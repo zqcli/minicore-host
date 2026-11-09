@@ -23,6 +23,7 @@ impl HistoryItemData {
 impl SessionState {
     pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) -> Result<(), Fault> {
         let mut raw = Vec::new();
+        let mut input_provenance = input_provenance::InputProvenance::default();
         let mut projection: Option<minicore_host_storage::CompactionProjection> = None;
         for (position, entry) in entries.iter().enumerate() {
             if let HistoryEntry::Compaction {
@@ -47,10 +48,12 @@ impl SessionState {
                     })?;
                 projection = Some(candidate);
             } else if let Some(item) = entry.runtime_item() {
+                input_provenance.record(raw.len(), entry);
                 raw.push(item);
             }
         }
         self.history = raw;
+        self.input_provenance = input_provenance;
         self.history_position = entries.len() as u64;
         self.projection = projection;
         self.readable_history = Some(

@@ -196,6 +196,10 @@ impl SessionController {
             for message in consumed {
                 Self::record_delegated_input(&mut state, turn_id, &message);
             }
+            let start = state.history.len();
+            for (offset, entry) in entries.iter().enumerate() {
+                state.input_provenance.record(start + offset, entry);
+            }
             state.history.extend_from_slice(items);
             state
                 .readable_history

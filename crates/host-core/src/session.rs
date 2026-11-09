@@ -12,6 +12,7 @@ mod controls;
 mod deletion;
 mod history;
 mod history_read;
+mod input_provenance;
 mod interaction;
 pub use interaction::{ApprovalAnswer, InteractionAnswerData};
 mod metadata;
@@ -282,6 +283,7 @@ struct SessionState {
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
     history: Vec<HistoryItem>,
+    input_provenance: input_provenance::InputProvenance,
     history_position: u64,
     projection: Option<minicore_host_storage::CompactionProjection>,
     compaction: Option<compaction::CompactionWork>,
@@ -393,6 +395,7 @@ impl SessionController {
             edits_complete: history.is_empty(),
             history_position: history.len() as u64,
             history,
+            input_provenance: Default::default(),
             projection: None,
             compaction: None,
             compaction_task: None,

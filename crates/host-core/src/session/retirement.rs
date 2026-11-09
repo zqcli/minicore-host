@@ -278,6 +278,7 @@ impl SessionController {
                     minicore_host_workspace::EditJournal::new(self.id.clone()),
                 ),
                 std::mem::take(&mut state.history),
+                std::mem::take(&mut state.input_provenance),
                 state.readable_history.take(),
                 std::mem::take(&mut state.messages),
                 std::mem::take(&mut state.completed),
