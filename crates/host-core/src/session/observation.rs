@@ -46,6 +46,9 @@ impl Body {
 pub(super) struct ToolRecord {
     pub(super) data: ToolCallData,
     pub(super) output: BTreeMap<String, Body>,
+    // The same cleanup-scoped admission held by the actual worker. Native
+    // history may arrive earlier, but public finished requires this to close.
+    pub(super) owned_output: Option<Arc<AtomicBool>>,
 }
 
 impl SessionController {
@@ -197,6 +200,7 @@ impl SessionController {
                                         result: None,
                                     },
                                     output: BTreeMap::new(),
+                                    owned_output: None,
                                 };
                                 self.access.observation.publish(ObservationEvent::State(
                                     StateEvent::Toolcall {
@@ -229,35 +233,82 @@ impl SessionController {
                 HistoryItem::ToolResult(result) => {
                     let id = ToolCallId(result.call_id.as_str().to_owned());
                     if let Some(record) = observation.tools.get_mut(&id) {
-                        record.data.state.state = ToolCallState::Finished;
-                        record.data.state.outcome = Some(result.outcome);
-                        record.data.state.runner_revision = revision;
+                        // Retain the complete native result immediately. Its
+                        // history/save handoff never waits for observer timing
+                        // or for a cancelled tool's actual cleanup tail.
                         record.data.result = Some(result.into());
-                        let source = ToolCallIdentity {
-                            turn: source.clone(),
-                            tool_call_id: id,
-                        };
-                        self.access.observation.publish(ObservationEvent::State(
-                            StateEvent::Toolcall {
-                                source: source.clone(),
-                                data: record.data.state.clone(),
+                        self.publish_tool_finished(
+                            ToolCallIdentity {
+                                turn: source.clone(),
+                                tool_call_id: id,
                             },
-                        ));
-                        self.access.observation.publish(ObservationEvent::Activity(
-                            ActivityEvent::ToolFinished {
-                                source,
-                                data: ToolFinishedData {
-                                    result: result.into(),
-                                    output_positions: positions(&record.output),
-                                },
-                            },
-                        ));
+                            record,
+                            revision,
+                        );
                     }
                 }
                 _ => {}
             }
         }
     }
+    pub(super) fn publish_tool_finished(
+        &self,
+        source: ToolCallIdentity,
+        record: &mut ToolRecord,
+        revision: u64,
+    ) {
+        if record.data.state.state == ToolCallState::Finished
+            || record
+                .owned_output
+                .as_ref()
+                .is_some_and(|live| live.load(Ordering::SeqCst))
+        {
+            return;
+        }
+        let Some(result) = record.data.result.clone() else {
+            return;
+        };
+        record.data.state.state = ToolCallState::Finished;
+        record.data.state.outcome = Some(result.outcome);
+        record.data.state.runner_revision = revision;
+        self.access
+            .observation
+            .publish(ObservationEvent::State(StateEvent::Toolcall {
+                source: source.clone(),
+                data: record.data.state.clone(),
+            }));
+        self.access
+            .observation
+            .publish(ObservationEvent::Activity(ActivityEvent::ToolFinished {
+                source,
+                data: ToolFinishedData {
+                    result,
+                    output_positions: positions(&record.output),
+                },
+            }));
+    }
+
+    pub(super) fn publish_cleaned_tool_results(&self, state: &mut SessionState, turn_id: &TurnId) {
+        let source = self.turn_identity(&state.active.as_ref().expect("owned active Turn").info);
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
+        let revision = state.runner_revision;
+        if let Some(turn) = state.output.get_mut(turn_id) {
+            for (tool_call_id, record) in &mut turn.tools {
+                self.publish_tool_finished(
+                    ToolCallIdentity {
+                        turn: source.clone(),
+                        tool_call_id: tool_call_id.clone(),
+                    },
+                    record,
+                    revision,
+                );
+            }
+        }
+    }
+
     pub(super) fn observe_runtime_state(
         &self,
         turn_id: &TurnId,

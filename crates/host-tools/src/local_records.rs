@@ -82,6 +82,20 @@ impl LocalToolInvocationSink for SessionLocalToolSink {
     }
 }
 impl LocalToolSink for SessionLocalToolSink {
+    fn complete(&self, call: &ToolCallId, cleanup_confirmed: bool) -> Result<(), RecordError> {
+        let output = self
+            .0
+            .lock()
+            .map_err(|_| RecordError)?
+            .get(call.as_str())
+            .ok_or(RecordError)?
+            .output
+            .clone();
+        if cleanup_confirmed {
+            output.confirm_cleanup().map_err(|_| RecordError)?;
+        }
+        Ok(())
+    }
     fn output(
         &self,
         call: &ToolCallId,

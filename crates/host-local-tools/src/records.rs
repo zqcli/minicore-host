@@ -111,6 +111,13 @@ pub trait LocalToolSink: Send + Sync + 'static {
     ) -> Result<(), RecordError>;
     fn edit(&self, call: &ToolCallId, edit: CapturedEdit) -> Result<(), RecordError>;
     fn command(&self, call: &ToolCallId, result: &CommandResult) -> Result<(), RecordError>;
+    /// Actual work has returned after its file operation or process/group/pipe
+    /// cleanup. This is independent of Runtime's result/future lifetime. False
+    /// must never be treated as confirmed completion. Standalone sinks may
+    /// ignore this fact; a Session adapter uses it to close its original lease.
+    fn complete(&self, _call: &ToolCallId, _cleanup_confirmed: bool) -> Result<(), RecordError> {
+        Ok(())
+    }
 }
 
 /// Explicit standalone execution without retained owner records. This is not a

@@ -88,6 +88,9 @@ impl SessionController {
         } else {
             Vec::new()
         };
+        if complete {
+            self.publish_cleaned_tool_results(&mut state, turn_id);
+        }
         if !complete && state.block_reason.is_none() {
             state.block_reason = state.active.as_ref().unwrap().tool_cleanup.fault.clone();
         }

@@ -57,7 +57,7 @@ impl ToolOutputSink {
     }
     /// Transfer output admission to the registered actual worker owner. The
     /// returned lease is distinct from this future-scoped sink and is revoked
-    /// only when that public Turn's actual tool cleanup is confirmed.
+    /// when its actual per-call cleanup or the public Turn cleanup is confirmed.
     pub fn retain_owned(&self) -> Result<ToolOutputLease, Fault> {
         let session = self.binding.session.upgrade().ok_or_else(inactive_output)?;
         session.retain_tool_output(self)
@@ -65,7 +65,8 @@ impl ToolOutputSink {
 }
 /// An original invocation's output lease, held by a trusted execution adapter.
 /// Its identity and lifetime are minted by the Session, never by tool arguments.
-/// Cloning it cannot outlive the actual public Turn's cleanup confirmation.
+/// Cloning it cannot outlive its invocation's actual cleanup confirmation, or
+/// the public Turn's cleanup barrier when no earlier per-call fact is supplied.
 #[derive(Clone)]
 pub struct ToolOutputLease {
     sink: ToolOutputSink,
@@ -93,6 +94,38 @@ impl ToolOutputLease {
             .ok_or_else(inactive_output)?;
         session.record_tool_edit(self, path, before, after, outcome)
     }
+    /// Confirm this invocation's actual owned work has ended, after all file
+    /// work, process/group waits and pipe drains. This closes every clone's
+    /// output admission and publishes finished only if its native result was
+    /// already received. It does not create, save or replace a ToolResult.
+    pub fn confirm_cleanup(&self) -> Result<(), Fault> {
+        let session = self
+            .sink
+            .binding
+            .session
+            .upgrade()
+            .ok_or_else(inactive_output)?;
+        let mut state = session.state.lock().expect("Session mutex poisoned");
+        if !self.admitted(&state) {
+            return Err(inactive_output());
+        }
+        self.sink.live.store(false, Ordering::SeqCst);
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
+        let revision = state.runner_revision;
+        let record = state
+            .output
+            .get_mut(&self.source.turn.turn_id)
+            .unwrap()
+            .tools
+            .get_mut(&self.source.tool_call_id)
+            .unwrap();
+        session.publish_tool_finished(self.source.clone(), record, revision);
+        Ok(())
+    }
+
     /// Mark a real binary stream without replacing its bytes with fake text.
     /// The already-published UTF-8 prefix remains unchanged and range-readable.
     pub fn mark_non_utf8(&self, channel: &str) -> bool {
@@ -200,6 +233,14 @@ impl SessionController {
             })
             .ok_or_else(inactive_output)?;
         let response_index = record.data.state.response_index;
+        let newly_owned = record.owned_output.is_none();
+        let live = record
+            .owned_output
+            .clone()
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
+        if !live.load(Ordering::SeqCst) {
+            return Err(inactive_output());
+        }
         let active = state
             .active
             .as_mut()
@@ -208,10 +249,18 @@ impl SessionController {
                     && matches!(active.info.state, TurnState::Starting | TurnState::Running)
             })
             .ok_or_else(inactive_output)?;
-        let live = Arc::new(AtomicBool::new(true));
-        if !active.tool_cleanup.retain_output(Arc::clone(&live)) {
+        if newly_owned && !active.tool_cleanup.retain_output(Arc::clone(&live)) {
             return Err(inactive_output());
         }
+        let load_id = active.info.load_id.clone();
+        state
+            .output
+            .get_mut(&sink.binding.turn_id)
+            .unwrap()
+            .tools
+            .get_mut(&call)
+            .unwrap()
+            .owned_output = Some(Arc::clone(&live));
         Ok(ToolOutputLease {
             sink: ToolOutputSink {
                 binding: sink.binding.clone(),
@@ -222,7 +271,7 @@ impl SessionController {
                 turn: TurnIdentity {
                     session: self.identity(),
                     turn_id: sink.binding.turn_id.clone(),
-                    load_id: Some(active.info.load_id.clone()),
+                    load_id: Some(load_id),
                 },
                 tool_call_id: call,
             },
@@ -264,7 +313,11 @@ impl SessionController {
         else {
             return false;
         };
-        if (owned.is_none() && record.data.result.is_some())
+        if record
+            .owned_output
+            .as_ref()
+            .is_some_and(|live| !live.load(Ordering::SeqCst))
+            || (owned.is_none() && record.data.result.is_some())
             || owned.is_some_and(|(_, index)| record.data.state.response_index != index)
             || record.data.state.name != invocation.tool_name.as_str()
             || record.data.arguments != invocation.arguments

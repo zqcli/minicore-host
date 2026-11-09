@@ -75,22 +75,61 @@ impl Tool for LocalTool {
 
     fn execute<'a>(&'a self, invocation: ToolInvocation, context: ToolContext) -> ToolFuture<'a> {
         Box::pin(async move {
-            if invocation.tool_name() != self.spec.name() {
-                return Err(ToolError::InvalidInvocation);
-            }
-            check(&context)?;
-            let action = Action::parse(self.spec.name().as_str(), invocation.arguments().clone())?;
+            let prepared = (|| {
+                if invocation.tool_name() != self.spec.name() {
+                    return Err(ToolError::InvalidInvocation);
+                }
+                check(&context)?;
+                Action::parse(self.spec.name().as_str(), invocation.arguments().clone())
+            })();
+            let action = match prepared {
+                Ok(action) => action,
+                Err(error) => {
+                    // Rejection happened before an actual worker was started.
+                    self.binding
+                        .sink
+                        .complete(invocation.tool_call_id(), true)
+                        .map_err(|_| ToolError::Internal)?;
+                    return Err(error);
+                }
+            };
             let binding = Arc::clone(&self.binding);
+            let sink = Arc::clone(&binding.sink);
             let id = invocation.tool_call_id().clone();
+            let completed_id = id.clone();
             let completion = self.scope.start(id.clone(), async move {
-                let result = match action {
-                    Action::Read(input) => files::read(binding, input, context).await,
-                    Action::Edit(input) => files::edit(binding, id, input, context).await,
-                    Action::Write(input) => files::write(binding, id, input, context).await,
-                    Action::Bash(input) => return command::run(binding, id, input, context).await,
+                let mut outcome = match action {
+                    Action::Read(input) => {
+                        scope::OwnedOutcome::settled(files::read(binding, input, context).await)
+                    }
+                    Action::Edit(input) => {
+                        scope::OwnedOutcome::settled(files::edit(binding, id, input, context).await)
+                    }
+                    Action::Write(input) => scope::OwnedOutcome::settled(
+                        files::write(binding, id, input, context).await,
+                    ),
+                    Action::Bash(input) => command::run(binding, id, input, context).await,
                 };
-                scope::OwnedOutcome::settled(result)
-            })?;
+                // Actual I/O and all its output/observations are settled here,
+                // even if Runtime already dropped its waiting ToolFuture.
+                if sink
+                    .complete(&completed_id, outcome.cleanup_confirmed)
+                    .is_err()
+                {
+                    outcome.result = Err(ToolError::Internal);
+                }
+                outcome
+            });
+            let completion = match completion {
+                Ok(completion) => completion,
+                Err(error) => {
+                    self.binding
+                        .sink
+                        .complete(invocation.tool_call_id(), true)
+                        .map_err(|_| ToolError::Internal)?;
+                    return Err(error);
+                }
+            };
             completion.await.map_err(|_| ToolError::Internal)?
         })
     }
