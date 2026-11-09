@@ -75,3 +75,13 @@ export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 export CARGO_INCREMENTAL=0
 export CARGO_TARGET_DIR=/workspace/shared/minicore-host-session-context-target
 ```
+
+## Independent review correction: public compaction association
+
+Independent review of `a412d7fbac03c4e810d38ae7b6f34a8be279b0bc` reproduced that the reused public `CompactionActivity` exposed `CompactionSource::Automatic.loop_id/request_index`. That contradicted the public Turn/continuous `response_index` boundary in SPEC lines 481, 566 and 568. The original reviewer source and red logs remain unchanged under `/workspace/shared/session-context-review-a412d7f/`.
+
+The first correction changes the public `CompactionSource` itself, so context, session.state and observation share the same representation. Automatic admission validates the actual private Turn/Load/Loop binding under the Session owner lock, then captures `active.response_base + request_index` as the public `response_index`. Internal `CompactionBinding` and model-call validation retain their original Loop identity. Manual operation association and independently numbered utility usage are unchanged. The existing resources compaction test only changes its public field assertion.
+
+A permanent real-Runtime Host regression runs automatic compaction during a second internal Loop in the same Turn. It verifies public response index 1 in context, direct state and subscription snapshot, absent internal IDs, two actual distinct raw Loop IDs with internal request index 0, and utility request index 0. The original independent internal-ID probe was appended unchanged for verification and removed afterward.
+
+Pre-commit verification: the two automatic context tests, all 15 core compaction owner tests, all three resources tests selected by `compaction`, the original independent internal-ID probe, and all-target strict Clippy for core/resources passed. Logs are `review-fix-compaction-{source-focused,original-probe,owner-suite,resource-suite,clippy}.log` under the task artifact directory. The separately reproduced accepted-history/save-registration race remains open for the next correction; this first commit does not claim to fix it.

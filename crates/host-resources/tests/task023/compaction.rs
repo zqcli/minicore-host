@@ -275,7 +275,7 @@ async fn http_automatic_compaction_runs_at_real_prompt_boundary_and_usage_stays_
     assert!(matches!(
         activity.source,
         CompactionSource::Automatic {
-            request_index: 0,
+            response_index: 0,
             ..
         }
     ));

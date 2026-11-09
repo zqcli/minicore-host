@@ -1023,6 +1023,113 @@ async fn automatic_compaction_context_is_owned_by_active_turn_and_query_never_la
     shutdown(&host, &caller).await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn automatic_compaction_on_continuation_uses_public_response_index_everywhere() {
+    let first = Arc::new(Semaphore::new(0));
+    let utility = Arc::new(Semaphore::new(0));
+    let model = ScriptedModel::new(
+        4096,
+        vec![Script::gated(first.clone()), Script::answer(None)],
+        Some(utility.clone()),
+    );
+    let (host, connection, target) = memory(Resources::new(model.clone()));
+    let caller = connection.caller();
+    host.update_session(
+        &caller,
+        &target,
+        0,
+        &SessionConfigPatch {
+            execution: Some(config(true).session_defaults.execution),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // The first request has no accepted prefix to compact. Its complete handoff
+    // becomes eligible at the next internal Loop in this same public Turn.
+    host.send(
+        &caller,
+        SendMessage::new(
+            input(&"historical input ".repeat(550), MessageMode::FollowUp),
+            target.clone(),
+        ),
+    )
+    .unwrap();
+    entered(&model.entered).await;
+    let turn = host
+        .session_state(&caller, &target)
+        .unwrap()
+        .data
+        .active_turn_id
+        .unwrap();
+    assert_eq!(model.utility_calls.load(Ordering::SeqCst), 0);
+    host.send(
+        &caller,
+        SendMessage::new(
+            input("continue original Turn", MessageMode::Steer),
+            target.clone(),
+        ),
+    )
+    .unwrap();
+    first.add_permits(1);
+    entered(&model.utility_entered).await;
+    let context = host.session_context(&caller, &target).await.unwrap();
+    let state = host.session_state(&caller, &target).unwrap();
+    let source = serde_json::to_value(&context.data.compaction.as_ref().unwrap().source).unwrap();
+    assert_eq!(source["turn_id"], serde_json::json!(turn));
+    assert_eq!(
+        source["load_id"],
+        serde_json::json!(context.data.active_turn.as_ref().unwrap().load_id)
+    );
+    assert_eq!(source["response_index"], 1);
+    assert!(source.get("loop_id").is_none());
+    assert!(source.get("request_index").is_none());
+    assert_eq!(
+        serde_json::to_value(&state.data.compaction.as_ref().unwrap().source).unwrap(),
+        source
+    );
+    let subscription = host
+        .events_subscribe(
+            &caller,
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: target.agent_id.clone(),
+                    session_id: target.session_id.clone(),
+                },
+                categories: BTreeSet::from([EventCategory::State]),
+            },
+        )
+        .unwrap();
+    let observed = subscription
+        .result()
+        .initial_states
+        .iter()
+        .find_map(|state| match state {
+            StateEvent::Session { data, .. } => data.compaction.as_ref().map(|work| &work.source),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(serde_json::to_value(observed).unwrap(), source);
+    utility.add_permits(100);
+    turn_finished(&host, &caller, &target, 1).await;
+    let finished = host.session_context(&caller, &target).await.unwrap();
+    let work = finished.data.compaction.as_ref().unwrap();
+    assert_eq!(serde_json::to_value(&work.source).unwrap(), source);
+    assert_eq!(work.utility_usage.first().unwrap().request_index, 0);
+    assert_eq!(host.turn_info(&caller, &target, &turn).unwrap().requests, 2);
+    let history = host.history(&caller, &target).unwrap();
+    let responses: Vec<_> = history
+        .iter()
+        .filter_map(|item| match item {
+            HistoryItem::Assistant(response) => Some(response),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(responses.len(), 2);
+    assert_ne!(responses[0].loop_id, responses[1].loop_id);
+    assert_eq!(responses[0].request_index, 0);
+    assert_eq!(responses[1].request_index, 0);
+}
+
 #[tokio::test]
 async fn incomplete_model_output_is_not_complete_context_history_and_reclaimed_is_not_empty() {
     let model = ScriptedModel::new(

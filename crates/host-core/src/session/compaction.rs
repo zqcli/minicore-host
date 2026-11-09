@@ -36,24 +36,6 @@ pub(super) enum CompactionBinding {
     },
 }
 impl CompactionBinding {
-    fn source(&self) -> CompactionSource {
-        match self {
-            Self::Manual { operation_id, .. } => CompactionSource::Manual {
-                operation_id: operation_id.clone(),
-            },
-            Self::Automatic {
-                turn_id,
-                load_id,
-                loop_id,
-                request_index,
-            } => CompactionSource::Automatic {
-                turn_id: turn_id.clone(),
-                load_id: load_id.clone(),
-                loop_id: *loop_id,
-                request_index: *request_index,
-            },
-        }
-    }
     pub(super) fn turn_id(&self) -> Option<&TurnId> {
         match self {
             Self::Automatic { turn_id, .. } => Some(turn_id),
@@ -75,13 +57,14 @@ pub(super) struct CompactionWork {
 impl CompactionWork {
     fn new(
         binding: CompactionBinding,
+        association: CompactionSource,
         source: HistorySnapshot,
         previous_coverage: u64,
         cancellation: CancellationToken,
     ) -> Self {
         Self {
             activity: CompactionActivity {
-                source: binding.source(),
+                source: association,
                 state: CompactionState::Preparing {},
                 cancellation_requested: false,
                 utility_usage: Vec::new(),
@@ -243,6 +226,9 @@ impl SessionController {
             };
             let work = CompactionWork::new(
                 binding.clone(),
+                CompactionSource::Manual {
+                    operation_id: request.operation_id.clone(),
+                },
                 snapshot.source,
                 snapshot.previous_coverage,
                 CancellationToken::new(),
@@ -826,14 +812,23 @@ impl SessionController {
         else {
             return Err(stale());
         };
-        if state.active.as_ref().is_none_or(|active| {
-            &active.info.id != turn_id
-                || &active.info.load_id != load_id
-                || active.loop_id != Some(*loop_id)
-                || active.info.state != TurnState::Running
-        }) {
-            return Err(stale());
-        }
+        let active = state
+            .active
+            .as_ref()
+            .filter(|active| {
+                &active.info.id == turn_id
+                    && &active.info.load_id == load_id
+                    && active.loop_id == Some(*loop_id)
+                    && active.info.state == TurnState::Running
+            })
+            .ok_or_else(stale)?;
+        // Map at the same owner boundary that validates the original internal
+        // Loop. A continuation's request zero is not public response zero.
+        let association = CompactionSource::Automatic {
+            turn_id: turn_id.clone(),
+            load_id: load_id.clone(),
+            response_index: active.response_base + u64::from(*request_index),
+        };
         let context = ModelCallContext::new(
             *loop_id,
             *request_index,
@@ -842,6 +837,7 @@ impl SessionController {
         );
         let work = CompactionWork::new(
             binding.clone(),
+            association,
             snapshot.source.clone(),
             snapshot.previous_coverage,
             cancellation,

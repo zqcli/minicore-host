@@ -267,8 +267,9 @@ pub enum CompactionSource {
     Automatic {
         turn_id: TurnId,
         load_id: LoadId,
-        loop_id: minicore_runtime::LoopId,
-        request_index: u32,
+        /// The pending ordinary request's continuous public Turn index. Utility
+        /// requests retain their separate indexes in `utility_usage`.
+        response_index: u64,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
