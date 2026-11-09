@@ -1,16 +1,16 @@
 # Public method implementation map
 
-This checkpoint describes Host code/test checkpoint `8079970` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes Host code/test checkpoint `bd8bf2f` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
-`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Twenty-five actual primitives now share typed/stdio routing, shown separately below; WSS is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
+`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Twenty-five actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
-| Canonical method | Core status | Typed/stdio route | Existing implementation and remaining boundary |
+| Canonical method | Core status | Typed/stdio/WSS route | Existing implementation and remaining boundary |
 | --- | --- | --- | --- |
 | `host.info` | Partial | Routed | `Host::info`. Identity, incarnation, lifecycle and operation-right state; actual shutdown strategy/fault state; logging and complete resource configuration pending. |
 | `host.config.get` | Partial | Not routed | `Host::settings`. Only supported Host name metadata; not execution, access or logging configuration. |
 | `host.reload` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
 | `host.receipt.get` | Partial | Routed | `Host::receipt_get` traverses direct owners for original-kind creation/control facts; 1202 means missing, 1203 means ambiguous independent invocations. Additional command families remain staged. |
-| `host.shutdown` | Implemented typed entry | Routed | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. Typed/stdio dispatch shares this real entry; WSS remains pending. |
+| `host.shutdown` | Implemented typed entry | Routed | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. All three adapters share this real entry; process assembly remains pending. |
 | `agent.create` | Partial | Routed | `Host::create_agent_async`. Real memory/persistent creation, owned waits, partial receipts and invocation-isolated tracking; canonical request/receipt mapping pending. |
 | `agent.get` | Partial | Routed | `Host::agent_info`. Direct Agent record and committed configuration; complete derived status mapping pending. |
 | `agent.list` | Partial | Routed | `Host::agents`. Actual registered owners; load failures are separately observable. |
@@ -81,10 +81,17 @@ The integrated lifecycle checkpoint `413916c` passes the complete 240-test/2-doc
 
 Workspace backend integration `b0fdbfb` passes the complete 275-test/2-doctest gate. Unique cases were verified using `--list`, excluding storage subprocess output duplication. Workspace independent review is pending; the six canonical methods are not available merely because their backend exists.
 
-At fixed typed/stdio checkpoint `8079970`, the entire gate passes 290 unique
+At fixed typed/stdio checkpoint `bd8bf2f`, the entire gate passes 290 unique
 unit/integration tests and 3 doctests. The count is verified by `--list`. Scoped
 adapter review remains open. Workspace review identified real external-filter
 execution and damaged-repository classification defects; the fixes are integrated at `775235a` and independently verified under stable
 Git configuration/attributes. Uncoordinated concurrent changes remain a declared
 first-version limit. The integrated full gate passes 299 unique tests and 3
 doctests, not complete canonical method acceptance.
+
+WSS checkpoint `bd8bf2f` reuses those same 25 routes through actual TLS and
+authenticated initialization, with network-only key-change invalidation. The
+complete gate passes 321 unique tests and 3 doctests. This is an embedding API,
+not complete process/reload assembly. Shared-client unknown-Fault and synchronous
+preparation review corrections remain separate, and independent WSS review has
+not been completed.

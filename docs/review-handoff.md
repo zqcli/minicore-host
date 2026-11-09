@@ -2,7 +2,7 @@
 
 ## Review target and authority
 
-The target is the `dev` foundation, with typed/stdio checkpoint `8079970`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
+The target is the `dev` foundation, with WSS checkpoint `bd8bf2f`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
 
 Read `AGENTS.md`, the complete `SPEC.md`, `PROJECT.md`, and `docs/method-coverage.md` first. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`. The 52-method catalog describes names/contracts, not 52 finished handlers. No remote Host publication or main merge has been performed. Remote pushes require the owner's explicit approval.
 
@@ -82,3 +82,19 @@ Do not convert these gaps into fake-success handlers or treat DTOs, fixture resp
 There is no new public recovery entry for a failed necessary save of an unpublished creation. The owner deferred that rare local boundary rather than adding a new API, filesystem witnesses or automatic repair. Required save failures cannot be labeled successful controlled shutdown, and repeated shutdown returns facts without retrying. Existing Session resume confirms only its own retained originals.
 
 Dropping the final root `Arc<Host>` after an already-failed save without controlled shutdown is treated as uncontrolled instance destruction, not successful stopped retirement. No permanent self-cycle is provided for it. This does not weaken the tested owner lifetime for ordinary caller abandonment, connection revocation or accepted explicit shutdown.
+
+## WSS integration checkpoint
+
+`bd8bf2f` adds the actual TLS/WebSocket adapter and Host-owned authentication
+publication boundary. Its full integrated gate passes 321 unique tests and
+3 doctests. All three adapters share 25 implemented primitive routes. Key
+publication tests preserve local trusted callers, invalidate old network callers
+only after a successful actual change, and retain already accepted owner work.
+Network tests use real loopback TLS/WebSockets and fixture certificates.
+
+Independent typed/stdio review found unknown Fault leaves were incorrectly
+rejected, losing nested accepted facts and sometimes closing a shared connection.
+It also reproduced synchronous creation validation preventing a typed wait
+budget from returning on time. Separate fixes are underway; this checkpoint
+does not clear them. WSS independent review, full configuration/process assembly,
+canonical event transport and final product acceptance remain open.

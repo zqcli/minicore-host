@@ -40,3 +40,31 @@ response, proving bidirectional framing independently from Runtime 0.9.2's text
 limit. A first attempt using >16 MiB business text received the actual old
 Runtime-related `SESSION_INPUT_INVALID` rejection; no WSS quota was involved.
 - Runtime 0.10 migration and shared observation wiring remain separately owned.
+
+## Integrated checkpoint
+
+Topic-to-dev mapping: `795b233` -> `3309659`, `37e40c2` -> `502b38a`,
+`587f239` -> `c5634f4`, `1d00fe7` -> `bd8bf2f`. Observation-only bridge commits
+were not integrated without their actual core observation module.
+
+Fixed dev `bd8bf2f5f9306d8d229f1907435cc22e849583d1` passed
+`./scripts/check.sh`: committed/staged/working whitespace, formatting, strict
+all-target workspace Clippy, all unit/integration tests, 3 doctests and strict
+rustdoc. `cargo test --workspace --all-targets --locked -- --list` counted
+**321 unique tests**. The 9 workspace-review regressions account for the
+difference from this topic's 312-case source baseline. Runtime remains the
+published 0.9.2 revision; no local source override was used. Logs:
+`wss-integrated-bd8bf2f.log` and `wss-test-list-bd8bf2f.txt` in the local
+validation directory.
+
+After validation, the accumulated main-checkout build cache was cleaned to
+recover shared disk space; source, commits and validation logs were retained.
+Subsequent fresh builds disable debug/incremental artifacts through environment
+settings, not repository behavioral changes.
+
+The earlier typed/stdio review still has two follow-ups: preserving unknown
+Fault leaves (including nested receipts) and allowing the client wait budget to
+progress during synchronous creation validation. Their separate fixes are not
+in this checkpoint. This WSS gate is not independent full-product approval, a
+production process/config loader, completed `host.reload`, or TUI/live-model
+validation.
