@@ -1197,6 +1197,10 @@ async fn cancellation_interrupts_real_sse_retry_wait_without_another_request() {
     assert!(
         matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
     );
+    // Prove that the real driver remains in the header-directed wait before
+    // cancelling it, without a wall-clock sleep or another network attempt.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(1)).await;
     assert_eq!(fixture.request_count(), 1);
     assert!(agent.handle().cancel());
     assert_eq!(

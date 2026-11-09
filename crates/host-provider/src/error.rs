@@ -124,17 +124,28 @@ fn structured_kind(value: &Value) -> Option<ModelErrorKind> {
     })
 }
 
-pub(crate) fn provider(value: &Value, seen: bool) -> ModelError {
-    let kind = structured_kind(value).unwrap_or(ModelErrorKind::ProviderUnavailable);
+pub(crate) fn provider(
+    value: &Value,
+    seen: bool,
+    status: u16,
+    retry_at: Option<Instant>,
+) -> ModelError {
+    let recognized = structured_kind(value);
+    let kind = recognized.unwrap_or(ModelErrorKind::ProviderUnavailable);
+    let diagnostic = diagnostic(kind, Some(status));
     if seen {
-        return stream(kind, true);
+        return ModelError::started(kind, diagnostic);
     }
-    match structured_kind(value) {
+    match recognized {
         Some(ModelErrorKind::RateLimited | ModelErrorKind::ProviderUnavailable) => {
-            retryable(kind, None, None)
+            ModelError::not_started(
+                kind,
+                retry_at.and_then(|at| at.checked_duration_since(Instant::now())),
+                diagnostic,
+            )
         }
-        Some(_) => local(kind),
-        None => unknown(kind),
+        Some(_) => ModelError::permanent(kind, DeliveryState::NotStarted, diagnostic),
+        None => ModelError::unknown(kind, diagnostic),
     }
 }
 
@@ -229,7 +240,7 @@ pub(crate) async fn http(
     }
 }
 
-fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Instant> {
+pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Instant> {
     let now = Instant::now();
     let decimal = |value: &str, divisor: f64| {
         Duration::try_from_secs_f64(value.trim().parse::<f64>().ok()? / divisor).ok()

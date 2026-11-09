@@ -24,6 +24,8 @@ type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Sen
 
 pub(crate) struct State {
     bytes: ByteStream,
+    status: u16,
+    retry_at: Option<std::time::Instant>,
     chunk: Bytes,
     offset: usize,
     parser: Parser,
@@ -54,8 +56,15 @@ impl State {
         cancellation: CancellationToken,
         deadline: Instant,
     ) -> Self {
+        // Retain response metadata before bytes_stream consumes the response.
+        // An explicit first-frame rejection uses the same header lower bound
+        // as an HTTP error. Runtime alone decides whether/how long to retry.
+        let status = response.status().as_u16();
+        let retry_at = error::retry_after(response.headers());
         Self {
             bytes: Box::pin(response.bytes_stream()),
+            status,
+            retry_at,
             chunk: Bytes::new(),
             offset: 0,
             parser: Parser::new(),
@@ -117,7 +126,12 @@ impl State {
         }
         let value: Value = serde_json::from_slice(frame).map_err(|_| self.malformed())?;
         if value.get("error").is_some_and(|error| !error.is_null()) {
-            return Err(error::provider(&value, self.seen));
+            return Err(error::provider(
+                &value,
+                self.seen,
+                self.status,
+                self.retry_at,
+            ));
         }
         let chunk: Chunk = serde_json::from_value(value).map_err(|_| self.malformed())?;
         // Receiving a provider choice, including its role-only header, proves
