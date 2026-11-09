@@ -824,6 +824,8 @@ dependencies = [
  "futures-util",
  "minicore-host-core",
  "minicore-host-protocol",
+ "minicore-host-provider",
+ "minicore-host-resources",
  "minicore-runtime",
  "rcgen",
  "serde",

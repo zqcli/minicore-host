@@ -19,6 +19,8 @@ tokio-rustls = { version = "=0.26.6", default-features = false, features = ["rin
 tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
 
 [dev-dependencies]
+minicore-host-resources = { path = "../host-resources", version = "0.1.0" }
+minicore-host-provider = { path = "../host-provider", version = "0.1.0" }
 tempfile = "=3.27.0"
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
 tokio = { version = "=1.54.0", features = ["test-util", "net"] }
