@@ -29,8 +29,8 @@ impl SessionController {
             close,
             data: DataDeletion::Pending {},
         });
-        if close && state.lifecycle != SessionLifecycle::Closed {
-            state.lifecycle = SessionLifecycle::Closing;
+        if close {
+            Self::fence_delete_close_locked(&mut state);
         }
         self.publish(&mut state);
         Ok(SessionDeleteAccepted {
@@ -40,6 +40,25 @@ impl SessionController {
             },
             close,
         })
+    }
+    /// Admission only: use the same Turn expiry and root-scope seal as normal
+    /// close before a delete receipt can escape. Runtime shutdown, scope hooks
+    /// and result handoff remain with the registered asynchronous cleanup owner.
+    fn fence_delete_close_locked(state: &mut SessionState) {
+        if state.lifecycle != SessionLifecycle::Closed {
+            state.lifecycle = SessionLifecycle::Closing;
+        }
+        if let Some(active) = &state.active {
+            active._activation.expire();
+        }
+        if let Some(scope) = &state.root_scope {
+            scope.sealed.store(true, Ordering::SeqCst);
+        }
+    }
+    pub(crate) fn fence_delete_close_owned(&self) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        Self::fence_delete_close_locked(&mut state);
+        self.publish(&mut state);
     }
     pub(crate) fn begin_delete_close_owned(&self) {
         self.start_scope_cleanup_owned();

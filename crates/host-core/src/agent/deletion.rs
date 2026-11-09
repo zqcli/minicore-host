@@ -188,7 +188,16 @@ impl AgentOwner {
             sessions: Vec::new(),
             data: DataDeletion::Pending {},
         });
-        let children = state.sessions.values().cloned().collect();
+        let children = state.sessions.values().cloned().collect::<Vec<_>>();
+        drop(state);
+        // The shared admission boundary is still held, but no Agent state lock
+        // crosses a child call. A Retiring receipt must not leave old Turn
+        // capabilities or descendant scope admission live until a worker runs.
+        if matches!(scope, AgentDeleteScope::Sessions { close: true, .. }) {
+            for child in &children {
+                child.fence_delete_close_owned();
+            }
+        }
         self.changed.notify_waiters();
         Ok(children)
     }
