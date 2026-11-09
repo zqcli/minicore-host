@@ -398,3 +398,55 @@ async fn draining_rejects_new_delegation_to_an_existing_session() {
             .any(|event| event == "accept_task")
     );
 }
+
+#[tokio::test]
+async fn self_and_root_delegation_are_rejected_without_a_cycle() {
+    let root = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    assert!(
+        scopes
+            .send(
+                root.port(),
+                origin(&root),
+                root.source.session.clone(),
+                input(),
+                true,
+                false
+            )
+            .await
+            .is_err()
+    );
+    let child = session();
+    scopes
+        .send(
+            root.port(),
+            origin(&root),
+            child.clone(),
+            input(),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+    let member = root.for_session(child.clone());
+    assert!(
+        scopes
+            .send(member.port(), origin(&member), child, input(), true, false)
+            .await
+            .is_err()
+    );
+    assert!(
+        scopes
+            .send(
+                member.port(),
+                origin(&member),
+                root.source.session.clone(),
+                input(),
+                true,
+                false
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(root.state.relations.lock().unwrap().len(), 1);
+}

@@ -82,8 +82,7 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
                 ModelEvent::tool_call_arguments_delta(
                     "provider-call-42".parse().unwrap(),
                     arguments.to_string(),
-                )
-                .unwrap(),
+                ),
                 ModelEvent::ToolCallEnd {
                     tool_call_id: "provider-call-42".parse().unwrap(),
                 },
@@ -92,7 +91,7 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
                 },
             ],
             vec![
-                ModelEvent::text_delta("Accepted independent work").unwrap(),
+                ModelEvent::text_delta("Accepted independent work"),
                 ModelEvent::Finish {
                     reason: ModelFinishReason::Stop,
                 },

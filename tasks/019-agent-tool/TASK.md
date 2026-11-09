@@ -45,4 +45,6 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 - Add real owner adapter and Host end-to-end tests once core capabilities land. Do not present fixture tests as real Host delegation.
 - Incorporate the observation owner's actual output/page request types rather than invent a parallel read protocol.
 - Metadata updates require atomic owner name/title plus config revision commits; bridge to core once that owner publishes the implementation.
-- Runtime quota-removal publication is in progress; current crate revision remains the existing reproducible `18a6ac9b82d003330cd870275efca793cdcc9a96` (0.9.2). No unpublished local SHA is presented as remote-reproducible.
+- Stage 2 code commit: `b9066a5`; its additional root-lock-only test dependency commit is `c8a51f0`.
+- Integrated parent baseline `275110695551c30582d1302e6b01ab23a3aad536` with local merge `8ca9ab9`. The tool crate now uses the actual published Runtime `59ee8ce668f72a21d408e6247d3ce075b260db14`, exact version `=0.10.0`, matching every other Host consumer. No local patch/path/vendor dependency is committed.
+- Re-ran all 27 tool tests on Runtime 0.10.0. Added explicit root/self delegation rejection (including an already registered member sending delegate:true to itself), without imposing an idle or capacity limit. Full integrated workspace gates remain pending the real core bridge stage.

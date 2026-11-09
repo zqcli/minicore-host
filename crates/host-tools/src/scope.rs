@@ -200,8 +200,18 @@ impl ScopeManager {
         dispatch.check()?;
         let origin = dispatch.origin.clone();
         port.check_active()?;
+        if delegate && target == port.source().session {
+            return Err(Fault::new(
+                FaultKind::SessionOwnershipMismatch,
+                "a Session cannot delegate to itself",
+            ));
+        }
         let existing = match self.existing(&port.source().session, &target) {
-            Err(error) if !delegate && error.kind() == FaultKind::SessionOwnershipMismatch => None,
+            Err(error)
+                if !delegate && error.kind() == Some(FaultKind::SessionOwnershipMismatch) =>
+            {
+                None
+            }
             result => result?,
         };
         let member = match existing {
