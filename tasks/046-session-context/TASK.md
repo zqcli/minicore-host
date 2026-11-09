@@ -6,6 +6,7 @@
 - Implements the in-process `session.context` query required by SPEC v4.93 §8, with the direct ownership, configuration, history and observation contracts from §§2, 4, 5 and 9. SPEC remains byte-for-byte unchanged: SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
 - minicore-agent `f36a87366d8e2fe0a1c8216463887902e471c739` was read as code reference, specifically `src/sessions/budget.rs`, `src/sessions/types.rs` and compaction context logic. Its history estimates, context budgets, recovery observations and old execution limits are not a Host behavior baseline.
 - Uses the existing Session raw history, committed `CompactionProjection`, `CompactionActivity`, save work and Runtime `Usage`. No second compaction system, token cap, prompt-preparation query, history cache, retained output service or resource-preparation mode was added.
+- SPEC line 1426 assigns retained/stored content reads to `session.history.read`; line 1427 assigns context usage, compaction and execution information to `session.context`; line 1457 permits module-specific auxiliary query fields. Accordingly, a cold `history: null` is an unknown owner fact, not a fabricated empty/zero context or a claim that the file was validated. This scope decision does not close the separate history-read risk below.
 
 ## Public contract and sources
 
@@ -50,3 +51,27 @@ Minimal reproduction: seed valid persistent history, open a fresh Host without l
 ## Integration and remaining work
 
 The transport owner has the frozen Host method and DTO, including nullable history. This topic deliberately does not add the canonical RPC route or typed client method. The integration owner maintains PROJECT.md and performs independent review/integration. This task does not claim every catalog operation or the full product is complete.
+
+## Exact functional source and final verification
+
+- Functional source: `a412d7fbac03c4e810d38ae7b6f34a8be279b0bc` (`feat(core): expose owner-held session context facts`). All following checks ran against that fixed hash with a clean worktree, before this report-only follow-up commit.
+- `./scripts/check.sh`: passed on its first final-source run, including repository whitespace checks, rustfmt, workspace all-target Clippy with warnings denied, every unit/integration target, four doctests and strict rustdoc. No failing full gate was repeatedly retried to obtain a green result. Log: `/workspace/shared/minicore-host-session-context-artifacts/a412d7f-full-gate.log`.
+- `cargo test -p minicore-host-core --test session_context --locked` and `cargo test -p minicore-host-core --lib session::context::tests --locked`: all 10 public-Host cases and both gated owner cases passed three consecutive repetitions after the full gate. Log: `a412d7f-focused-repeats.log` in the same artifact directory.
+- `cargo test --workspace --all-targets --locked -- --list`: **662 listed, 662 unique target/test-name cases**, across 67 targets containing tests. Nested storage subprocess execution output is not an additional case. Inventory: `a412d7f-test-list.log`; machine-readable summary: `a412d7f-verification-summary.json`.
+- `cargo metadata --format-version 1 --locked` confirms the sole Runtime dependency is version `0.10.0` at `git+https://github.com/zqcli/minicore-runtime?rev=69faf9196991524b5549499d6208a1eaf567bf56#69faf9196991524b5549499d6208a1eaf567bf56`, with no path patch or regenerated lock. Metadata: `a412d7f-metadata.json`.
+- `SPEC.md` SHA-256 remains `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`; `Cargo.lock` SHA-256 remains `9084c32031f24813b50bf2c2181c7f055ffc86650ef1690b6c7bf7865a143e89`.
+- The untouched TUI reference checkout remains `3beeb1d8a525e58ce6352e05061f242c5580e248`. Its historical Runtime pin is not this Host's current Runtime pin; no joint TUI integration is claimed.
+- Independent review and canonical transport integration remain the parent/integration owner's next steps. No source fix outside this task, remote publication or main merge was performed.
+
+Reproduction environment for every final-source command:
+
+```sh
+export RUSTUP_HOME=/workspace/shared/rustup
+export CARGO_HOME=/workspace/shared/cargo
+export PATH=/workspace/shared/cargo/bin:$PATH
+export TMPDIR=/workspace/shared/minicore-host-tmp
+export CARGO_BUILD_JOBS=2
+export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+export CARGO_INCREMENTAL=0
+export CARGO_TARGET_DIR=/workspace/shared/minicore-host-session-context-target
+```
