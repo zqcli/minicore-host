@@ -10,7 +10,7 @@ use std::{
     future::Future,
     pin::Pin,
     sync::{
-        Arc, Weak,
+        Arc, Mutex, Weak,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
@@ -30,7 +30,9 @@ pub struct TurnSource {
 #[derive(Clone)]
 pub struct PreparedTurnBinding {
     capability: TurnCapability,
+    cleanup: Arc<Mutex<Option<ToolCleanupHandles>>>,
 }
+type ToolCleanupHandles = Vec<Arc<dyn crate::TurnToolCleanup>>;
 impl PreparedTurnBinding {
     pub(crate) fn new(
         owner: &Arc<SessionController>,
@@ -38,6 +40,7 @@ impl PreparedTurnBinding {
         access: &Arc<ConnectionRegistry>,
     ) -> Self {
         Self {
+            cleanup: Arc::new(Mutex::new(Some(Vec::new()))),
             capability: TurnCapability {
                 access: Arc::downgrade(access),
                 authority: Arc::new(TurnAuthority {
@@ -54,12 +57,42 @@ impl PreparedTurnBinding {
     pub fn capability(&self) -> TurnCapability {
         self.capability.clone()
     }
-    pub(crate) fn activate(&self) -> ActivationLease {
+    /// Register actual execution owners before this candidate is claimed. The
+    /// handles cannot authorize tool execution and are never run on rejection.
+    pub fn register_tool_cleanup(
+        &self,
+        cleanup: Arc<dyn crate::TurnToolCleanup>,
+    ) -> Result<(), Fault> {
+        let mut handles = self
+            .cleanup
+            .lock()
+            .expect("prepared cleanup mutex poisoned");
+        handles
+            .as_mut()
+            .ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionConfigInvalid,
+                    "tool cleanup registration is closed for this Turn binding",
+                )
+            })?
+            .push(cleanup);
+        Ok(())
+    }
+    pub(crate) fn activate(&self) -> (ActivationLease, ToolCleanupHandles) {
+        let cleanup = self
+            .cleanup
+            .lock()
+            .expect("prepared cleanup mutex poisoned")
+            .take()
+            .expect("candidate activates only once");
         self.capability
             .authority
             .active
             .store(true, Ordering::SeqCst);
-        ActivationLease(Arc::clone(&self.capability.authority))
+        (
+            ActivationLease(Arc::clone(&self.capability.authority)),
+            cleanup,
+        )
     }
 }
 

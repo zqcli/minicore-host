@@ -29,6 +29,8 @@ pub struct TurnStateData {
     pub model_attempts: Vec<u8>,
     pub fault: Option<Fault>,
     pub persistence_fault: Option<Fault>,
+    #[serde(default)]
+    pub cleanup_faults: Vec<Fault>,
 }
 /// The same atomic Turn identity and state used by subscription baselines.
 #[derive(Clone, Debug, Serialize, Deserialize)]

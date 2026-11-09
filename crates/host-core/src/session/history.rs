@@ -287,7 +287,10 @@ impl SessionController {
                     .as_ref()
                     .is_some_and(|f| f.kind() == Some(FaultKind::SessionHistoryWriteFailed))
                 {
-                    state.block_reason = None;
+                    state.block_reason = state
+                        .active
+                        .as_ref()
+                        .and_then(|active| active.tool_cleanup.fault.clone());
                 }
                 Ok(())
             }
@@ -317,12 +320,8 @@ impl SessionController {
         outcome: TurnOutcome,
         fault: Option<Fault>,
     ) {
-        let entry = {
+        {
             let mut state = self.state.lock().expect("Session mutex poisoned");
-            if state.history_work.is_some() {
-                return;
-            }
-            let stopping = state.host_stopping;
             let Some(active) = state
                 .active
                 .as_mut()
@@ -338,6 +337,29 @@ impl SessionController {
             active._activation.expire();
             active.info.state = TurnState::Finalizing;
             active.handle = None;
+            if active.info.outcome == Some(TurnOutcome::Failed) {
+                state.failure_paused = true;
+            }
+            self.publish(&mut state);
+        }
+        // Runtime may have dropped a tool future on cancellation. Actual tool
+        // workers must still be joined, even if an original history save failed.
+        if !self.finish_tool_cleanup(turn_id).await {
+            return;
+        }
+        let entry = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.history_work.is_some() {
+                return;
+            }
+            let stopping = state.host_stopping;
+            let Some(active) = state
+                .active
+                .as_mut()
+                .filter(|active| &active.info.id == turn_id)
+            else {
+                return;
+            };
             let outcome = active.info.outcome.expect("terminal claim");
             let entry = if active.terminal_accepted {
                 None
@@ -376,9 +398,6 @@ impl SessionController {
                         }),
                 })
             };
-            if outcome == TurnOutcome::Failed {
-                state.failure_paused = true;
-            }
             self.publish(&mut state);
             entry
         };
@@ -395,6 +414,7 @@ impl SessionController {
         if state.history_work.is_some()
             || state.active.as_ref().is_none_or(|active| {
                 &active.info.id != turn_id
+                    || !active.tool_cleanup.complete
                     || !active.terminal_accepted
                     || !matches!(
                         active.info.persistence,

@@ -54,3 +54,7 @@ Necessary save failures cannot become successful stopped shutdown. Repeated shut
 Development stays on isolated topics and integrates into `dev`. Publication must preserve existing remote history and use the owner's current explicit authorization; no force update or main merge occurs. Independent review and required checks remain prerequisites for main. Workers were requested with `gpt-6-astra` and `max`; no separate runtime configuration attestation is available.
 
 minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. A separately staged ordinary-tool implementation is held for review of normal shared-workspace write races and actual process-group cleanup, and for a focused reuse comparison; it is not part of this dev checkpoint.
+
+## Tool cleanup ownership topic
+
+[Task 033](tasks/033-turn-tool-cleanup/TASK.md) adds a narrow prepared-to-active Turn cleanup registration and actual-worker finalization barrier on top of `04ba5bc`. Real Host/Runtime and child-process tests distinguish Runtime future cancellation from actual child wait, including force shutdown, memory retirement, same-Turn continuation and blocked history saves. Independent cleanup diagnostics do not overwrite business outcomes. Ordinary tool production wiring, durable edit recording and output lease integration are still pending; this topic is not a complete first-version claim.

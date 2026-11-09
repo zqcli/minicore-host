@@ -109,6 +109,9 @@ pub struct TurnInfo {
     pub model_attempts: Vec<u8>,
     pub fault: Option<Fault>,
     pub persistence_fault: Option<Fault>,
+    /// Cleanup diagnostics never replace the claimed business outcome/fault.
+    #[serde(default)]
+    pub cleanup_faults: Vec<Fault>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

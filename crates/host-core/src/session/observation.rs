@@ -75,6 +75,7 @@ impl SessionController {
             model_attempts: info.model_attempts.clone(),
             fault: info.fault.clone(),
             persistence_fault: info.persistence_fault.clone(),
+            cleanup_faults: info.cleanup_faults.clone(),
         }
     }
     pub(super) fn publish_observation(&self, state: &mut SessionState, snapshot: &SessionSnapshot) {

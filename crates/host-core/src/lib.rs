@@ -28,7 +28,7 @@ pub use host::Host;
 pub use session::{
     ApprovalAnswer, BoundResources, HistoryBackend, InteractionAnswerData, LoadFuture,
     MemoryHistory, ResourceFuture, ResourceResolver, SaveFuture, SessionSubscription,
-    ToolOutputBinding, ToolOutputSink,
+    ToolOutputBinding, ToolOutputSink, TurnToolCleanup,
 };
 pub use types::*;
 

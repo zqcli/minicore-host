@@ -111,6 +111,12 @@ impl SessionController {
                     .and_then(|work| work.fault.clone())
             })
             .or_else(|| state.close_fault.clone())
+            .or_else(|| {
+                state
+                    .active
+                    .as_ref()
+                    .and_then(|active| active.tool_cleanup.fault.clone())
+            })
             .or_else(|| (!drained).then(|| state.block_reason.clone()).flatten());
         SessionShutdownStatus {
             drained,
@@ -293,6 +299,12 @@ impl SessionController {
                             .record_work
                             .as_ref()
                             .and_then(|work| work.fault.clone())
+                    })
+                    .or_else(|| {
+                        state
+                            .active
+                            .as_ref()
+                            .and_then(|active| active.tool_cleanup.fault.clone())
                     })
                     .unwrap_or_else(|| {
                         Fault::new(

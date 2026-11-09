@@ -486,6 +486,7 @@ pub fn completion(
         model_attempts: vec![1],
         fault: None,
         persistence_fault: None,
+        cleanup_faults: Vec::new(),
     };
     DelegationCompletion {
         results: vec![minicore_host_core::TurnResult {

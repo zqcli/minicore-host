@@ -14,6 +14,8 @@ mod metadata;
 mod observation;
 mod tool_output;
 pub use tool_output::{ToolOutputBinding, ToolOutputSink};
+mod tool_cleanup;
+pub use tool_cleanup::TurnToolCleanup;
 mod retirement;
 pub(crate) use retirement::SessionShutdownStatus;
 mod persistent;
@@ -162,6 +164,7 @@ impl QueuedInput {
 }
 struct ActiveTurn {
     _activation: crate::collaboration::ActivationLease,
+    tool_cleanup: tool_cleanup::ToolCleanupWork,
     info: TurnInfo,
     loop_id: Option<LoopId>,
     handle: Option<LoopHandle>,
@@ -1112,8 +1115,10 @@ impl SessionController {
                 let load_id = state.load_id.get_or_insert(load_id).clone();
                 state.residency = Residency::Loaded;
                 let start_history = state.history.len();
+                let (activation, cleanup) = binding.activate();
                 state.active = Some(ActiveTurn {
-                    _activation: binding.activate(),
+                    _activation: activation,
+                    tool_cleanup: tool_cleanup::ToolCleanupWork::new(cleanup),
                     info: TurnInfo {
                         id: turn_id.clone(),
                         session_id: self.id.clone(),
@@ -1133,6 +1138,7 @@ impl SessionController {
                         model_attempts: Vec::new(),
                         fault: None,
                         persistence_fault: None,
+                        cleanup_faults: Vec::new(),
                     },
                     loop_id: None,
                     handle: None,
@@ -1325,34 +1331,39 @@ impl SessionController {
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
                 // A failed save blocks new work; no reappend or automatic retry.
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                state.block_reason = Some(fault.clone());
-                if let Some(active) = state.active.as_mut() {
-                    active.info.persistence = PersistenceState::Failed;
-                    active.info.persistence_fault = Some(fault);
-                    active.info.fault = match &report.outcome {
-                        LoopOutcome::Failed(failure)
-                            if failure.kind != minicore_runtime::LoopFailureKind::History =>
-                        {
-                            Some(runtime_fault(failure))
+                {
+                    let mut state = self.state.lock().expect("Session mutex poisoned");
+                    state.block_reason = Some(fault.clone());
+                    if let Some(active) = state.active.as_mut() {
+                        active.info.persistence = PersistenceState::Failed;
+                        active.info.persistence_fault = Some(fault);
+                        active.info.fault = match &report.outcome {
+                            LoopOutcome::Failed(failure)
+                                if failure.kind != minicore_runtime::LoopFailureKind::History =>
+                            {
+                                Some(runtime_fault(failure))
+                            }
+                            _ => None,
+                        };
+                        active.info.outcome = Some(match report.outcome {
+                            LoopOutcome::Completed
+                                if active.info.state == TurnState::Cancelling =>
+                            {
+                                TurnOutcome::Cancelled
+                            }
+                            LoopOutcome::Completed => TurnOutcome::Completed,
+                            LoopOutcome::Cancelled(_) => TurnOutcome::Cancelled,
+                            _ => TurnOutcome::Failed,
+                        });
+                        active._activation.expire();
+                        active.info.state = TurnState::Finalizing;
+                        if active.info.outcome == Some(TurnOutcome::Failed) {
+                            state.failure_paused = true;
                         }
-                        _ => None,
-                    };
-                    active.info.outcome = Some(match report.outcome {
-                        LoopOutcome::Completed if active.info.state == TurnState::Cancelling => {
-                            TurnOutcome::Cancelled
-                        }
-                        LoopOutcome::Completed => TurnOutcome::Completed,
-                        LoopOutcome::Cancelled(_) => TurnOutcome::Cancelled,
-                        _ => TurnOutcome::Failed,
-                    });
-                    active._activation.expire();
-                    active.info.state = TurnState::Finalizing;
-                    if active.info.outcome == Some(TurnOutcome::Failed) {
-                        state.failure_paused = true;
                     }
+                    self.publish(&mut state);
                 }
-                self.publish(&mut state);
+                self.finish_tool_cleanup(&turn_id).await;
                 return;
             }
             let next = {
