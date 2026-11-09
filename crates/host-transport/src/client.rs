@@ -331,6 +331,43 @@ impl SessionClient {
             .await
     }
     session_control! { pause, PauseSession; resume, ResumeSession; load, LoadSession; unload, UnloadSession; }
+    /// Start manual compaction at the Session owner without creating a Turn or
+    /// queuing a command. The receipt records acceptance, not completion. Read
+    /// later progress from Session state; abandoning this wait does not cancel it.
+    pub async fn compact(
+        &self,
+        request: CompactRequest,
+        options: CallOptions,
+    ) -> Result<CompactReceipt, CallError> {
+        self.client
+            .call(
+                CompactSession(SessionOperation {
+                    target: self.target.clone(),
+                    operation_id: request.operation_id,
+                }),
+                options,
+            )
+            .await
+    }
+    /// Request cancellation of exactly the original manual operation. This
+    /// does not clear either input queue, cancel a later operation, or promise
+    /// rollback of an already committed history replacement.
+    pub async fn cancel_compact(
+        &self,
+        request: CompactCancelRequest,
+        options: CallOptions,
+    ) -> Result<CompactCancelReceipt, CallError> {
+        self.client
+            .call(
+                CancelCompact(CancelCompactParams {
+                    target: self.target.clone(),
+                    operation_id: request.operation_id,
+                    target_operation_id: request.target_operation_id,
+                }),
+                options,
+            )
+            .await
+    }
     pub async fn cancel(
         &self,
         request: SessionCancelRequest,

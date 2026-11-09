@@ -107,14 +107,15 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 35 real routes:
+`SUPPORTED_METHODS` lists these 37 real routes:
 
 - Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
 - Session: `session.create`, `session.get`, `session.list`, `session.state`,
   `session.load`, `session.unload`, `session.pause`, `session.resume`,
-  `session.cancel`, `session.close`, `session.history.read`.
+  `session.cancel`, `session.close`, `session.history.read`, `session.compact`,
+  `session.compact.cancel`.
 - Message: `message.send`, `message.get`.
 - Turn: `turn.get`, `turn.list`, `turn.wait`, `turn.cancel`, `turn.result`, `turn.output.read`.
 - Tool calls: `toolcall.get`, `toolcall.output.read`.
@@ -165,6 +166,40 @@ invocations and make a single-result lookup ambiguous; they are not replay keys.
 No transport cache or automatic retry is involved. Caller timeout, disconnect,
 or key invalidation cannot cancel accepted preparation/publication/cleanup.
 The low-level prepared `Host::reload_configuration` embedding API remains valid.
+
+## Manual compaction
+
+`SessionClient::compact(CompactRequest, options)` and
+`SessionClient::cancel_compact(CompactCancelRequest, options)` route directly to
+`Host::session_compact` and `Host::session_compact_cancel`. Independent RPC calls
+use the same flat target and operation fields as other Session controls:
+
+- `session.compact`: `{ target: SessionRef, operation_id: OperationId }`.
+- `session.compact.cancel`: `{ target: SessionRef, operation_id: OperationId,
+  target_operation_id: OperationId }`.
+
+The cancellation has its own operation ID and explicitly targets the original
+manual operation. JSON-RPC IDs only correlate wire calls; no operation ID is
+replaced or generated at the server. Unknown fields, missing targets and invalid
+IDs are rejected. Caller authority and wait timeouts are not business parameters.
+
+The actual Session owner checks current connection rights, lifecycle, history
+availability and competing Turn/compaction work. An accepted manual operation
+does not create a Turn or queue a message. Its utility work, history commit and
+applicable saving continue independently of the client waiter and connection.
+Messages still enter the two existing queues; completion or cancellation neither
+clears those queues nor clears explicit pause. Other Sessions continue normally.
+
+The returned `CompactReceipt` is a fact snapshot, usually `preparing`, and
+`host.receipt.get` retains that original receipt. Later progress is available in
+`session.state` and its existing state events, including the original manual
+operation ID and real utility outcome. Those events can arrive before the call
+receipt without changing what that receipt means. `CompactCancelReceipt` reports
+whether this request claimed cancellation and the target's then-known facts;
+it does not promise immediate stop or rollback. A late cancel of an older
+operation never targets a newer compaction or Turn. Missing original operations
+return the owner's Fault rather than a guessed result. Timeout, aborted caller
+and connection loss never automatically cancel or replay accepted compaction.
 
 ## Shared observations and client content
 

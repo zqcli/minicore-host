@@ -81,6 +81,13 @@ pub(crate) struct CancelSessionParams {
     #[serde(default)]
     pub keep_inbox: bool,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CancelCompactParams {
+    pub target: SessionRef,
+    pub operation_id: OperationId,
+    pub target_operation_id: OperationId,
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,6 +182,8 @@ operations! {
     ResumeSession, "session.resume", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_resume(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
     CancelSession, "session.cancel", CancelSessionParams => SessionCancelReceipt, |h, c, p| { h.session_cancel(&c, &p.target, SessionCancelRequest { operation_id: p.operation_id, keep_inbox: p.keep_inbox }) };
     CloseSession, "session.close", SessionOperation => SessionCloseReceipt, |h, c, p| { h.session_close(&c, &p.target, SessionCloseRequest { operation_id: p.operation_id }) };
+    CompactSession, "session.compact", SessionOperation => CompactReceipt, |h, c, p| { h.session_compact(&c, &p.target, CompactRequest { operation_id: p.operation_id }) };
+    CancelCompact, "session.compact.cancel", CancelCompactParams => CompactCancelReceipt, |h, c, p| { h.session_compact_cancel(&c, &p.target, CompactCancelRequest { operation_id: p.operation_id, target_operation_id: p.target_operation_id }) };
     SendMessageOp, "message.send", SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };
     GetMessage, "message.get", MessageTargetParams => MessageRecord, |h, c, p| { h.message(&c, &p.target, &p.message_id) };
     GetTurn, "turn.get", TurnTarget => TurnSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
