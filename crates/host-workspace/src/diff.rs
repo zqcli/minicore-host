@@ -89,6 +89,7 @@ impl Workspace {
     ) -> Result<DiffResult> {
         validate_request(&request)?;
         let ChangeRef::Workspace {
+            workspace_scope,
             head_oid: original_head,
             entry: original_entry,
         } = &request.change_ref
@@ -97,6 +98,12 @@ impl Workspace {
         };
         if request.comparison == DiffComparison::ToolBeforeAfter {
             return Err(WorkspaceError::InvalidRange);
+        }
+        // Validate the list-time source before any Git/status/content reads.
+        // Matching HEAD/status alone does not identify a workspace: two unborn
+        // repositories can contain the same untracked path with different bytes.
+        if *workspace_scope != self.scope(&["changes"]) {
+            return Err(WorkspaceError::ChangeNotFound);
         }
         let repository = repository(self, &context).await?;
         let status = repository.status(&context).await?;

@@ -317,7 +317,11 @@ Workspace reads clone that Session's committed configuration before binding the
 root and performing I/O outside owner locks. An active Turn keeps its original
 workspace after Session configuration changes; queries never borrow that Turn
 or a client-selected current page. Git changes are current workspace facts with
-`workspace_unknown` origin. Session/Turn changes come only from the Session's
+`workspace_unknown` origin. Their existing `ChangeRef::Workspace` includes a
+`workspace_scope` fingerprint of the original canonical root. Diff rejects a
+different root with `SESSION_CHANGE_NOT_FOUND` before Git/content reads, even
+when HEAD and status happen to match. Two Sessions using the same root can read
+that reference; this source marker is not an authorization credential. Session/Turn changes come only from the Session's
 actual captured tool observations, and diffs use their exact before/after bytes
 without reading a current file to fill missing history.
 

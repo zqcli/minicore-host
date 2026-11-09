@@ -51,6 +51,8 @@ pub enum ChangeOrigin {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChangeRef {
     Workspace {
+        /// The original canonical-root scope, not authorization or a Session ID.
+        workspace_scope: String,
         head_oid: Option<String>,
         entry: StatusEntry,
     },
@@ -157,6 +159,7 @@ impl Workspace {
                 details_available: entry.kind != StatusEntryKind::Unmerged && !entry.submodule,
                 edit_outcome: None,
                 change_ref: ChangeRef::Workspace {
+                    workspace_scope: scope.clone(),
                     head_oid: status.head_oid.clone(),
                     entry,
                 },

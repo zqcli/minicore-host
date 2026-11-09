@@ -113,3 +113,44 @@ separate gates; no publication is authorized by this task record.
   commits and rerun the full fixed-source gate before final combined approval.
   Do not treat the green aggregate above as evidence that the known issue is
   absent. Workspace routing does not change tool finishing or cleanup ownership.
+
+## Independent review source-binding correction
+
+The independent review of `d7f1ac2` found a P1 despite the green aggregate above:
+`ChangeRef::Workspace` held only HEAD/status. Two real unborn repositories with
+the same untracked path could therefore return the wrong root's bytes, including
+a Session workspace change between list and diff, with `stale=false`. The
+reviewer's original probe reproduced both cases on typed, OS-pipe stdio and TLS
+WSS. This is a normal source-consistency bug, not a hostile-filesystem scenario.
+
+- The existing Workspace branch now requires `workspace_scope`, reusing the
+  canonical-root `Workspace::scope(["changes"])` fingerprint already used by
+  changes-list cursors. Diff checks it before repository/status/content reads;
+  mismatch returns existing `ChangeNotFound` / `SESSION_CHANGE_NOT_FOUND`.
+- This field identifies source only. It is not a Session ID, authorization
+  credential, registry key, cached snapshot, durable database or new schema.
+  Same canonical root across Sessions/rebindings remains valid; actual live
+  same-root status/HEAD refresh and diff-byte cursor checks are unchanged.
+  Session/Turn tool references and original snapshots are unchanged.
+- New canonical regression first failed against the unchanged candidate with
+  the actual B bytes, then passed after the correction. It covers wrong root,
+  reconfigured root, original/sibling same-root positive cases, and listing the
+  new current root. Log: `/workspace/shared/workspace-routing-source-red.log`.
+- Backend regression proves another canonical spelling of the same root works,
+  missing source fields fail deserialization, and mismatch precedes even corrupt
+  target Git discovery. All 18 Git backend tests and all 9 canonical routing
+  cases passed: `workspace-routing-source-backend.log` and
+  `workspace-routing-source-focused.log` under `/workspace/shared/`.
+- The reviewer source file `review_source_probes.rs` was compiled unchanged
+  against this fixed dependency graph, selected from Cargo compiler-artifact
+  JSON. Both original probes passed; all six wrong-root routes now return
+  `SESSION_CHANGE_NOT_FOUND`, and real two-Turn edit bytes survive absent roots.
+  Evidence and exact compiler argv/source SHA are in
+  `/workspace/shared/workspace-routing-source-fix-artifacts/`.
+- This correction does not isolate external replacement of a directory at the
+  same canonical path or hostile concurrent filesystem manipulation. Those
+  remain outside the existing first-version local-use scope.
+
+The route correction is committed separately before consuming the producer's
+independent tool-finish fix `4f0988b` -> `e330db7` -> `0a4f90d`. A full fixed
+combined gate and independent rereview remain required.

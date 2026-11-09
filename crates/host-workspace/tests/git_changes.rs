@@ -826,3 +826,56 @@ async fn inherited_config_cannot_hide_active_filters_or_block_unused_global_driv
     run(true);
     assert!(!marker.exists());
 }
+
+#[tokio::test]
+async fn change_references_bind_canonical_root_before_git_reads_and_require_source_field() {
+    let first = repository();
+    let second = repository();
+    fs::write(first.path().join("file"), "first root\n").unwrap();
+    fs::write(second.path().join("file"), "second root\n").unwrap();
+    let original = Workspace::open(first.path()).await.unwrap();
+    let other = Workspace::open(second.path()).await.unwrap();
+    let record = original
+        .changes_list(list(1), QueryContext::default())
+        .await
+        .unwrap()
+        .records
+        .remove(0);
+    let request = diff(&record, DiffComparison::HeadToWorktree);
+    assert!(matches!(
+        other
+            .changes_diff(request.clone(), QueryContext::default())
+            .await,
+        Err(WorkspaceError::ChangeNotFound)
+    ));
+    // Reopening the same canonical root remains legitimate, including a
+    // syntactically different path. The source marker is not a binding lease.
+    let same = Workspace::open(first.path().join(".")).await.unwrap();
+    assert_eq!(
+        text(
+            &same
+                .changes_diff(request.clone(), QueryContext::default())
+                .await
+                .unwrap(),
+            DiffLineKind::Added
+        ),
+        "first root\n"
+    );
+    // A corrupt target would otherwise fail Git discovery. Source mismatch
+    // must be rejected before trying to read that target's repository data.
+    fs::remove_dir_all(second.path().join(".git")).unwrap();
+    fs::create_dir(second.path().join(".git")).unwrap();
+    fs::write(second.path().join(".git/HEAD"), "damaged\n").unwrap();
+    assert!(matches!(
+        other.changes_diff(request, QueryContext::default()).await,
+        Err(WorkspaceError::ChangeNotFound)
+    ));
+    let mut encoded = serde_json::to_value(&record.change_ref).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ChangeRef>(encoded.clone()).unwrap(),
+        record.change_ref
+    );
+    assert_eq!(encoded["workspace_scope"].as_str().unwrap().len(), 64);
+    encoded.as_object_mut().unwrap().remove("workspace_scope");
+    assert!(serde_json::from_value::<ChangeRef>(encoded).is_err());
+}
