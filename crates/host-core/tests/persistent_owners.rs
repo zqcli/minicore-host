@@ -3001,3 +3001,64 @@ async fn review_lifecycle_check_child_notify_leaves_no_owner_cycle() {
         wait_for_root_release(directory.path()).await;
     }
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_parent_child_metadata_updates_keep_confirmed_records() {
+    for _ in 0..24 {
+        let directory = tempfile::tempdir().unwrap();
+        let (host_id, agent_id, ids) = seed(directory.path());
+        let (resources, _) = resources();
+        let host = Host::open_persistent(directory.path(), settings("first"), resources.clone())
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let agent = AgentRef {
+            host_id,
+            agent_id: agent_id.clone(),
+        };
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let patch_agent = AgentConfigPatch {
+            role: Some(Role {
+                name: "confirmed Agent".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let patch_session = SessionConfigPatch {
+            role: Some(Role {
+                name: "confirmed Session".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (agent_result, session_result) = tokio::join!(
+            host.update_agent_async(&caller, &agent, 7, &patch_agent),
+            host.update_session_async(&caller, &target, 4, &patch_session)
+        );
+        assert_eq!(agent_result.unwrap().config_revision, 8);
+        assert_eq!(session_result.unwrap().config_revision, 5);
+        drop(connection);
+        drop(host);
+        let reopened = Host::open_persistent(directory.path(), settings("second"), resources)
+            .await
+            .unwrap();
+        let connection = reopened.connect().unwrap();
+        assert_eq!(
+            reopened
+                .agent_info(&connection.caller(), &agent)
+                .unwrap()
+                .config_revision,
+            8
+        );
+        assert_eq!(
+            reopened
+                .session_info(&connection.caller(), &target)
+                .unwrap()
+                .config_revision,
+            5
+        );
+    }
+}

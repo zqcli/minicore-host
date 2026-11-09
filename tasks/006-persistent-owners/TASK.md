@@ -1,6 +1,6 @@
 # Compose Persistent Owners
 
-Status: active, not full first-version completion.
+Status: implemented and integration-tested for this task scope; not full first-version completion.
 
 ## Scope
 
@@ -10,7 +10,7 @@ HostSettings is only currently supported identity metadata (name). ResourceResol
 
 ## Verification and provenance
 
-Commands and commit checkpoints are recorded below when run. Local validation uses an ignored Cargo patch to the separately unpublished Runtime extension. No Runtime copy, bundle, local path or root lock changes are committed. Clean remote reproducibility is not claimed.
+Commands and commit checkpoints are recorded below when run. Earlier local validation used an ignored Cargo patch while the Runtime extension was not yet published. Runtime is now published as `18a6ac9b82d003330cd870275efca793cdcc9a96`, and the parent integration has pinned that exact remote revision. This worktree's local validation still uses its existing patch: local Runtime HEAD `4f976b41f2381e2b09f3383aa66318b7aee2a8b3` and published `18a6ac9b82d003330cd870275efca793cdcc9a96` were independently compared and have the identical tree `46a3dc03a8ec0d89fc18ac39e9924eb1799ec45b`. No Runtime copy, bundle, absolute dependency path, root manifest or lock change is committed here. Remote-pin and clean-source verification belong to the parent integration; the historical local checks are not relabeled as clean-clone checks.
 
 ## Stable identity and discovery checkpoint
 
@@ -75,3 +75,15 @@ Verification: 56 core tests (36 persistent owners) passed; the five metadata/lif
 A real-file regression found that a retained failed Agent config save could unnecessarily block closing a healthy nondefault Session even after the shared storage path was usable again. The Agent now waits for its metadata only when the current default or the original pending candidate actually names the child being closed. A pending candidate that would make that child the default still fences its durable close until the same candidate is reconciled and the default is cleared. Unrelated Agent candidates remain retained and queryable; this change neither discards them nor retries them automatically.
 
 Both opposing default-reference cases pass, together with the review's root-release/no-owner-cycle check across sync memory, async M/M, P/M, P/P and discovered persistent Session construction. Full core tests: 59 passed (39 persistent owners). Formatting, core all-target Clippy and core rustdoc with warnings denied passed. The prior lifecycle correction is `94e6029`.
+
+
+## Final storage integration and handoff
+
+- Integrated the independent storage correction `c2de8f1` (local cherry-pick `e3416fd`). Its per-file metadata read/publication coordination removes the reproduced legitimate parent/default-child replace race without weakening external replacement checks or adding an owner/global I/O lock.
+- Retained the original concurrent case as `concurrent_parent_child_metadata_updates_keep_confirmed_records`: real Agent and default Session updates run together, both confirmed records are checked, then an immediate fresh Host reads the saved versions. This test is distinct from sequential worker-retirement tests.
+- Added `crates/host-core/README.md` describing actual acceptance/completion boundaries, queryable failures, source/version selection, creation correlation semantics and remaining scope. The memory default-target precheck is also outside the access guard; the Agent's closing-set check still decides publication at its own boundary.
+- Final local checks passed: `cargo fmt --all --check`; `cargo test --workspace --offline` (190 unit/integration cases plus 2 doc tests; core 60 = 4 unit + 40 persistent owners + 15 memory owners + 1 HTTP integration); `cargo clippy --workspace --all-targets --offline -- -D warnings`; `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --offline`. The complete 40-test persistent-owner suite passed 25 consecutive runs after the storage correction. No live-provider, TUI, clean-source or remote-pin test is claimed from this locally patched worktree.
+
+Core commits before this handoff: `fc28786`, `dddd347`, `f703977`, `8277546`, `d7fe459`, `94e6029`, `2e65e94`. The parent owns integration-only documents, dependency pin/lock updates and any remote publication. No remote was pushed and no main branch was merged by this task.
+
+The limitations above remain real: especially controlled Host shutdown, complete Host resource configuration/reload, automatic memory-entity reclamation and directory deletion, owner-level history-save continuation, and the complete canonical/transport/tool/interaction surfaces. Scoped persistent-owner completion does not mean the entire first edition is finished.

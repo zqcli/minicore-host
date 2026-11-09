@@ -240,13 +240,13 @@ impl AgentOwner {
             ));
         }
         let child = session.as_ref().map(|id| self.session(id)).transpose()?;
+        if child.as_ref().is_some_and(|child| !child.is_open_owned()) {
+            return Err(Fault::new(
+                FaultKind::AgentDefaultSessionUnavailable,
+                "default Session must be open",
+            ));
+        }
         self.access.accept(caller, || {
-            if child.as_ref().is_some_and(|child| !child.is_open_owned()) {
-                return Err(Fault::new(
-                    FaultKind::AgentDefaultSessionUnavailable,
-                    "default Session must be open",
-                ));
-            }
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if session
