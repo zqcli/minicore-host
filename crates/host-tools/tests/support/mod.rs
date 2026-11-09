@@ -477,6 +477,7 @@ pub fn completion(
         load_id: LoadId::new().unwrap(),
         state: TurnState::Finished,
         config_revision: 0,
+        config: SessionConfig::default(),
         outcome: Some(outcome),
         persistence: PersistenceState::NotApplicable,
         requests: 1,

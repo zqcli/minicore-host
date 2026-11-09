@@ -1,3 +1,5 @@
+mod query;
+
 use super::*;
 use crate::observation::*;
 use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};

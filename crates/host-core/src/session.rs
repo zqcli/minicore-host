@@ -1214,6 +1214,7 @@ impl SessionController {
                         load_id,
                         state: TurnState::Starting,
                         config_revision: preparation.1,
+                        config: preparation.0.clone(),
                         outcome: None,
                         persistence: if state.info.mode == StorageMode::Memory {
                             PersistenceState::NotApplicable

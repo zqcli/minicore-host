@@ -105,6 +105,8 @@ pub struct TurnInfo {
     pub load_id: LoadId,
     pub state: TurnState,
     pub config_revision: ConfigRevision,
+    /// The original Session configuration accepted with this Turn's binding.
+    pub config: SessionConfig,
     pub outcome: Option<TurnOutcome>,
     pub persistence: PersistenceState,
     pub requests: u64,
