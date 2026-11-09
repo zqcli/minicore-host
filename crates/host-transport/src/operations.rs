@@ -1,10 +1,11 @@
 //! One typed operation table drives direct calls and RPC dispatch.
 use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
-    AgentInfo, CallerContext, Host, HostConfig, HostConfigSnapshot, HostInfo,
-    InteractionAnswerData, MessageSnapshot, ModelDescription, ModelTextSnapshot,
-    SessionContextSnapshot, SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot,
-    ToolTextSnapshot, TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
+    AgentDetails, AgentListPage, AgentListRequest, CallerContext, Host, HostConfig,
+    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription,
+    ModelTextSnapshot, SessionContextSnapshot, SessionHistorySnapshot, SessionInfo,
+    SessionListPage, SessionListRequest, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
+    TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -33,6 +34,13 @@ pub(crate) struct Empty {}
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentTarget {
     pub target: AgentRef,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ListSessionsParams {
+    pub target: AgentRef,
+    #[serde(flatten)]
+    pub query: SessionListRequest,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -269,8 +277,8 @@ operations! {
     ReceiptGet, "host.receipt.get", OperationTarget => Receipt, |h, c, p| { h.receipt_get(&c, &p.operation_id) };
     Shutdown, "host.shutdown", HostShutdownRequest => HostShutdownReceipt, |h, c, p| { h.shutdown(&c, p) };
     CreateAgent, "agent.create", AgentCreate => AgentCreateReceipt, |h, c, p| { h.create_agent_async(&c, p).await };
-    GetAgent, "agent.get", AgentTarget => AgentInfo, |h, c, p| { h.agent_info(&c, &p.target) };
-    ListAgents, "agent.list", Empty => Vec<AgentInfo>, |h, c, _p| { h.agents(&c) };
+    GetAgent, "agent.get", AgentTarget => AgentDetails, |h, c, p| { h.agent_details(&c, &p.target) };
+    ListAgents, "agent.list", AgentListRequest => AgentListPage, |h, c, p| { h.list_agents(&c, &p) };
     StartAgent, "agent.start", AgentOperation => AgentStartReceipt, |h, c, p| { h.agent_start(&c, &p.target, AgentStartRequest { operation_id: p.operation_id }) };
     UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     SetDefaultSession, "agent.set_default_session", SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
@@ -279,7 +287,7 @@ operations! {
     CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
     GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
     GetSessionContext, "session.context", SessionTarget => SessionContextSnapshot, |h, c, p| { h.session_context(&c, &p.target).await };
-    ListSessions, "session.list", AgentTarget => Vec<SessionInfo>, |h, c, p| { h.sessions(&c, &p.target) };
+    ListSessions, "session.list", ListSessionsParams => SessionListPage, |h, c, p| { h.list_sessions(&c, &p.target, &p.query) };
     UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     ListInputs, "input.list", SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
     RemoveInput, "input.remove", RemoveInputParams => InputRemoveReceipt, |h, c, p| { h.input_remove(&c, &p.target, InputRemoveRequest { operation_id: p.operation_id, message_id: p.message_id, expected_controller_revision: p.expected_controller_revision }) };

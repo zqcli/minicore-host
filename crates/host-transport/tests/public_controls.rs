@@ -123,6 +123,7 @@ async fn exercise(client: HostClient, reader: HostClient) {
             .agent(agent.clone(), options(2000))
             .await
             .unwrap()
+            .info
             .name,
         "renamed Agent"
     );

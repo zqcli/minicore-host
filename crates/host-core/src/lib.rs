@@ -23,6 +23,8 @@ mod prompt_history;
 pub use prompt_history::prepare_prompt_history;
 mod query;
 pub use query::*;
+mod discovery;
+pub use discovery::*;
 mod session;
 mod types;
 

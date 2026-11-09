@@ -308,6 +308,7 @@ impl SessionController {
             );
             slot.handed_off = true;
             state.handoff_pending = true;
+            self.publish(&mut state);
             prepared
         };
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| prepared.0.handoff(prepared.1)))

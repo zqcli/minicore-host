@@ -633,7 +633,12 @@ async fn remaining_query_and_canonical_control_routes_return_real_owner_facts() 
     };
     assert_eq!(client.agents(options(500)).await.unwrap().len(), 1);
     assert_eq!(
-        client.agent(agent.clone(), options(500)).await.unwrap().id,
+        client
+            .agent(agent.clone(), options(500))
+            .await
+            .unwrap()
+            .info
+            .id,
         agent.agent_id
     );
     let created = client

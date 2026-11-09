@@ -29,6 +29,9 @@ impl ToolCleanupWork {
             fault: None,
         }
     }
+    pub(super) fn pending(&self) -> bool {
+        !self.complete && !self.handles.is_empty()
+    }
     pub(super) fn retain_output(&mut self, live: Arc<AtomicBool>) -> bool {
         if self.started || self.handles.is_empty() {
             return false;

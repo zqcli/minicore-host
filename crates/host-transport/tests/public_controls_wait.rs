@@ -88,6 +88,7 @@ async fn update_wait_budget(agent: bool) {
             .agent(target, options(2000))
             .await
             .unwrap()
+            .info
             .config_revision,
         0
     );

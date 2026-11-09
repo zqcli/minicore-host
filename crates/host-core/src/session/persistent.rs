@@ -44,7 +44,8 @@ impl SessionController {
         state.info.title = record.data.title.clone();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
-        if record.data.closed.is_some() {
+        if let Some(closed) = &record.data.closed {
+            state.end_reason = Some(closed.reason.clone());
             state.lifecycle = SessionLifecycle::Closed;
         }
         mutable.snapshots.send_replace(Self::make_snapshot(

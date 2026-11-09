@@ -10,6 +10,7 @@ pub use compaction::{BoundCompactionResources, CompactionResourceFuture};
 mod context;
 mod controls;
 mod deletion;
+mod discovery;
 mod history;
 mod history_read;
 mod input_provenance;
@@ -264,6 +265,7 @@ impl ActiveTurn {
 struct SessionState {
     info: SessionInfo,
     lifecycle: SessionLifecycle,
+    end_reason: Option<String>,
     paused: bool,
     pause_generation: u64,
     failure_paused: bool,
@@ -374,6 +376,7 @@ impl SessionController {
                 config,
             },
             lifecycle: SessionLifecycle::Open,
+            end_reason: None,
             paused: false,
             pause_generation: 0,
             failure_paused: false,
@@ -468,6 +471,8 @@ impl SessionController {
             agent_id: agent_id.clone(),
             session_id: id.clone(),
             data: SessionStateData {
+                owned_work: Self::owned_work(state),
+                end_reason: state.end_reason.clone(),
                 mode: state.info.mode,
                 controller_revision: state.controller_revision,
                 lifecycle: state.lifecycle,

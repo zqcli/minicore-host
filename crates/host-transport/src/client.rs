@@ -1,10 +1,11 @@
 use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
-    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfig,
-    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription,
-    ModelTextSnapshot, ObservationNotification, SessionContextSnapshot, SessionHistorySnapshot,
-    SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot,
-    TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
+    AgentDetails, AgentListPage, AgentListRequest, AgentSummary, CallerContext, ConnectionHandle,
+    EventSubscription, Host, HostConfig, HostConfigSnapshot, HostInfo, InteractionAnswerData,
+    MessageSnapshot, ModelDescription, ModelTextSnapshot, ObservationNotification,
+    SessionContextSnapshot, SessionHistorySnapshot, SessionInfo, SessionListPage,
+    SessionListRequest, SessionSnapshot, SessionSummary, StateEvent, ToolCallSnapshot,
+    ToolTextSnapshot, TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -233,11 +234,21 @@ impl HostClient {
         &self,
         target: AgentRef,
         options: CallOptions,
-    ) -> Result<AgentInfo, CallError> {
+    ) -> Result<AgentDetails, CallError> {
         self.call(GetAgent(AgentTarget { target }), options).await
     }
-    pub async fn agents(&self, options: CallOptions) -> Result<Vec<AgentInfo>, CallError> {
-        self.call(ListAgents(Empty {}), options).await
+    pub async fn agents(&self, options: CallOptions) -> Result<Vec<AgentSummary>, CallError> {
+        Ok(self
+            .list_agents(AgentListRequest::default(), options)
+            .await?
+            .items)
+    }
+    pub async fn list_agents(
+        &self,
+        request: AgentListRequest,
+        options: CallOptions,
+    ) -> Result<AgentListPage, CallError> {
+        self.call(ListAgents(request), options).await
     }
     pub async fn stop_agent(
         &self,
@@ -333,8 +344,19 @@ impl HostClient {
         &self,
         target: AgentRef,
         options: CallOptions,
-    ) -> Result<Vec<SessionInfo>, CallError> {
-        self.call(ListSessions(AgentTarget { target }), options)
+    ) -> Result<Vec<SessionSummary>, CallError> {
+        Ok(self
+            .list_sessions(target, SessionListRequest::default(), options)
+            .await?
+            .items)
+    }
+    pub async fn list_sessions(
+        &self,
+        target: AgentRef,
+        query: SessionListRequest,
+        options: CallOptions,
+    ) -> Result<SessionListPage, CallError> {
+        self.call(ListSessions(ListSessionsParams { target, query }), options)
             .await
     }
     pub async fn send(

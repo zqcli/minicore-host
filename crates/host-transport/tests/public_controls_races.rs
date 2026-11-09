@@ -109,7 +109,7 @@ async fn message_revision_does_not_conflict_but_real_config_revision_does_for_bo
         matches!(task.await.unwrap().unwrap_err(),CallError::Business(f) if f.kind()==Some(FaultKind::AgentConfigConflict))
     );
     assert_eq!(
-        client.agent(agent, options(2000)).await.unwrap().name,
+        client.agent(agent, options(2000)).await.unwrap().info.name,
         "winner"
     );
     client.close();
@@ -155,6 +155,7 @@ async fn stale_external_authority_is_rechecked_after_preparation_at_each_owner()
                 .agent(agent, options(2000))
                 .await
                 .unwrap()
+                .info
                 .config_revision,
             0
         );

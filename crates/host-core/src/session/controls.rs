@@ -428,6 +428,9 @@ impl SessionController {
         if state.lifecycle == SessionLifecycle::Closed {
             None
         } else {
+            if state.lifecycle == SessionLifecycle::Open {
+                state.end_reason = Some("explicit close".into());
+            }
             state.lifecycle = SessionLifecycle::Closing;
             Self::cancel_compaction_locked(state);
             clear_inbox(state);

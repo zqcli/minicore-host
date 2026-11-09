@@ -7,6 +7,7 @@ mod collaboration;
 mod controls;
 mod create;
 mod deletion;
+mod discovery;
 mod metadata;
 mod persistent;
 mod retirement;

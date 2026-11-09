@@ -341,7 +341,7 @@ impl SessionController {
             }
             let mut candidate = self.record(&state);
             candidate.data.closed = Some(SessionClosure {
-                reason: "explicit close".into(),
+                reason: state.end_reason.clone().expect("accepted close reason"),
             });
             state.record_work = Some(SessionRecordWork {
                 baseline: state.record_base.clone().expect("metadata baseline"),

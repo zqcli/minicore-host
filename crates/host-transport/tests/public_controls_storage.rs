@@ -126,6 +126,7 @@ async fn settled(client: &HostClient, agent: &AgentRef, session: &SessionClient)
                 .agent(agent.clone(), options(2000))
                 .await
                 .unwrap()
+                .info
                 .metadata_saving
                 && !session
                     .state(options(2000))
@@ -184,6 +185,7 @@ fn accepted_updates_outlive_dropped_callers_and_keep_original_receipts() {
                 .agent(agent.clone(), options(2000))
                 .await
                 .unwrap()
+                .info
                 .config_revision,
             0
         );
@@ -205,7 +207,11 @@ fn accepted_updates_outlive_dropped_callers_and_keep_original_receipts() {
         blocked.await.unwrap();
         settled(&next, &agent, &session).await;
         assert_eq!(
-            next.agent(agent.clone(), options(2000)).await.unwrap().name,
+            next.agent(agent.clone(), options(2000))
+                .await
+                .unwrap()
+                .info
+                .name,
             "saved Agent"
         );
         assert_eq!(
@@ -234,7 +240,11 @@ fn failed_metadata_saves_keep_committed_config_and_report_fault_without_rewritin
     runtime().block_on(async {
         let (directory, _host, client, agent, session, _resources) = persistent().await;
         let (agent_path, session_path) = paths(directory.path(), &agent, &session);
-        let original_agent = client.agent(agent.clone(), options(2000)).await.unwrap();
+        let original_agent = client
+            .agent(agent.clone(), options(2000))
+            .await
+            .unwrap()
+            .info;
         let original_session = session.info(options(2000)).await.unwrap();
         for path in [&agent_path, &session_path] {
             std::fs::rename(path, path.with_extension("original")).unwrap();
@@ -249,7 +259,11 @@ fn failed_metadata_saves_keep_committed_config_and_report_fault_without_rewritin
             .await
             .unwrap();
         settled(&client, &agent, &session).await;
-        let after = client.agent(agent.clone(), options(2000)).await.unwrap();
+        let after = client
+            .agent(agent.clone(), options(2000))
+            .await
+            .unwrap()
+            .info;
         assert_eq!(after.config, original_agent.config);
         assert_eq!(after.name, original_agent.name);
         assert_eq!(after.config_revision, 0);
@@ -298,14 +312,14 @@ fn default_save_preserves_old_pointer_until_commit_and_close_clears_exact_target
         let (release,blocked)=gate_disk().await;
         let receipt=client.set_default_session(agent.clone(),AgentSetDefaultSessionRequest{operation_id:OperationId::new().unwrap(),session_id:Some(new.target().session_id.clone())},options(2000)).await.unwrap();
         assert_eq!(receipt.result,AgentSetDefaultSessionResult::Saving{default_session_id:Some(old.target().session_id.clone()),requested_session_id:Some(new.target().session_id.clone())});
-        assert_eq!(client.agent(agent.clone(),options(2000)).await.unwrap().default_session_id,Some(old.target().session_id.clone()));
+        assert_eq!(client.agent(agent.clone(),options(2000)).await.unwrap().info.default_session_id,Some(old.target().session_id.clone()));
         let closed=new.close(SessionCloseRequest{operation_id:OperationId::new().unwrap()},options(2000)).await.unwrap();
         assert_eq!(closed.result.lifecycle,SessionCloseLifecycle::Closing);
         client.close();
         let next=HostClient::in_process(host).unwrap(); let new=next.session(new.target().clone());
         release.send(()).unwrap(); blocked.await.unwrap();
         tokio::time::timeout(Duration::from_secs(5),async { loop { if new.state(options(2000)).await.unwrap().data.lifecycle==SessionLifecycle::Closed {break;} tokio::task::yield_now().await; } }).await.unwrap();
-        assert_eq!(next.agent(agent.clone(),options(2000)).await.unwrap().default_session_id,None);
+        assert_eq!(next.agent(agent.clone(),options(2000)).await.unwrap().info.default_session_id,None);
         assert_eq!(read(&agent_path)["data"]["default_session_id"],Value::Null);
         assert_eq!(next.receipt(receipt.operation_id.clone(),options(2000)).await.unwrap(),Receipt::AgentSetDefaultSession(receipt));
         let unavailable=next.set_default_session(agent.clone(),AgentSetDefaultSessionRequest{operation_id:OperationId::new().unwrap(),session_id:Some(new.target().session_id.clone())},options(2000)).await.unwrap_err();
@@ -315,7 +329,7 @@ fn default_save_preserves_old_pointer_until_commit_and_close_clears_exact_target
         let memory_id=memory.session_id.unwrap();
         next.set_default_session(agent.clone(),AgentSetDefaultSessionRequest{operation_id:OperationId::new().unwrap(),session_id:Some(memory_id.clone())},options(2000)).await.unwrap();
         settled(&next,&agent,&new).await;
-        assert_eq!(next.agent(agent.clone(),options(2000)).await.unwrap().default_session_id,Some(memory_id));
+        assert_eq!(next.agent(agent.clone(),options(2000)).await.unwrap().info.default_session_id,Some(memory_id));
         assert_eq!(read(&agent_path)["data"]["default_session_id"],Value::Null);
         next.close();
     });

@@ -39,17 +39,14 @@ impl CoreTurnPort {
             InspectTarget::Agent { host_id, agent_id } => {
                 self.check_host(&host_id)?;
                 let target = AgentRef { host_id, agent_id };
-                let info = self.capability.agent_snapshot(&target)?;
-                let sessions=self.capability.sessions(&target)?.into_iter().map(|info| {
-                    let state=self.capability.session_state(&SessionRef {agent_id:info.agent_id,session_id:info.id.clone()})?;
-                    Ok(json!({"session_id":info.id,"title":info.title,"config_revision":info.config_revision,"data":state.data}))
-                }).collect::<Result<Vec<_>,Fault>>()?;
+                let details = self.capability.agent_details(&target)?;
+                let info = details.info;
                 let mut data = encoded(&info)?;
                 remove(&mut data, &["id", "host_id"]);
                 if !request.include_config {
                     remove(&mut data, &["config"]);
                 }
-                data["sessions"] = encoded(sessions)?;
+                data["sessions"] = encoded(details.sessions)?;
                 Ok(
                     json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":info.id,"data":data}),
                 )

@@ -167,13 +167,16 @@ impl TurnCapability {
     pub fn agent_snapshot(&self, target: &AgentRef) -> Result<AgentInfo, Fault> {
         self.host()?.agent_info(&self.caller()?, target)
     }
+    pub fn agent_details(&self, target: &AgentRef) -> Result<crate::AgentDetails, Fault> {
+        self.host()?.agent_details(&self.caller()?, target)
+    }
     pub fn session_snapshot(&self, target: &SessionRef) -> Result<SessionInfo, Fault> {
         self.host()?.session_info(&self.caller()?, target)
     }
     pub fn session_state(&self, target: &SessionRef) -> Result<SessionSnapshot, Fault> {
         self.host()?.session_state(&self.caller()?, target)
     }
-    pub fn sessions(&self, target: &AgentRef) -> Result<Vec<SessionInfo>, Fault> {
+    pub fn sessions(&self, target: &AgentRef) -> Result<Vec<crate::SessionSummary>, Fault> {
         self.host()?.sessions(&self.caller()?, target)
     }
     pub fn message(&self, target: &SessionRef, id: &MessageId) -> Result<MessageRecord, Fault> {

@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HostInfo {
+    pub name: String,
+    pub version: String,
+    pub capabilities: crate::HostCapabilities,
+    pub resources: crate::HostResourceSummary,
+    pub facilities: crate::HostFacilities,
     pub host_id: HostId,
     pub host_incarnation: HostIncarnation,
     pub lifecycle: HostLifecycle,
@@ -66,6 +71,8 @@ pub struct MessageRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionStateData {
+    pub owned_work: Box<crate::SessionOwnedWork>,
+    pub end_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deletion: Option<SessionDeletionState>,
     pub mode: StorageMode,

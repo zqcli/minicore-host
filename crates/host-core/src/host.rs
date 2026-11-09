@@ -13,6 +13,7 @@ mod context;
 mod controls;
 mod create;
 mod deletion;
+mod discovery;
 mod metadata;
 mod network;
 mod observation;
@@ -143,8 +144,14 @@ impl Host {
     }
     pub fn info(&self, caller: &CallerContext) -> Result<HostInfo, Fault> {
         let control = self.access.snapshot(caller)?;
+        let (name, capabilities, resources, facilities) = self.discovery_info();
         let state = self.state.lock().expect("Host mutex poisoned");
         Ok(HostInfo {
+            name,
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            capabilities,
+            resources,
+            facilities,
             host_id: self.id.clone(),
             host_incarnation: self.incarnation.clone(),
             lifecycle: state.lifecycle,
@@ -357,19 +364,6 @@ impl Host {
         self.check_host(&target.host_id)?;
         self.agent(caller, &target.agent_id)?.info(caller)
     }
-    pub fn agents(&self, caller: &CallerContext) -> Result<Vec<AgentInfo>, Fault> {
-        let agents = self.access.read(caller, || {
-            Ok(self
-                .state
-                .lock()
-                .expect("Host mutex poisoned")
-                .agents
-                .values()
-                .cloned()
-                .collect::<Vec<_>>())
-        })?;
-        agents.into_iter().map(|agent| agent.info(caller)).collect()
-    }
     pub fn create_session(
         &self,
         caller: &CallerContext,
@@ -484,18 +478,6 @@ impl Host {
         target: &SessionRef,
     ) -> Result<SessionSubscription, Fault> {
         self.session(caller, target)?.subscribe_state(caller)
-    }
-    pub fn sessions(
-        &self,
-        caller: &CallerContext,
-        target: &AgentRef,
-    ) -> Result<Vec<SessionInfo>, Fault> {
-        self.check_host(&target.host_id)?;
-        self.agent(caller, &target.agent_id)?
-            .list_sessions(caller)?
-            .into_iter()
-            .map(|session| session.info(caller))
-            .collect()
     }
     pub fn message(
         &self,
