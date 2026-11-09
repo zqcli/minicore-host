@@ -10,6 +10,7 @@ description = "Direct-owner Host, Agent, and Session controllers for MiniCore"
 minicore-host-compaction = { path = "../host-compaction", version = "0.1.0" }
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
 minicore-host-storage = { path = "../host-storage", version = "0.1.0" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
 serde_json = "=1.0.154"

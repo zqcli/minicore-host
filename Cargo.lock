@@ -803,6 +803,7 @@ dependencies = [
  "minicore-host-protocol",
  "minicore-host-provider",
  "minicore-host-storage",
+ "minicore-host-workspace",
  "minicore-runtime",
  "serde",
  "serde_json",
