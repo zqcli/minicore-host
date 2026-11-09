@@ -137,6 +137,7 @@ pub(crate) async fn connect(
     url: &str,
     tls: Arc<ClientConfig>,
     access_key: &str,
+    diagnostic: &mut crate::diagnostics::Call,
 ) -> Result<RpcClient, CallError> {
     let request = url
         .into_client_request()
@@ -172,7 +173,7 @@ pub(crate) async fn connect(
         .map_err(|error| connection_error(websocket_error(error)))?;
     let (reader, writer) = split(socket);
     let client = RpcClient::start_frames(reader, writer);
-    let initial = client.authenticate(access_key).await?;
+    let initial = client.authenticate(access_key, diagnostic).await?;
     Ok(client.initialized(initial))
 }
 

@@ -80,7 +80,14 @@ impl HostClient {
     {
         let deadline = Deadline::new(options)?;
         let connection = RpcClient::start(reader, writer);
-        let initial = deadline.wait(connection.initialize()).await?;
+        let mut diagnostic = Call::client(None, "initialize", Correlation::default());
+        let span = diagnostic.span();
+        let result = deadline
+            .wait(connection.initialize(&mut diagnostic))
+            .instrument(span)
+            .await;
+        diagnostic.client_finished(&result);
+        let initial = result?;
         Ok(Self {
             connection: Connection::Rpc(Arc::new(connection.initialized(initial))),
         })
@@ -97,9 +104,14 @@ impl HostClient {
         options: CallOptions,
     ) -> Result<Self, CallError> {
         let deadline = Deadline::new(options)?;
-        let client = deadline
-            .wait(crate::wss::connect(url, tls, access_key))
-            .await?;
+        let mut diagnostic = Call::client(None, "initialize", Correlation::default());
+        let span = diagnostic.span();
+        let result = deadline
+            .wait(crate::wss::connect(url, tls, access_key, &mut diagnostic))
+            .instrument(span)
+            .await;
+        diagnostic.client_finished(&result);
+        let client = result?;
         Ok(Self {
             connection: Connection::Rpc(Arc::new(client)),
         })

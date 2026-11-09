@@ -1,4 +1,4 @@
-use crate::diagnostics::{self, Call, Correlation};
+use crate::diagnostics::{self, Call};
 use crate::operations::{Empty, Operation, dispatch, protocol_error};
 use minicore_host_core::{
     ConnectionHandle, Host, ObservationEvent, ObservationNotification, StateEvent,
@@ -597,22 +597,31 @@ impl RpcClient {
             initial: None,
         }
     }
-    pub(crate) async fn initialize(&self) -> Result<ConnectionInfo, CallError> {
-        self.initialize_with(Empty {}).await
+    pub(crate) async fn initialize(
+        &self,
+        diagnostic: &mut Call,
+    ) -> Result<ConnectionInfo, CallError> {
+        self.initialize_with(Empty {}, diagnostic).await
     }
-    pub(crate) async fn authenticate(&self, access_key: &str) -> Result<ConnectionInfo, CallError> {
-        self.initialize_with(serde_json::json!({ "access_key": access_key }))
+    pub(crate) async fn authenticate(
+        &self,
+        access_key: &str,
+        diagnostic: &mut Call,
+    ) -> Result<ConnectionInfo, CallError> {
+        self.initialize_with(serde_json::json!({ "access_key": access_key }), diagnostic)
             .await
     }
-    async fn initialize_with<P: Serialize>(&self, params: P) -> Result<ConnectionInfo, CallError> {
-        let mut diagnostic = Call::client(None, "initialize", Correlation::default());
-        let result = self
-            .request("initialize", params, None, &mut diagnostic)
-            .await;
+    async fn initialize_with<P: Serialize>(
+        &self,
+        params: P,
+        diagnostic: &mut Call,
+    ) -> Result<ConnectionInfo, CallError> {
+        let result = self.request("initialize", params, None, diagnostic).await;
         if let Ok(info) = &result {
             diagnostic.connected(info);
         }
-        diagnostic.client_finished(&result);
+        // The caller's original deadline is outside this future. Only that
+        // boundary can distinguish its timeout from a genuinely dropped wait.
         result
     }
     pub(crate) fn initialized(mut self, initial: ConnectionInfo) -> Self {

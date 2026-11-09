@@ -308,3 +308,32 @@ checks passed. Logs are `task053-recovered-owner-helper-tests.log` and
 `task053-recovered-owner-helper-clippy.log` under `/workspace/shared/`. Broader
 owner lifecycle, Session acceptance/finalization/storage and tool diagnostics
 remain unfinished and do not inherit a full approval from this helper slice.
+
+### Review correction: initialization wait provenance
+
+The independent task076 original `review076_initialize_timeout.rs` was replayed
+unchanged. The red actually completed Host setup over OS pipes, gated its real
+response, and returned the original 100 ms `WaitTimeout`; the logger incorrectly
+said `wait_abandoned`. Its Call lived inside the original Deadline future and
+was dropped before the outer boundary could observe that timeout. Red output is
+`/workspace/shared/task053-initialize-timeout-red.log`.
+
+The one Call now belongs to HostClient's existing stdio/WSS deadline boundary.
+RpcClient initialization/authentication and WSS framing borrow it; only the outer
+result finishes it. No new timer, attempt, request, authentication change, result
+repair or owner state is introduced. A genuinely dropped constructor still logs
+an unconfirmed abandoned wait. Unknown peer identities remain omitted.
+
+The unchanged original probe passed after the fix, with green output separate in
+`task053-initialize-timeout-green.log`. The permanent `diagnostic_initialize`
+compound case covers stdio and authenticated loopback TLS/WebSocket, each with
+an actual timeout and an actual task abort. A wire relay holds the production
+Host's unchanged authentication response for WSS; it does not fabricate the
+response or bypass certificate validation. The test checks exactly four client
+summaries, the original timeout value, absent timeout on abandonment, no invented
+peer ID, and no fixture credential in diagnostics. The existing real Runtime/HTTP
+`diagnostic_calls` case also passed. The three focused executables (including the
+unchanged review probe) passed. All-target transport strict Clippy, strict
+transport rustdoc, formatting and diff checks passed. The temporary copied review
+executable is retained outside the repository, not as a duplicate permanent test.
+No full workspace gate or independent re-approval is claimed here.
