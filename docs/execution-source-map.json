@@ -1,0 +1,132 @@
+{
+  "branch": "stage/next-reviewed",
+  "base": "705a3e8cfc14d56e51fc08e522df04ee0adca1f6",
+  "head": "21521919b5ecacea2fd72c698ea7521241a9e2d4",
+  "mapping": [
+    {
+      "source": "e0899cf5b82427894edd353bc86f3dc64b111d63",
+      "integrated": "3cf25b2cf27b094b1da523b292f486f94f1edfa2",
+      "subject": "feat(protocol): define canonical Host reload receipts"
+    },
+    {
+      "source": "a80311c10c1d6cb8b0634034e929aadca4d93994",
+      "integrated": "8446867098f8a2c44cd00e20d740c0b9a780b25c",
+      "subject": "feat(host): own accepted reload preparation and receipt facts"
+    },
+    {
+      "source": "45dae06f3d13ffa378979579988d6025ec84a16a",
+      "integrated": "08684b160574265827e0a77d4aaf90cb09b1b344",
+      "subject": "docs(host): record verified reload owner checkpoint"
+    },
+    {
+      "source": "e30aaefe1406978c2a7cff660f58290ed5a65a47",
+      "integrated": "626aadfb7d9284f4730129fbfe96db0cb17a7754",
+      "subject": "feat(transport): route canonical Host reload requests"
+    },
+    {
+      "source": "fc8975e12155ccd950cce197bb40c7096592e5f7",
+      "integrated": "98d594b4d2298aafd785dfded32df04349b65c8d",
+      "subject": "test(transport): verify reload receipts and accepted work across connections"
+    },
+    {
+      "source": "6e252d57be911fcbccdce2af95f37fd6f541e33c",
+      "integrated": "6b95161b62cf0bd96a7f308945cbaa4d71d610c4",
+      "subject": "docs(transport): record canonical reload validation and handoff"
+    },
+    {
+      "source": "1e8caab63f126c9254d50467fe153fdd1bb46686",
+      "integrated": "9afa0c068bd1e3f670e55c5dd7fddaad73580a92",
+      "subject": "build(compaction): add isolated model-backed compaction module"
+    },
+    {
+      "source": "5c44f09acd23fd628842a1519aebecabd33e25bb",
+      "integrated": "3d18c267426861137175526bf9213315315fbb41",
+      "subject": "feat(compaction): generate model-backed history candidates"
+    },
+    {
+      "source": "f5c43f5e7aa8648a6a6a2345b89047479feb4496",
+      "integrated": "d0f41558f2b41ce9781e535e7da4b224acc64d13",
+      "subject": "fix(compaction): preserve Runtime text and call lifetimes"
+    },
+    {
+      "source": "9f25d0efaeeccbee358ea315033acc95c13630bb",
+      "integrated": "ada4171a4b30de85d7ae1abf443927913a5c2e8f",
+      "subject": "docs(compaction): record full engine verification"
+    },
+    {
+      "source": "6d1d41cd64555d94e9a3ea8b1bfab5daf380a93b",
+      "integrated": "63f350dfdf98e02f47cd319c315c10f1404bedfc",
+      "subject": "feat(storage): persist cumulative compaction coverage"
+    },
+    {
+      "source": "2847547aabe000c3f58351d1f9fa8a7ce00c9fe2",
+      "integrated": "524173d33abc49e711767934647f70fa5707ff3e",
+      "subject": "feat(core): expose committed compaction summaries in history reads"
+    },
+    {
+      "source": "20a626541fb11010d11bc17756c6d9e8a21672a8",
+      "integrated": "41238efcd78397e7b68dc6d51309913ccf0972da",
+      "subject": "docs(storage): record compaction persistence validation"
+    },
+    {
+      "source": "b69d0b8fa638289f6d6c92d5bc62509aaa1c6623",
+      "integrated": "8d03fbc9d6666e26f36ab557d940dd1450981fad",
+      "subject": "docs(storage): distinguish object and compaction history formats"
+    },
+    {
+      "source": "da1e354b283413a01e01ef143a19eaf5b312fded",
+      "integrated": "eed84a669cea02bf786ead4e88c81ba4bcee6ea8",
+      "subject": "build(tools): add isolated workspace tool module"
+    },
+    {
+      "source": "43ed31618689c721c47eb4bf589ea3b9dff7d7ff",
+      "integrated": "6f39217a51d448fc330d2a652bd1741f8c5df626",
+      "subject": "feat(tools): implement workspace-bound local Runtime tools"
+    },
+    {
+      "source": "3cdd977c70e559286a72cf06e485a5e8a89b4261",
+      "integrated": "bf415cfde92ce45847a96e84f84e45d1de2074b7",
+      "subject": "fix(tools): distinguish joined faults from unconfirmed cleanup"
+    },
+    {
+      "source": "d7481c058a6cb98ea34616a1f88633a5d970aef3",
+      "integrated": "f60fd9ae2e5f53163dbfc68ed9a36394904c5ddb",
+      "subject": "docs(tools): record complete local execution validation"
+    },
+    {
+      "source": "708a18ff27bb16a7b58b723a15986b4d4046c4b1",
+      "integrated": "b149ad9ee2908869a4636f304acbeef2895f1741",
+      "subject": "build(tools): pin mature process group supervision"
+    },
+    {
+      "source": "80945814207f5e687de26d2c6a05d725dda9a850",
+      "integrated": "551bb1b38bb79af22a222a992bbe468d9432c309",
+      "subject": "fix(tools): confirm process group end after actual wait"
+    },
+    {
+      "source": "c8703636a8606810c05c877ac8f522a6091e51ba",
+      "integrated": "7149d92f7c19f0f72bdb5c98d082204d5ca073f2",
+      "subject": "fix(workspace): serialize mutations across cloned bindings"
+    },
+    {
+      "source": "7778869d28854c0274de991a2d95ee15832a5677",
+      "integrated": "5ec54bfbe1be21cf3710104b10ef58ed8fb73fb2",
+      "subject": "test(tools): await actual subprocess readiness bytes"
+    },
+    {
+      "source": "169f9d10cea6b2e6b391fe42bc0b4f7291abc0b4",
+      "integrated": "21521919b5ecacea2fd72c698ea7521241a9e2d4",
+      "subject": "docs(tools): record ownership fixes and final verification"
+    }
+  ],
+  "integration_notes": [
+    "a80311c required preserving both existing session_resource_resume module and new production reload preparer test at the tail of task023.rs. No assertion was removed."
+  ],
+  "status": "aggregate gate passed at exact head; further owner composition remains pending",
+  "validation": {
+    "all_target_unique_cases": 602,
+    "doctests": 3,
+    "gate_log": "/workspace/shared/minicore-host-validation/next-2152191-full.log",
+    "list_log": "/workspace/shared/minicore-host-validation/next-2152191-test-list.txt"
+  }
+}
