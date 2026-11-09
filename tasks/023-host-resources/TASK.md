@@ -71,3 +71,13 @@ export CARGO_TARGET_DIR=/workspace/shared/minicore-host-resources-target
 - Failed Host record saves retain an explicit blocking fault and original candidate. This stage introduces no public continuation/repair interface.
 - Logs/listener initialization and their real CLI process are not implemented here. Their settings are restart-classified metadata; no subscriber/listener is installed by reload.
 - No completed transport route, operation-id receipt lookup, broad list query platform, capability negotiation, resource quota or dynamic plugin platform is claimed or introduced.
+
+## Final fixed checkpoint
+
+- Bootstrap: `bfa802e` (`build(resources): add production resource assembly crate`), the independent workspace member/manifest/lock commit. Earlier bootstrap hashes mentioned during development were superseded before integration.
+- Functional source: `a510d040f268d459ab2b1972088dfc1265577916` (`feat(resources): assemble versioned Host execution configuration`).
+- Against that exact committed source, `./scripts/check.sh` passed in full: whitespace, fmt, strict all-target workspace Clippy, all workspace unit/integration targets, 3 doctests and strict rustdoc. Log: `/tmp/task023-final-a510d04.log`.
+- A subsequent exact-source `cargo test --workspace --all-targets --locked -- --list` plus target/test-name deduplication confirmed **438 listed and 438 unique cases**. Log: `/tmp/task023-list-a510d04.log`.
+- The earlier transport BrokenPipe remains an observed intermittent failure, not a fixed defect. Its original owner is handling a separate gated teardown fix. The later all-green run is accurately reported without erasing the earlier reproduction.
+- The parent will integrate the separate `prepare_prompt_history` helper at the one production prompt call site, add the precise Session config-blocker correction, and own aggregate review/integration. Those commits are deliberately absent from this fixed-base topic.
+- No new tool registry platform, application capacity/retention budget, private key in records/queries/Debug, local Runtime patch, TUI edit, remote push, or full-product completion claim was introduced.
