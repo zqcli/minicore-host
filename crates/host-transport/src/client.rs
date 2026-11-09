@@ -164,11 +164,11 @@ impl HostClient {
         options: CallOptions,
     ) -> Result<UnsubscribeResult, CallError> {
         let id = request.subscription_id.clone();
-        let result = self.call(Unsubscribe(request), options).await;
+        let result = self.call(Unsubscribe(request), options).await?;
         if let Connection::Rpc(rpc) = &self.connection {
             rpc.ended_subscription(&id);
         }
-        result
+        Ok(result)
     }
     pub async fn info(&self, options: CallOptions) -> Result<HostInfo, CallError> {
         self.call(Info(Empty {}), options).await

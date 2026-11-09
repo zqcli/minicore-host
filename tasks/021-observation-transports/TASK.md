@@ -109,3 +109,17 @@ Validation with the same explicit local Runtime patch: formatting passed;
 The new real loopback TLS test covers current key invalidation, local observer
 survival, occupied/unoccupied revisions, read-only rejection, fresh authority,
 ordinary disconnect, and completion of previously accepted Runtime work.
+
+## Independent review correction: rejected unsubscribe
+
+Review found that `HostClient::unsubscribe` ended its local stream even when
+`CallOptions { wait_timeout_ms: Some(0) }` was rejected before sending anything.
+A real OS-pipe regression failed before the fix: its next `recv` was `None`, while
+a subsequent valid unsubscribe returned `ended=true` from the still-live Host.
+The SDK now removes a local stream only after a successful unsubscribe result.
+Failure/timeout does not claim remote completion and is not retried.
+
+`cargo test -p minicore-host-transport --test unsubscribe_validation --locked
+--offline` (same explicit Runtime patch) passed after the two-line fix. The test
+is retained permanently. This review correction is separate from the pending
+interaction source changes.
