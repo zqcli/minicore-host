@@ -26,6 +26,7 @@ use minicore_runtime::{
     },
 };
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
@@ -556,19 +557,21 @@ fn records(path: &Path) -> Vec<HistoryRecord> {
         .collect()
 }
 fn sha256(bytes: &[u8]) -> String {
-    use std::{
-        io::Write,
-        process::{Command, Stdio},
-    };
-    let mut child = Command::new("sha256sum")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child.stdin.take().unwrap().write_all(bytes).unwrap();
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
-    String::from_utf8(output.stdout).unwrap()
+    // A hash subprocess can temporarily inherit another parallel test's locked
+    // file descriptions before exec, extending their locks past the owner's drop.
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+#[test]
+fn fixture_sha256_matches_standard_vectors() {
+    assert_eq!(
+        sha256(b""),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        sha256(b"abc"),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 async fn persistent_case(missing: bool, complete: bool) {
