@@ -396,7 +396,7 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
         HostConfig::from(settings()),
         0,
     ))
-        .unwrap();
+    .unwrap();
     let target = SessionRef {
         agent_id: AgentId::new().unwrap(),
         session_id: SessionId::new().unwrap(),
