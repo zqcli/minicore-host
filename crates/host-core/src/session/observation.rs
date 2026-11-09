@@ -478,6 +478,7 @@ impl SessionController {
                             data: tool.data.state.clone(),
                         },
                     ));
+                    self.publish(&mut state);
                 }
             }
             LoopEvent::ToolProgress {
