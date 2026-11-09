@@ -3,7 +3,7 @@ use minicore_host_local_tools::*;
 use minicore_host_workspace::{EditOutcome, FileSnapshot, Workspace};
 use minicore_runtime::{LoopOptions, LoopOutcome, ToolCallId, tools::ToolError};
 use serde_json::json;
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, time::Duration};
 use support::*;
 
 #[tokio::test]
@@ -336,4 +336,98 @@ async fn equal_upstream_call_ids_in_different_turn_bindings_remain_separate() {
     assert_eq!(a[0].0, b[0].0);
     assert_eq!(a[0].1.after, b[0].1.before);
     assert_eq!(b[0].1.after, FileSnapshot::Content(b"second turn".to_vec()));
+}
+
+#[tokio::test]
+async fn separate_turn_tools_share_mutation_order_and_disjoint_edit_snapshots() {
+    let root = tempfile::TempDir::new().unwrap();
+    let workspace = Workspace::open(root.path()).await.unwrap();
+    let original = "LEFT_OLD RIGHT_OLD";
+    let expected = "LEFT_NEW RIGHT_NEW";
+    fs::write(root.path().join("file"), original).unwrap();
+    let first_records = Arc::new(Recorder::default());
+    let second_records = Arc::new(Recorder::default());
+    let first = LocalTools::new(workspace.clone(), first_records.clone());
+    let second = LocalTools::new(workspace.clone(), second_records.clone());
+
+    // An explicit operation gate, not a large-file timing race: both accepted
+    // workers must wait before capturing any source through either Turn binding.
+    let gate = workspace.begin_mutation().await;
+    let mut left = Box::pin(invoke(
+        &first,
+        "edit",
+        json!({"path":"file","old_text":"LEFT_OLD","new_text":"LEFT_NEW"}),
+    ));
+    let mut right = Box::pin(invoke(
+        &second,
+        "edit",
+        json!({"path":"file","old_text":"RIGHT_OLD","new_text":"RIGHT_NEW"}),
+    ));
+    assert!(futures_util::poll!(left.as_mut()).is_pending());
+    assert!(futures_util::poll!(right.as_mut()).is_pending());
+    let mut finished = Box::pin(async { tokio::join!(first.finish(), second.finish()) });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), &mut finished)
+            .await
+            .is_err(),
+        "shared Workspace mutations must remain pending while the gate is held"
+    );
+    assert_eq!(
+        fs::read(root.path().join("file")).unwrap(),
+        original.as_bytes()
+    );
+    assert!(first_records.edits.lock().unwrap().is_empty());
+    assert!(second_records.edits.lock().unwrap().is_empty());
+
+    drop(gate);
+    let (left, right) = tokio::join!(left, right);
+    assert_eq!(left.unwrap()["status"], "applied");
+    assert_eq!(right.unwrap()["status"], "applied");
+    let (first_finished, second_finished) = finished.await;
+    for completions in [first_finished, second_finished] {
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].error, None);
+        assert!(completions[0].cleanup_confirmed);
+    }
+    assert_eq!(
+        fs::read(root.path().join("file")).unwrap(),
+        expected.as_bytes()
+    );
+
+    let first_edits = first_records.edits.lock().unwrap();
+    let second_edits = second_records.edits.lock().unwrap();
+    assert_eq!(first_edits.len(), 1);
+    assert_eq!(second_edits.len(), 1);
+    let left = &first_edits[0].1;
+    let right = &second_edits[0].1;
+    for (edit, old, new) in [
+        (left, "LEFT_OLD", "LEFT_NEW"),
+        (right, "RIGHT_OLD", "RIGHT_NEW"),
+    ] {
+        assert_eq!(edit.outcome, EditOutcome::Applied);
+        let FileSnapshot::Content(before) = &edit.before else {
+            panic!("the existing file must have an actual before capture");
+        };
+        assert_eq!(
+            edit.after,
+            FileSnapshot::Content(
+                String::from_utf8(before.clone())
+                    .unwrap()
+                    .replace(old, new)
+                    .into_bytes()
+            )
+        );
+    }
+    let initial = FileSnapshot::Content(original.as_bytes().to_vec());
+    let (earlier, later) = if left.before == initial {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    assert_eq!(earlier.before, initial);
+    assert_eq!(earlier.after, later.before);
+    assert_eq!(
+        later.after,
+        FileSnapshot::Content(expected.as_bytes().to_vec())
+    );
 }

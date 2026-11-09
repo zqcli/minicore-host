@@ -267,15 +267,17 @@ async fn mutate(
         biased;
         _ = context.cancellation.cancelled() => return Err(ToolError::Cancelled),
         _ = tokio::time::sleep_until(context.deadline.into()) => return Err(ToolError::TimedOut),
-        guard = binding.writes.lock() => guard,
+        guard = binding.workspace.begin_mutation() => guard,
     };
     check(&context)?;
-    let work = Arc::clone(&binding);
-    let result = tokio::task::spawn_blocking(move || mutate_sync(&work, &id, input, &context))
-        .await
-        .map_err(|_| ToolError::Internal)?;
-    drop(guard);
-    result
+    tokio::task::spawn_blocking(move || {
+        // The file worker owns the whole source/commit/observation boundary,
+        // even if its async waiter is dropped. Other Workspace clones wait.
+        let _guard = guard;
+        mutate_sync(&binding, &id, input, &context)
+    })
+    .await
+    .map_err(|_| ToolError::Internal)?
 }
 
 fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), Failure> {

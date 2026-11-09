@@ -22,6 +22,8 @@ use serde_json::{Value, json};
 
 /// One frozen workspace and narrow, already Turn-bound recording capability.
 /// Retain this handle until `finish` joins every actual execution.
+/// Separate Turns sharing file mutations must receive clones of one Workspace
+/// binding, not independently opened bindings for the same path.
 pub struct LocalTools {
     binding: Arc<Binding>,
     scope: Arc<scope::Scope>,
@@ -30,17 +32,12 @@ pub struct LocalTools {
 struct Binding {
     workspace: Workspace,
     sink: Arc<dyn LocalToolSink>,
-    writes: tokio::sync::Mutex<()>,
 }
 
 impl LocalTools {
     pub fn new(workspace: Workspace, sink: Arc<dyn LocalToolSink>) -> Self {
         Self {
-            binding: Arc::new(Binding {
-                workspace,
-                sink,
-                writes: tokio::sync::Mutex::new(()),
-            }),
+            binding: Arc::new(Binding { workspace, sink }),
             scope: Arc::new(scope::Scope::default()),
         }
     }

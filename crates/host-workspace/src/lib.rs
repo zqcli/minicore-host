@@ -1,4 +1,4 @@
-//! Explicit workspace bindings and read-only filesystem/Git observations.
+//! Workspace bindings, mutation coordination, and read-only filesystem/Git observations.
 //!
 //! Session owners resolve and clone a binding before I/O. This crate does not
 //! authorize a caller, choose a Session, change process cwd, or attribute Git
@@ -12,7 +12,7 @@ mod workspace;
 
 pub use context::QueryContext;
 pub use error::{Result, WorkspaceError};
-pub use workspace::Workspace;
+pub use workspace::{Workspace, WorkspaceMutation};
 
 mod files;
 pub use files::*;

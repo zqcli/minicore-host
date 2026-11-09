@@ -7,14 +7,26 @@ use std::{
 
 use minicore_host_protocol::WorkspaceRef;
 use sha2::{Digest, Sha256};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::{QueryContext, Result, WorkspaceError, context::blocking};
 
 /// One resolved binding. Clone it at the Session/Turn boundary; later config
 /// changes do not mutate this root. Binding never changes process-global cwd.
+/// Clones share mutation ordering; independently opened bindings do not.
 #[derive(Clone, Debug)]
 pub struct Workspace {
     pub(crate) root: Arc<PathBuf>,
+    mutations: Arc<Mutex<()>>,
+}
+
+/// An exclusive mutation operation on one Workspace binding, not an owner-state
+/// lock. Keep it with the actual worker from source capture through commit and
+/// after capture, including if the caller stops waiting for that worker.
+#[derive(Debug)]
+#[must_use = "dropping the guard releases the workspace mutation operation"]
+pub struct WorkspaceMutation {
+    _guard: OwnedMutexGuard<()>,
 }
 
 impl Workspace {
@@ -36,6 +48,7 @@ impl Workspace {
             path_text(&root)?;
             Ok(Self {
                 root: Arc::new(root),
+                mutations: Arc::new(Mutex::new(())),
             })
         })
         .await
@@ -43,6 +56,17 @@ impl Workspace {
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Begin a mutation shared by this binding's clones. The caller may cancel
+    /// while waiting, but must retain the returned guard until its actual file
+    /// operation and observation finish. Do not wait while holding owner state.
+    /// This does not coordinate separately opened roots, shell commands, or
+    /// external processes; owners that need shared ordering must reuse a binding.
+    pub async fn begin_mutation(&self) -> WorkspaceMutation {
+        WorkspaceMutation {
+            _guard: Arc::clone(&self.mutations).lock_owned().await,
+        }
     }
 
     pub(crate) fn resolve(&self, path: &str, allow_root: bool) -> Result<PathBuf> {
