@@ -95,15 +95,15 @@ async fn stdio_message_executes_production_http_adapter_and_persists_real_output
     assert_eq!(request["model"], "local-http-fixture");
     assert!(request.to_string().contains("local fixture input"));
     let turns = child.rpc("turn.list", json!({"target":target})).await;
-    assert_eq!(turns.as_array().unwrap().len(), 1);
+    assert_eq!(turns["data"].as_array().unwrap().len(), 1);
     http.finish_response();
     let result = child
         .rpc(
             "turn.wait",
-            json!({"target":target,"turn_id":turns[0]["id"]}),
+            json!({"target":target,"turn_id":turns["data"][0]["turn_id"]}),
         )
         .await;
-    assert_eq!(result["info"]["outcome"], "completed");
+    assert_eq!(result["data"]["info"]["outcome"], "completed");
     assert!(result.to_string().contains("actual local HTTP response"));
     child.send("host.shutdown", shutdown("graceful"));
     let output = child.finish().await;
@@ -545,7 +545,7 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
     child
         .rpc(
             "turn.wait",
-            json!({"target":address,"turn_id":turns[0]["id"]}),
+            json!({"target":address,"turn_id":turns["data"][0]["turn_id"]}),
         )
         .await;
     child.send("host.shutdown", shutdown("graceful"));

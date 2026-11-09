@@ -258,9 +258,9 @@ async fn binary_tools_produce_exact_files_native_results_and_canonical_sources()
         .process
         .rpc("turn.wait", json!({"target":target,"turn_id":turn}))
         .await;
-    assert_eq!(result["info"]["outcome"], "completed");
-    assert_eq!(result["info"]["persistence"], "persisted");
-    assert_eq!(result["info"]["cleanup_faults"], json!([]));
+    assert_eq!(result["data"]["info"]["outcome"], "completed");
+    assert_eq!(result["data"]["info"]["persistence"], "persisted");
+    assert_eq!(result["data"]["info"]["cleanup_faults"], json!([]));
     let before = history(&mut app.process, &target).await;
     for id in ["write", "read", "edit", "rejected-edit", "bash"] {
         assert_eq!(history_result(&before, id)["outcome"], "success");
@@ -522,8 +522,8 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
             .process
             .rpc("turn.wait", json!({"target":target,"turn_id":turn}))
             .await;
-        assert_eq!(result["info"]["outcome"], "completed");
-        assert_eq!(result["info"]["config_revision"], 0);
+        assert_eq!(result["data"]["info"]["outcome"], "completed");
+        assert_eq!(result["data"]["info"]["config_revision"], 0);
     }
     app.process
         .rpc(
@@ -541,18 +541,21 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
     let next = new_provider.request().await;
     assert_eq!(next.tool_result("current-read")["text"], "different root\n");
     let turns = app.process.rpc("turn.list", json!({"target":target})).await;
-    let later = turns
+    let later = turns["data"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|turn| turn["id"] != old_turn)
+        .find(|turn| turn["turn_id"] != old_turn)
         .unwrap();
     assert_eq!(later["config_revision"], 1);
     next.answer(answer("new binding complete"));
     assert_eq!(
         app.process
-            .rpc("turn.wait", json!({"target":target,"turn_id":later["id"]}))
-            .await["info"]["outcome"],
+            .rpc(
+                "turn.wait",
+                json!({"target":target,"turn_id":later["turn_id"]})
+            )
+            .await["data"]["info"]["outcome"],
         "completed"
     );
     app.process.send("host.shutdown", shutdown("graceful"));

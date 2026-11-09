@@ -268,9 +268,9 @@ async fn binary_cancel_drains_real_buffered_tails_before_tool_and_turn_completio
         .process
         .rpc("turn.wait", json!({"target":target,"turn_id":turn}))
         .await;
-    assert_eq!(result["info"]["outcome"], "cancelled");
-    assert_eq!(result["info"]["persistence"], "persisted");
-    assert_eq!(result["info"]["cleanup_faults"], json!([]));
+    assert_eq!(result["data"]["info"]["outcome"], "cancelled");
+    assert_eq!(result["data"]["info"]["persistence"], "persisted");
+    assert_eq!(result["data"]["info"]["cleanup_faults"], json!([]));
     let history = history(&mut app.process, &target).await;
     assert_eq!(
         history_result(&history, "cancel-call"),
@@ -390,7 +390,7 @@ async fn binary_force_waits_for_actual_child_cleanup_and_preserves_native_cancel
     assert_eq!(result["output"], native["output"]);
     assert_eq!(fs::read(history_path(&app.root, &target)).unwrap(), saved);
     assert_eq!(
-        reopened.rpc("turn.list", json!({"target":target})).await,
+        reopened.rpc("turn.list", json!({"target":target})).await["data"],
         json!([])
     );
     reopened.send("host.shutdown", shutdown("graceful"));

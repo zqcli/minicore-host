@@ -260,8 +260,8 @@ pub async fn event(events: &mut ClientSubscription) -> ObservationEvent {
 }
 pub async fn only_turn(process: &mut Process, target: &Value) -> Value {
     let turns = process.rpc("turn.list", json!({"target":target})).await;
-    assert_eq!(turns.as_array().unwrap().len(), 1);
-    turns[0]["id"].clone()
+    assert_eq!(turns["data"].as_array().unwrap().len(), 1);
+    turns["data"][0]["turn_id"].clone()
 }
 pub fn read(path: &str) -> Value {
     json!({"path":path,"start":0,"end":null,"max_bytes":4096})
