@@ -62,7 +62,7 @@ impl SessionController {
             if &active.info.id != turn_id || active.loop_id != Some(report.loop_id) {
                 return Err(stale_history());
             }
-            if let Some(partial) = &report.partial {
+            let entries = if let Some(partial) = &report.partial {
                 if active.partial_accepted {
                     Vec::new()
                 } else {
@@ -83,7 +83,13 @@ impl SessionController {
                 }
             } else {
                 Vec::new()
-            }
+            };
+            state
+                .readable_history
+                .as_mut()
+                .expect("history loaded before execution")
+                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
+            entries
         };
         if !entries.is_empty() {
             self.save(
@@ -178,6 +184,11 @@ impl SessionController {
                 Self::record_delegated_input(&mut state, turn_id, &message);
             }
             state.history.extend_from_slice(items);
+            state
+                .readable_history
+                .as_mut()
+                .expect("history loaded before execution")
+                .extend(items.iter().map(HistoryItemData::from));
             self.observe_history(&mut state, items);
             self.publish(&mut state);
             entries

@@ -1,6 +1,38 @@
 use super::*;
 use crate::{HistoryItemData, SessionHistorySnapshot};
 
+impl HistoryItemData {
+    pub(super) fn from_entry(entry: &HistoryEntry) -> Option<Self> {
+        match entry {
+            HistoryEntry::Input { user, .. } => Some(Self::User {
+                text: user.input.as_text().to_owned(),
+            }),
+            HistoryEntry::Runtime { item, .. } => Some(item.into()),
+            HistoryEntry::Partial { partial, .. } => Some(Self::Partial {
+                partial: partial.into(),
+            }),
+            HistoryEntry::Summary { summary } => Some(Self::Summary {
+                text: summary.content.as_str().to_owned(),
+            }),
+            HistoryEntry::TurnFinished { .. } => None,
+        }
+    }
+}
+impl SessionState {
+    pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) {
+        self.history = entries
+            .iter()
+            .filter_map(HistoryEntry::runtime_item)
+            .collect();
+        self.readable_history = Some(
+            entries
+                .iter()
+                .filter_map(HistoryItemData::from_entry)
+                .collect(),
+        );
+    }
+}
+
 impl SessionController {
     /// A content read does not create a Runner, consume input or reconcile saves.
     pub(crate) async fn history_read(
@@ -15,9 +47,12 @@ impl SessionController {
         let retained = self.access.read(caller, || {
             self.ensure_visible()?;
             let state = self.state.lock().expect("Session mutex poisoned");
+            // Unload retains accepted content, including unconfirmed saves.
+            // Readability is independent of Runtime residency and persistence.
             state
-                .history_loaded
-                .then(|| self.history_page(&state.history, start, request.limit))
+                .readable_history
+                .as_ref()
+                .map(|history| self.history_page(history, start, request.limit))
                 .transpose()
         })?;
         if let Some(page) = retained {
@@ -37,16 +72,20 @@ impl SessionController {
         let history = crate::persistence::disk(FaultKind::SessionHistoryLoadFailed, move || {
             store.read_history()
         })
-        .await?
-        .runtime_history();
+        .await?;
+        let content = history
+            .records
+            .iter()
+            .filter_map(|record| HistoryItemData::from_entry(&record.entry))
+            .collect::<Vec<_>>();
         self.access.read(caller, || {
             self.ensure_visible()?;
-            self.history_page(&history, start, request.limit)
+            self.history_page(&content, start, request.limit)
         })
     }
     fn history_page(
         &self,
-        history: &[HistoryItem],
+        history: &[HistoryItemData],
         start: usize,
         limit: u64,
     ) -> Result<SessionHistorySnapshot, Fault> {
@@ -58,10 +97,7 @@ impl SessionController {
         }
         let limit = usize::try_from(limit).unwrap_or(usize::MAX);
         let end = start.saturating_add(limit).min(history.len());
-        let items = history[start..end]
-            .iter()
-            .map(HistoryItemData::from)
-            .collect();
+        let items = history[start..end].to_vec();
         let next_cursor =
             (end < history.len()).then(|| format!("v1.{}.{}.{}", self.incarnation, self.id, end));
         Ok(SessionHistorySnapshot {

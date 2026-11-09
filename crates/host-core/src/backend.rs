@@ -136,7 +136,7 @@ impl HistoryBackend for JournalHistory {
                     .expect("opened journal")
                     .loaded_records()
                     .iter()
-                    .filter_map(|record| record.entry.runtime_item())
+                    .map(|record| record.entry.clone())
                     .collect())
             })
             .await

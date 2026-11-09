@@ -248,6 +248,7 @@ impl SessionController {
             let retired = (
                 std::mem::take(&mut state.output),
                 std::mem::take(&mut state.history),
+                state.readable_history.take(),
                 std::mem::take(&mut state.messages),
                 std::mem::take(&mut state.completed),
                 std::mem::take(&mut state.completion_order),

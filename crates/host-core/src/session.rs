@@ -105,9 +105,11 @@ pub type SaveFuture<'a> =
 /// Narrow save ownership boundary. The implementation must keep accepted
 /// batches through cancellation and perform disk work outside owner state locks.
 pub type LoadFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<HistoryItem>, Fault>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<Vec<HistoryEntry>, Fault>> + Send + 'a>>;
 pub trait HistoryBackend: Send + Sync + std::any::Any {
     fn mode(&self) -> StorageMode;
+    /// Original entries in save order. The Session separately projects readable
+    /// content and complete Runtime context; partials never enter the latter.
     fn load(&self) -> LoadFuture<'_>;
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
     /// Explicitly continue only the original retained append. Never reload,
@@ -197,6 +199,9 @@ struct SessionState {
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
     history: Vec<HistoryItem>,
+    // Accepted content in original order, not model context or save confirmation.
+    // None until loaded; retained on unload and released with the Session body.
+    readable_history: Option<Vec<HistoryItemData>>,
     output: BTreeMap<TurnId, observation::TurnObservation>,
     closed_published: bool,
     published: bool,
@@ -260,6 +265,8 @@ impl SessionController {
         history: Vec<HistoryItem>,
         agent_enabled: Arc<AtomicBool>,
     ) -> Arc<Self> {
+        let readable_history = (backend.mode() == StorageMode::Memory)
+            .then(|| history.iter().map(HistoryItemData::from).collect());
         let state = SessionState {
             info: SessionInfo {
                 agent_config_revision: 0,
@@ -290,6 +297,7 @@ impl SessionController {
             controls: BTreeMap::new(),
             completion_order: Vec::new(),
             history,
+            readable_history,
             output: BTreeMap::new(),
             closed_published: false,
             published: false,
@@ -1007,7 +1015,7 @@ impl SessionController {
                     }) {
                     Ok(history) => {
                         let mut state = self.state.lock().expect("Session mutex poisoned");
-                        state.history = history;
+                        state.replace_history(&history);
                         state.history_loaded = true;
                         // Validated history is Controller-owned; no Runner has
                         // been bound yet. Do not leave a completed load stuck

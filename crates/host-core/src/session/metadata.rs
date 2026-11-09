@@ -47,7 +47,8 @@ impl SessionController {
             if let Some(previous) = previous {
                 let _ = previous.await;
             }
-            let result = if owner.backend.mode() == StorageMode::Persistent {
+            let persistent = owner.backend.mode() == StorageMode::Persistent;
+            let result = if persistent {
                 AssertUnwindSafe(owner.backend.load())
                     .catch_unwind()
                     .await
@@ -58,19 +59,17 @@ impl SessionController {
                         ))
                     })
             } else {
-                Ok(owner
-                    .state
-                    .lock()
-                    .expect("Session mutex poisoned")
-                    .history
-                    .clone())
+                // Memory load retains the current context and partial content.
+                Ok(Vec::new())
             };
             {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
                 state.preparing = false;
                 match result {
                     Ok(history) => {
-                        state.history = history;
+                        if persistent {
+                            state.replace_history(&history);
+                        }
                         state.history_loaded = true;
                         if state.block_reason.as_ref().is_some_and(|fault| {
                             fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)

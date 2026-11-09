@@ -202,6 +202,9 @@ pub enum HistoryItemData {
     Assistant {
         response: crate::ModelResponseData,
     },
+    Partial {
+        partial: ModelPartialData,
+    },
     ToolResult {
         tool_call_id: ToolCallId,
         name: String,
@@ -210,6 +213,24 @@ pub enum HistoryItemData {
     Summary {
         text: String,
     },
+}
+
+/// Unfinished model content, never a complete response or executable context.
+/// Like complete response reads, this excludes internal request/replay metadata.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelPartialData {
+    pub content: Vec<minicore_runtime::model::AssistantPart>,
+    pub incomplete_tool_calls: Vec<minicore_runtime::model::IncompleteToolCall>,
+    pub usage: Option<minicore_runtime::model::Usage>,
+}
+impl From<&ModelPartial> for ModelPartialData {
+    fn from(value: &ModelPartial) -> Self {
+        Self {
+            content: value.content.clone(),
+            incomplete_tool_calls: value.incomplete_tool_calls.clone(),
+            usage: value.usage,
+        }
+    }
 }
 impl From<&HistoryItem> for HistoryItemData {
     fn from(value: &HistoryItem) -> Self {
