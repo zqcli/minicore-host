@@ -1,6 +1,6 @@
 # Build Host Foundation
 
-Status: active.
+Status: first real Runtime foundation milestone implemented; final storage hardening and complete workspace gate in progress. The full v4.93 release is not complete.
 
 ## Goal
 
@@ -11,8 +11,8 @@ Implement typed ownership contracts, durable object/history storage, connection 
 - Full spec copied from the user's exported v4.93 source; SHA-256 verified as `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
 - `git clone https://github.com/zqcli/minicore-host.git` completed with the expected empty-repository warning.
 - Linux x86_64 with Git/C compiler/curl available; Rust/Cargo initially absent.
-- Official Rust installer downloaded from `https://sh.rustup.rs`; install to workspace-local Rust/Cargo homes is in progress.
-- No remote writes, TUI changes, provider calls, or passed integration checks yet.
+- Official Rust installed from `https://sh.rustup.rs` into workspace-local Rust/Cargo homes. The toolchain is pinned to Rust/Cargo 1.90.0 with rustfmt and Clippy.
+- No remote writes, TUI changes or live external provider calls. Real Runtime and loopback HTTP integration results are recorded below.
 
 ## Acceptance priorities
 
@@ -27,3 +27,43 @@ Implement typed ownership contracts, durable object/history storage, connection 
 ## Remaining full-version scope
 
 All unimplemented methods and lifecycle branches, DSH delegation, complete provider/tools, stdio/WSS, event/read synchronization, independent review, and real TUI integration. These are not asserted complete by foundation tests.
+
+## Integrated checkpoints
+
+- `98621c9`: complete specification, engineering instructions and initial project record. This remains `main`.
+- `86dc6cd`, `6a725aa`, `8c80b4e`, `6ff9607`, `d43ef8a`: strict protocol foundations, input/creation receipts, controls/method catalog and JSON-RPC contract documentation.
+- `263860f`, `13c04b3`, `ac347b7`: production OpenAI Chat Completions adapter, real TCP/SSE Runtime integration tests and handoff documentation.
+- `7164725`, `2c3a3aa`: real durable storage and native-history/write-failure hardening.
+- `75f6dd6`: direct memory owners, connection operation rights, real Runtime turn scheduling and seven reviewed owner regressions.
+- `66548fc`: real file-save boundaries, authoritative partial/combined-failure integration and two-turn Host-to-HTTP integration.
+
+All are local reviewable commits integrated onto `dev`. No remote push or main merge has occurred. Workers were requested with `gpt-6-astra` and `max`; no separate actual model/effort attestation is available.
+
+## Validation checkpoint on 2026-11-09
+
+Environment:
+
+```sh
+export RUSTUP_HOME=/workspace/shared/rustup
+export CARGO_HOME=/workspace/shared/cargo
+export PATH=/workspace/shared/cargo/bin:$PATH
+```
+
+Commands actually run:
+
+- `cargo check --workspace --offline`: passed after integrating the storage manifest change and refreshing the root lock.
+- `cargo test --workspace --all-targets --locked`: 125 tests passed, 0 failed. Protocol 47; provider 27; storage 31; core 20. Subprocess probes re-run selected storage tests; these are not counted again.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed at the preceding core integration checkpoint. It will be re-run after final storage hardening.
+- Individual component formatting, documentation and doctests passed as recorded in their task files. The aggregate `scripts/check.sh` gate is still pending after the final changes.
+- Runtime's separate full engineering gate at `49a6e8b06512616a2fb9c6104c07536b8396c4ca`: 307 tests and 2 doctests passed, plus format, Clippy/rustdoc warnings-as-errors, documentation, architecture and acceptance gates. This result does not include the newly requested Runtime cleanup yet.
+- `sha256sum SPEC.md`: unchanged full baseline hash.
+- Remote read-only revision checks still identify Runtime `3fd5ecda1fb7c717ab0a39218d90268b4d97909c`, Agent `f36a87366d8e2fe0a1c8216463887902e471c739`, and TUI `3beeb1d8a525e58ce6352e05061f242c5580e248`; TUI remains clean. Agent/TUI lock the older Runtime `b276d9c0a1f3a3c06e32029f831ccd100c9699c7`.
+
+The core integration runs actual Host/Agent/SessionController/AgentLoop code. Scripted models, gated stores and loopback server responses are explicitly test fixtures. Actual tempfile JSONL and production reqwest/SSE transport are exercised; no live provider or TUI integration is claimed.
+
+## Current blockers and next work
+
+1. The required Runtime changes remain local and unpublished. An ignored Cargo patch selects that exact worktree; the current root lock is local-validation state, not a clean-clone release claim. Do not add a bundle/bootstrap or copied Runtime layer. After explicit publication approval, pin the verified remote SHA and regenerate the lock without the patch.
+2. Integrate final storage review fixes and re-run the aggregate gate at a stable Runtime cleanup commit.
+3. Continue persistent entity composition in its own topic worktree, then the remaining full-version lifecycle/API/transport/tool stages. See `PROJECT.md` for the complete open scope.
+4. The separate external review and required integration gates must pass before any main merge. Runtime and Host pushes both still need explicit owner approval.

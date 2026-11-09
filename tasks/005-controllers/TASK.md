@@ -29,7 +29,7 @@ The core requires the separately developed Runtime history/partial patch. Runtim
 
 The public Host entry currently accepts memory entities only. Durable storage and JournalHistory exist, but persistent Host/Agent/Session startup and lifecycle composition are unfinished. Core controls still need complete typed receipt mapping for the canonical RPC service. Full 52-method coverage, stdio/WSS, DSH, tools/workspace/compaction and real TUI integration are unfinished. There is no implicit success handler for missing features.
 
-Further work: real-file Session save-boundary tests, final Runtime combined-failure integration, full workspace gate, and complete owner lifecycle/transport stages.
+Further work: complete persistent owner lifecycle and canonical service/transport stages. Real-file boundaries and combined-failure tests are completed below; final aggregate workspace gate follows final storage hardening.
 
 ## Save and production-adapter integration checkpoint
 
