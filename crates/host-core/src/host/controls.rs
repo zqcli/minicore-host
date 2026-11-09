@@ -127,6 +127,7 @@ impl Host {
                 );
                 (receipts, state.agents.values().cloned().collect::<Vec<_>>())
             };
+            receipts.extend(self.configuration.receipts_owned(operation));
             for child in children {
                 receipts.extend(child.receipts_owned(operation));
             }

@@ -21,7 +21,7 @@ impl ResourceResolver for UnusedResources {
         })
     }
 }
-fn config(name: &str) -> HostConfig {
+pub(super) fn config(name: &str) -> HostConfig {
     HostConfig {
         name: name.into(),
         network: NetworkSettings {
@@ -31,11 +31,11 @@ fn config(name: &str) -> HostConfig {
         ..Default::default()
     }
 }
-fn prepared(config: HostConfig, key: &str) -> PreparedHostConfiguration {
+pub(super) fn prepared(config: HostConfig, key: &str) -> PreparedHostConfiguration {
     PreparedHostConfiguration::new(config, Arc::new(UnusedResources), vec![], Some(key.into()))
         .unwrap()
 }
-fn gate(host: &Host) -> Arc<SaveGate> {
+pub(super) fn gate(host: &Host) -> Arc<SaveGate> {
     let gate = Arc::new(SaveGate {
         entered: Semaphore::new(0),
         release: Semaphore::new(0),
@@ -43,7 +43,7 @@ fn gate(host: &Host) -> Arc<SaveGate> {
     *host.configuration.save_gate.lock().unwrap() = Some(gate.clone());
     gate
 }
-async fn stopped(host: &Host, caller: &CallerContext) {
+pub(super) async fn stopped(host: &Host, caller: &CallerContext) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let info = host.info(caller).unwrap();

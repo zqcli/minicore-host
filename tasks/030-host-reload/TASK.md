@@ -19,9 +19,23 @@ The existing low-level reload_configuration remains an embedding convenience and
 ## Validation status
 
 - `cargo check --workspace --all-targets --locked`: passed after the initial implementation.
-- Focused protocol, owner lifecycle and production HTTP/SSE validation, strict lint/docs and full workspace gate are pending. No live provider, real credentials or completed transport-route validation is claimed.
+- Four strict protocol tests pass. They reject absent/invalid correlation and revision fields, caller-supplied authority/wait options, method aliases, unrelated object identities and inconsistent phase fields, while preserving each actual phase and its original method/operation.
+- Thirteen configuration owner tests pass (nine new canonical cases and four existing publication/binding cases). Explicit scheduling fixtures gate real preparation, storage and resource destruction. Coverage includes abandoned caller wait, network ConnectionHandle close/revocation, read-only/stale/lifecycle rejection before preparation, force waiting through preparation/save/cleanup, immutable returned snapshots, independent duplicate IDs, retained preparation/save failure facts, all-or-nothing restart classification, unchanged restart settings and initialization-only preparer identity.
+- Production resources test target passes ten cases, including two new canonical cases. Real Runtime and production HTTP/SSE on loopback show an already-accepted network-origin Turn continuing with actual A clients/tools/Role after key rotation, a new-key connection reading the original operation, and the next Turn binding B. The credential adapter is explicitly a test fixture; model requests, SSE parsing and tool execution are real components. Default builder initialization supplies the production preparer without a setter.
+- First full `./scripts/check.sh` passed all stages: whitespace, formatting, strict workspace all-target Clippy, unit/integration targets, three doctests and strict rustdoc. Log: `/tmp/task030-full-gate.log`. A subsequent stronger network-origin fixture and the preparer-identity test are being rerun at the final source checkpoint; this first pass is not reported as covering those later test edits.
+- Initial owner test compilation found a test-only FaultKind spelling error; it was corrected and the focused target rerun successfully. No production failing test was suppressed.
+- No live provider, real credentials, actual WSS/stdio reload route, CLI/process or TUI validation is claimed at this core checkpoint. The new network acceptance cases use actual core connection authority, not a new transport implementation.
 - All checks use a separate `/workspace/shared/minicore-host-reload-target`, the shared fixed Rust/Cargo installations, two build jobs, no incremental compilation and disabled dev/test debug info.
 
 ## Next
 
-Complete focused acceptance/failure/cleanup/provider tests, run the full repository gate and record exact source commits/results. The original transport owner will integrate canonical typed/stdio/WSS host.reload using this frozen Host entry point and the existing receipt lookup after core review.
+Finish final source revalidation and record exact source commits/results. The integration owner maintains the aggregate PROJECT.md checkpoint. The original transport owner will integrate canonical typed/stdio/WSS host.reload using this frozen Host entry point and the existing receipt lookup after core review.
+
+## Frozen integration surface
+
+- `Host::reload(&Arc<Self>, &CallerContext, HostReloadRequest<HostConfig>) -> Result<HostReloadReceipt, Fault>` is synchronous acceptance, not a full-I/O waiter.
+- `HostConfigurationPreparer::prepare(&self, HostConfig) -> HostConfigurationFuture<'_>` is a Send future returning a complete PreparedHostConfiguration.
+- `PreparedHostConfiguration::with_preparer(Arc<dyn HostConfigurationPreparer>)` supplies the static application assembler only at Host construction. Unassembled low-level Hosts report HostMethodUnavailable for canonical reload.
+- `HostResourceBuilder` clones share exactly the original Arc ToolRegistry. Private explicit credentials affect their candidate only; the production reload preparer reads the named environment sources. Embeddings with another source bind their own preparer at construction.
+- `Receipt::HostReload` participates in existing direct-owner lookup. `preparing` and `applying` carry the original effective config_revision; `applied` is recorded at the atomic whole-publication/key-invalidation boundary with the new revision. Actual old-resource destruction remains inside the shutdown barrier after publication, without holding owner locks.
+- Protocol checkpoint: `e0899cf5b82427894edd353bc86f3dc64b111d63` (`feat(protocol): define canonical Host reload receipts`). Functional source and final checks are recorded below after commit.

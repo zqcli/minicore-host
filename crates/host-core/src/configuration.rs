@@ -4,10 +4,11 @@
 //! Saved values name their source; neither queries nor Debug expose key bytes.
 use crate::{BoundResources, PreparedTurnBinding, ResourceFuture, ResourceResolver};
 use minicore_host_protocol::*;
+pub use minicore_host_protocol::{HostReloadResult, RestartField};
 use minicore_runtime::tools::ToolSpec;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fmt,
     net::SocketAddr,
     sync::{Arc, Mutex},
@@ -159,13 +160,6 @@ pub enum LogOutput {
     Stderr,
     File { path: String },
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RestartField {
-    NetworkListen,
-    Logging,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ModelDescription {
@@ -190,17 +184,16 @@ pub struct HostConfigSnapshot {
     pub config: HostConfig,
     pub config_revision: ConfigRevision,
 }
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub enum HostReloadResult {
-    Applied {
-        config_revision: ConfigRevision,
-    },
-    RestartRequired {
-        config_revision: ConfigRevision,
-        fields: Vec<RestartField>,
-    },
+/// Application assembly is fixed when the Host is constructed. The preparer
+/// owns the deployment's static registry, never a Host or connection. It must
+/// preserve candidate values, resolve all configured resources, and retain no
+/// Host owner locks while awaiting preparation.
+pub trait HostConfigurationPreparer: Send + Sync + 'static {
+    fn prepare(&self, config: HostConfig) -> HostConfigurationFuture<'_>;
 }
+pub type HostConfigurationFuture<'a> = std::pin::Pin<
+    Box<dyn std::future::Future<Output = Result<PreparedHostConfiguration, Fault>> + Send + 'a>,
+>;
 
 /// Fully prepared candidate. Construction never publishes it. The assembler is
 /// responsible for resolving every configured model and tool before returning.
@@ -210,6 +203,7 @@ pub struct PreparedHostConfiguration {
     pub(crate) resources: Arc<dyn ResourceResolver>,
     pub(crate) tools: Vec<ToolSpec>,
     pub(crate) access_key: Option<String>,
+    pub(crate) preparer: Option<Arc<dyn HostConfigurationPreparer>>,
 }
 impl fmt::Debug for PreparedHostConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -248,7 +242,14 @@ impl PreparedHostConfiguration {
             resources,
             tools,
             access_key,
+            preparer: None,
         })
+    }
+    /// Bind the application assembler at Host initialization. Reload candidates
+    /// cannot replace the assembler or the deployment's static tool registry.
+    pub fn with_preparer(mut self, preparer: Arc<dyn HostConfigurationPreparer>) -> Self {
+        self.preparer = Some(preparer);
+        self
     }
     pub fn config(&self) -> &HostConfig {
         &self.config
@@ -261,10 +262,14 @@ pub(crate) struct ConfigurationOwner {
     pub(crate) save_gate: Mutex<Option<Arc<tests::SaveGate>>>,
 }
 pub(crate) struct ConfigurationState {
+    pub(crate) preparer: Option<Arc<dyn HostConfigurationPreparer>>,
     pub(crate) snapshot: Arc<PublishedConfiguration>,
+    // Accepted preparation, save, publication and actual resource cleanup.
     pub(crate) saving: bool,
     pub(crate) save_fault: Option<Fault>,
     pub(crate) failed_candidate: Option<PreparedHostConfiguration>,
+    // One record per actual invocation; operation IDs are correlation only.
+    pub(crate) reloads: BTreeMap<OperationId, Vec<HostReloadReceipt>>,
 }
 pub(crate) struct PublishedConfiguration {
     pub(crate) config: HostConfig,
@@ -282,6 +287,7 @@ impl ConfigurationOwner {
             #[cfg(test)]
             save_gate: Mutex::new(None),
             state: Mutex::new(ConfigurationState {
+                preparer: candidate.preparer,
                 snapshot: Arc::new(PublishedConfiguration {
                     config: candidate.config,
                     revision,
@@ -291,6 +297,7 @@ impl ConfigurationOwner {
                 saving: false,
                 save_fault: None,
                 failed_candidate: None,
+                reloads: BTreeMap::new(),
             }),
         });
         (owner, candidate.access_key)
@@ -317,9 +324,24 @@ impl ConfigurationOwner {
                 tools: prior.tools.clone(),
                 resources: None,
             });
-            std::mem::replace(&mut state.snapshot, retired)
+            (
+                std::mem::replace(&mut state.snapshot, retired),
+                state.preparer.take(),
+            )
         };
         drop(old);
+    }
+    pub(crate) fn receipts_owned(&self, operation: &OperationId) -> Vec<Receipt> {
+        self.state
+            .lock()
+            .expect("Host configuration mutex poisoned")
+            .reloads
+            .get(operation)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(Receipt::HostReload)
+            .collect()
     }
     pub(crate) fn status(&self) -> (bool, Option<Fault>) {
         let state = self
@@ -395,5 +417,7 @@ fn environment_name(name: &str) -> Result<(), Fault> {
     Ok(())
 }
 
+#[cfg(test)]
+mod reload_tests;
 #[cfg(test)]
 mod tests;

@@ -45,6 +45,10 @@ pub enum HostReloadResult {
     },
     RestartRequired {
         config_revision: ConfigRevision,
+        #[serde(
+            serialize_with = "serialize_restart_fields",
+            deserialize_with = "deserialize_restart_fields"
+        )]
         fields: Vec<RestartField>,
     },
     Failed {
@@ -55,18 +59,35 @@ pub enum HostReloadResult {
 impl HostReloadResult {
     pub fn validate(&self) -> Result<(), ValidationError> {
         match self {
-            Self::RestartRequired { fields, .. }
-                if fields.is_empty()
-                    || fields.iter().collect::<BTreeSet<_>>().len() != fields.len() =>
-            {
-                Err(invalid(
-                    "restart_required needs distinct actual changed fields",
-                ))
-            }
+            Self::RestartRequired { fields, .. } => validate_restart_fields(fields),
             Self::Failed { error, .. } => error.validate(),
             _ => Ok(()),
         }
     }
+}
+
+fn validate_restart_fields(fields: &[RestartField]) -> Result<(), ValidationError> {
+    if fields.is_empty() || fields.iter().collect::<BTreeSet<_>>().len() != fields.len() {
+        Err(invalid(
+            "restart_required needs distinct actual changed fields",
+        ))
+    } else {
+        Ok(())
+    }
+}
+fn serialize_restart_fields<S: serde::Serializer>(
+    fields: &[RestartField],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    validate_restart_fields(fields).map_err(serde::ser::Error::custom)?;
+    fields.serialize(serializer)
+}
+fn deserialize_restart_fields<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<RestartField>, D::Error> {
+    let fields = Vec::deserialize(deserializer)?;
+    validate_restart_fields(&fields).map_err(serde::de::Error::custom)?;
+    Ok(fields)
 }
 
 crate::validated_dto!(HostReloadReceipt, HostReloadReceiptWire, "HostReloadReceiptWire" {

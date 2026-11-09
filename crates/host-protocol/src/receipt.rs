@@ -340,8 +340,9 @@ impl SessionCreateReceipt {
     }
 }
 
-/// Existing owner-held creation progress or formed control facts. Serialization
-/// preserves the original method's receipt; this is not an Operation entity.
+/// Existing owner-held creation/configuration progress or formed control facts.
+/// Each value is a snapshot preserving the original method and operation ID;
+/// later reads do not mutate a previously returned value or create an Operation.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Receipt {

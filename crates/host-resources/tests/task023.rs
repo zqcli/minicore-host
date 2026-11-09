@@ -292,8 +292,54 @@ fn selection() -> Vec<ToolBinding> {
     }]
 }
 
+/// Explicit fixture credentials, while all resource preparation still uses
+/// the real production assembler and its original static ToolRegistry.
+struct ExplicitCredentialsPreparer {
+    builder: Arc<HostResourceBuilder>,
+}
+impl HostConfigurationPreparer for ExplicitCredentialsPreparer {
+    fn prepare(&self, config: HostConfig) -> HostConfigurationFuture<'_> {
+        Box::pin(async move {
+            let credentials = keys(&config, "rotated-key");
+            self.builder
+                .prepare_with_credentials(config, credentials)
+                .await
+        })
+    }
+}
+async fn applied(host: &Host, caller: &CallerContext, operation: &OperationId) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let receipt = host.receipt_get(caller, operation).unwrap();
+            match receipt {
+                Receipt::HostReload(HostReloadReceipt {
+                    result: HostReloadResult::Applied { .. },
+                    ..
+                }) => return,
+                Receipt::HostReload(HostReloadReceipt {
+                    result: HostReloadResult::Preparing { .. } | HostReloadResult::Applying { .. },
+                    ..
+                }) => {}
+                other => panic!("reload did not apply: {other:?}"),
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn old_turn_keeps_actual_model_tools_role_and_workspace_after_reload() {
+    old_turn_resources_after_reload(false).await;
+}
+
+#[tokio::test]
+async fn canonical_reload_receipt_keeps_real_old_turn_and_new_turn_resource_bindings() {
+    old_turn_resources_after_reload(true).await;
+}
+
+async fn old_turn_resources_after_reload(canonical: bool) {
     let gate = Arc::new(Semaphore::new(0));
     let mut server_a = Server::start(vec![
         (tool_answer(), Some(gate.clone())),
@@ -303,12 +349,24 @@ async fn old_turn_keeps_actual_model_tools_role_and_workspace_after_reload() {
     let mut server_b = Server::start(vec![(answer("B finished"), None)]).await;
     let directory = tempfile::tempdir().unwrap();
     let (builder, calls) = builder_with_probe();
+    let builder = Arc::new(builder);
     let mut original = config(&server_a.endpoint);
     original.tools = selection();
-    let host =
-        Host::memory_configured(prepare(&builder, original.clone(), "old-key").await).unwrap();
-    let connection = host.connect().unwrap();
-    let caller = connection.caller();
+    let host = Host::memory_configured(
+        prepare(&builder, original.clone(), "old-key")
+            .await
+            .with_preparer(Arc::new(ExplicitCredentialsPreparer {
+                builder: builder.clone(),
+            })),
+    )
+    .unwrap();
+    let mut connection = if canonical {
+        host.connect_network("old-key").unwrap()
+    } else {
+        host.connect().unwrap()
+    };
+    let mut caller = connection.caller();
+    let local_reader = host.connect().unwrap();
     let old_network = host.connect_network("old-key").unwrap();
     let target = create(
         &host,
@@ -325,17 +383,53 @@ async fn old_turn_keeps_actual_model_tools_role_and_workspace_after_reload() {
     candidate.models[0].endpoint = server_b.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
     candidate.tools.clear();
-    assert_eq!(
-        host.reload_configuration(
-            &caller,
-            0,
-            prepare(&builder, candidate, "rotated-key").await
-        )
-        .await
-        .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
-    );
+    if canonical {
+        let operation_id = OperationId::new().unwrap();
+        let formed = host
+            .reload(
+                &caller,
+                HostReloadRequest {
+                    operation_id: operation_id.clone(),
+                    expected_revision: 0,
+                    candidate,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            formed.result,
+            HostReloadResult::Preparing { config_revision: 0 }
+        );
+        applied(&host, &local_reader.caller(), &operation_id).await;
+        assert!(host.info(&caller).is_err());
+        connection = host.connect_network("rotated-key").unwrap();
+        assert!(connection.initial_info().can_operate);
+        caller = connection.caller();
+        assert!(matches!(
+            host.receipt_get(&caller, &operation_id).unwrap(),
+            Receipt::HostReload(HostReloadReceipt {
+                result: HostReloadResult::Applied { config_revision: 1 },
+                ..
+            })
+        ));
+        // This already-returned control fact was not rewritten or resent.
+        assert_eq!(
+            formed.result,
+            HostReloadResult::Preparing { config_revision: 0 }
+        );
+    } else {
+        assert_eq!(
+            host.reload_configuration(
+                &caller,
+                0,
+                prepare(&builder, candidate, "rotated-key").await,
+            )
+            .await
+            .unwrap(),
+            HostReloadResult::Applied { config_revision: 1 }
+        );
+    }
     assert!(host.info(&old_network.caller()).is_err());
+    assert!(host.info(&local_reader.caller()).is_ok());
     assert!(host.info(&caller).is_ok());
     host.update_session_async(
         &caller,
@@ -782,3 +876,29 @@ async fn actual_tool_binding_failure_preserves_the_accepted_message() {
 
 #[path = "task023/session_resource_resume.rs"]
 mod session_resource_resume;
+
+#[tokio::test]
+async fn production_builder_binds_reload_preparer_at_initialization_without_an_extra_setter() {
+    let builder = HostResourceBuilder::builtins().unwrap();
+    let host =
+        Host::memory_configured(builder.prepare(HostConfig::default()).await.unwrap()).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut candidate = host.config_get(&caller).unwrap().config;
+    candidate.name = "Assembled reload".into();
+    let formed = host
+        .reload(
+            &caller,
+            HostReloadRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_revision: 0,
+                candidate,
+            },
+        )
+        .unwrap();
+    applied(&host, &caller, &formed.operation_id).await;
+    assert_eq!(
+        host.config_get(&caller).unwrap().config.name,
+        "Assembled reload"
+    );
+}

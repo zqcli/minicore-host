@@ -4,8 +4,8 @@
 //! or process-wide cwd changes occur during preparation. Each candidate builds
 //! new immutable provider clients; each Turn binds one actual selected ToolSet.
 use minicore_host_core::{
-    BoundResources, HostConfig, PreparedHostConfiguration, PreparedTurnBinding, ResourceFuture,
-    ResourceResolver,
+    BoundResources, HostConfig, HostConfigurationFuture, HostConfigurationPreparer,
+    PreparedHostConfiguration, PreparedTurnBinding, ResourceFuture, ResourceResolver,
 };
 use minicore_host_protocol::{Fault, FaultKind, ReasoningPreference, SessionConfig};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
@@ -21,6 +21,7 @@ use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 /// The deployment's statically compiled registry. Keep one builder across
 /// reloads: agent-tool delegation scopes remain owned across public Turns.
+#[derive(Clone)]
 pub struct HostResourceBuilder {
     tools: Arc<ToolRegistry>,
 }
@@ -74,6 +75,10 @@ impl HostResourceBuilder {
         )
         .await
     }
+    /// Override private inputs for this candidate only. The bound production
+    /// reload preparer still reads the configured environment sources. An
+    /// embedding with another credential source binds its own preparer before
+    /// Host construction through PreparedHostConfiguration::with_preparer.
     pub async fn prepare_with_credentials(
         &self,
         config: HostConfig,
@@ -81,6 +86,7 @@ impl HostResourceBuilder {
     ) -> Result<PreparedHostConfiguration, Fault> {
         config.validate()?;
         let tools = Arc::clone(&self.tools);
+        let preparer = Arc::new(self.clone());
         tokio::task::spawn_blocking(move || {
             let declared = tools.specs();
             let mut selected_specs = Vec::new();
@@ -145,9 +151,16 @@ impl HostResourceBuilder {
                 framework: config.framework_instructions.clone(),
             });
             PreparedHostConfiguration::new(config, resources, selected_specs, access_key)
+                .map(|candidate| candidate.with_preparer(preparer))
         })
         .await
         .map_err(|_| invalid("resource preparation worker did not finish"))?
+    }
+}
+
+impl HostConfigurationPreparer for HostResourceBuilder {
+    fn prepare(&self, config: HostConfig) -> HostConfigurationFuture<'_> {
+        Box::pin(HostResourceBuilder::prepare(self, config))
     }
 }
 
