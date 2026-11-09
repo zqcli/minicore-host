@@ -126,8 +126,16 @@ and never dispatch `message.send` or other business work.
 
 The count describes adapters for current core primitives, not completion of all
 SPEC §8. Lists retain basic current-owner results. `turn.get` returns
-`TurnSnapshot { source, data }` with the source flattened on the wire, using the
-same atomic Session factory as `turn.state` and initial snapshots.
+`TurnDetailsSnapshot { source, data }` with the actual Turn identity flattened
+on the wire. Its data combines the same authoritative `TurnStateData` used by
+`turn.state` with the complete original bound Session configuration; later
+Session updates do not replace it. State subscriptions stay lightweight.
+`message.get`, `turn.list`, `turn.result` and `turn.wait` also return actual
+Host/incarnation/target identity and a `data` envelope. Lists preserve completion
+order followed by the active Turn. Results project complete native history and
+separate unfinished partials, exposing actual public response indexes but no
+Runtime Loop IDs, request indexes or provider replay payloads. These snapshots
+read the existing direct owner and do not extend memory retention.
 `session.history.read` takes `{ target, request: { cursor, limit } }` and returns
 `SessionHistorySnapshot`; it reads real retained/cold persistent history without
 creating a Runner or restoring old Turns. Text reads take the original Session,

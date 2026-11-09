@@ -1,5 +1,6 @@
 use super::*;
 use crate::observation::*;
+use crate::{MessageSnapshot, TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot};
 
 impl Host {
     pub fn answer_interaction(
@@ -17,17 +18,56 @@ impl Host {
         caller: &CallerContext,
         target: &SessionRef,
         turn_id: &TurnId,
-    ) -> Result<TurnSnapshot, Fault> {
-        let session = self.session(caller, target)?;
-        let (states, _) = session.observation_baseline(Some(turn_id), true, false)?;
-        let snapshot = states
-            .into_iter()
-            .find_map(|state| match state {
-                StateEvent::Turn { source, data } => Some(TurnSnapshot { source, data }),
-                _ => None,
-            })
-            .ok_or_else(|| Fault::new(FaultKind::SessionTurnNotFound, "Turn is not retained"))?;
-        self.access.read(caller, || Ok(snapshot))
+    ) -> Result<TurnDetailsSnapshot, Fault> {
+        self.session(caller, target)?.turn_details(caller, turn_id)
+    }
+
+    pub fn message_snapshot(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        message_id: &MessageId,
+    ) -> Result<MessageSnapshot, Fault> {
+        self.session(caller, target)?
+            .message_snapshot(caller, message_id)
+    }
+
+    pub fn turn_list(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+    ) -> Result<TurnListSnapshot, Fault> {
+        self.session(caller, target)?.turn_list(caller)
+    }
+
+    pub fn turn_result_snapshot(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        turn_id: &TurnId,
+    ) -> Result<TurnResultSnapshot, Fault> {
+        self.session(caller, target)?
+            .turn_result_snapshot(caller, turn_id)
+    }
+
+    pub async fn wait_turn_snapshot(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        turn_id: &TurnId,
+    ) -> Result<TurnResultSnapshot, Fault> {
+        // The existing subscription holds only a Weak owner and light state.
+        // Dropping this wait cannot retain content or cancel accepted work.
+        let mut states = self.session_states(caller, target)?;
+        loop {
+            if self
+                .session(caller, target)?
+                .turn_query_finished(caller, turn_id)?
+            {
+                return self.turn_result_snapshot(caller, target, turn_id);
+            }
+            states.changed().await?;
+        }
     }
 
     pub async fn history_read(

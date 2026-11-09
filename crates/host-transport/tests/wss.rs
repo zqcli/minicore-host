@@ -275,6 +275,7 @@ async fn accepted_creation_survives_timeout_disconnect_and_key_rotation() {
                 .wait_turn(turn, options(2_000))
                 .await
                 .unwrap()
+                .data
                 .info
                 .outcome,
             Some(TurnOutcome::Completed)
@@ -330,7 +331,7 @@ async fn wss_receipts_results_and_business_faults_match_typed_and_stdio_reads() 
                 .message(accepted.message_id.clone(), options(500))
                 .await
                 .unwrap()
-                .input
+                .data
                 .text,
             "same owner receipt"
         );

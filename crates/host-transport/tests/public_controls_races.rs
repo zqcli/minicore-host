@@ -349,7 +349,7 @@ async fn active_turn_and_continuation_keep_actual_old_resources_next_turn_uses_c
     assert_eq!(running(&session).await, turn);
     assert_eq!(new.model.calls.load(Ordering::SeqCst), 0);
     let bound = session.turn(turn.clone(), options(2000)).await.unwrap();
-    assert_eq!(bound.data.config_revision, 0);
+    assert_eq!(bound.data.state.config_revision, 0);
     assert!(
         matches!(session.remove_input(InputRemoveRequest{operation_id:OperationId::new().unwrap(),message_id:steer_id,expected_controller_revision:None},options(2000)).await.unwrap_err(),CallError::Business(f) if f.kind()==Some(FaultKind::SessionInputAlreadyBound))
     );
@@ -358,7 +358,7 @@ async fn active_turn_and_continuation_keep_actual_old_resources_next_turn_uses_c
     entered(&new.model.started).await;
     let next = running(&session).await;
     let bound = session.turn(next.clone(), options(2000)).await.unwrap();
-    assert_eq!(bound.data.config_revision, 1);
+    assert_eq!(bound.data.state.config_revision, 1);
     assert_eq!(old.model.calls.load(Ordering::SeqCst), 2);
     assert_eq!(new.model.calls.load(Ordering::SeqCst), 1);
     assert_eq!(

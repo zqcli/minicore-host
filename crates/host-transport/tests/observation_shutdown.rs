@@ -157,6 +157,7 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
                 .wait_turn(turn, options(2000))
                 .await
                 .unwrap()
+                .data
                 .info
                 .outcome,
             Some(TurnOutcome::Completed)

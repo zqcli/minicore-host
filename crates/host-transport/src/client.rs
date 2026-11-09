@@ -1,10 +1,10 @@
 use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
     AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfig,
-    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageRecord, ModelDescription,
+    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription,
     ModelTextSnapshot, ObservationNotification, SessionContextSnapshot, SessionHistorySnapshot,
-    SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo,
-    TurnResult, TurnSnapshot, WorkspaceSnapshot,
+    SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot,
+    TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -549,7 +549,7 @@ impl SessionClient {
         &self,
         message_id: MessageId,
         options: CallOptions,
-    ) -> Result<MessageRecord, CallError> {
+    ) -> Result<MessageSnapshot, CallError> {
         self.client
             .call(
                 GetMessage(MessageTargetParams {
@@ -560,7 +560,7 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn turns(&self, options: CallOptions) -> Result<Vec<TurnInfo>, CallError> {
+    pub async fn turns(&self, options: CallOptions) -> Result<TurnListSnapshot, CallError> {
         self.client
             .call(
                 ListTurns(SessionTarget {
@@ -574,7 +574,7 @@ impl SessionClient {
         &self,
         turn_id: TurnId,
         options: CallOptions,
-    ) -> Result<TurnSnapshot, CallError> {
+    ) -> Result<TurnDetailsSnapshot, CallError> {
         self.client
             .call(
                 GetTurn(TurnTarget {
@@ -589,7 +589,7 @@ impl SessionClient {
         &self,
         turn_id: TurnId,
         options: CallOptions,
-    ) -> Result<TurnResult, CallError> {
+    ) -> Result<TurnResultSnapshot, CallError> {
         self.client
             .call(
                 WaitTurn(TurnTarget {
@@ -621,7 +621,7 @@ impl SessionClient {
         &self,
         turn_id: TurnId,
         options: CallOptions,
-    ) -> Result<TurnResult, CallError> {
+    ) -> Result<TurnResultSnapshot, CallError> {
         self.client
             .call(
                 GetTurnResult(TurnTarget {

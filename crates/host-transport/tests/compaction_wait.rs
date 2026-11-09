@@ -151,7 +151,7 @@ async fn actual_compaction_completion_notification_can_precede_its_unchanged_acc
     relay.release.add_permits(1);
     assert_eq!(pending.await.unwrap().unwrap(), formed);
     retained(&relay.client, &formed).await;
-    assert_eq!(session.turns(options()).await.unwrap().len(), 2);
+    assert_eq!(session.turns(options()).await.unwrap().data.len(), 2);
     http.no_request();
 }
 
@@ -217,7 +217,7 @@ async fn aborted_compact_caller_leaves_owned_http_work_and_shared_connection_ali
     retained(&relay.client, &formed).await;
     relay.release.add_permits(1);
     assert!(relay.client.info(options()).await.is_ok());
-    assert_eq!(session.turns(options()).await.unwrap().len(), 2);
+    assert_eq!(session.turns(options()).await.unwrap().data.len(), 2);
     http.no_request();
 }
 
@@ -239,7 +239,7 @@ async fn stdio_disconnect_before_receipt_does_not_cancel_accepted_compaction() {
     gate.add_permits(1);
     finished(&watching, &formed.operation_id).await;
     retained(&observer, &formed).await;
-    assert_eq!(watching.turns(options()).await.unwrap().len(), 2);
+    assert_eq!(watching.turns(options()).await.unwrap().data.len(), 2);
     http.no_request();
 }
 

@@ -226,16 +226,16 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
             .wait_turn(original.clone(), options(3000))
             .await
             .unwrap();
-        assert_eq!(result.info.outcome, Some(TurnOutcome::Cancelled));
+        assert_eq!(result.data.info.outcome, Some(TurnOutcome::Cancelled));
         assert_eq!(
-            result.info.persistence,
+            result.data.info.persistence,
             if mode == StorageMode::Persistent {
                 PersistenceState::Persisted
             } else {
                 PersistenceState::NotApplicable
             }
         );
-        assert_eq!(result.partials.len(), 1);
+        assert_eq!(result.data.partials.len(), 1);
         let accepted = pages(&session, 1).await;
         assert_eq!(accepted.as_array().unwrap().len(), 2);
         assert_eq!(accepted[1]["kind"], "partial");
@@ -335,7 +335,7 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
             value(before.data)
         );
         assert!(session.turn(original, options(3000)).await.is_err());
-        assert!(session.turns(options(3000)).await.unwrap().is_empty());
+        assert!(session.turns(options(3000)).await.unwrap().data.is_empty());
         assert!(starts.try_recv().is_err());
         assert_eq!(
             std::fs::read(&path).unwrap(),

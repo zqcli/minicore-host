@@ -516,8 +516,8 @@ async fn known_resource_references_execute_real_http_without_prior_list_queries(
         assert_eq!(request["model"], "configured-chat");
         let turn = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
-                if let Some(turn) = session.turns(options()).await.unwrap().first() {
-                    break turn.id.clone();
+                if let Some(turn) = session.turns(options()).await.unwrap().data.first() {
+                    break turn.turn_id.clone();
                 }
                 tokio::task::yield_now().await;
             }
@@ -525,9 +525,9 @@ async fn known_resource_references_execute_real_http_without_prior_list_queries(
         .await
         .unwrap();
         let result = session.wait_turn(turn, options()).await.unwrap();
-        assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
+        assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
         assert!(
-            serde_json::to_string(&result.history)
+            serde_json::to_string(&result.data.history)
                 .unwrap()
                 .contains("Actual HTTP fixture response")
         );

@@ -38,8 +38,8 @@ async fn typed_service_runtime_and_stdio_query_parity() {
         .wait_turn(turn.clone(), options(2_000))
         .await
         .unwrap();
-    assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
-    assert!(!result.history.is_empty());
+    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
+    assert!(!result.data.history.is_empty());
     assert_eq!(
         value(local.info(options(2_000)).await.unwrap()),
         value(remote.info(options(2_000)).await.unwrap())
@@ -133,7 +133,7 @@ async fn actual_os_pipes_multiplex_long_wait_cancel_and_queries() {
             .message(accepted.message_id, options(500))
             .await
             .unwrap()
-            .input
+            .data
             .text,
         "gated Runtime"
     );
@@ -159,7 +159,7 @@ async fn actual_os_pipes_multiplex_long_wait_cancel_and_queries() {
         value(cancellation)
     );
     assert_eq!(
-        waiting.await.unwrap().unwrap().info.outcome,
+        waiting.await.unwrap().unwrap().data.info.outcome,
         Some(TurnOutcome::Cancelled)
     );
     assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
@@ -197,6 +197,7 @@ async fn timeout_and_dropped_wait_do_not_cancel_or_resend_accepted_work() {
                 .await
                 .unwrap()
                 .data
+                .state
                 .state,
             TurnState::Running
         );
@@ -214,6 +215,7 @@ async fn timeout_and_dropped_wait_do_not_cancel_or_resend_accepted_work() {
                 .await
                 .unwrap()
                 .data
+                .state
                 .state,
             TurnState::Running
         );
@@ -223,6 +225,7 @@ async fn timeout_and_dropped_wait_do_not_cancel_or_resend_accepted_work() {
                 .wait_turn(turn, options(2_000))
                 .await
                 .unwrap()
+                .data
                 .info
                 .outcome,
             Some(TurnOutcome::Completed)
@@ -315,6 +318,7 @@ async fn accepted_creation_outlives_timeout_abandonment_and_disconnect() {
                     .wait_turn(turn, options(2_000))
                     .await
                     .unwrap()
+                    .data
                     .info
                     .outcome,
                 Some(TurnOutcome::Completed)
@@ -568,7 +572,7 @@ async fn os_pipe_frames_have_no_added_application_size_quota_and_shutdown_is_rec
             .message(accepted.message_id, options(5_000))
             .await
             .unwrap()
-            .input
+            .data
             .text,
         text
     );
@@ -661,7 +665,7 @@ async fn remaining_query_and_canonical_control_routes_return_real_owner_facts() 
         session.info(options(500)).await.unwrap().id,
         session.target().session_id
     );
-    assert!(session.turns(options(500)).await.unwrap().is_empty());
+    assert!(session.turns(options(500)).await.unwrap().data.is_empty());
     session.pause(control(), options(500)).await.unwrap();
     let loaded = session.load(control(), options(500)).await.unwrap();
     assert_eq!(loaded.kind, SessionControlKind::Load);
@@ -789,6 +793,7 @@ async fn dropping_last_client_handle_releases_only_the_connection() {
             .await
             .unwrap()
             .data
+            .state
             .state,
         TurnState::Running
     );
@@ -803,6 +808,7 @@ async fn dropping_last_client_handle_releases_only_the_connection() {
             .wait_turn(turn, options(2_000))
             .await
             .unwrap()
+            .data
             .info
             .outcome,
         Some(TurnOutcome::Completed)

@@ -250,6 +250,7 @@ async fn long_turn_wait_and_waiter_cancellation_leave_real_runtime_and_connectio
             .await
             .unwrap()
             .data
+            .state
             .state,
         TurnState::Running
     );
@@ -259,6 +260,7 @@ async fn long_turn_wait_and_waiter_cancellation_leave_real_runtime_and_connectio
             .wait_turn(turn, options(2_000))
             .await
             .unwrap()
+            .data
             .info
             .outcome,
         Some(TurnOutcome::Completed)

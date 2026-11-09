@@ -243,12 +243,16 @@ pub fn is_utility(request: &Value) -> bool {
 pub async fn settled(session: &SessionClient, count: usize) {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let turns = session.turns(options()).await.unwrap();
-            if turns.len() == count && turns.iter().all(|turn| turn.state == TurnState::Finished) {
+            let turns = session.turns(options()).await.unwrap().data;
+            if turns.len() == count
+                && turns
+                    .iter()
+                    .all(|turn| turn.data.state.state == TurnState::Finished)
+            {
                 assert!(
                     turns
                         .iter()
-                        .all(|turn| turn.outcome == Some(TurnOutcome::Completed)),
+                        .all(|turn| turn.data.state.outcome == Some(TurnOutcome::Completed)),
                     "{turns:?}"
                 );
                 return;

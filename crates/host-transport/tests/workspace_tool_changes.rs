@@ -301,7 +301,9 @@ async fn reopened_sessions_expose_missing_edit_coverage_but_current_turn_edits_a
     http.request().await;
     http.request().await;
     settled(&session, 1).await;
-    let old_turn = session.turns(options()).await.unwrap()[0].id.clone();
+    let old_turn = session.turns(options()).await.unwrap().data[0]
+        .turn_id
+        .clone();
     let old_ref = session
         .changes_list(list(ChangeScope::Session), options())
         .await
@@ -396,7 +398,9 @@ async fn reopened_sessions_expose_missing_edit_coverage_but_current_turn_edits_a
     http.request().await;
     http.request().await;
     settled(&current, 1).await;
-    let turn = current.turns(options()).await.unwrap()[0].id.clone();
+    let turn = current.turns(options()).await.unwrap().data[0]
+        .turn_id
+        .clone();
     for client in &peers.clients {
         let session = client.session(target.clone());
         assert_eq!(

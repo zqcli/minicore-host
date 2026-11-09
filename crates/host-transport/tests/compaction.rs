@@ -79,7 +79,7 @@ async fn all_transports_compact_real_history_without_turns_and_preserve_paused_q
             .unwrap();
         assert!(!is_utility(&http.request().await));
         settled(&other, 1).await;
-        assert_eq!(session.turns(options()).await.unwrap().len(), 2);
+        assert_eq!(session.turns(options()).await.unwrap().data.len(), 2);
         gate.add_permits(1);
         let state = finished(&session, &accepted.operation_id).await;
         let activity = state.data.compaction.as_ref().unwrap();
@@ -114,7 +114,7 @@ async fn all_transports_compact_real_history_without_turns_and_preserve_paused_q
             next_turn.iter().collect::<Vec<_>>()
         );
         assert!(state.data.active_turn_id.is_none());
-        assert_eq!(session.turns(options()).await.unwrap().len(), 2);
+        assert_eq!(session.turns(options()).await.unwrap().data.len(), 2);
         let after = history(&session).await;
         let original_items = before["items"].as_array().unwrap();
         let actual_items = after["items"].as_array().unwrap();

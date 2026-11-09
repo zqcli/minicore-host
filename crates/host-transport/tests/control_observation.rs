@@ -90,7 +90,7 @@ async fn actual_disconnect_and_key_rotation_publish_control_without_promoting_re
         .turn_result(turn, options(2000))
         .await
         .unwrap();
-    assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
     replacement.close();
     let closed = control(&mut local, false).await;
     assert!(closed.revision > occupied.revision);

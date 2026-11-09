@@ -124,9 +124,9 @@ fn input(text: &str) -> MessageInput {
 async fn turn_id(session: &SessionClient, index: usize) -> TurnId {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let turns = session.turns(options()).await.unwrap();
+            let turns = session.turns(options()).await.unwrap().data;
             if turns.len() > index {
-                return turns[index].id.clone();
+                return turns[index].turn_id.clone();
             }
             tokio::task::yield_now().await;
         }
@@ -284,9 +284,9 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     finish_a.add_permits(1);
     let session = replacement.session(target);
     let first_result = session.wait_turn(first_turn, options()).await.unwrap();
-    assert_eq!(first_result.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(first_result.data.info.outcome, Some(TurnOutcome::Completed));
     assert!(
-        serde_json::to_string(&first_result.history)
+        serde_json::to_string(&first_result.data.history)
             .unwrap()
             .contains("A finished after rotation")
     );
@@ -294,9 +294,12 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     let second_request = provider_b.request().await;
     let second_turn = turn_id(&session, 1).await;
     let second_result = session.wait_turn(second_turn, options()).await.unwrap();
-    assert_eq!(second_result.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        second_result.data.info.outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert!(
-        serde_json::to_string(&second_result.history)
+        serde_json::to_string(&second_result.data.history)
             .unwrap()
             .contains("B finished")
     );

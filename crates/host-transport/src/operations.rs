@@ -2,9 +2,9 @@
 use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
     AgentInfo, CallerContext, Host, HostConfig, HostConfigSnapshot, HostInfo,
-    InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
+    InteractionAnswerData, MessageSnapshot, ModelDescription, ModelTextSnapshot,
     SessionContextSnapshot, SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot,
-    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot, WorkspaceSnapshot,
+    ToolTextSnapshot, TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -294,12 +294,12 @@ operations! {
     CompactSession, "session.compact", SessionOperation => CompactReceipt, |h, c, p| { h.session_compact(&c, &p.target, CompactRequest { operation_id: p.operation_id }) };
     CancelCompact, "session.compact.cancel", CancelCompactParams => CompactCancelReceipt, |h, c, p| { h.session_compact_cancel(&c, &p.target, CompactCancelRequest { operation_id: p.operation_id, target_operation_id: p.target_operation_id }) };
     SendMessageOp, "message.send", SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };
-    GetMessage, "message.get", MessageTargetParams => MessageRecord, |h, c, p| { h.message(&c, &p.target, &p.message_id) };
-    GetTurn, "turn.get", TurnTarget => TurnSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
-    ListTurns, "turn.list", SessionTarget => Vec<TurnInfo>, |h, c, p| { h.turns(&c, &p.target) };
-    WaitTurn, "turn.wait", TurnTarget => TurnResult, |h, c, p| { h.wait_turn(&c, &p.target, &p.turn_id).await };
+    GetMessage, "message.get", MessageTargetParams => MessageSnapshot, |h, c, p| { h.message_snapshot(&c, &p.target, &p.message_id) };
+    GetTurn, "turn.get", TurnTarget => TurnDetailsSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
+    ListTurns, "turn.list", SessionTarget => TurnListSnapshot, |h, c, p| { h.turn_list(&c, &p.target) };
+    WaitTurn, "turn.wait", TurnTarget => TurnResultSnapshot, |h, c, p| { h.wait_turn_snapshot(&c, &p.target, &p.turn_id).await };
     CancelTurn, "turn.cancel", CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
-    GetTurnResult, "turn.result", TurnTarget => TurnResult, |h, c, p| { h.turn_result(&c, &p.target, &p.turn_id) };
+    GetTurnResult, "turn.result", TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id) };
     ReadHistory, "session.history.read", HistoryParams => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
     ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
     GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };

@@ -91,7 +91,7 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             .await
             .unwrap();
         assert_eq!(snapshot.source, end);
-        assert_eq!(snapshot.data.state, TurnState::Finished);
+        assert_eq!(snapshot.data.state.state, TurnState::Finished);
         let baseline = client
             .subscribe(
                 request(
@@ -117,8 +117,8 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
                 }
             })
             .unwrap();
-        assert!(state.1.runner_revision >= snapshot.data.runner_revision);
-        let mut expected = snapshot.data.clone();
+        assert!(state.1.runner_revision >= snapshot.data.state.runner_revision);
+        let mut expected = snapshot.data.state.clone();
         expected.runner_revision = state.1.runner_revision;
         assert_eq!(
             serde_json::to_value(state.1).unwrap(),
