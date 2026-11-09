@@ -80,15 +80,7 @@ async fn restored_model_resumes(mode: StorageMode) {
         host.session_info(&caller, &target).unwrap().config_revision,
         0
     );
-    assert_eq!(
-        request["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|m| m["content"] == "accepted once")
-            .count(),
-        1
-    );
+    assert_single_input(&request, &id, "accepted once");
     assert!(matches!(
         host.message(&caller, &target, &id).unwrap().binding,
         MessageBinding::Bound { .. }
@@ -141,15 +133,7 @@ async fn corrected_workspace_continues(mode: StorageMode) {
             .message_id,
         id
     );
-    assert_eq!(
-        request["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|m| m["content"] == "keep workspace input")
-            .count(),
-        1
-    );
+    assert_single_input(&request, &id, "keep workspace input");
     assert!(request["messages"].as_array().unwrap().iter().any(|m| {
         m["content"]
             .as_str()

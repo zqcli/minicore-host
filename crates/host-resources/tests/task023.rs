@@ -1,4 +1,6 @@
 //! Real Host + Runtime + production HTTP/SSE on loopback, never a live provider.
+#[path = "../../host-core/tests/support/input_context.rs"]
+mod input_context;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
@@ -548,15 +550,7 @@ async fn removed_referenced_model_keeps_original_input_queued_and_can_be_restore
     .unwrap();
     let request = server.request().await;
     settled(&host, &caller, &target, 1).await;
-    assert_eq!(
-        request["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|m| m["content"] == "accepted once")
-            .count(),
-        1
-    );
+    assert_single_input(&request, &message_id, "accepted once");
 }
 
 #[tokio::test]
@@ -903,3 +897,23 @@ async fn production_builder_binds_reload_preparer_at_initialization_without_an_e
 
 #[path = "task023/compaction.rs"]
 mod compaction;
+
+fn assert_single_input(request: &Value, id: &MessageId, original: &str) {
+    let users: Vec<_> = request["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["role"] == "user")
+        .collect();
+    assert_eq!(users.len(), 1, "the original queued input is consumed once");
+    let (context, text) = input_context::decode(users[0]["content"].as_str().unwrap());
+    assert_eq!(
+        context,
+        input_context::Context {
+            message_id: id.clone(),
+            source: MessageSource::User,
+            in_reply_to: None,
+        }
+    );
+    assert_eq!(text, original);
+}
