@@ -107,3 +107,44 @@ routes are separate stages, not included in this six-method acceptance result.
 The existing TUI reference remains `3beeb1d8a525e58ce6352e05061f242c5580e248`,
 which locks older Runtime `b276d9c0a1f3a3c06e32029f831ccd100c9699c7`.
 No TUI, live-provider, production-process or performance validation is claimed.
+
+## Subsequent context route integration
+
+The six-control review boundary remains `570b886`. Independent review passed
+that fixed source, including seven separate owner/Runtime/restart/transport
+probes, and did not claim the blocked full aggregate passed.
+
+After that boundary, the integration owner authorized these separate commits:
+
+- `bbe5f2d00bd1218cf8180a752f329474fd71fc56`: unchanged cherry-pick of context
+  owner implementation `a412d7fbac03c4e810d38ae7b6f34a8be279b0bc`. Host and
+  Session module/bootstrap changes merged automatically without conflict.
+- `955f07e051a576fdf6f0711bb6193e8a86b58507`: adds SessionClient::context and
+  canonical session.context routing using the existing strict SessionTarget.
+  Only transport client/operations and transport tests changed in this commit.
+
+The query returns the core SessionContextSnapshot unchanged. Cold persistent
+history remains null until actual owner load; known empty history remains an
+actual empty snapshot. It does not prepare resources, load a Runner, consume
+queued input, fabricate usage, or invoke a model. Read-only clients are allowed.
+
+At fixed combined source `955f07e`:
+
+- 10 context Host integration tests and 2 gated Session save tests passed.
+- 4 new typed/OS-pipe/TLS-WSS/cold-persistent transport tests passed.
+- All 14 six-control transport acceptance/race/storage/deadline tests passed
+  again alongside the context routes.
+- Strict all-target workspace Clippy, formatting, whitespace, 4 doctests and
+  strict workspace rustdoc passed.
+- All-target --list reports **685 unique test cases**. This is a catalog count,
+  not a claim that all-workspace execution passed after the known lease failures.
+- Locked metadata still has 11 workspace crates and Runtime 69faf919; Cargo.lock,
+  SPEC and the TUI are unchanged.
+
+Logs: `/workspace/shared/public-controls-context-owner.log`,
+`public-controls-context-regression.log`, `public-controls-context-clippy.log`,
+`public-controls-context-list.log`, `public-controls-context-doctests.log`,
+`public-controls-context-rustdoc.log` and `public-controls-context-metadata.json`.
+The parent coordinates the independent context/route review and combined
+aggregate after the separate diagnostics/storage lease fixes. No other topic
+was imported and no remote write was made.
