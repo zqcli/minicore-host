@@ -216,7 +216,18 @@ impl AgentOwner {
         make_default: bool,
     ) -> Result<(), Fault> {
         self.access.ensure_execution_owned()?;
-        self.resources_owned()?.validate(&prepared.config)?;
+        let resources = self.resources_owned()?;
+        let config = prepared.config.clone();
+        // The accepted creation owner retains this join independently from the
+        // client's wait. Validation stays pure and outside all owner locks.
+        tokio::task::spawn_blocking(move || resources.validate(&config))
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "Session validation task terminated unexpectedly",
+                )
+            })??;
         self.access.ensure_execution_owned()?;
         let session = if prepared.mode == StorageMode::Persistent {
             let store = self

@@ -7,7 +7,7 @@ use tokio::sync::oneshot;
 
 impl Host {
     /// Canonical asynchronous creation path for either storage mode. Once the
-    /// first poll accepts the request, dropping this wait does not stop the work.
+    /// owner accepts the request, dropping this wait does not stop the work.
     pub async fn create_agent_async(
         self: &Arc<Self>,
         caller: &CallerContext,
@@ -22,16 +22,27 @@ impl Host {
                 "persistent Agents require a persistent Host data root",
             ));
         }
-        self.resources_owned()?.validate(
-            &SessionConfig::from_agent(&request.config, &SessionOverrides::default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-        )?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
             Fault::new(
                 FaultKind::HostLifecycleUnavailable,
                 "creation requires a live Tokio runtime",
             )
         })?;
+        let resources = self.resources_owned()?;
+        let config = SessionConfig::from_agent(&request.config, &SessionOverrides::default())
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        // This extension callback remains pure validation, not I/O. Isolate its
+        // synchronous work so caller deadlines and other async work can run.
+        // Authority is still checked only at the acceptance boundary below.
+        runtime
+            .spawn_blocking(move || resources.validate(&config))
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::HostInternalUnexpected,
+                    "Agent validation task terminated unexpectedly",
+                )
+            })??;
         let operation = request.operation_id.clone();
         let id = AgentId::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;

@@ -89,3 +89,16 @@ message/start-error receipts, real partial Agent creation, and WSS error/result
 frames. Focused protocol/transport tests and whole-workspace clippy with warnings
 denied passed after the compatibility change. No transport-specific business
 error fallback or duplicate fault registry was introduced.
+
+The second review follow-up isolates only the synchronous resource-validation
+callbacks in Host/Agent asynchronous creation using `spawn_blocking`. Existing
+owner acceptance, owned workflow retention and fault propagation stay in place.
+The ResourceResolver contract still requires pure reference/structural validation
+with no filesystem/network/model/tool work. This is not a promise to preempt
+arbitrary synchronous code or a generic task layer for typed calls.
+
+Three actual Host regressions cover multi-thread preacceptance timeout,
+current-thread preacceptance timeout, and current-thread accepted child creation.
+All three fail against `ab4a56b` before the fix and pass with the narrow change;
+independent fixture fallback release bounds the negative run. Focused command:
+`cargo test -p minicore-host-transport --test typed_validation_budget --locked`.
