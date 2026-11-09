@@ -85,3 +85,11 @@ round-trip/uniqueness checks include the two leaves.
 tests (113 core +48 protocol) after the correction; formatting and diff checks
 also passed. The complete integrated gate and fixed correction review follow
 separately; this focused result is not yet a full-gate claim.
+
+The integrated correction is `b961f9f45ea31def2e215fa07368c05893cdf6fa`.
+`./scripts/check.sh` passed on that exact commit: 254 unit/integration tests
+(113 core, 48 protocol, 36 provider, 57 storage), 2 doctests, formatting, strict
+all-target Clippy/rustdoc and committed whitespace. Log:
+`minicore-host-validation/canonical-integrated.log`. Independent correction
+verification is in progress; the earlier P2 is not called reviewed merely because
+this gate passed.

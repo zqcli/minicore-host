@@ -27,6 +27,23 @@ P/P, P/M and M/M are supported. M/P is rejected. Memory descendants of a persist
 
 The synchronous creation/configuration convenience entries support memory ownership. Persistent mutation uses the asynchronous entries; it never silently substitutes a memory backend. A completed creation or metadata waiter follows retirement of that temporary worker. A completed Turn snapshot or accepted stop/close/shutdown receipt is not a task-join promise. Host `stopped` requires the actual descendant and resource-release barriers.
 
+
+## Canonical controls and receipt queries
+
+`agent_stop`, `session_pause/resume/load/unload/close/cancel` and `turn_cancel`
+accept the shared operation request types and return their canonical receipts.
+Each direct owner forms the facts under the same short lock that accepts the
+mutation. Later load, save, stop or close progress does not rewrite that receipt.
+Older convenience calls share these mutations rather than separate business paths.
+
+`receipt_get` reads original-kind creation/control facts from their current owners.
+An independent invocation may reuse an operation ID; it never replaces or replays
+another invocation. No retained match is `HOST_RECEIPT_NOT_FOUND` (1202), multiple
+matches are `HOST_RECEIPT_AMBIGUOUS` (1203), and `receipts` exposes the separate
+retained facts. Missing capability remains `HOST_METHOD_UNAVAILABLE` (1401).
+Reclamation removes the released owner's receipt data normally; an already-returned
+close receipt remains valid without keeping that memory Session alive.
+
 ## Save and reload boundaries
 
 Session history is written through real storage at Runtime's complete-response, tool-batch and Turn-ending boundaries. Actual partial output and the real outcome are preserved. Primary execution faults and independent persistence faults remain distinct; a completed execution with a failed save is not reported as durably finalized, rerun or appended a second time.
@@ -45,6 +62,6 @@ The first version has no recovery entry for an unpublished creation whose necess
 
 Tests use temporary files, production owners, real Runtime and explicitly named scripted/gated model fixtures. The HTTP integration test uses the real provider adapter against a local test server. These are not live-provider or TUI validation.
 
-Run formatting, workspace tests, all-target Clippy with warnings denied, and rustdoc with warnings denied in the configured development checkout. Detailed checkpoints and commands are in tasks 006, 008, 009 and 012 at the repository root. The integrated checkpoint `413916c` passed all 240 unit/integration tests and 2 doctests, with strict lint/documentation gates. A separate scoped review exercised 12 additional public-API acceptance cases; it is not the requested external review.
+Run formatting, workspace tests, all-target Clippy with warnings denied, and rustdoc with warnings denied in the configured development checkout. Detailed checkpoints and commands are in tasks 006, 008, 009 and 012 at the repository root. The integrated canonical-control correction checkpoint `b961f9f` passed all 254 unit/integration tests and 2 doctests, with strict lint/documentation gates. A separate scoped review exercised 12 additional public-API acceptance cases; it is not the requested external review.
 
 Not implemented here: complete Host execution-resource configuration/reload, phased directory deletion, the complete canonical operation surface, transport/SDK adapters, DSH, full output/event reads, standard interaction and compaction. API/type presence is not evidence that these features are complete.

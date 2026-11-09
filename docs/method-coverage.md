@@ -1,6 +1,6 @@
 # Public method implementation map
 
-This checkpoint describes Host code/test checkpoint `413916c` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes Host code/test checkpoint `b961f9f` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
 `Partial` means a real in-process owner primitive exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. No stdio/WSS dispatcher is present yet. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
@@ -9,14 +9,14 @@ This checkpoint describes Host code/test checkpoint `413916c` (published Runtime
 | `host.info` | Partial | `Host::info`. Identity, incarnation, lifecycle and operation-right state; actual shutdown strategy/fault state; logging and complete resource configuration pending. |
 | `host.config.get` | Partial | `Host::settings`. Only supported Host name metadata; not execution, access or logging configuration. |
 | `host.reload` | Not implemented | Required by SPEC; no completed business handler. |
-| `host.receipt.get` | Partial | `Host::receipt / session_creation_receipt`. Retained real creation progress; canonical common query mapping pending. |
+| `host.receipt.get` | Partial | `Host::receipt_get` traverses direct owners for original-kind creation/control facts; 1202 means missing, 1203 means ambiguous independent invocations. Additional command families remain staged. |
 | `host.shutdown` | Implemented typed entry | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. Transport dispatch remains pending. |
 | `agent.create` | Partial | `Host::create_agent_async`. Real memory/persistent creation, owned waits, partial receipts and invocation-isolated tracking; canonical request/receipt mapping pending. |
 | `agent.get` | Partial | `Host::agent_info`. Direct Agent record and committed configuration; complete derived status mapping pending. |
 | `agent.list` | Partial | `Host::agents`. Actual registered owners; load failures are separately observable. |
 | `agent.update` | Partial | `Host::update_agent / update_agent_async`. Memory and durable configuration updates; confirmed publication and retained original-candidate reconciliation work. Canonical receipt mapping pending. |
 | `agent.start` | Partial | `Host::start_agent`. Owner scheduling gate; complete typed control receipt mapping pending. |
-| `agent.stop` | Partial | `Host::stop_agent`. Cancels active children with inbox preserved; stop owner is tracked; canonical receipt mapping pending. |
+| `agent.stop` | Implemented typed entry | `Host::agent_stop` forms actual stopping/stopped facts at the Agent boundary and preserves child inboxes; owned stopping continues independently. |
 | `agent.set_default_session` | Partial | `Host::set_default_session / set_default_session_async`. Memory and confirmed durable default selection; memory children are not restored as durable defaults. Canonical receipt mapping pending. |
 | `agent.delete` | Not implemented | Required by SPEC; no completed business handler. |
 | `session.create` | Partial | `Host::create_session_async`. Real owner-scoped creation and explicit modes; published objects survive later delivery failure. |
@@ -24,12 +24,12 @@ This checkpoint describes Host code/test checkpoint `413916c` (published Runtime
 | `session.list` | Partial | `Host::sessions`. Direct-child records; unhealthy persisted children have explicit load-failure facts. |
 | `session.update` | Partial | `Host::update_session / update_session_async`. Memory and durable versioned config; effective values publish after confirmation, with fixed same-Turn bindings. Canonical receipt mapping pending. |
 | `session.state` | Partial | `Host::session_state`. Actual queues, active Turn, residency, saving and faults; final canonical state schema mapping pending. |
-| `session.load` | Partial | `Host::load_session / lazy start`. Owner-held actual history loading and validation; failures retain original bytes and block execution. Canonical control receipt mapping pending. |
-| `session.unload` | Partial | `Host::unload`. Memory context retained; persistent reload reopens the actual settled journal and preserves original failed save ranges. Canonical control receipt mapping pending. |
-| `session.pause` | Partial | `Host::pause`. Explicit pause takes effect without cancelling current Turn; canonical receipt mapping pending. |
-| `session.resume` | Partial | `Host::resume`. Preserves a later explicit pause, validates unloaded history, and confirms only this Session’s original pending history/metadata saves without rerunning execution. Canonical receipt mapping pending. |
-| `session.cancel` | Partial | `Host::cancel_session`. Owner current-Turn cancellation; first claim owns optional inbox clear. |
-| `session.close` | Partial | `Host::close_session`. Reception fence, actual default-reference ordering and durable closed state; pending saves remain owner-tracked; memory children disappear only after actual cleanup. Canonical receipt mapping pending. |
+| `session.load` | Implemented typed entry | `Host::session_load` returns actual load/residency and pause facts; owned validation continues without unpausing. |
+| `session.unload` | Implemented typed entry | `Host::session_unload` preserves needed memory context and original failed ranges; queued inputs cause an explicit unload pause reason. |
+| `session.pause` | Implemented typed entry | `Host::session_pause` forms paused facts at acceptance without cancelling the current Turn. |
+| `session.resume` | Implemented typed entry | `Host::session_resume` forms actual loading/save/pause facts, preserves a later pause, and confirms only its own original saves before execution continues. |
+| `session.cancel` | Implemented typed entry | `Host::session_cancel` reports the actual selected current Turn or no active Turn; only the first cancellation claim clears its accepted inbox range. |
+| `session.close` | Implemented typed entry | `Host::session_close` returns its formed closing/closed receipt even if memory reclamation follows immediately; default and save ordering remain owned. Delegation scope integration remains open. |
 | `session.delete` | Not implemented | Required by SPEC; no completed business handler. |
 | `message.send` | Partial | `Host::send`. Real Session acceptance, actual queue and typed receipt; internal delegation source path not implemented. |
 | `message.get` | Partial | `Host::message`. Retained queued/bound/removed facts; does not infer execution from absence. |
@@ -38,7 +38,7 @@ This checkpoint describes Host code/test checkpoint `413916c` (published Runtime
 | `turn.get` | Partial | `Host::turn_info`. Real active/completed execution metadata with independent outcome and persistence. |
 | `turn.list` | Partial | `Host::turns`. Retained Session-owned Turn records in completion order. |
 | `turn.wait` | Partial | `Host::wait_turn`. Waits the selected owner result; shared client timeout/transport behavior not implemented. |
-| `turn.cancel` | Partial | `Host::cancel_turn`. Exact Turn claim, stale/repeated cancellation cannot clear later inputs; canonical receipt mapping pending. |
+| `turn.cancel` | Implemented typed entry | `Host::turn_cancel` retains the exact Turn cancellation claim/state/revision; stale or repeated calls never clear later inputs or retarget another Turn. |
 | `turn.result` | Partial | `Host::turn_result`. Actual native history/partial and primary/persistence faults while retained; complete durable query reconstruction pending. |
 | `turn.output.read` | Not implemented | Required by SPEC; no completed business handler. |
 | `model.list` | Not implemented | Required by SPEC; no completed business handler. |
@@ -72,8 +72,8 @@ This checkpoint describes Host code/test checkpoint `413916c` (published Runtime
 
 ## Cross-cutting open scope
 
-Canonical receipt/state mapping, request dispatch, client wait timeout ownership, Host execution configuration/reload, network authentication and key changes, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
+Remaining canonical command/state mapping, request dispatch, client wait timeout ownership, Host execution configuration/reload, network authentication and key changes, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
 
 The targeted review findings for memory-owner root leases, empty-queue resume validation, unsafe-child isolation, duplicate caller operation IDs, worker retirement, late stop wakeups and initialization fencing are fixed in the recorded commits. `a088b00` adds file-scoped metadata snapshot/publication coordination; `d73b161` limits close dependencies to actual current or pending default references. The complete workspace gate at `0b9b390` passes 198 unit/integration tests and 2 doctests against the published Runtime revision. The same gate passed from a fresh local Git clone with an empty per-checkout build target and no local patch. Targeted follow-up review found no new blocker in these fixes; its seven additional regressions are now permanent tests. This is not full lifecycle or release completion, and the requested external review is still pending.
 
-The integrated lifecycle checkpoint `413916c` passes the complete 240-test/2-doctest gate (core 100, protocol 47, provider 36, storage 57). A scoped independent review passed 12 additional public-API cases; the normal concurrent-close handoff it found was fixed before integration. There is no new unpublished-creation recovery entry or implicit repeated-shutdown retry. Dropping the final root Host after an already-failed save without controlled shutdown is an explicit uncontrolled-destruction limit, not a successful stopped state. Canonical controls and workspace reads are the next active work; they are not advertised here before implementation.
+The integrated lifecycle checkpoint `413916c` passes the complete 240-test/2-doctest gate (core 100, protocol 47, provider 36, storage 57). A scoped independent review passed 12 additional public-API cases; the normal concurrent-close handoff it found was fixed before integration. There is no new unpublished-creation recovery entry or implicit repeated-shutdown retry. Dropping the final root Host after an already-failed save without controlled shutdown is an explicit uncontrolled-destruction limit, not a successful stopped state. Canonical controls were then integrated through `b961f9f`; their complete gate passes 254 tests and 2 doctests. Independent review identified the lookup error conflation corrected in that commit; final correction review is pending. Typed/stdio adapters and workspace reads remain active work, not completed methods in this map.
