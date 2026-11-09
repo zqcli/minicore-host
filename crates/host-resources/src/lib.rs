@@ -409,3 +409,7 @@ fn missing(message: impl Into<String>) -> Fault {
     Fault::new(FaultKind::SessionResourceMissing, message)
 }
 
+#[cfg(test)]
+extern crate self as minicore_host_resources;
+#[cfg(test)]
+mod production_concurrency_tests;
