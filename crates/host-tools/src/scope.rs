@@ -546,25 +546,39 @@ impl Member {
 impl DelegationSink for Sink {
     fn handoff(&self, completion: DelegationCompletion) -> Result<(), Fault> {
         let member = self.0.upgrade().ok_or_else(closed)?;
-        let consumed = completion.inputs.iter().any(|range| {
-            range
-                .message_ids
-                .contains(&member.registration.task_message_id)
-        });
+        // The direct Session owner supplies the accepted delegated subset of
+        // each shared Turn. An appended steer may bind before the first task.
+        let bound = completion
+            .inputs
+            .iter()
+            .any(|range| !range.delegated_message_ids.is_empty());
         let discarded = completion
             .discarded_inputs
             .contains(&member.registration.task_message_id);
-        if !consumed && !discarded {
+        if !bound && !discarded {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,
                 "completion includes neither a real Turn input binding nor explicit removal of its task input",
             ));
         }
-        if (consumed && completion.results.is_empty())
-            || (!consumed && !completion.results.is_empty())
-            || completion.results.iter().any(|result| {
-                result.info.state != TurnState::Finished || result.info.outcome.is_none()
-            })
+        if (bound && completion.results.is_empty())
+            || (!bound && !completion.results.is_empty())
+            || completion.inputs.len() != completion.results.len()
+            || completion
+                .inputs
+                .iter()
+                .zip(&completion.results)
+                .any(|(range, result)| {
+                    range.turn.session_id != member.registration.child.session_id
+                        || result.info.session_id != range.turn.session_id
+                        || result.info.id != range.turn.turn_id
+                        || range
+                            .delegated_message_ids
+                            .iter()
+                            .any(|id| !range.message_ids.contains(id))
+                        || result.info.state != TurnState::Finished
+                        || result.info.outcome.is_none()
+                })
         {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,

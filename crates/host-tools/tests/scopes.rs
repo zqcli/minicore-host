@@ -76,6 +76,7 @@ async fn old_turn_without_task_input_cannot_deliver_a_result() {
         .unwrap();
     let mut old = completion(&relation.registration, TurnOutcome::Completed);
     old.inputs[0].message_ids = vec![MessageId::new().unwrap()];
+    old.inputs[0].delegated_message_ids.clear();
     assert!(relation.sink.handoff(old).is_err());
     assert!(port.state.notifications.lock().unwrap().is_empty());
     relation
@@ -592,4 +593,51 @@ async fn cancellation_after_real_input_binding_does_not_report_not_executed() {
     assert_eq!(text["status"], "ended");
     assert_eq!(text["results"][0]["outcome"], "cancelled");
     assert_eq!(text["discarded_inputs"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn completion_rejects_another_child_and_unbound_input_facts_before_handoff() {
+    let port = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let child = session();
+    scopes
+        .send(
+            port.port(),
+            origin(&port),
+            child.clone(),
+            input(),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+    let relation = port
+        .state
+        .relations
+        .lock()
+        .unwrap()
+        .get(&child)
+        .cloned()
+        .unwrap();
+    let mut wrong_child = completion(&relation.registration, TurnOutcome::Completed);
+    let another = SessionId::new().unwrap();
+    wrong_child.inputs[0].turn.session_id = another.clone();
+    wrong_child.results[0].info.session_id = another;
+    assert!(relation.sink.handoff(wrong_child).is_err());
+    let mut unbound = completion(&relation.registration, TurnOutcome::Completed);
+    unbound.inputs[0].delegated_message_ids = vec![MessageId::new().unwrap()];
+    assert!(relation.sink.handoff(unbound).is_err());
+    assert!(port.state.notifications.lock().unwrap().is_empty());
+    relation
+        .sink
+        .handoff(completion(&relation.registration, TurnOutcome::Completed))
+        .unwrap();
+    released(&port.state, 1).await;
+    assert_eq!(port.state.notifications.lock().unwrap().len(), 1);
+    assert!(
+        relation
+            .sink
+            .handoff(completion(&relation.registration, TurnOutcome::Completed))
+            .is_err()
+    );
 }

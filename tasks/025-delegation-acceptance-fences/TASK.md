@@ -29,4 +29,12 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shar
 - Two additional core gates cover appended steer in T0 before the first follow-up in T1, and explicit removal of that first follow-up after the steer was consumed. Full shared outputs, input order, and a single notification remain intact.
 - Six permanent core gates and all four archived independent probes pass. The close-probe observation adjustment above is recorded rather than misrepresented as an unchanged probe passing.
 
-The real agent-tool sink adaptation/regression, complete workspace gates and unique test count are pending. Independent review is a separate step and is not claimed here.
+## Tool sink
+
+- Commit `7c1facb0d7a37bdea336f3290f590b7d84a89b81` contains the shared-range qualification and typed bridge.
+- A new test through actual Host, Runtime, `AgentToolFactory`, `CoreTurnPort`, ScopeManager and production Sink reproduced the first-follow-up-removal variant: M2 executes in T0 with a real `agent.inspect` ToolResult, M1 is explicitly removed, and the old sink rejects its real result. The other three tool variants passed before this adaptation.
+- The sink now uses the owner-confirmed delegated input subset, validates matching child/Turn/result ranges and settled outcomes, and retains its one-handoff fence. It does not copy the accepted-message authority. Pure explicit removal still reports `not_executed` without fabricating a Turn.
+- All four new real-tool cases pass after the sink fix: M2/T0 followed by M1/T1, first-input removal, failed T0 with retained inbox, and cancelled T0 with retained inbox. They assert real input order, ToolResults, original launch ToolResult unchanged, one notification, original parent, ordinary child retention, and explicit memory reclamation. Only the model is a gated test fixture.
+- Existing no-delegated-input, cross-scope, discard-only and one-handoff tests remain in the scope suite; an additional explicit owner-port fixture checks mismatched child and input-range facts before a valid single handoff.
+
+Complete workspace gates and unique test count are pending. Independent review is a separate step and is not claimed here.
