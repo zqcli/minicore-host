@@ -374,3 +374,131 @@ async fn query_identity_and_values_match_over_real_pipes_for_readonly_and_replac
     reader.close();
     server.await.unwrap().unwrap();
 }
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_loops() {
+    let (host, resources) = fixture();
+    let (client, server) = stdio_pipes(host.clone()).await;
+    let session = create(&client).await;
+    let mut outputs = client
+        .subscribe(
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: session.target().agent_id.clone(),
+                    session_id: session.target().session_id.clone(),
+                },
+                categories: [EventCategory::Output].into_iter().collect(),
+            },
+            options(2000),
+        )
+        .await
+        .unwrap();
+    session
+        .send(input("first complete Loop"), options(2000))
+        .await
+        .unwrap();
+    resources.model.started.acquire().await.unwrap().forget();
+    let turn = running(&session).await;
+    let identity = session
+        .turn(turn.clone(), options(2000))
+        .await
+        .unwrap()
+        .source;
+    let mut continuation = input("next internal Loop, same Turn");
+    continuation.mode = MessageMode::Steer;
+    session.send(continuation, options(2000)).await.unwrap();
+    resources.model.finish.add_permits(1);
+    resources.model.started.acquire().await.unwrap().forget();
+    assert_eq!(running(&session).await, turn);
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let minicore_host_core::ObservationNotification::Event(push) =
+                outputs.recv().await.unwrap().unwrap()
+                && let minicore_host_core::ObservationEvent::Activity(
+                    minicore_host_core::ActivityEvent::ModelOutput { source, .. },
+                ) = push.event
+                && source.response_index == 1
+            {
+                assert_eq!(source.turn, identity);
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    session
+        .cancel_turn(
+            TurnCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                turn_id: turn.clone(),
+                keep_inbox: false,
+            },
+            options(2000),
+        )
+        .await
+        .unwrap();
+    let waited = session
+        .wait_turn(turn.clone(), options(2000))
+        .await
+        .unwrap();
+    assert_eq!(waited.source, identity);
+    assert_eq!(waited.data.info.outcome, Some(TurnOutcome::Cancelled));
+    assert_eq!(waited.data.partials.len(), 1);
+    assert_eq!(waited.data.partials[0].response_index, 1);
+    assert_eq!(
+        waited
+            .data
+            .history
+            .iter()
+            .filter_map(|item| item.response_index)
+            .collect::<Vec<_>>(),
+        [0]
+    );
+    let retained_reader = host.connect().unwrap();
+    let native = host
+        .turn_result(&retained_reader.caller(), session.target(), &turn)
+        .unwrap();
+    assert_eq!(native.partials[0].partial.request_index, 0);
+    let loops: Vec<_> = native
+        .history
+        .iter()
+        .filter_map(|item| {
+            if let minicore_runtime::HistoryItem::User(user) = item {
+                Some(user.loop_id)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(loops.len(), 2);
+    assert_ne!(loops[0], loops[1]);
+    let (mut peer, raw_server) = raw(host);
+    peer.initialize().await;
+    for method in ["turn.result", "turn.wait"] {
+        let response = peer
+            .request(
+                json!(method),
+                method,
+                json!({"target":session.target(),"turn_id":turn}),
+            )
+            .await;
+        let result = response.get("result").expect("retained real result");
+        assert_eq!(result, &value(&waited));
+        assert_no_runtime_keys(result);
+    }
+    client
+        .unsubscribe(
+            UnsubscribeRequest {
+                subscription_id: outputs.result().subscription_id.clone(),
+            },
+            options(2000),
+        )
+        .await
+        .unwrap();
+    drop(outputs);
+    drop(peer);
+    raw_server.await.unwrap().unwrap();
+    client.close();
+    server.await.unwrap().unwrap();
+}

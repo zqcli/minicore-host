@@ -266,14 +266,15 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
     assert!(replacement.initial_info().can_operate);
     assert_eq!(replacement.initial_info().control.revision, 3);
     let session = replacement.session(serde_json::from_value(address).unwrap());
-    let turns = session.turns(options()).await.unwrap();
+    let turns = session.turns(options()).await.unwrap().data;
     assert_eq!(turns.len(), 1);
     http.finish_response();
     assert_eq!(
         session
-            .wait_turn(turns[0].id.clone(), options())
+            .wait_turn(turns[0].turn_id.clone(), options())
             .await
             .unwrap()
+            .data
             .info
             .outcome,
         Some(TurnOutcome::Completed)

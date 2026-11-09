@@ -75,3 +75,17 @@ Independent target, Rust 1.90.0, locked dependencies, jobs=2, no incremental bui
   wrong-target failures and actual memory reclamation.
 - Full transport suite and final fixed-source aggregate gate are pending.
   Independent review and parent integration remain separate.
+
+## First fixed-source aggregate attempt
+
+Implementation `daf24b2` and transport regressions `63a5dbb` are separately
+reviewable commits after the root bootstrap. The whole transport test suite
+passed (`all-transport.log`). Aggregate `./scripts/check.sh` at exact
+`63a5dbb22249fb96e4e4da1c656e267cfbdfcba3` stopped in Clippy compilation:
+`crates/host-app/tests/process.rs` still used three old typed query field paths.
+The failure is preserved in `full-gate-63a5dbb.log`; later aggregate stages did
+not run. The following test-only correction migrates those paths without
+changing the real subprocess/TLS scenario or assertions. It also adds direct
+raw stdio result/wait assertions for a real same-Turn second-Loop partial, so
+Runtime metadata exclusion is checked on the actual wire as well as core
+serialization. The aggregate will be rerun only after this concrete correction.
