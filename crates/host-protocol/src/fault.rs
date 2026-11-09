@@ -58,6 +58,8 @@ fault_registry! {
     HostOwnershipMismatch = 1003, "HOST_OWNERSHIP_MISMATCH", [Host], None, false;
     HostStorageUnavailable = 1101, "HOST_STORAGE_UNAVAILABLE", [Host, HostStorage], None, false;
     HostAgentNotFound = 1201, "HOST_AGENT_NOT_FOUND", [Host, HostLookup], None, false;
+    HostReceiptNotFound = 1202, "HOST_RECEIPT_NOT_FOUND", [Host, HostLookup], None, false;
+    HostReceiptAmbiguous = 1203, "HOST_RECEIPT_AMBIGUOUS", [Host, HostLookup], None, false;
     HostLifecycleUnavailable = 1301, "HOST_LIFECYCLE_UNAVAILABLE", [Host], None, false;
     HostMethodUnavailable = 1401, "HOST_METHOD_UNAVAILABLE", [Host], None, false;
     HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host], None, false;

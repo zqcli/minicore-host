@@ -143,13 +143,13 @@ impl Host {
         let mut receipts = self.receipts(caller, operation)?.into_iter();
         let receipt = receipts.next().ok_or_else(|| {
             Fault::new(
-                FaultKind::HostMethodUnavailable,
+                FaultKind::HostReceiptNotFound,
                 "no owner retains facts for this operation",
             )
         })?;
         if receipts.next().is_some() {
             return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
+                FaultKind::HostReceiptAmbiguous,
                 "operation_id matches multiple invocations; use receipts to inspect their separate facts",
             ));
         }

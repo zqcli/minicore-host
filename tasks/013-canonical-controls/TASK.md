@@ -62,3 +62,26 @@ One earlier full gate passed 252+2 tests before adding the automatic-history-loa
 Ready for independent review and parent integration of the local commits. The canonical signatures and protocol variants were sent directly to the isolated typed/stdio adapter worker. No root manifests, README, PROJECT.md, other documentation, provider/storage implementation, Runtime pin, or TUI changed. No remote push or main merge was authorized or performed.
 
 Receipt lookup reports only retained owner facts. Reclaimed Session controls can become unavailable immediately after a successful close; the returned close receipt remains valid. Ambiguous reused IDs return an explicit lookup error; `Host::receipts` exposes each retained invocation separately. These are correlation queries, not retry or replay mechanisms. Deferred recovery architectures remain out of scope.
+
+## Integrated lookup-fault correction
+
+Parent integration maps `881624b` → `19008cb`, `f10d859` → `7197366`,
+`8a68edb` → `12efa6a`, and `fcf3580` → `deb14d8`.
+Independent fixed-snapshot review passed all 160 core/protocol cases but confirmed
+P2: missing retained receipts and ambiguous reused operation IDs both used 1401,
+the same Fault as an unimplemented method. SPEC requires type/code, not prose,
+to distinguish handling semantics.
+
+The correction registers two narrow HostLookup leaves: 1202
+`HOST_RECEIPT_NOT_FOUND` and 1203 `HOST_RECEIPT_AMBIGUOUS`. Canonical lookup and the
+existing creation-only helpers share those meanings; 1401 retains its method
+availability meaning. No new error framework, retry behavior or object retention
+is added. Existing collision/reclamation checks now assert exact Fault kinds;
+a new real-owner regression compares missing, one match, multiple independent
+matches and genuinely unsupported method behavior. The protocol registry's
+round-trip/uniqueness checks include the two leaves.
+
+`cargo test -p minicore-host-core -p minicore-host-protocol --locked` passed 161
+tests (113 core +48 protocol) after the correction; formatting and diff checks
+also passed. The complete integrated gate and fixed correction review follow
+separately; this focused result is not yet a full-gate claim.

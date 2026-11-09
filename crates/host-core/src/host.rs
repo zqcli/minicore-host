@@ -277,13 +277,13 @@ impl Host {
         let mut receipts = self.creation_receipts(caller, operation_id)?.into_iter();
         let receipt = receipts.next().ok_or_else(|| {
             Fault::new(
-                FaultKind::HostMethodUnavailable,
+                FaultKind::HostReceiptNotFound,
                 "no retained creation receipt for this operation",
             )
         })?;
         if receipts.next().is_some() {
             return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
+                FaultKind::HostReceiptAmbiguous,
                 "operation_id matches multiple invocations; use creation_receipts",
             ));
         }

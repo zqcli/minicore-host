@@ -35,13 +35,13 @@ impl AgentOwner {
         let mut receipts = self.creation_receipts(caller, operation)?.into_iter();
         let receipt = receipts.next().ok_or_else(|| {
             Fault::new(
-                FaultKind::AgentSessionNotFound,
+                FaultKind::HostReceiptNotFound,
                 "no retained Session creation receipt for this operation",
             )
         })?;
         if receipts.next().is_some() {
             return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
+                FaultKind::HostReceiptAmbiguous,
                 "operation_id matches multiple invocations; use session_creation_receipts",
             ));
         }

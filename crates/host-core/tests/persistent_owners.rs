@@ -1781,7 +1781,10 @@ async fn review_create_reused_operation_does_not_mix_owner_or_message() {
     assert_eq!(retained.len(), 2);
     assert!(retained.contains(&first_receipt));
     assert!(retained.contains(&second_receipt));
-    assert!(host.receipt(&caller, &operation).is_err());
+    assert_eq!(
+        host.receipt(&caller, &operation).unwrap_err().kind(),
+        FaultKind::HostReceiptAmbiguous
+    );
 
     assert_ne!(first_agent, second_receipt.agent_id.clone().unwrap());
     assert_eq!(
@@ -2134,9 +2137,11 @@ async fn review_create_reused_session_operation_keeps_actual_message() {
     assert_eq!(retained.len(), 2);
     assert!(retained.contains(&first_receipt));
     assert!(retained.contains(&second_receipt));
-    assert!(
+    assert_eq!(
         host.session_creation_receipt(&caller, &target, &operation)
-            .is_err()
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostReceiptAmbiguous
     );
 
     assert_ne!(first_receipt.session_id, second_receipt.session_id);
@@ -3323,7 +3328,10 @@ async fn canonical_creation_lookup_excludes_nested_steps_but_keeps_colliding_inv
         .await
         .unwrap();
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
-    assert!(host.receipt_get(&caller, &operation).is_err());
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap_err().kind(),
+        FaultKind::HostReceiptAmbiguous
+    );
     assert!(
         host.receipts(&caller, &operation)
             .unwrap()

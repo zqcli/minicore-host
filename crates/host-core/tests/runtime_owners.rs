@@ -1245,7 +1245,12 @@ async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
             Receipt::SessionControl(third),
         ]
     );
-    assert!(host.receipt_get(&caller, &request.operation_id).is_err());
+    assert_eq!(
+        host.receipt_get(&caller, &request.operation_id)
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostReceiptAmbiguous
+    );
     let agent_ref = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
         agent_id: target.agent_id.clone(),
@@ -1264,7 +1269,12 @@ async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
         host.receipts(&caller, &request.operation_id).unwrap().len(),
         4
     );
-    assert!(host.receipt_get(&caller, &request.operation_id).is_err());
+    assert_eq!(
+        host.receipt_get(&caller, &request.operation_id)
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostReceiptAmbiguous
+    );
 }
 
 #[tokio::test]
@@ -1510,7 +1520,12 @@ async fn canonical_close_returns_accepted_facts_even_when_memory_is_reclaimed() 
     assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closed);
     assert_eq!(receipt.session_id, target.session_id);
     assert!(host.session_info(&caller, &target).is_err());
-    assert!(host.receipt_get(&caller, &receipt.operation_id).is_err());
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id)
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostReceiptNotFound
+    );
     assert!(host.agents(&caller).unwrap().is_empty());
 }
 
@@ -1645,7 +1660,10 @@ async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
         host.receipts(&caller, &operation).unwrap(),
         [Receipt::HostShutdown(first), Receipt::HostShutdown(second)]
     );
-    assert!(host.receipt_get(&caller, &operation).is_err());
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap_err().kind(),
+        FaultKind::HostReceiptAmbiguous
+    );
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while host.info(&caller).unwrap().lifecycle != HostLifecycle::Stopped {
             tokio::task::yield_now().await;
@@ -1654,4 +1672,42 @@ async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
     .await
     .unwrap();
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
+}
+
+#[test]
+fn canonical_receipt_lookup_distinguishes_absence_ambiguity_and_unavailable_method() {
+    let (host, connection, target, _) = setup(Vec::new());
+    let caller = connection.caller();
+    let operation = OperationId::new().unwrap();
+    let agent = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: target.agent_id.clone(),
+    };
+    for missing in [
+        host.receipt_get(&caller, &operation).unwrap_err(),
+        host.receipt(&caller, &operation).unwrap_err(),
+        host.session_creation_receipt(&caller, &agent, &operation)
+            .unwrap_err(),
+    ] {
+        assert_eq!(missing.kind(), FaultKind::HostReceiptNotFound);
+        assert_eq!(missing.code(), 1202);
+    }
+    let request = SessionControlRequest {
+        operation_id: operation.clone(),
+    };
+    let first = host
+        .session_pause(&caller, &target, request.clone())
+        .unwrap();
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::SessionControl(first)
+    );
+    host.session_pause(&caller, &target, request).unwrap();
+    let ambiguous = host.receipt_get(&caller, &operation).unwrap_err();
+    assert_eq!(ambiguous.kind(), FaultKind::HostReceiptAmbiguous);
+    assert_eq!(ambiguous.code(), 1203);
+    assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
+    let unsupported = require_implemented(Method::HostReceiptGet, &BTreeSet::new()).unwrap_err();
+    assert_eq!(unsupported.kind(), FaultKind::HostMethodUnavailable);
+    assert_eq!(unsupported.code(), 1401);
 }

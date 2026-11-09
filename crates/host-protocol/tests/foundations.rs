@@ -220,6 +220,10 @@ fn every_fault_type_and_code_has_one_registry_mapping() {
         assert_eq!(serde_json::from_value::<Fault>(value).unwrap(), fault);
     }
     assert_eq!(FaultKind::SessionLifecycleClosed.code(), 3101);
+    assert_eq!(FaultKind::HostReceiptNotFound.code(), 1202);
+    assert_eq!(FaultKind::HostReceiptAmbiguous.code(), 1203);
+    assert!(FaultKind::HostReceiptNotFound.is_a(FaultClass::HostLookup));
+    assert!(FaultKind::HostReceiptAmbiguous.is_a(FaultClass::HostLookup));
     assert_eq!(FaultKind::SessionHistoryWriteFailed.code(), 3301);
     assert!(FaultKind::TurnModelUpstreamRateLimited.is_a(FaultClass::TurnModelUpstream));
 }
