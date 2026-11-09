@@ -103,6 +103,7 @@ impl RecoveryFixture {
                 access,
                 resources.clone(),
                 enabled,
+                false,
             )
         } else {
             SessionController::new(

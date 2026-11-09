@@ -38,6 +38,7 @@ impl AgentOwner {
                         Arc::clone(&owner.access),
                         owner.resources_owned()?,
                         Arc::clone(&owner.enabled),
+                        true, // Old edit snapshots were not durable.
                     )
                     .notify_parent_on_change(Arc::clone(&owner.changed));
                     owner

@@ -270,6 +270,7 @@ impl AgentOwner {
                 Arc::clone(&self.access),
                 self.resources_owned()?,
                 Arc::clone(&self.enabled),
+                false, // This Session was just created, not reopened.
             )
         } else {
             SessionController::new(

@@ -11,6 +11,7 @@ impl SessionController {
         access: Arc<ConnectionRegistry>,
         resources: Arc<dyn ResourceResolver>,
         enabled: Arc<AtomicBool>,
+        reopened: bool,
     ) -> Arc<Self> {
         let backend: Arc<dyn HistoryBackend> = Arc::new(JournalHistory::new(store.clone()));
         let mut owner = Self::new(
@@ -39,7 +40,7 @@ impl SessionController {
         state.record_base = Some(record.clone());
         // Edit snapshots are retained observations, not independently durable
         // records. A reopened Session must not claim an empty complete list.
-        state.edits_complete = false;
+        state.edits_complete = !reopened;
         state.info.title = record.data.title.clone();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
