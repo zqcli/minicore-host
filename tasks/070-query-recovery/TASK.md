@@ -93,3 +93,45 @@ locked dependencies, jobs=2, debug info disabled and no incremental builds.
 - Full-workspace gate, independent review, TUI and live-provider validation have
   not been claimed by this task. The first two remain coordinator work; the
   latter two are outside this recovery task's scope.
+
+## Follow-up: migrate remaining binary query fixtures
+
+Base: `c872e1d4d039684fa124d8b5a28fab8efc4ab11c`, worktree
+`minicore-host-query-fixtures`, branch `task/070-query-fixture-migration`.
+Task067 identified an existing fixture that still treated public `turn.list`
+as the pre-projection array. This migration addresses the same missing test
+adaptation scope as original source step16; it does not claim to recover that
+old commit's bytes.
+
+Commit `a26498e28fd4984c7b7cdb7ca7bb8ed1847b2234` changes only existing tests:
+`tool_support/mod.rs`, `tool_support/cleanup.rs`, `ordinary_tools.rs`, and
+`process.rs`. Raw `turn.list` uses `data` and `turn_id`; raw `turn.wait` facts
+use `data.info`. The restart-empty-list assertion checks the actual `data`
+array. The already-correct typed result/wait paths remain untouched. There
+were no raw `turn.get`, `turn.result`, or `message.get` fixture calls to adapt.
+
+All behavior assertions, real process cleanup, subscriptions and teardown stay
+intact. No test was removed, no process wait was bypassed, and no production,
+manifest, lockfile or specification changed. Task067's new
+`credential_environment.rs` is separately owned and is not included in this
+base's existing-test count.
+
+Evidence: `/workspace/shared/task070-query-validation/fixture-migration/`.
+The same Rust 1.90.0, locked-dependency environment and task070-owned target
+were used; exact environment is retained in its `env.sh`.
+
+- Before edits, `cargo test -p minicore-host --test ordinary_tools binary_tools_produce_exact_files_native_results_and_canonical_sources --locked -- --exact --nocapture`
+  reproduced a real binary-fixture failure at `tool_support/mod.rs:263`:
+  top-level `as_array().unwrap()` saw the correct query object, not an array
+  (`red-only-turn.log`). This was a stale test shape, not a production failure.
+- `cargo test -p minicore-host --all-targets --locked`: passed all 17 existing
+  cases after migration (`all-host-app-tests-attempt1.log`), comprising four
+  ordinary-tool/cleanup tests and thirteen process tests. No separate behavior
+  failure occurred after the mechanical shape correction.
+- `cargo test -p minicore-host --all-targets --locked -- --list`: confirmed
+  17 unique cases (`host-app-test-list.log`).
+- `cargo clippy -p minicore-host --all-targets --locked -- -D warnings`: passed
+  (`host-app-clippy.log`). Whitespace, formatting, `git diff --check`, and
+  protected-source diff checks passed.
+- Whole-workspace validation, independent review, and publication remain with
+  the coordinator. No remote write was performed by this worker.
