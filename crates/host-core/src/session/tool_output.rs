@@ -76,6 +76,64 @@ impl ToolOutputLease {
     pub fn source(&self) -> &ToolCallIdentity {
         &self.source
     }
+    /// Record an actual mutation observation under this original invocation.
+    /// This retained Session journal is not a new durable history database.
+    pub fn record_edit(
+        &self,
+        path: String,
+        before: minicore_host_workspace::FileSnapshot,
+        after: minicore_host_workspace::FileSnapshot,
+        outcome: minicore_host_workspace::EditOutcome,
+    ) -> Result<(), Fault> {
+        let session = self
+            .sink
+            .binding
+            .session
+            .upgrade()
+            .ok_or_else(inactive_output)?;
+        session.record_tool_edit(self, path, before, after, outcome)
+    }
+    /// Mark a real binary stream without replacing its bytes with fake text.
+    /// The already-published UTF-8 prefix remains unchanged and range-readable.
+    pub fn mark_non_utf8(&self, channel: &str) -> bool {
+        let Some(session) = self.sink.binding.session.upgrade() else {
+            return false;
+        };
+        let mut state = session.state.lock().expect("Session mutex poisoned");
+        if channel.is_empty() || !self.admitted(&state) {
+            return false;
+        }
+        state
+            .output
+            .get_mut(&self.source.turn.turn_id)
+            .unwrap()
+            .tools
+            .get_mut(&self.source.tool_call_id)
+            .unwrap()
+            .output
+            .entry(channel.into())
+            .or_default()
+            .non_utf8 = true;
+        true
+    }
+    pub(super) fn admitted(&self, state: &SessionState) -> bool {
+        self.sink.live.load(Ordering::SeqCst)
+            && !state.reclaimed
+            && state.active.as_ref().is_some_and(|active| {
+                active.info.id == self.source.turn.turn_id
+                    && Some(&active.info.load_id) == self.source.turn.load_id.as_ref()
+            })
+            && state
+                .output
+                .get(&self.source.turn.turn_id)
+                .and_then(|turn| turn.tools.get(&self.source.tool_call_id))
+                .is_some_and(|record| {
+                    record.data.state.response_index == self.response_index
+                        && record.data.state.name == self.sink.invocation.tool_name.as_str()
+                        && record.data.arguments == self.sink.invocation.arguments
+                })
+    }
+
     pub fn emit(&self, channel: &str, text: &str) -> bool {
         if channel.is_empty() || !self.sink.live.load(Ordering::SeqCst) {
             return false;
@@ -214,6 +272,9 @@ impl SessionController {
             return false;
         }
         let body = record.output.entry(channel.into()).or_default();
+        if body.non_utf8 {
+            return false;
+        }
         let start = body.live.len() as u64;
         body.live.push_str(text);
         self.access

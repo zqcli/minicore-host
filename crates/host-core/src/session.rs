@@ -14,6 +14,7 @@ mod interaction;
 pub use interaction::{ApprovalAnswer, InteractionAnswerData};
 mod metadata;
 mod observation;
+mod tool_edits;
 mod tool_output;
 pub use tool_output::{ToolOutputBinding, ToolOutputLease, ToolOutputSink};
 mod tool_cleanup;
@@ -275,6 +276,8 @@ struct SessionState {
     // None until loaded; retained on unload and released with the Session body.
     readable_history: Option<Vec<HistoryItemData>>,
     output: BTreeMap<TurnId, observation::TurnObservation>,
+    edits: minicore_host_workspace::EditJournal,
+    edits_complete: bool,
     closed_published: bool,
     published: bool,
     history_loaded: bool,
@@ -368,6 +371,7 @@ impl SessionController {
             completed: BTreeMap::new(),
             controls: BTreeMap::new(),
             completion_order: Vec::new(),
+            edits_complete: history.is_empty(),
             history_position: history.len() as u64,
             history,
             projection: None,
@@ -377,6 +381,7 @@ impl SessionController {
             finished_manual_compactions: BTreeMap::new(),
             readable_history,
             output: BTreeMap::new(),
+            edits: minicore_host_workspace::EditJournal::new(id.clone()),
             closed_published: false,
             published: false,
             history_loaded: backend.mode() == StorageMode::Memory,

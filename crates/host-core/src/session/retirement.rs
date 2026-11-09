@@ -258,6 +258,10 @@ impl SessionController {
             state.finished_manual_compactions.clear();
             let retired = (
                 std::mem::take(&mut state.output),
+                std::mem::replace(
+                    &mut state.edits,
+                    minicore_host_workspace::EditJournal::new(self.id.clone()),
+                ),
                 std::mem::take(&mut state.history),
                 state.readable_history.take(),
                 std::mem::take(&mut state.messages),

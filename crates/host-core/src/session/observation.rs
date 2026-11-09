@@ -33,6 +33,9 @@ impl TurnObservation {
 #[derive(Default)]
 pub(super) struct Body {
     pub(super) live: String,
+    // A binary channel has only a real contiguous UTF-8 prefix. Never imply
+    // that a request crossing its end returned the complete process stream.
+    pub(super) non_utf8: bool,
     complete: Option<String>,
 }
 impl Body {
@@ -666,6 +669,12 @@ impl SessionController {
                     "output channel is not retained",
                 )
             })?;
+            if body.non_utf8 && request.end > body.text().len() as u64 {
+                return Err(Fault::new(
+                    FaultKind::SessionOutputRangeInvalid,
+                    "tool channel contains non-UTF-8 bytes; only its observed UTF-8 prefix is text-readable, consult the native ToolResult for byte output",
+                ));
+            }
             read_range(body.text(), request)
         })
     }
