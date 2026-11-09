@@ -8,12 +8,14 @@ The foundation contains strict contracts, Linux durable storage, a production HT
 
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed.
 
-**Current prerequisite:** the independently committed Runtime extension is still unpublished. The locally verified build uses an ignored Cargo patch to the Runtime worktree at the exact commit in `PROJECT.md`. The upstream revision alone does not supply the required history/partial APIs. Remote standalone reproducibility remains blocked until that extension is reviewed, approved for publication and pinned here. No fallback fake Runtime is provided.
+**Current prerequisite:** the independently committed Runtime extension is still unpublished. The locally verified build uses an ignored Cargo patch to the Runtime worktree at the exact commit in `PROJECT.md`. The upstream revision alone does not supply the required history/partial APIs. The extension has been reviewed, but publication is blocked by the available authentication/author controls. Remote standalone reproducibility remains blocked until the permitted publication succeeds and its exact remote revision is pinned here. No fallback fake Runtime is provided.
 
 ## Components
 
 - [Protocol contracts](crates/host-protocol/README.md)
 - [Provider adapter](crates/host-provider/README.md)
+- [Storage schema](crates/host-storage/README.md)
+- [Public method implementation map](docs/method-coverage.md)
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
 - [Controller and integration evidence](tasks/005-controllers/TASK.md)
 

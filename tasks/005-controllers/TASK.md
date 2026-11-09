@@ -50,3 +50,5 @@ Independent targeted review re-ran the final non-Tokio regression and confirmed 
 - `cargo test -p minicore-host-core --test runtime_owners --locked`: 16 passed.
 - Repeated the same 16-test suite 25 times: every run passed. This is repeated scheduling coverage, not 400 distinct cases or a capacity claim.
 - `cargo clippy -p minicore-host-core --all-targets --locked -- -D warnings` and formatting passed. No production source changes were needed.
+
+- Additional release-profile check at Host `4b8de50`: `cargo test -p minicore-host-core --release --test runtime_owners --locked` passed all 16 cases. This is not a performance benchmark.
