@@ -4,10 +4,40 @@ mod wss_common;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
+use minicore_host_transport::{HostClient, serve_stdio};
 use minicore_runtime::model::{ModelEvent, ModelFinishReason};
 use observation_common::*;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+
+struct PipeServer {
+    requests: tokio::task::JoinHandle<std::io::Result<u64>>,
+    server: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+impl PipeServer {
+    async fn close(self, client: &HostClient) {
+        // All calls have settled. Close only the request pipe first, keeping
+        // the SDK's response reader alive until the real server observes EOF.
+        self.requests.abort();
+        assert!(self.requests.await.unwrap_err().is_cancelled());
+        self.server.await.unwrap().unwrap();
+        client.close();
+    }
+}
+async fn stdio_with_request_half_close(host: Arc<Host>) -> (HostClient, PipeServer) {
+    let (mut to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
+    let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+    // This test-only relay copies request bytes unchanged to a real OS pipe.
+    // Its lifetime lets teardown close that write end without closing reads.
+    let (writer, mut requests) = tokio::io::duplex(4096);
+    let requests =
+        tokio::spawn(async move { tokio::io::copy(&mut requests, &mut to_server).await });
+    let server = tokio::spawn(serve_stdio(host, input, output));
+    let client = HostClient::stdio(from_server, writer, options(2000))
+        .await
+        .unwrap();
+    (client, PipeServer { requests, server })
+}
 
 struct GatedFileTool {
     spec: minicore_runtime::tools::ToolSpec,
@@ -217,7 +247,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         )
         .await
         .unwrap();
-        let (client, task) = stdio_pipes(host.clone()).await;
+        let (client, server) = stdio_with_request_half_close(host.clone()).await;
         let mut create = create_request();
         create.mode = StorageMode::Persistent;
         let created = client.create_agent(create, options(2000)).await.unwrap();
@@ -291,9 +321,8 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         })
         .await
         .unwrap();
+        server.close(&client).await;
         drop(observation);
-        client.close();
-        task.await.unwrap().unwrap();
         drop(session);
         drop(client);
         drop(host);
@@ -306,7 +335,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         )
         .await
         .unwrap();
-        let (client, task) = stdio_pipes(reopened.clone()).await;
+        let (client, server) = stdio_with_request_half_close(reopened.clone()).await;
         let session = client.session(target);
         let before = session.state(options(2000)).await.unwrap();
         assert_eq!(before.data.residency, Residency::Unloaded);
@@ -349,8 +378,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
             started.try_recv(),
             Err(mpsc::error::TryRecvError::Empty)
         ));
-        client.close();
-        task.await.unwrap().unwrap();
+        server.close(&client).await;
         drop(session);
         drop(client);
         drop(reopened);

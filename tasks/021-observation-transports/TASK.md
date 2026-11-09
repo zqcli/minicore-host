@@ -231,3 +231,51 @@ Logs: `/workspace/shared/event-deadline-red.log` and
 `/workspace/shared/event-deadline-green.log`. Full aggregate validation follows
 the independent pipe teardown correction. These are scripted-model owner tests,
 not live-provider or TUI validation. No remote push was performed.
+
+## Review correction: deterministic pipe teardown
+
+The resource stage reproduced `BrokenPipe` at the persistent-history test's
+server join. This was a test teardown assumption, not a storage or owner failure:
+dropping its observation queued a real `events.unsubscribe` request, immediately
+followed by `client.close()` closing both directions. The server could write the
+unsubscribe response after its reader was gone. Terminal business state does
+not promise a drained transport, and stdio correctly reports that OS error.
+
+The persistent observed/unobserved comparison now closes only the request pipe
+first, retains the actual response reader through the server's EOF exit, then
+closes the SDK and drops the observation. A test-only byte-copy relay permits
+this half-close; every business request and response still crosses real OS
+pipes. All saved-history equality, cold reads, unloaded state, missing old Turn
+and no-new-Runtime assertions are unchanged. Production shutdown semantics and
+I/O error handling are unchanged.
+
+The separate permanent gated regression captures the actual Host unsubscribe
+response with `ended=true` before its write. With the request pipe kept open,
+closing the response reader first deterministically yields exactly `BrokenPipe`.
+Closing the request pipe first while retaining the reader deterministically
+returns `Ok`. Both paths then finish a previously accepted real Runtime Turn
+and read both its complete body and the previous Turn's history. This does not
+swallow arbitrary errors, abort the server, retry until green, or fabricate a
+peer response. The gate delays only a genuine server write.
+
+Final source includes deadline correction
+`46bd4c9a916eb7c394673b63f2c89ddec9d6fc4d` on the published Runtime pin from
+bootstrap `87ed77a6c81518609e71e54d67c4713bec52ed34`. No path patch is used.
+The parent's integration already contains the dependency pin and separately
+owned history/resource fixes; only the two review-fix commits should be replayed.
+
+Commands use the environment above, without `--config` overrides:
+
+- `cargo fmt --all --check`: passed.
+- `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --locked --offline`: passed.
+- `cargo test --workspace --all-targets --locked --offline -- --list`: **392 unique tests**.
+- `cargo test --workspace --doc --locked --offline`: **3 doctests passed**.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked --offline`: passed.
+- Focused `observation_tools` (2) and `observation_shutdown` (1): passed.
+
+Aggregate logs: `/workspace/shared/event-review-final-{clippy,workspace,list,doctests,rustdoc}.log`.
+Deterministic pipe log: `/workspace/shared/event-pipe-teardown.log`.
+The count is this worker's branch, not the parent's later integrated suite.
+Independent verification and parent integration remain pending. No remote push
+or unrelated shared history DTO/Host resource modification was performed.

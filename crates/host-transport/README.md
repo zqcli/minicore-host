@@ -64,6 +64,12 @@ connection is required to acquire the freed right. Dispatch retains the original
 read/write error or dropping the server future closes its `ConnectionHandle`.
 Accepted owner work remains independent of those transport tasks.
 
+`close()` ends both client directions; it is not an output-drain handshake.
+If the peer closes its read end while a response or notification is being
+written, `serve_stdio` can return `BrokenPipe`. An embedding that needs a clean
+stdio server exit should finish its calls, close the request pipe, await the
+server, then release the response reader. This does not add an observation ACK.
+
 Requests dispatch concurrently. A slow create or `turn.wait` cannot serialize
 unrelated controls/queries behind it. One writer owns each output stream; no
 business-state lock is held while writing. Per-connection bookkeeping contains
