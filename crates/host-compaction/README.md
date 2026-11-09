@@ -77,13 +77,15 @@ large indivisible input or a nonreducing summary yields no replacement, rather
 than deleting source data to force success. Model errors retain their original
 Runtime details. The Session owner decides how to report them.
 
-Manual/automatic Session wiring, phases and operation receipts, write/cancel
-arbitration, resource binding and durable coverage are not implemented here.
-Current storage `HistoryEntry::Summary` contains text only: appending it cannot
-record which earlier records it supersedes. A storage/Session-owner integration
-must represent the committed coverage before durable compaction can be enabled.
-No Runtime or storage schema is modified by this crate.
+This crate remains the pure candidate engine. Integrated Session ownership,
+manual/automatic phases, operation receipts and cancellation live in
+`host-core`; committed coverage lives in the storage `CompactionProjection`.
+The native source history remains append-only, and only successfully saved
+coverage changes the effective request history. Canonical typed/stdio/WSS
+compaction controls are integrated; see tasks 036, 037 and 040 for their exact
+checkpoints and reviewed save/cancel boundaries. This engine does not own
+storage or change Runtime itself.
 
 Tests use explicitly named Scripted Models and actual Host OpenAI HTTP/SSE
-fixtures. They do not claim live provider credentials, TUI or public Session
-compaction integration.
+fixtures. Session and transport integration are tested separately. No live
+provider credentials or TUI validation is claimed.

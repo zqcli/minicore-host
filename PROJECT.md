@@ -1,10 +1,12 @@
 # MiniCore Host
 
-## Next execution integration checkpoint
+## Current execution integration checkpoint
 
-The isolated `stage/next-reviewed` code checkpoint is `21521919b5ecacea2fd72c698ea7521241a9e2d4`, based on frozen local dev `705a3e8cfc14d56e51fc08e522df04ee0adca1f6`. It combines canonical reload (including typed/stdio/WSS access), the reviewed compaction engine/storage, and the reviewed ordinary-tool process and shared-binding mutation fixes. The exact aggregate gate passes **602 unique tests and 3 doctests**. [Task 041](tasks/041-execution-integration/TASK.md) and the [23-commit source mapping](docs/execution-source-map.json) record the scope, checks and integration adjustment. This branch is not published and is not the completed first version.
+The fixed local code checkpoint is `76a7bfbe7f70d7f707d48cc38190829d14c137f2` on `stage/reviewed-next-dev`, based on `810e3817a78855871d13f8127a3f0e87db821d66` (published as [a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f](https://github.com/zqcli/minicore-host/commit/a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f)). The exact code gate passes **650 unique tests and 4 doctests**. This next checkpoint is not yet published and is not the complete first version. A subsequent aggregate run exposed a diagnostic file-lease release race after a reported flush; publication is held while task 047 reproduces and corrects it. The earlier passing gate is retained, not treated as proof that this new finding is resolved.
 
-Manual/automatic Session compaction is still on a separate topic undergoing correction of two independent review findings. Ordinary tools are present as a validated module, not yet production-bound: the real Session output/change sink and Workspace reuse across production Turns remain unfinished. The published owner/resource handoff below remains fixed historical evidence.
+It includes canonical reload, manual/automatic Session compaction with durable coverage and typed/stdio/WSS controls, the independently reviewed ordinary-tool module, and shared diagnostics with a real writer-held file lease. There are **37 actual shared routes**, not 52 completed contracts. [The fixed execution handoff](docs/execution-review-handoff.md), [task 041](tasks/041-execution-integration/TASK.md), and [40-commit linear integration map](docs/execution-linear-map.json) record exact source checkpoints, review scope, actual commands and exclusions. The earlier 23-commit checkpoint remains preserved.
+
+Production ordinary-tool binding, actual Session output/edit retention, canonical workspace routes, the Host executable, remaining controls and context are separate topics. They are not included merely because their modules or tests exist elsewhere. The latest published documentation-only checkpoint a84e36f passed [exact-head CI 42653342131](https://github.com/zqcli/minicore-host/actions/runs/42653342131); its [mapping](docs/owner-handoff-publication.json) and the previous code handoff below remain fixed historical evidence.
 
 The first v4.93 release is **not complete or release-ready**. The owner/observation/resource checkpoint is now published on `dev` at [c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e](https://github.com/zqcli/minicore-host/commit/c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e), compared with previous published head `7900d21a8cc767f508d45a1687ade4376bc6dded`. It exactly matches frozen source `705a3e8cfc14d56e51fc08e522df04ee0adca1f6`; reviewed code `a5c4bf4451123d994bdd7cceb13787e94bbbcb99` maps to remote `4186c3d02954dabb43563b0bb0850a70db9db36e`. The [64-commit publication mapping](docs/owner-integration-publication.json) preserves every source tree, raw message and order after the original 103 published commits. Local integration and independent exact-code gates pass **506 unique tests and 3 doctests**. Exact-head [hosted CI 42650587425](https://github.com/zqcli/minicore-host/actions/runs/42650587425) and its complete quality job passed. The [fixed review handoff](docs/integration-review-handoff.md), [task 029](tasks/029-owner-resource-integration/TASK.md), [task 033](tasks/033-turn-tool-cleanup/TASK.md), and [task 034](tasks/034-history-lock-reopen/TASK.md) give scope and reproducible evidence.
 
@@ -23,13 +25,20 @@ The earlier foundation is available on `dev` at [82583b31ac9091164da5f6dcfee6bb2
 - Linux durable object/native-history storage, inode ownership, exact accepted versus persisted ranges, corruption rejection and original-save continuation. Memory objects create no files.
 - Production OpenAI-compatible HTTP/SSE model adapter, conservative retry classification and Retry-After, authoritative partial data, actual model constraints and safe credential handling.
 - Host/Agent/Session owners, independent input queues, real Runtime, same-Turn continuation, frozen execution binding, canonical controls, accepted task lifetime, save barriers, monotonic shutdown and memory reclamation.
-- Scoped observation with fixed ranges, UTF-8 catch-up, cold full history including authoritative partial records, real tool invocation reads and retry state. Typed clients, real stdio and authenticated WSS now share 34 actual routes, including subscriptions and standard interaction answers. Original interaction settlement follows actual answer, cancel or deadline facts. This is an embedding library, not yet a production process.
+- Scoped observation with fixed ranges, UTF-8 catch-up, cold full history including authoritative partial records, real tool invocation reads and retry state. Typed clients, real stdio and authenticated WSS now share 37 actual routes, including subscriptions, standard interaction answers, canonical reload and compaction controls. Original interaction settlement follows actual answer, cancel or deadline facts. This is an embedding library, not yet a production process.
 - Standard six-action `agent` tool with owner-bound capabilities, early registered independent delegation results, shared input ranges, notifications through the same queues, wait and scope-close cleanup. Metadata updates support actual Agent name/Session title with durable publication.
-- Real configured workspace file/search/Git backends and edit snapshots. Canonical workspace routes and ordinary write tools are still missing.
-- Production resource assembly from a single HostConfig: actual provider clients, static tool declarations, workspace binding, frozen Role/framework/context and versioned Host-owned reload publication. Host configuration/model/tool queries share canonical typed/stdio/WSS routes; canonical reload receipts remain incomplete. Credentials are private inputs, not returned configuration.
+- Real configured workspace file/search/Git backends and edit snapshots. Canonical workspace routes and production ordinary-tool binding remain separate; the independently validated read/write/edit/bash module is included but not advertised as production-bound.
+- Production resource assembly from a single HostConfig: actual provider clients, static tool declarations, workspace binding, frozen Role/framework/context and versioned Host-owned reload publication. Host configuration/model/tool queries share canonical typed/stdio/WSS routes; canonical reload uses owned preparation, immutable receipts and operator-checked typed/stdio/WSS routes. Credentials are private inputs, not returned configuration.
 - Per-request legacy tool-history projection is wired into the production BoundPrompt. Complete exchanges retain their content and associations; absent old results become historical facts only in the request. Native history/JSONL are not rewritten and old tools are not re-executed.
 
+- Manual and automatic compaction use the real utility model, frozen resource binding, append-only coverage records and owner-controlled save/cancel barriers. Estimates remain estimates; reported provider usage is not invented. Same original control receipt facts are retained.
+- Shared structured diagnostics provides sanitized errors, stderr/file sinks and bounded flush observation. The actual file writer retains its own OS lease until it exits, even if waiting times out. Production application installation and full business-event instrumentation are not part of this checkpoint.
+
 ## Validation and review
+
+At exactly `76a7bfbe7f70d7f707d48cc38190829d14c137f2`, `./scripts/check.sh` passes committed/worktree whitespace, rustfmt, strict all-target Clippy, **650 unique tests**, **4 doctests** and strict rustdoc. The independent `--list` inventory and offline Cargo metadata confirm the case count and sole published Runtime pin. Exact commands and per-component independent review findings are in the execution handoff. They are scoped implementation reviews, not the requested final external review.
+
+### Earlier owner/resource validation
 
 At `04ba5bc`, `./scripts/check.sh` passes committed/staged/worktree whitespace, rustfmt, all-target Clippy with warnings denied, all workspace tests, 3 doctests and strict rustdoc. `cargo test --workspace --all-targets --locked -- --list` confirms **494 unique target/test-name cases**, excluding repeated storage subprocess output. `cargo metadata --locked --offline` confirms actual Runtime Git `69faf919`. Rust is pinned to 1.90.0.
 
@@ -47,11 +56,11 @@ Further real-Runtime probes found a terminal-claim window: a returned failure wa
 
 ## Remaining first-version work
 
-1. Complete canonical reload receipts, metadata/input/start/default command routes, persistent deletion and the rest of the 52-method surface.
-2. Integrate the active compaction engine and ordinary-tool topics only after their direct-owner boundaries, real validation and review are complete.
-3. Implement manual/automatic compaction, real context accounting and durable compaction ownership. Production currently rejects enabled compaction explicitly; because the default is enabled, production test configurations must explicitly disable it. This is an unfinished feature, not a silently supported default.
-4. Supply ordinary read/edit/bash tools, canonical workspace routes, actual write capture and retention, and full model input source/association context. Stored message provenance is preserved, but Runtime UserHistory alone does not currently expose it to the production prompt.
-5. Assemble the real Host executable/configuration startup and TLS/logging, then run full process-level acceptance, authorized live-provider checks, performance measurements and the requested external review. TUI stays untouched this round.
+1. Complete metadata/input/start/default command routes, persistent deletion, context queries and the remaining canonical contracts. A route count does not mean each full SPEC result schema is complete.
+2. Integrate production read/write/edit/bash binding, actual per-call output completion and Session edit retention, shared Workspace reuse and canonical workspace queries after their fixed-source reviews. No no-op sink or reconstructed output may become the production path.
+3. Assemble the actual Host executable, configuration startup, TLS and diagnostics installation, then verify ordinary tools through the real process. Full business diagnostics and Host health reporting remain unfinished.
+4. Expose full model input source/association context. Stored message provenance is retained, but Runtime UserHistory alone does not expose all of it to the production prompt.
+5. Finish process-level acceptance, authorized live-provider checks, performance/resource measurements and the requested external review. TUI remains unchanged this round.
 
 ## Scope constraints
 
@@ -59,7 +68,7 @@ Necessary save failures cannot become successful stopped shutdown. Repeated shut
 
 Development stays on isolated topics and integrates into `dev`. Publication must preserve existing remote history and use the owner's current explicit authorization; no force update or main merge occurs. Independent review and required checks remain prerequisites for main. Workers were requested with `gpt-6-astra` and `max`; no separate runtime configuration attestation is available.
 
-minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. A separately staged ordinary-tool implementation is held for review of normal shared-workspace write races and actual process-group cleanup, and for a focused reuse comparison; it is not part of this dev checkpoint.
+minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. The standalone ordinary-tool module and its process-group/shared-binding fixes have passed scoped independent review and are included here. Production registry, output and edit-owner integration remains separately staged.
 
 ## Tool cleanup ownership topic
 

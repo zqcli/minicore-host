@@ -1,14 +1,14 @@
 # Public method implementation map
 
-This checkpoint describes local Host code/test checkpoint `04ba5bc07a7d9bb73eabb143839fbaeb264a0cea` (published Runtime `69faf9196991524b5549499d6208a1eaf567bf56`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes local Host code/test checkpoint `76a7bfbe7f70d7f707d48cc38190829d14c137f2` (published Runtime `69faf9196991524b5549499d6208a1eaf567bf56`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
-`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Thirty-four actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
+`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Thirty-seven actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
 | Canonical method | Core status | Typed/stdio/WSS route | Existing implementation and remaining boundary |
 | --- | --- | --- | --- |
 | `host.info` | Partial | Routed | `Host::info`. Identity, incarnation, lifecycle and operation-right state; actual shutdown strategy/fault state; logging and complete resource configuration pending. |
 | `host.config.get` | Implemented typed query | Routed | `Host::config_get` returns canonical HostConfig and committed revision, without secret values. All three adapters use this same owner query. |
-| `host.reload` | Partial | Not routed | `Host::reload_configuration` owns prepared-candidate save/publication and atomic key invalidation. Canonical operation_id/Receipt and application preparation entry are still missing; no completed method is advertised. |
+| `host.reload` | Implemented typed entry | Routed | `Host::reload` owns accepted resource preparation, versioned durable publication, immutable original receipts and actual-change-only network key invalidation. All three adapters share the owner path; executable configuration startup remains separate. |
 | `host.receipt.get` | Partial | Routed | `Host::receipt_get` traverses direct owners for original-kind creation/control facts; 1202 means missing, 1203 means ambiguous independent invocations. Additional command families remain staged. |
 | `host.shutdown` | Implemented typed entry | Routed | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. All three adapters share this real entry; process assembly remains pending. |
 | `agent.create` | Partial | Routed | `Host::create_agent_async`. Real memory/persistent creation, owned waits, partial receipts and invocation-isolated tracking; canonical request/receipt mapping pending. |
@@ -45,8 +45,8 @@ This checkpoint describes local Host code/test checkpoint `04ba5bc07a7d9bb73eabb
 | `tool.list` | Implemented typed query | Routed | Actual static ToolSpecs or direct Agent/Session selection; missing configured resources produce Fault. Shared typed/stdio/WSS query. |
 | `session.history.read` | Implemented typed query | Routed | Actual complete/partial Host history with provenance and fixed pagination; cold JSONL reads create no old Turn or Runtime and do not rewrite storage. |
 | `session.context` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
-| `session.compact` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
-| `session.compact.cancel` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
+| `session.compact` | Implemented typed entry | Routed | `Host::session_compact` owns manual utility work, frozen resources, append-only coverage and necessary save barriers. Automatic request-boundary compaction uses the same owner; original receipt facts do not mutate. |
+| `session.compact.cancel` | Implemented typed entry | Routed | `Host::session_compact_cancel` targets the exact operation and reports only actual cancellation claims. Late/stale requests cannot cancel a later operation or skip required save settlement. |
 | `workspace.files` | Partial | Not routed | `host-workspace::Workspace::files` returns actual scoped file entries; Session authorization/Fault routing and transport are pending. |
 | `workspace.read` | Partial | Not routed | `Workspace::read` preserves requested UTF-8 byte ranges; Session authorization/Fault routing and transport are pending. |
 | `workspace.search` | Partial | Not routed | `Workspace::search` performs actual scoped literal search with explicit continuation; Session routing is pending. |
@@ -73,7 +73,7 @@ This checkpoint describes local Host code/test checkpoint `04ba5bc07a7d9bb73eabb
 
 ## Cross-cutting open scope
 
-Remaining canonical commands/resource routes and reload receipts, production-process assembly, built-in filesystem tools/workspace/write capture, compaction/context, persistent deletion, diagnostics and later TUI integration remain separate work. Resource fault recovery is independently verified. Current output/subscriptions/DSH/interaction implementations are real but still require full product acceptance. Internal targeted review is useful evidence but does not replace the requested external Host review.
+Remaining canonical metadata/input/start/default commands, production-process assembly, production local-tool/workspace/write capture, context, persistent deletion and business diagnostics remain separate work. Reload and compaction controls are now routed; the standalone ordinary-tool and diagnostics modules are included. TUI integration is deferred. Resource fault recovery is independently verified. Current output/subscriptions/DSH/interaction implementations are real but still require full product acceptance. Internal targeted review is useful evidence but does not replace the requested external Host review.
 
 The targeted review findings for memory-owner root leases, empty-queue resume validation, unsafe-child isolation, duplicate caller operation IDs, worker retirement, late stop wakeups and initialization fencing are fixed in the recorded commits. `a088b00` adds file-scoped metadata snapshot/publication coordination; `d73b161` limits close dependencies to actual current or pending default references. The complete workspace gate at `0b9b390` passes 198 unit/integration tests and 2 doctests against the published Runtime revision. The same gate passed from a fresh local Git clone with an empty per-checkout build target and no local patch. Targeted follow-up review found no new blocker in these fixes; its seven additional regressions are now permanent tests. This is not full lifecycle or release completion, and the requested external review is still pending.
 
@@ -106,3 +106,7 @@ is unchanged; ongoing observation/DSH topic work is not yet included here.
 ## Later owner/resource integration
 
 Local `04ba5bc` passes 494 unique tests and 3 doctests against actual published Runtime `69faf919`. Its 34 routes include standard interactions, observation and resource queries; prepared reload publication is implemented but the canonical reload command/receipt is still absent. Task 029 distinguishes integrated scope, independent findings and current unfinished paths. Tasks 018–025 retain their own source checkpoints and validation boundaries; their historical local-patch runs are not confused with this actual-Git gate.
+
+## Reviewed execution integration
+
+Fixed local code `76a7bfbe7f70d7f707d48cc38190829d14c137f2` passes **650 unique tests and 4 doctests**. Canonical reload and two compaction controls raise the shared routing count from 34 to 37. Tasks 030/035 cover reload, 031/036/037/040 compaction, 032/038 local-tool modules and 039 diagnostics. [The fixed handoff](execution-review-handoff.md) distinguishes this integrated tree from later production tool/application/workspace/control/context topics and preserves previous checkpoints.

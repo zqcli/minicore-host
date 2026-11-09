@@ -1,0 +1,26 @@
+{
+  "source": "76a7bfbe7f70d7f707d48cc38190829d14c137f2",
+  "base": "810e3817a78855871d13f8127a3f0e87db821d66",
+  "gate_exit": 0,
+  "unique_cases": 650,
+  "doctests": 4,
+  "runtime_source": "git+https://github.com/zqcli/minicore-runtime?rev=69faf9196991524b5549499d6208a1eaf567bf56#69faf9196991524b5549499d6208a1eaf567bf56",
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "artifacts": [
+    {
+      "file": "dev-next-76a7bfb-full.log",
+      "bytes": 75881,
+      "sha256": "395351f7869eb3af68e5b8fa959ffb2e8c274bf0d0f2e4e64b17d28cfcd3bb14"
+    },
+    {
+      "file": "dev-next-76a7bfb-test-list.txt",
+      "bytes": 58981,
+      "sha256": "9652fbe1ab8dd33a6fc94c73b3a6e515b024cdd140284741049b5e0609bb434d"
+    },
+    {
+      "file": "dev-next-76a7bfb-metadata.json",
+      "bytes": 1150833,
+      "sha256": "d67c121de27536ae9938ee0a7fb7811ec54514a4ea01b58a9311e8f18c2e5861"
+    }
+  ]
+}
