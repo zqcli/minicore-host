@@ -79,6 +79,14 @@ impl ToolRegistry {
         }
         Ok(())
     }
+    pub fn requires_local(&self, selected: &[ToolBinding]) -> bool {
+        selected.iter().any(|selection| {
+            matches!(
+                self.entries.get(&selection.name),
+                Some(RegisteredTool::Local(_))
+            )
+        })
+    }
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.entries
             .values()

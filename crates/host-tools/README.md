@@ -59,4 +59,8 @@ No remote push is authorized. No TUI files or SPEC are modified.
 
 The invocation adapter checks the existing Turn capability, receives a real owner-minted output lease, and calls the sink's synchronous `begin` before starting the worker. `ResourceResolver::bind_tool_output` must wrap selected implementations with the original `ToolOutputBinding`. Actual worker collection is registered with that public Turn, survives Runtime cancellation, and runs only at public Turn finalization. Internal errors with confirmed cleanup remain diagnostics; unconfirmed cleanup blocks finished. No standard agent action or delegation scope is changed.
 
-The production record/persistence sink and resource assembly remain separate integration work. The in-memory sink in `tests/local_binding.rs` is an explicit test fixture, not durable edit capture or a production fallback.
+`BoundLocalTools::production` constructs the real Session adapter used by `HostResourceBuilder`. The adapter holds only original invocation leases, byte offsets and incomplete UTF-8 code points. Edit observations enter the existing Session-owned journal; native ToolResults remain authoritative and use the existing history barrier. There is no second command-result store or tool scheduler. No production write uses `NoopLocalToolSink`.
+
+UTF-8 decoding preserves characters split across real chunks. A binary suffix stops text projection and marks that text range explicitly unavailable; existing prefixes remain unchanged. The successful native command result retains raw bytes. Leases are weak, expire only at actual tool cleanup, and cannot keep a reclaimed Session alive. Journal/process observations are not independently persisted or restored after restart.
+
+The in-memory sink in `tests/local_binding.rs` remains an explicit test fixture, not durable edit capture or a production fallback. `host-resources/tests/task042.rs` covers the real production adapter.

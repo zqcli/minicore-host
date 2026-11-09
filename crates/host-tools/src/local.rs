@@ -29,6 +29,16 @@ pub struct BoundLocalTools {
     sink: Arc<dyn LocalToolInvocationSink>,
 }
 impl BoundLocalTools {
+    /// Production uses the original Session owner, never a standalone no-op
+    /// sink. The adapter retains no second result store or execution scheduler.
+    pub fn production(binding: PreparedTurnBinding, workspace: Workspace) -> Result<Self, Fault> {
+        Self::prepare(
+            binding,
+            workspace,
+            Arc::new(crate::local_records::SessionLocalToolSink::default()),
+        )
+    }
+
     pub fn prepare(
         binding: PreparedTurnBinding,
         workspace: Workspace,

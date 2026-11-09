@@ -23,3 +23,5 @@ pub use registry::{AgentToolFactory, ToolFactory, ToolRegistry};
 pub use schema::agent_tool_spec;
 pub use scope::{DispatchContext, ScopeCloseAccepted, ScopeManager};
 pub use tool::AgentTool;
+
+mod local_records;
