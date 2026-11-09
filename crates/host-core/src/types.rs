@@ -2,7 +2,7 @@ use minicore_host_protocol::*;
 use minicore_runtime::{HistoryItem, model::ModelPartial};
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HostInfo {
     pub host_id: HostId,
     pub host_incarnation: HostIncarnation,
@@ -12,7 +12,7 @@ pub struct HostInfo {
     pub control: ControlStateData,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentInfo {
     pub id: AgentId,
     pub host_id: HostId,
@@ -26,7 +26,7 @@ pub struct AgentInfo {
     pub metadata_fault: Option<Fault>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub agent_config_revision: ConfigRevision,
     pub id: SessionId,
@@ -37,7 +37,7 @@ pub struct SessionInfo {
     pub config: SessionConfig,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputSummary {
     pub message_id: MessageId,
     pub mode: MessageMode,
@@ -45,7 +45,7 @@ pub struct InputSummary {
     pub order: u64,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum MessageBinding {
     Queued,
@@ -53,7 +53,7 @@ pub enum MessageBinding {
     Removed,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageRecord {
     pub input: MessageInput,
     pub queue: InputQueue,
@@ -61,13 +61,13 @@ pub struct MessageRecord {
     pub binding: MessageBinding,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionStateData {
     pub mode: StorageMode,
     pub controller_revision: ControllerRevision,
     pub lifecycle: SessionLifecycle,
     pub scheduling: Scheduling,
-    pub pause_reasons: Vec<String>,
+    pub pause_reasons: Vec<PauseReason>,
     pub residency: Residency,
     pub load_id: Option<LoadId>,
     pub runner_revision: u64,
@@ -78,11 +78,11 @@ pub struct SessionStateData {
     pub saving: bool,
     pub metadata_saving: bool,
     pub metadata_fault: Option<Fault>,
-    pub block_reason: Option<Fault>,
+    pub block_reason: Option<BlockReason>,
     pub last_result: Option<TurnRef>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSnapshot {
     pub host_id: HostId,
     pub host_incarnation: HostIncarnation,
@@ -91,7 +91,7 @@ pub struct SessionSnapshot {
     pub data: SessionStateData,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnInfo {
     pub id: TurnId,
     pub session_id: SessionId,
@@ -106,13 +106,13 @@ pub struct TurnInfo {
     pub persistence_fault: Option<Fault>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PartialResult {
     pub response_index: u64,
     pub partial: ModelPartial,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnResult {
     pub info: TurnInfo,
     pub history: Vec<HistoryItem>,
@@ -121,7 +121,7 @@ pub struct TurnResult {
 
 /// Controller cancellation outcome. Only `Claimed` authorizes the optional
 /// queue clear. Repeated or stale cancellation is a factual no-op.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CancelStatus {
     Claimed,
@@ -129,7 +129,7 @@ pub enum CancelStatus {
     NotActive,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CancelResult {
     pub status: CancelStatus,
     pub cleared: Vec<MessageId>,
@@ -156,12 +156,12 @@ impl HostSettings {
 
 /// A discovery failure remains associated with its actual direct child. It is
 /// not converted to an empty object and does not prevent healthy siblings loading.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentLoadFailure {
     pub agent_id: AgentId,
     pub fault: Fault,
 }
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionLoadFailure {
     pub session_id: SessionId,
     pub fault: Fault,

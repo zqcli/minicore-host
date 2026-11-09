@@ -94,6 +94,8 @@ impl AgentOwner {
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 creations: BTreeMap::new(),
+                public_creations: Default::default(),
+                controls: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
                 creating: 0,
                 creation_committed: true,

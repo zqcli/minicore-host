@@ -476,8 +476,9 @@ async fn cancellation_during_save_keeps_save_owner_and_complete_response() {
     assert_eq!(
         fixture
             .session
-            .cancel(&fixture.connection.caller(), None, false)
+            .cancel(&fixture.connection.caller(), None, false, None)
             .unwrap()
+            .0
             .status,
         CancelStatus::Claimed
     );
@@ -522,10 +523,20 @@ fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
         resources,
     );
     let first = agent
-        .create_session(&caller, SessionOptions::default(), true)
+        .create_session(
+            &caller,
+            SessionId::new().unwrap(),
+            SessionOptions::default(),
+            true,
+        )
         .unwrap();
     let child = agent
-        .create_session(&caller, SessionOptions::default(), false)
+        .create_session(
+            &caller,
+            SessionId::new().unwrap(),
+            SessionOptions::default(),
+            false,
+        )
         .unwrap();
     let baseline = Arc::strong_count(&child);
     let held = child.state.lock().unwrap();
@@ -840,7 +851,10 @@ async fn terminal_save_continuation_preserves_completed_claim_despite_force() {
             .await
             .is_err()
     );
-    fixture.session.continue_saves_owned().unwrap();
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
     until(&fixture, |state| state.completed.len() == 1).await;
     assert_single_terminal(&fixture, TurnOutcome::Completed, 0);
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
@@ -1008,7 +1022,10 @@ async fn force_keeps_cancelled_partial_and_original_save_through_continuation() 
     assert_eq!(original.outcome, Some(TurnOutcome::Cancelled));
     assert!(original.fault.is_none());
     assert!(!fixture.session.shutdown_status_owned().quiescent);
-    fixture.session.continue_saves_owned().unwrap();
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
     until(&fixture, |state| state.completed.len() == 1).await;
     assert_single_terminal(&fixture, TurnOutcome::Cancelled, 1);
     assert_eq!(backend.appends.load(Ordering::SeqCst), 3);
@@ -1129,7 +1146,9 @@ fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
     let retained = session.clone();
     assert_eq!(session.history(&connection.caller()).unwrap().len(), 1);
     assert!(DataRoot::acquire(dir.path().join("root")).is_err());
-    session.begin_close_owned().unwrap();
+    session
+        .begin_close_owned(OperationId::new().unwrap())
+        .unwrap();
     assert!(session.retire_closed_immediately_owned().unwrap());
     assert_eq!(
         observer.snapshot().unwrap_err().kind(),

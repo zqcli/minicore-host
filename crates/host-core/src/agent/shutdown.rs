@@ -154,6 +154,8 @@ impl AgentOwner {
         state.resources_released = true;
         if state.info.mode == StorageMode::Memory {
             state.creations.clear();
+            state.public_creations.clear();
+            state.controls.clear();
             state.info.default_session_id = None;
             state.info.lifecycle = AgentLifecycle::Retired;
         } else if !matches!(

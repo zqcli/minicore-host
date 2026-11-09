@@ -6,6 +6,7 @@ use minicore_host_protocol::*;
 use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
 
+mod controls;
 mod create;
 mod metadata;
 mod persistent;
@@ -39,6 +40,7 @@ struct HostState {
     // The generated object identity distinguishes accepted invocations. The
     // caller's operation_id is correlation data, never an idempotency key.
     creations: BTreeMap<AgentId, AgentCreateReceipt>,
+    controls: BTreeMap<OperationId, Vec<HostShutdownReceipt>>,
     load_failures: BTreeMap<AgentId, Fault>,
     create_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
 }
@@ -68,6 +70,7 @@ impl Host {
                 retirement_epoch: 0,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
+                controls: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
             }),
@@ -341,7 +344,9 @@ impl Host {
             .initial_message
             .as_ref()
             .map(|message| message.message_id.clone());
-        let (session_id, result) = match agent.create_session(caller, options, false) {
+        let key = SessionId::new()
+            .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()))?;
+        let (session_id, result) = match agent.create_session(caller, key.clone(), options, false) {
             Err(error)
                 if matches!(
                     error.kind(),
@@ -386,7 +391,7 @@ impl Host {
                 (Some(id), result)
             }
         };
-        Ok(SessionCreateReceipt {
+        let receipt = SessionCreateReceipt {
             kind: SessionCreateKind::SessionCreate,
             host_id: self.id.clone(),
             host_incarnation: self.incarnation.clone(),
@@ -395,7 +400,9 @@ impl Host {
             session_id,
             message_id,
             result,
-        })
+        };
+        agent.retain_session_creation(key, receipt.clone());
+        Ok(receipt)
     }
     pub fn send(
         &self,
@@ -463,19 +470,34 @@ impl Host {
         self.session(caller, target)?.history(caller)
     }
     pub fn pause(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        self.session(caller, target)?.pause(caller)
+        self.session_pause(
+            caller,
+            target,
+            SessionControlRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn resume(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        let session = self.session(caller, target)?;
-        if !self.access.execution_allowed_owned() {
-            return self
-                .access
-                .accept(caller, || session.continue_saves_owned());
-        }
-        session.resume(caller)
+        self.session_resume(
+            caller,
+            target,
+            SessionControlRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn unload(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        self.session(caller, target)?.unload(caller)
+        self.session_unload(
+            caller,
+            target,
+            SessionControlRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn update_session(
         &self,
@@ -509,14 +531,20 @@ impl Host {
             .set_default(caller, session_id)
     }
     pub fn stop_agent(&self, caller: &CallerContext, target: &AgentRef) -> Result<(), Fault> {
-        self.check_host(&target.host_id)?;
-        self.agent(caller, &target.agent_id)?
-            .set_enabled(caller, false)
+        self.agent_stop(
+            caller,
+            target,
+            AgentStopRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn start_agent(&self, caller: &CallerContext, target: &AgentRef) -> Result<(), Fault> {
         self.check_host(&target.host_id)?;
         self.agent(caller, &target.agent_id)?
-            .set_enabled(caller, true)
+            .set_enabled(caller, true, None)
+            .map(|_| ())
     }
     pub fn remove_input(
         &self,
@@ -533,7 +561,8 @@ impl Host {
         keep_inbox: bool,
     ) -> Result<CancelResult, Fault> {
         self.session(caller, target)?
-            .cancel(caller, None, keep_inbox)
+            .cancel(caller, None, keep_inbox, None)
+            .map(|(result, _)| result)
     }
     pub fn cancel_turn(
         &self,
@@ -543,15 +572,18 @@ impl Host {
         keep_inbox: bool,
     ) -> Result<CancelResult, Fault> {
         self.session(caller, target)?
-            .cancel(caller, Some(turn_id), keep_inbox)
+            .cancel(caller, Some(turn_id), keep_inbox, None)
+            .map(|(result, _)| result)
     }
     pub fn close_session(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        let agent = self.agent(caller, &target.agent_id)?;
-        agent.close_session(caller, &target.session_id)?;
-        self.ensure_retirement_watch();
-        agent.try_retire_empty_owned();
-        self.remove_retired_agents_owned();
-        Ok(())
+        self.session_close(
+            caller,
+            target,
+            SessionCloseRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn turns(
         &self,

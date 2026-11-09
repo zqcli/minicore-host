@@ -280,24 +280,27 @@ impl AgentOwner {
         self: &Arc<Self>,
         caller: &CallerContext,
         id: &SessionId,
-    ) -> Result<(), Fault> {
+        request: SessionCloseRequest,
+    ) -> Result<SessionCloseReceipt, Fault> {
         let child = self.session(id)?;
         if self.store().is_none() {
-            self.access.accept_execution(caller, || {
+            let receipt = self.access.accept_execution(caller, || {
+                let receipt = child.begin_close_owned(request.operation_id)?;
                 self.state
                     .lock()
                     .expect("Agent mutex poisoned")
                     .closing
                     .insert(id.clone());
-                Ok(())
+                Ok(receipt)
             })?;
-            child.begin_close_owned()?;
             self.clear_default_if(id);
-            if child.retire_closed_immediately_owned()? {
+            // Failure after acceptance stays in the child's close state. It
+            // must not replace an already-formed receipt with a late error.
+            if child.retire_closed_immediately_owned() == Ok(true) {
                 self.remove_retired_session_owned(&child);
                 self.try_retire_empty_owned();
             }
-            return Ok(());
+            return Ok(receipt);
         }
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
             Fault::new(
@@ -305,16 +308,15 @@ impl AgentOwner {
                 "close requires a live Tokio runtime",
             )
         })?;
-        let first = self.access.accept_execution(caller, || {
+        let (first, receipt) = self.access.accept_execution(caller, || {
+            let receipt = child.begin_close_owned(request.operation_id)?;
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.closing.insert(id.clone());
-            Ok(state.close_running.insert(id.clone()))
+            Ok((state.close_running.insert(id.clone()), receipt))
         })?;
-        child.begin_close_owned()?;
         if !first {
-            return Ok(());
+            return Ok(receipt);
         }
-        // No owner/access lock is held while asking the child to close or doing I/O.
         let owner = Arc::clone(self);
         let id = id.clone();
         let task_id = id.clone();
@@ -330,16 +332,13 @@ impl AgentOwner {
                 state.close_tasks.remove(&id);
                 state.close_running.remove(&id);
             }
-            // Publish a retryable close failure only after this attempt has
-            // released its running registration. An observer can then continue
-            // the original record and request close again without losing it.
             if let Err(fault) = result {
                 child.set_close_fault(fault);
             }
             owner.changed.notify_waiters();
         });
         state.close_tasks.insert(task_id, task);
-        Ok(())
+        Ok(receipt)
     }
     async fn clear_default_before_close(self: &Arc<Self>, id: &SessionId) -> Result<(), Fault> {
         loop {

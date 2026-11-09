@@ -10,9 +10,13 @@
 
 ## Checkpoints
 
-1. Protocol facts: `SessionCancelReceipt` describes an actually observed current Turn or an idle cancellation, with validated optional identity/state pairing. `Receipt` serializes the original concrete kind and operation ID, without a generic envelope.
+1. Protocol facts (`881624b`, `feat(protocol): define canonical receipt lookup variants`): `SessionCancelReceipt` describes an actually observed current Turn or an idle cancellation, with validated optional identity/state pairing. `Receipt` serializes the original concrete kind and operation ID, without a generic envelope.
    - `cargo test -p minicore-host-protocol --test control_catalog --locked`: passed 15 tests, including idle/active cancellation pairing and unknown-kind rejection.
-2. Direct-owner implementation and regressions: in progress. Formation occurs within the same owner acceptance/state boundary as the mutation. Each repeated correlation ID retains distinct invocation facts; a singular lookup refuses ambiguity.
+2. Direct-owner implementation: canonical Host entry methods delegate to Agent/Session controls. Formation and owner retention occur within the same acceptance/state lock as the mutation; shutdown uses the same boundary. Each repeated correlation ID retains distinct invocation facts and singular lookup refuses ambiguity. Lookup excludes internal Session-creation steps belonging to one Agent creation. Session receipts are discarded on actual reclamation, and an immediately reclaimed close still returns its accepted receipt.
+   - Snapshots and controls share typed PauseReason/BlockReason facts. BlockReason retains the complete original Fault, with an explicit release condition; metadata/history save fault fields keep their separate meanings.
+   - Load/resume return actual loading and pause facts. The original asynchronous loader and save continuation remain owned after caller revocation; a later explicit pause wins. Legacy controls share these primitives. Query DTOs additionally derive Deserialize for the separately implemented typed stdio client.
+   - `cargo clippy -p minicore-host-core -p minicore-host-protocol --all-targets --locked -- -D warnings`: passed.
+   - `cargo test -p minicore-host-core -p minicore-host-protocol --locked`: passed 156 tests with the eight new owner regressions present in the working tree; final regression commit and workspace gates follow.
 
 ## Validation environment
 

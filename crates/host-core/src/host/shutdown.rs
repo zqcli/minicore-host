@@ -10,7 +10,7 @@ impl Host {
         request: HostShutdownRequest,
     ) -> Result<HostShutdownReceipt, Fault> {
         let executor = tokio::runtime::Handle::try_current().ok();
-        let children = self.access.accept(caller, || {
+        let (children, receipt) = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle == HostLifecycle::Starting {
                 return Err(Fault::new(
@@ -49,9 +49,27 @@ impl Host {
                     owner.run_shutdown().await;
                 }));
             }
+            let receipt = HostShutdownReceipt {
+                kind: HostShutdownKind::HostShutdown,
+                host_id: self.id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                operation_id: request.operation_id,
+                result: HostShutdownResult {
+                    strategy,
+                    lifecycle: state.lifecycle,
+                },
+            };
+            state
+                .controls
+                .entry(receipt.operation_id.clone())
+                .or_default()
+                .push(receipt.clone());
             Ok((
-                state.lifecycle,
-                state.agents.values().cloned().collect::<Vec<_>>(),
+                (
+                    state.lifecycle,
+                    state.agents.values().cloned().collect::<Vec<_>>(),
+                ),
+                receipt,
             ))
         })?;
         let stopping = matches!(children.0, HostLifecycle::Stopping | HostLifecycle::Stopped);
@@ -61,17 +79,7 @@ impl Host {
             }
         }
         self.changed.notify_waiters();
-        let state = self.state.lock().expect("Host mutex poisoned");
-        Ok(HostShutdownReceipt {
-            kind: HostShutdownKind::HostShutdown,
-            host_id: self.id.clone(),
-            host_incarnation: self.incarnation.clone(),
-            operation_id: request.operation_id,
-            result: HostShutdownResult {
-                strategy: state.shutdown_strategy.expect("accepted shutdown"),
-                lifecycle: state.lifecycle,
-            },
-        })
+        Ok(receipt)
     }
 
     async fn run_shutdown(self: &Arc<Self>) {

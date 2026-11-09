@@ -400,13 +400,6 @@ impl SessionController {
         }
         self.publish(&mut state);
     }
-    /// Only this direct Session's original saves, accepted explicitly via
-    /// session.resume. This never retries another owner's metadata or Runtime.
-    pub(crate) fn continue_saves_owned(self: &Arc<Self>) -> Result<(), Fault> {
-        self.ensure_executor()?;
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        self.start_save_continuations(&mut state, false)
-    }
     pub(super) fn start_save_continuations(
         self: &Arc<Self>,
         state: &mut SessionState,
@@ -458,6 +451,7 @@ impl SessionController {
         {
             state.paused = false;
             state.failure_paused = false;
+            state.unloaded_with_input = false;
             true
         } else {
             false

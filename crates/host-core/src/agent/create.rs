@@ -158,6 +158,9 @@ impl AgentOwner {
         state.creating += 1;
         state.executor = Some(runtime.clone());
         state.creations.insert(id.clone(), initial);
+        if !make_default {
+            state.public_creations.insert(id.clone());
+        }
         let (sender, receiver) = oneshot::channel();
         let owner = Arc::clone(self);
         let task_id = id.clone();

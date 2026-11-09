@@ -300,7 +300,7 @@ async fn corrupt_history_blocks_only_that_session_and_preserves_the_file() {
     .unwrap();
     let state = host.session_state(&caller, &broken).unwrap().data;
     assert_eq!(
-        state.block_reason.unwrap().kind(),
+        state.block_reason.unwrap().fault.unwrap().kind(),
         FaultKind::SessionHistoryLoadFailed
     );
     assert_eq!(state.next_turn.len(), 1);

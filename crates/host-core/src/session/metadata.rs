@@ -18,102 +18,97 @@ impl SessionController {
             .info
             .agent_config_revision = revision;
     }
-    pub(crate) fn load(
+    pub(super) fn start_load_owned(
         self: &Arc<Self>,
-        caller: &CallerContext,
+        state: &mut SessionState,
         resume: bool,
     ) -> Result<(), Fault> {
-        self.ensure_executor()?;
         let load_id = LoadId::new()
             .map_err(|error| Fault::new(FaultKind::SessionInternalUnexpected, error.to_string()))?;
-        self.access.accept_execution(caller, || {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            Self::open(&state)?;
-            if state.active.is_some() || state.preparing || state.saving {
-                return Err(Fault::new(
-                    FaultKind::SessionBusy,
-                    "Session still owns execution or history work",
-                ));
+        Self::open(state)?;
+        if state.active.is_some() || state.preparing || state.saving {
+            return Err(Fault::new(
+                FaultKind::SessionBusy,
+                "Session still owns execution or history work",
+            ));
+        }
+        if let Some(fault) = &state.block_reason
+            && fault.kind() == FaultKind::SessionHistoryWriteFailed
+        {
+            return Err(fault.clone());
+        }
+        state.preparing = true;
+        state.residency = Residency::Loading;
+        state.resume_after_load = resume.then_some(state.pause_generation);
+        let owner = Arc::clone(self);
+        let runtime = state.executor.clone().expect("checked runtime");
+        let previous = state.load_task.take();
+        state.load_task = Some(runtime.spawn(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
             }
-            if let Some(fault) = &state.block_reason
-                && fault.kind() == FaultKind::SessionHistoryWriteFailed
+            let result = if owner.backend.mode() == StorageMode::Persistent {
+                AssertUnwindSafe(owner.backend.load())
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(Fault::new(
+                            FaultKind::SessionHistoryLoadFailed,
+                            "history loader failed unexpectedly",
+                        ))
+                    })
+            } else {
+                Ok(owner
+                    .state
+                    .lock()
+                    .expect("Session mutex poisoned")
+                    .history
+                    .clone())
+            };
             {
-                return Err(fault.clone());
-            }
-            state.preparing = true;
-            state.residency = Residency::Loading;
-            let pause_generation = state.pause_generation;
-            let owner = Arc::clone(self);
-            let runtime = state.executor.clone().expect("checked runtime");
-            let previous = state.load_task.take();
-            state.load_task = Some(runtime.spawn(async move {
-                if let Some(previous) = previous {
-                    let _ = previous.await;
-                }
-                let result = if owner.backend.mode() == StorageMode::Persistent {
-                    AssertUnwindSafe(owner.backend.load())
-                        .catch_unwind()
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err(Fault::new(
-                                FaultKind::SessionHistoryLoadFailed,
-                                "history loader failed unexpectedly",
-                            ))
-                        })
-                } else {
-                    Ok(owner
-                        .state
-                        .lock()
-                        .expect("Session mutex poisoned")
-                        .history
-                        .clone())
-                };
-                {
-                    let mut state = owner.state.lock().expect("Session mutex poisoned");
-                    state.preparing = false;
-                    match result {
-                        Ok(history) => {
-                            state.history = history;
-                            state.history_loaded = true;
-                            if state.block_reason.as_ref().is_some_and(|fault| {
-                                fault.kind() == FaultKind::SessionHistoryLoadFailed
-                            }) {
-                                state.block_reason = None;
-                            }
-                            if state.lifecycle == SessionLifecycle::Open
-                                && !state.host_stopping
-                                && owner.access.execution_allowed_owned()
-                            {
-                                state.load_id.get_or_insert(load_id);
-                                state.residency = Residency::Loaded;
-                                if resume && state.pause_generation == pause_generation {
-                                    state.paused = false;
-                                    state.failure_paused = false;
-                                }
-                            } else {
-                                state.residency = Residency::Unloaded;
-                                state.load_id = None;
-                                if state.info.mode == StorageMode::Memory
-                                    && state.lifecycle == SessionLifecycle::Closing
-                                {
-                                    state.lifecycle = SessionLifecycle::Closed;
-                                }
-                            }
+                let mut state = owner.state.lock().expect("Session mutex poisoned");
+                state.preparing = false;
+                match result {
+                    Ok(history) => {
+                        state.history = history;
+                        state.history_loaded = true;
+                        if state.block_reason.as_ref().is_some_and(|fault| {
+                            fault.kind() == FaultKind::SessionHistoryLoadFailed
+                        }) {
+                            state.block_reason = None;
                         }
-                        Err(fault) => {
+                        if state.lifecycle == SessionLifecycle::Open
+                            && !state.host_stopping
+                            && owner.access.execution_allowed_owned()
+                        {
+                            state.load_id.get_or_insert(load_id);
+                            state.residency = Residency::Loaded;
+                            owner.finish_load_resume(&mut state);
+                        } else {
+                            state.resume_after_load = None;
                             state.residency = Residency::Unloaded;
                             state.load_id = None;
-                            state.history_loaded = false;
-                            state.block_reason = Some(fault);
+                            if state.info.mode == StorageMode::Memory
+                                && state.lifecycle == SessionLifecycle::Closing
+                            {
+                                state.lifecycle = SessionLifecycle::Closed;
+                            }
                         }
                     }
-                    owner.publish(&mut state);
+                    Err(fault) => {
+                        state.resume_after_load = None;
+                        state.residency = Residency::Unloaded;
+                        state.load_id = None;
+                        state.history_loaded = false;
+                        state.block_reason = Some(fault);
+                    }
                 }
-                owner.wake();
-            }));
-            self.publish(&mut state);
-            Ok(())
-        })
+                owner.publish(&mut state);
+            }
+            owner.wake();
+        }));
+        self.publish(state);
+        Ok(())
     }
     fn record(&self, state: &SessionState) -> SessionRecord {
         let mut record = self
@@ -333,12 +328,15 @@ impl SessionController {
             )
         })?
     }
-    pub(crate) fn begin_close_owned(&self) -> Result<(), Fault> {
-        let handle = self.close_owned()?;
+    pub(crate) fn begin_close_owned(
+        &self,
+        operation: OperationId,
+    ) -> Result<SessionCloseReceipt, Fault> {
+        let (receipt, handle) = self.close_owned(operation)?;
         if let Some(handle) = handle {
             handle.shutdown();
         }
-        Ok(())
+        Ok(receipt)
     }
     pub(crate) fn set_close_fault(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");

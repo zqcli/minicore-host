@@ -1,7 +1,14 @@
 use super::*;
 impl Host {
     pub fn load_session(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        self.session(caller, target)?.load(caller, false)
+        self.session_load(
+            caller,
+            target,
+            SessionControlRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub async fn update_session_async(
         &self,

@@ -3,6 +3,7 @@ use crate::session::{HistoryBackend, MemoryHistory, ResourceResolver, SessionCon
 use crate::types::{AgentInfo, SessionLoadFailure};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
+mod controls;
 mod create;
 mod metadata;
 mod persistent;
@@ -32,6 +33,8 @@ struct AgentState {
     sessions: BTreeMap<SessionId, Arc<SessionController>>,
     load_failures: BTreeMap<SessionId, Fault>,
     creations: BTreeMap<SessionId, SessionCreateReceipt>,
+    public_creations: std::collections::BTreeSet<SessionId>,
+    controls: BTreeMap<OperationId, Vec<AgentStopReceipt>>,
     create_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     creating: usize,
     creation_committed: bool,
@@ -96,6 +99,8 @@ impl AgentOwner {
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 creations: BTreeMap::new(),
+                public_creations: Default::default(),
+                controls: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
                 creating: 0,
                 creation_committed: false,
@@ -204,11 +209,10 @@ impl AgentOwner {
     pub(crate) fn create_session(
         &self,
         caller: &CallerContext,
+        id: SessionId,
         options: SessionOptions,
         make_default: bool,
     ) -> Result<Arc<SessionController>, Fault> {
-        let id = SessionId::new()
-            .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()))?;
         self.access.accept_business(caller, || {
             self.create_session_owned(id, options, make_default)
         })
@@ -385,8 +389,9 @@ impl AgentOwner {
         self: &Arc<Self>,
         caller: &CallerContext,
         enabled: bool,
-    ) -> Result<(), Fault> {
-        let children = self.access.accept(caller, || {
+        operation: Option<OperationId>,
+    ) -> Result<Option<AgentStopReceipt>, Fault> {
+        let (children, receipt) = self.access.accept(caller, || {
             if enabled {
                 self.access.ensure_execution_owned()?;
             }
@@ -420,7 +425,8 @@ impl AgentOwner {
                 ))
                 || (enabled && state.info.lifecycle == AgentLifecycle::Active)
             {
-                return Ok(None);
+                let receipt = self.stop_receipt(&mut state, operation);
+                return Ok((None, receipt));
             }
             self.enabled.store(enabled, Ordering::SeqCst);
             state.info.lifecycle = if enabled {
@@ -428,16 +434,18 @@ impl AgentOwner {
             } else {
                 AgentLifecycle::Stopping
             };
-            Ok(Some(state.sessions.values().cloned().collect::<Vec<_>>()))
+            let children = state.sessions.values().cloned().collect::<Vec<_>>();
+            let receipt = self.stop_receipt(&mut state, operation);
+            Ok((Some(children), receipt))
         })?;
         let Some(children) = children else {
-            return Ok(());
+            return Ok(receipt);
         };
         for child in &children {
             child.set_agent_enabled(enabled);
         }
         if enabled {
-            return Ok(());
+            return Ok(receipt);
         }
         let executor = self
             .state
@@ -447,7 +455,7 @@ impl AgentOwner {
             .clone()
             .or_else(|| children.iter().find_map(|child| child.executor()));
         if self.stop_settled() {
-            return Ok(());
+            return Ok(receipt);
         }
         let executor = executor.expect("accepted child work has an execution runtime");
         let owner = Arc::clone(self);
@@ -478,7 +486,7 @@ impl AgentOwner {
             }
         });
         self.state.lock().expect("Agent mutex poisoned").stop_task = Some(task);
-        Ok(())
+        Ok(receipt)
     }
     fn stop_settled(&self) -> bool {
         let children = {

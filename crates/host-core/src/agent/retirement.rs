@@ -162,6 +162,8 @@ impl AgentOwner {
         {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.creations.clear();
+            state.public_creations.clear();
+            state.controls.clear();
             state.info.default_session_id = None;
             state.resources_released = true;
             state.info.lifecycle = AgentLifecycle::Retired;
