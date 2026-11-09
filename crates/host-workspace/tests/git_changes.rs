@@ -550,3 +550,279 @@ async fn discovery_ignores_an_inherited_repository_ceiling() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+fn filtered_repository() -> TempDir {
+    let root = repository();
+    fs::write(root.path().join(".gitattributes"), "*.txt filter=marker\n").unwrap();
+    fs::write(root.path().join("file.txt"), "same\n").unwrap();
+    git(root.path(), &["add", "."]);
+    git(
+        root.path(),
+        &["commit", "-m", "unconfigured filter fixture"],
+    );
+    root
+}
+
+#[tokio::test]
+async fn active_clean_filter_never_runs_from_status_list_or_diff() {
+    let root = filtered_repository();
+    let workspace = Workspace::open(root.path()).await.unwrap();
+    fs::write(root.path().join("file.txt"), "different\n").unwrap();
+    let reference = workspace
+        .changes_list(list(10), QueryContext::default())
+        .await
+        .unwrap()
+        .records
+        .into_iter()
+        .find(|record| record.path == "file.txt")
+        .unwrap();
+    let marker = root.path().join("filter-ran");
+    let command = format!("printf called >> '{}'; cat", marker.display());
+    git(root.path(), &["config", "filter.marker.clean", &command]);
+    // Identical content still requires a clean conversion when Git refreshes
+    // stale stat information. The query must not execute that conversion.
+    fs::write(root.path().join("file.txt"), "same\n").unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(matches!(
+        workspace
+            .changes_list(list(10), QueryContext::default())
+            .await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(matches!(
+        workspace
+            .changes_diff(
+                diff(&reference, DiffComparison::HeadToWorktree),
+                QueryContext::default()
+            )
+            .await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(!marker.exists());
+    // Positive control: actual Git without the query preflight does run it.
+    git(root.path(), &["status", "--porcelain=v2"]);
+    assert!(marker.exists());
+}
+
+#[tokio::test]
+async fn active_process_filter_is_rejected_before_starting_its_protocol() {
+    let root = filtered_repository();
+    let marker = root.path().join("process-ran");
+    let command = format!("printf called > '{}'; exit 1", marker.display());
+    git(root.path(), &["config", "filter.marker.process", &command]);
+    fs::write(root.path().join("file.txt"), "same\n").unwrap();
+    let workspace = Workspace::open(root.path()).await.unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn cancellation_cannot_leave_an_external_filter_holding_query_pipes() {
+    use std::time::Duration;
+    let root = filtered_repository();
+    let marker = root.path().join("slow-filter-ran");
+    let command = format!(
+        "printf started > '{}'; sleep 5; printf later >> '{}'; cat",
+        marker.display(),
+        marker.display()
+    );
+    git(root.path(), &["config", "filter.marker.clean", &command]);
+    fs::write(root.path().join("file.txt"), "same\n").unwrap();
+    let workspace = Workspace::open(root.path()).await.unwrap();
+    let context = QueryContext::default();
+    let cancellation = context.cancellation.clone();
+    let query = workspace.status(context);
+    let cancel = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        cancellation.cancel();
+    };
+    let (result, ()) = tokio::time::timeout(Duration::from_secs(2), async {
+        tokio::join!(query, cancel)
+    })
+    .await
+    .expect("query must not await a filter descendant's inherited pipes");
+    assert!(matches!(
+        result,
+        Err(WorkspaceError::UnsupportedFilter | WorkspaceError::Cancelled)
+    ));
+    assert!(
+        !marker.exists(),
+        "no filter process may start before refusal/cancellation"
+    );
+}
+
+#[tokio::test]
+async fn initialized_submodule_filters_are_checked_without_scanning_uninitialized_gitlinks() {
+    let source = filtered_repository();
+    let parent = repository();
+    git(
+        parent.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            source.path().to_str().unwrap(),
+            "module",
+        ],
+    );
+    git(parent.path(), &["commit", "-am", "submodule fixture"]);
+    let module = parent.path().join("module");
+    let workspace = Workspace::open(parent.path()).await.unwrap();
+    let clean_marker = parent.path().join("submodule-clean-ran");
+    let command = format!("printf called > '{}'; cat", clean_marker.display());
+    git(&module, &["config", "filter.marker.clean", &command]);
+    fs::write(module.join("file.txt"), "same\n").unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(!clean_marker.exists());
+    git(&module, &["config", "--unset", "filter.marker.clean"]);
+    let process_marker = parent.path().join("submodule-process-ran");
+    let command = format!("printf called > '{}'; exit 1", process_marker.display());
+    git(&module, &["config", "filter.marker.process", &command]);
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(!process_marker.exists());
+    // Deinitialized modules have no worktree to inspect or run filters in.
+    fs::remove_dir_all(&module).unwrap();
+    fs::create_dir(&module).unwrap();
+    assert!(
+        workspace
+            .status(QueryContext::default())
+            .await
+            .unwrap()
+            .repo_available
+    );
+}
+
+#[tokio::test]
+async fn nested_workspace_filter_preflight_uses_repository_relative_attributes() {
+    let root = repository();
+    fs::create_dir(root.path().join("selected")).unwrap();
+    fs::create_dir(root.path().join("sibling")).unwrap();
+    fs::write(
+        root.path().join(".gitattributes"),
+        "sibling/*.txt filter=marker\n",
+    )
+    .unwrap();
+    fs::write(root.path().join("selected/file.txt"), "same\n").unwrap();
+    fs::write(root.path().join("sibling/file.txt"), "same\n").unwrap();
+    git(root.path(), &["add", "."]);
+    git(root.path(), &["commit", "-m", "scoped filter fixture"]);
+    let marker = root.path().join("sibling-filter-ran");
+    let command = format!("printf called > '{}'; cat", marker.display());
+    git(root.path(), &["config", "filter.marker.clean", &command]);
+    fs::write(root.path().join("sibling/file.txt"), "same\n").unwrap();
+    fs::write(root.path().join("selected/file.txt"), "changed\n").unwrap();
+    let workspace = Workspace::open(root.path().join("selected")).await.unwrap();
+    let status = workspace.status(QueryContext::default()).await.unwrap();
+    assert_eq!(status.entries.len(), 1);
+    assert_eq!(status.entries[0].path, "file.txt");
+    assert!(!marker.exists());
+    fs::write(
+        root.path().join(".gitattributes"),
+        "selected/*.txt filter=marker\n",
+    )
+    .unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedFilter)
+    ));
+    assert!(!marker.exists());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_gitlink_directory_symlink_is_rejected_without_inspecting_its_target() {
+    use std::os::unix::fs::symlink;
+    let outside = filtered_repository();
+    let parent = repository();
+    git(
+        parent.path(),
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            outside.path().to_str().unwrap(),
+            "module",
+        ],
+    );
+    git(parent.path(), &["commit", "-am", "gitlink fixture"]);
+    let marker = outside.path().join("outside-filter-ran");
+    let command = format!("printf called > '{}'; cat", marker.display());
+    git(outside.path(), &["config", "filter.marker.clean", &command]);
+    fs::remove_dir_all(parent.path().join("module")).unwrap();
+    symlink(outside.path(), parent.path().join("module")).unwrap();
+    let workspace = Workspace::open(parent.path()).await.unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::UnsupportedChange)
+    ));
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn inherited_config_cannot_hide_active_filters_or_block_unused_global_drivers() {
+    const CHILD_ROOT: &str = "MINICORE_TEST_FILTER_ROOT";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let workspace = Workspace::open(root).await.unwrap();
+        let result = workspace.status(QueryContext::default()).await;
+        if std::env::var_os("MINICORE_TEST_EXPECT_FILTER").is_some() {
+            assert!(matches!(result, Err(WorkspaceError::UnsupportedFilter)));
+        } else {
+            assert!(result.unwrap().repo_available);
+        }
+        return;
+    }
+    let root = filtered_repository();
+    let configuration = TempDir::new().unwrap();
+    let global = configuration.path().join("global-config");
+    let empty = configuration.path().join("empty-config");
+    let marker = root.path().join("inherited-filter-ran");
+    fs::write(
+        &global,
+        format!(
+            "[filter \"unused\"]\n clean = printf called > '{}'\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    fs::write(&empty, "").unwrap();
+    let run = |expect_filter: bool| {
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "inherited_config_cannot_hide_active_filters_or_block_unused_global_drivers",
+            ])
+            .env(CHILD_ROOT, root.path())
+            .env("GIT_CONFIG_GLOBAL", &global)
+            .env("GIT_CONFIG", &empty);
+        if expect_filter {
+            command.env("MINICORE_TEST_EXPECT_FILTER", "yes");
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    run(false);
+    let command = format!("printf called > '{}'; cat", marker.display());
+    git(root.path(), &["config", "filter.marker.clean", &command]);
+    fs::write(root.path().join("file.txt"), "same\n").unwrap();
+    run(true);
+    assert!(!marker.exists());
+}

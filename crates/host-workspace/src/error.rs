@@ -41,6 +41,8 @@ pub enum WorkspaceError {
     },
     #[error("Git returned an unrecognized {0} record")]
     GitOutput(&'static str),
+    #[error("Git status for this scope can invoke a configured external content filter")]
+    UnsupportedFilter,
     #[error("the requested change no longer exists")]
     ChangeNotFound,
     #[error("the change is unmerged or uses an unsupported Git object type")]

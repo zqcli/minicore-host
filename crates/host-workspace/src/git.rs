@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
@@ -6,7 +7,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tokio::{io::AsyncReadExt, process::Command};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::Command,
+};
 
 use crate::{
     QueryContext, Result, Workspace, WorkspaceError,
@@ -62,6 +66,7 @@ impl Workspace {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct Repository {
     pub(crate) workspace: Workspace,
     root: PathBuf,
@@ -141,6 +146,7 @@ impl Repository {
     }
 
     pub(crate) async fn status(&self, context: &QueryContext) -> Result<StatusResult> {
+        self.check_content_filters(context).await?;
         // Porcelain v2 always uses repository-relative paths, including when
         // the bound workspace is a subdirectory. The literal pathspec limits
         // the observation to that workspace.
@@ -230,6 +236,153 @@ impl Repository {
         Ok(status)
     }
 
+    /// Status can run clean/process filters, including in initialized
+    /// submodules. Refuse those actual bindings before starting status rather
+    /// than disabling the filters and reporting different Git semantics.
+    async fn check_content_filters(&self, context: &QueryContext) -> Result<()> {
+        let mut pending = vec![self.clone()];
+        while let Some(repository) = pending.pop() {
+            context.check()?;
+            let config = git(
+                &repository.root,
+                &[
+                    "config",
+                    "--null",
+                    "--get-regexp",
+                    r"^filter\..*\.(clean|process)$",
+                ],
+                context,
+            )
+            .await?;
+            if !config.status.success() && config.status.code() != Some(1) {
+                return Err(config.failure("filter configuration"));
+            }
+            // Git configuration uses the last value of each driver setting.
+            let mut settings = BTreeMap::new();
+            for record in config
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|record| !record.is_empty())
+            {
+                let (key, value) = split_record(record, b'\n', "filter configuration")?;
+                let key = std::str::from_utf8(key)
+                    .map_err(|_| WorkspaceError::GitOutput("filter configuration"))?;
+                settings.insert(key.to_owned(), !value.is_empty());
+            }
+            let drivers: BTreeSet<_> = settings
+                .iter()
+                .filter(|(_, active)| **active)
+                .filter_map(|(key, _)| {
+                    key.strip_prefix("filter.").and_then(|key| {
+                        key.strip_suffix(".clean")
+                            .or_else(|| key.strip_suffix(".process"))
+                    })
+                })
+                .collect();
+            let tracked = git(
+                repository.workspace.root(),
+                &["ls-files", "--stage", "--full-name", "-z", "--", "."],
+                context,
+            )
+            .await?
+            .success("tracked paths")?;
+            let mut files = BTreeSet::new();
+            let mut submodules = BTreeSet::new();
+            for record in tracked
+                .stdout
+                .split(|byte| *byte == 0)
+                .filter(|record| !record.is_empty())
+            {
+                context.check()?;
+                let (header, path) = split_record(record, b'\t', "tracked paths")?;
+                let path = std::str::from_utf8(path).map_err(|_| WorkspaceError::NonUtf8Path)?;
+                normalize(path, false)?;
+                let mode = header
+                    .split(|byte| *byte == b' ')
+                    .next()
+                    .ok_or(WorkspaceError::GitOutput("tracked paths"))?;
+                if mode == b"160000" {
+                    submodules.insert(path);
+                } else if mode == b"100644" || mode == b"100755" {
+                    files.insert(path);
+                }
+            }
+            if !drivers.is_empty() && !files.is_empty() {
+                let mut input = Vec::new();
+                for path in files {
+                    input.extend_from_slice(path.as_bytes());
+                    input.push(0);
+                }
+                let attributes = git_with_input(
+                    &repository.root,
+                    &["check-attr", "-z", "--stdin", "filter"],
+                    Some(input),
+                    context,
+                )
+                .await?
+                .success("filter attributes")?;
+                let mut fields = attributes.stdout.split(|byte| *byte == 0);
+                while let Some(path) = fields.next().filter(|path| !path.is_empty()) {
+                    context.check()?;
+                    let attribute = fields
+                        .next()
+                        .ok_or(WorkspaceError::GitOutput("filter attributes"))?;
+                    let value = fields
+                        .next()
+                        .ok_or(WorkspaceError::GitOutput("filter attributes"))?;
+                    if attribute != b"filter" || !files_path_is_relative(path) {
+                        return Err(WorkspaceError::GitOutput("filter attributes"));
+                    }
+                    let value = std::str::from_utf8(value)
+                        .map_err(|_| WorkspaceError::GitOutput("filter attributes"))?;
+                    if drivers.contains(value) {
+                        return Err(WorkspaceError::UnsupportedFilter);
+                    }
+                }
+            }
+            for path in submodules {
+                let directory = repository.root.join(path);
+                let boundary = self.workspace.root().to_owned();
+                let directory = blocking(context.clone(), move |_| {
+                    let metadata = match fs::symlink_metadata(&directory) {
+                        Ok(metadata) => metadata,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            return Ok(None);
+                        }
+                        Err(error) => return Err(error.into()),
+                    };
+                    if metadata.is_symlink() {
+                        return Err(WorkspaceError::UnsupportedChange);
+                    }
+                    if !metadata.is_dir() {
+                        return Ok(None);
+                    }
+                    let directory = fs::canonicalize(directory)?;
+                    if !directory.starts_with(&boundary) {
+                        return Err(WorkspaceError::OutsideWorkspace);
+                    }
+                    match fs::symlink_metadata(directory.join(".git")) {
+                        Ok(_) => Ok(Some(directory)),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                        Err(error) => Err(error.into()),
+                    }
+                })
+                .await?;
+                if let Some(directory) = directory {
+                    let workspace = Workspace::open(&directory).await?;
+                    let child = Repository::discover(&workspace, context)
+                        .await?
+                        .ok_or(WorkspaceError::UnsupportedChange)?;
+                    if child.root != directory {
+                        return Err(WorkspaceError::UnsupportedChange);
+                    }
+                    pending.push(child);
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn relative(&self, path: &str) -> Result<String> {
         let path = normalize(path, false)?;
         let relative = path
@@ -314,6 +467,22 @@ impl Repository {
     }
 }
 
+fn split_record<'a>(
+    record: &'a [u8],
+    separator: u8,
+    operation: &'static str,
+) -> Result<(&'a [u8], &'a [u8])> {
+    let index = record
+        .iter()
+        .position(|byte| *byte == separator)
+        .ok_or(WorkspaceError::GitOutput(operation))?;
+    Ok((&record[..index], &record[index + 1..]))
+}
+
+fn files_path_is_relative(path: &[u8]) -> bool {
+    std::str::from_utf8(path).is_ok_and(|path| normalize(path, false).is_ok())
+}
+
 struct GitOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
@@ -336,21 +505,36 @@ impl GitOutput {
 }
 
 async fn git(root: &Path, args: &[&str], context: &QueryContext) -> Result<GitOutput> {
+    git_with_input(root, args, None, context).await
+}
+
+async fn git_with_input(
+    root: &Path,
+    args: &[&str],
+    input: Option<Vec<u8>>,
+    context: &QueryContext,
+) -> Result<GitOutput> {
     context.check()?;
     let root = root.to_owned();
     let args: Vec<OsString> = args.iter().map(OsString::from).collect();
     let context = context.clone();
-    // This small process owner outlives an abandoned caller. It always drains
-    // output and reaps the actual child, also after caller cancellation.
+    // This process owner outlives an abandoned caller. Input writing, output
+    // draining and child reaping all stay inside it, including cancellation.
     tokio::spawn(async move {
         context.check()?;
         let mut command = Command::new("git");
         command.args(["--no-pager", "-c", "core.fsmonitor=false"])
-            .args(args).current_dir(root).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true)
+            .args(args).current_dir(root).stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true)
             .env("LC_ALL", "C").env("GIT_OPTIONAL_LOCKS", "0").env("GIT_LITERAL_PATHSPECS", "1")
             .env("GIT_NO_LAZY_FETCH", "1").env("GIT_TERMINAL_PROMPT", "0");
-        for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM"] { command.env_remove(name); }
+        // GIT_CONFIG redirects `git config` alone, so it would make the filter
+        // preflight inspect different configuration than the later status.
+        for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_CONFIG"] { command.env_remove(name); }
         let mut child = command.spawn().map_err(WorkspaceError::GitUnavailable)?;
+        let writer = input.map(|bytes| {
+            let mut stdin = child.stdin.take().expect("piped stdin");
+            tokio::spawn(async move { stdin.write_all(&bytes).await?; stdin.shutdown().await })
+        });
         let mut stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");
         let out = tokio::spawn(async move { let mut bytes = Vec::new(); stdout.read_to_end(&mut bytes).await.map(|_| bytes) });
@@ -360,8 +544,14 @@ async fn git(root: &Path, args: &[&str], context: &QueryContext) -> Result<GitOu
             reason = context.stopped() => { child.kill().await.map_err(WorkspaceError::Io).and(Err(reason)) },
             status = child.wait() => status.map_err(WorkspaceError::Io),
         };
-        let stdout = out.await.map_err(|_| WorkspaceError::WorkerFailed)??;
-        let stderr = err.await.map_err(|_| WorkspaceError::WorkerFailed)??;
-        Ok(GitOutput { status: status?, stdout, stderr })
+        // Join all pipe tasks before propagating a cancellation or I/O error.
+        let written = match writer { Some(writer) => writer.await.map_err(|_| WorkspaceError::WorkerFailed).and_then(|written| written.map_err(WorkspaceError::Io)), None => Ok(()) };
+        let stdout = out.await;
+        let stderr = err.await;
+        let status = status?;
+        if status.success() { written?; }
+        let stdout = stdout.map_err(|_| WorkspaceError::WorkerFailed)??;
+        let stderr = stderr.map_err(|_| WorkspaceError::WorkerFailed)??;
+        Ok(GitOutput { status, stdout, stderr })
     }).await.map_err(|_| WorkspaceError::WorkerFailed)?
 }
