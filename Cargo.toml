@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/host-protocol", "crates/host-storage", "crates/host-provider", "crates/host-core", "crates/host-workspace", "crates/host-transport", "crates/host-tools", "crates/host-resources"]
+members = ["crates/host-protocol", "crates/host-storage", "crates/host-provider", "crates/host-core", "crates/host-workspace", "crates/host-transport", "crates/host-tools", "crates/host-resources", "crates/host-compaction"]
 resolver = "3"
 
 [workspace.package]

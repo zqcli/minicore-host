@@ -1,0 +1,26 @@
+[package]
+name = "minicore-host-compaction"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Model-backed historical compaction primitives for MiniCore Host"
+
+[dependencies]
+minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.0", features = ["macros", "time"] }
+tokio-util = { version = "=0.7.20", features = ["rt"] }
+futures-util = "=0.3.34"
+
+[dev-dependencies]
+minicore-host-provider = { path = "../host-provider", version = "0.1.0" }
+tokio = { version = "=1.54.0", features = ["net", "io-util", "rt-multi-thread", "sync", "test-util"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+await_holding_lock = "deny"
