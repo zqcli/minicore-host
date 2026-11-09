@@ -1,0 +1,267 @@
+{
+  "repository": "zqcli/minicore-runtime",
+  "source_head": "cd59b6ecbad5ccfb67552660290992662253219b",
+  "source_tree": "a9affb5ec0a2c40dc68c77c1e0dec1a13bd2cc49",
+  "base_sha": "18a6ac9b82d003330cd870275efca793cdcc9a96",
+  "published_ref": "refs/heads/feat/host-history-handoff",
+  "published_head": "59ee8ce668f72a21d408e6247d3ce075b260db14",
+  "branch_url": "https://github.com/zqcli/minicore-runtime/tree/feat/host-history-handoff",
+  "commits": [
+    {
+      "old_sha": "ee01aca0259bf70115a107f2bb1ed8da053141bd",
+      "new_sha": "88e0b319b20551b6680fb9e5517134ebbda22097",
+      "tree": "8975ac067545bf42bc06f4e2383cf4a5bade3a3d",
+      "parent": "18a6ac9b82d003330cd870275efca793cdcc9a96",
+      "message": "feat(runtime): remove application payload and observation quotas\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:43:24Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228204 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:43:24Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228204 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/88e0b319b20551b6680fb9e5517134ebbda22097",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "4ae0c903199ddd171a87647b24f77747da27e9de",
+      "new_sha": "eccbead72777eca258381a45ce3158394f8c7055",
+      "tree": "b6424ab50caf0057437e6c486037917f0e75be71",
+      "parent": "88e0b319b20551b6680fb9e5517134ebbda22097",
+      "message": "test(runtime): verify lossless execution beyond former quotas\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:22Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228262 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:22Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228262 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/eccbead72777eca258381a45ce3158394f8c7055",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "fc17bfcfa1458b33024c9cf67c928567f8d6a9d4",
+      "new_sha": "84e09eced1e65b7085de913b9de8fc5f73e3cbc6",
+      "tree": "fbc07290f44804dd774027ccc8e789c0096504e5",
+      "parent": "eccbead72777eca258381a45ce3158394f8c7055",
+      "message": "test(contracts): validate unrestricted runtime payloads and observations\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:34Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228274 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:34Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228274 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/84e09eced1e65b7085de913b9de8fc5f73e3cbc6",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "a92d0206b157365b1d03e51a097311a95b56a0d2",
+      "new_sha": "925a9e65cf1a92f53e716f0dadf5472bdb46e4df",
+      "tree": "644c2b42c9547d69345b00559d55307c78a3d16c",
+      "parent": "84e09eced1e65b7085de913b9de8fc5f73e3cbc6",
+      "message": "test(model): verify parser nesting through actual assembly\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:48Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228288 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:44:48Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228288 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/925a9e65cf1a92f53e716f0dadf5472bdb46e4df",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "8882d1b98cc14c338be96f37e6e872bfe772f8e9",
+      "new_sha": "5892c5367511b4a456748ceeac378f6b8b8bb28a",
+      "tree": "b7022e5b02ba5f740801036e1912cb0a414f5ba5",
+      "parent": "925a9e65cf1a92f53e716f0dadf5472bdb46e4df",
+      "message": "refactor(examples): print uncapped observation events\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:01Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228301 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:01Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228301 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/5892c5367511b4a456748ceeac378f6b8b8bb28a",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "b9baf243a6299fe5dd9d01dacb00fe1f5330379d",
+      "new_sha": "b31e998928b70707e1695c086a70ea86edf84dcd",
+      "tree": "68a14c3ba5b48bbd49ea9f7e54b737b282ab8f22",
+      "parent": "5892c5367511b4a456748ceeac378f6b8b8bb28a",
+      "message": "docs(runtime): publish unbounded contracts and prepare version 0.10.0\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:14Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228314 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:14Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228314 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/b31e998928b70707e1695c086a70ea86edf84dcd",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    },
+    {
+      "old_sha": "cd59b6ecbad5ccfb67552660290992662253219b",
+      "new_sha": "59ee8ce668f72a21d408e6247d3ce075b260db14",
+      "tree": "a9affb5ec0a2c40dc68c77c1e0dec1a13bd2cc49",
+      "parent": "b31e998928b70707e1695c086a70ea86edf84dcd",
+      "message": "test(runtime): preserve large partials across dual failures\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:27Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228327 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T12:45:27Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794228327 +0900"
+      },
+      "url": "https://github.com/zqcli/minicore-runtime/commit/59ee8ce668f72a21d408e6247d3ce075b260db14",
+      "raw_object_sha_verified": true,
+      "raw_message_verified": true,
+      "single_parent_verified": true,
+      "no_coauthor_verified": true
+    }
+  ],
+  "verification": {
+    "seven_raw_commits_verified": true,
+    "trees_identical": true,
+    "messages_byte_identical": true,
+    "single_parent_chain_verified": true,
+    "coauthor_absent": true,
+    "fast_forward_verified": true,
+    "source_head_unchanged": true,
+    "source_worktree_clean": true,
+    "remote_ref_verified": true,
+    "independent_ls_remote_verified": true,
+    "dev_unchanged": true,
+    "main_absent_before_and_after": true,
+    "no_new_remote_branches": true
+  },
+  "final_ci_verification": {
+    "run_id": 42619794415,
+    "head_sha": "59ee8ce668f72a21d408e6247d3ce075b260db14",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415",
+    "jobs": [
+      {
+        "id": 129168666098,
+        "name": "quality gate (ubuntu, stable)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666098"
+      },
+      {
+        "id": 129168666199,
+        "name": "Package (x86_64-unknown-linux-gnu)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666199"
+      },
+      {
+        "id": 129168666308,
+        "name": "Package (x86_64-pc-windows-msvc)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666308"
+      },
+      {
+        "id": 129168666362,
+        "name": "Package (x86_64-apple-darwin)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666362"
+      },
+      {
+        "id": 129168666373,
+        "name": "cargo test (macos-latest)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666373"
+      },
+      {
+        "id": 129168666407,
+        "name": "Package (aarch64-apple-darwin)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666407"
+      },
+      {
+        "id": 129168666652,
+        "name": "cargo test (windows-latest)",
+        "status": "completed",
+        "conclusion": "success",
+        "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42619794415/job/129168666652"
+      }
+    ]
+  },
+  "note": "GitHub recreated commit identities. Each source tree and raw message was verified unchanged, with a single-parent chain on the existing branch; authors/committers are actual observed values. This records Runtime publication only, not Host release acceptance."
+}

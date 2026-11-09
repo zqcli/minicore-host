@@ -153,3 +153,24 @@ Host process/config loading, actual `host.reload`, CLI/TUI validation and live
 provider checks remain out of scope. Runtime 0.10 adoption and its >16 MiB business
 text integration are owned by the parent migration; no Runtime pin or permanent
 path override was changed here. No remote was pushed and no main branch merged.
+
+## Integrated correction and independent recheck
+
+Correction topic-to-dev mapping: `22bd2da` -> `967cc7a`, `48d06a0` ->
+`0e0f628`, `ab4a56b` -> `ee14e47`, `c3f7c3c` -> `e308de2`, `895b530` ->
+`bb750cf`, `ba608ea` -> `7fa7447`, `df98d12` -> `5921c72`.
+
+At fixed `5921c72ca5deb69865cca6c1fc3f48f1def70ed1`, a clean-source full
+`./scripts/check.sh` and unique-test listing pass **331 tests and 3 doctests**,
+without a local dependency override. A separate archive/target review passed
+the same complete gate, all five original client probes, four additional real
+TLS/WebSocket probes and three runs of 29 focused cases. Those probes cover
+owner cleanup on server drop, old-context rejection after key rotation, wrong
+TLS hostname and URL credential rejection, and actual SDK/server frames above
+16 MiB. No remaining scoped finding was identified; no full-product or external
+review approval is implied.
+
+Subsequent Runtime 0.10 integration at `2751106` passes the full **340-test /
+3-doctest** gate against the actual published Git revision `59ee8ce`. The
+observation bridge and full event RPC routes are still separate topic work,
+not claimed by this checkpoint.

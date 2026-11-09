@@ -1,6 +1,6 @@
 # Task 016: Adopt Runtime 0.10
 
-## Scope and isolated baseline
+## Original isolated scope and baseline
 
 - Host baseline: `8079970d3d7b35912ae4b45118d8e980d5f3e749`.
 - Branch/worktree: `topic/runtime-010-integration` at `/workspace/shared/minicore-host-runtime-010`.
@@ -112,3 +112,47 @@ the full integrated gate without a local patch. The source-only staging branch
 still contains the old committed Runtime pin and is not independently buildable
 until that integration step. No remote publication, independent Host review,
 live provider use, TUI validation or completed first-version release is claimed.
+
+## Integrated published checkpoint
+
+The original staging limits above are historical. Runtime publication completed
+on the existing `feat/host-history-handoff` branch at
+`59ee8ce668f72a21d408e6247d3ce075b260db14`, with the exact tree of local
+`cd59b6e`. All seven exact-head CI jobs passed. The included
+`docs/runtime-publication.json` records the seven old/new commit identities,
+verified trees/messages/authors and CI.
+
+Source-to-dev integration: `c676f5f` -> `f0531ab`, `8a26e31` -> `8657f85`,
+`4a262aa` -> `0bc0e26`, `4edc90e` -> `c955c44`, `0c93ca0` -> `bb3e0d2`,
+`5667435` -> `a1d6224`. Commit
+`275110695551c30582d1302e6b01ab23a3aad536` pins all four Runtime manifests to
+exact `=0.10.0` and Git revision `59ee8ce`, with the matching lockfile. One new
+HTTP-owner assertion adopts the independently integrated `Fault::kind()` Option
+API. No local source override is needed or present.
+
+Actual integration commands, using the environment above but the main
+checkout's own target directory and **without the temporary patch**:
+
+```sh
+cargo metadata --locked --format-version 1 --filter-platform x86_64-unknown-linux-gnu
+./scripts/check.sh
+cargo test --workspace --all-targets --locked -- --list
+```
+
+Metadata reports exactly one Runtime package, version `0.10.0`, with source
+`git+https://github.com/zqcli/minicore-runtime?rev=59ee8ce668f72a21d408e6247d3ce075b260db14#59ee8ce668f72a21d408e6247d3ce075b260db14`.
+The full gate passes formatting, committed/staged/working whitespace, strict
+Clippy, **340 unique tests**, **3 doctests** and strict rustdoc. The unique
+count was verified by listing; the difference from the topic's 299 is the
+independently integrated workspace/WSS/client-review work.
+
+An initial pin-preparation command updated only two version requirements and
+failed resolution before testing; all four were then made exact. The first
+compile caught the new test's old Fault assertion, corrected in the pin commit.
+Neither failed attempt is reported as passing. Local evidence files are
+`runtime-010-integrated-2751106.log`, `runtime-010-test-list-2751106.txt` and
+`runtime-010-remote-metadata.json` in the validation directory.
+
+The separate authoritative retry-progress Runtime extension is not part of this
+published pin. Host production-process/TUI/live-model checks and full external
+review remain pending.

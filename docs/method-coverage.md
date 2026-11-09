@@ -1,6 +1,6 @@
 # Public method implementation map
 
-This checkpoint describes Host code/test checkpoint `bd8bf2f` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes Host code/test checkpoint `2751106` (published Runtime `59ee8ce668f72a21d408e6247d3ce075b260db14`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
 `Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Twenty-five actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
@@ -68,22 +68,22 @@ This checkpoint describes Host code/test checkpoint `bd8bf2f` (published Runtime
 - `crates/host-core/tests/host_shutdown.rs`, `entity_retirement.rs`, and `history_continuation.rs`: actual shutdown/GC, original save continuation, model/tool cancellation and root-release barriers.
 - `crates/host-core/tests/http_host.rs`: two turns through real owners/Runtime and the production provider over loopback TCP/HTTP/SSE. No live external model or TUI is implied.
 - `crates/host-storage/tests/` and storage unit tests: actual filesystem locking, identity checks, atomic object saves, strict JSONL, durability/reconciliation boundaries and failure injection.
-- `crates/host-workspace/tests/`: 21 actual temporary-file/Git/edit-snapshot tests; no Session/transport/write-tool integration claim.
+- `crates/host-workspace/tests/`: 30 actual temporary-file/Git/edit-snapshot tests; no Session/transport/write-tool integration claim.
 - `crates/host-provider/tests/http_runtime.rs`: production adapter with real HTTP/SSE fixtures and actual Runtime; complete, partial, error, retry and tool-history paths.
 
 ## Cross-cutting open scope
 
-Remaining canonical command/state mapping and request routes, Host execution configuration/reload, network authentication and key changes, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
+Remaining canonical command/state mapping and request routes, Host execution configuration/reload, complete network/process assembly, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
 
 The targeted review findings for memory-owner root leases, empty-queue resume validation, unsafe-child isolation, duplicate caller operation IDs, worker retirement, late stop wakeups and initialization fencing are fixed in the recorded commits. `a088b00` adds file-scoped metadata snapshot/publication coordination; `d73b161` limits close dependencies to actual current or pending default references. The complete workspace gate at `0b9b390` passes 198 unit/integration tests and 2 doctests against the published Runtime revision. The same gate passed from a fresh local Git clone with an empty per-checkout build target and no local patch. Targeted follow-up review found no new blocker in these fixes; its seven additional regressions are now permanent tests. This is not full lifecycle or release completion, and the requested external review is still pending.
 
 The integrated lifecycle checkpoint `413916c` passes the complete 240-test/2-doctest gate (core 100, protocol 47, provider 36, storage 57). A scoped independent review passed 12 additional public-API cases; the normal concurrent-close handoff it found was fixed before integration. There is no new unpublished-creation recovery entry or implicit repeated-shutdown retry. Dropping the final root Host after an already-failed save without controlled shutdown is an explicit uncontrolled-destruction limit, not a successful stopped state. Canonical controls were then integrated through `b961f9f`; their complete gate passes 254 tests and 2 doctests. Independent review identified the lookup error conflation corrected in that commit; fixed correction review passed 161 core/protocol cases with no remaining scoped finding. Typed/stdio now routes 25 real primitives; that availability is distinct from complete canonical contract coverage, as the separate column records.
 
-Workspace backend integration `b0fdbfb` passes the complete 275-test/2-doctest gate. Unique cases were verified using `--list`, excluding storage subprocess output duplication. Workspace independent review is pending; the six canonical methods are not available merely because their backend exists.
+Workspace backend integration `b0fdbfb` passes the complete 275-test/2-doctest gate. Unique cases were verified using `--list`, excluding storage subprocess output duplication. Workspace scoped review and its fixes are recorded below; the six canonical methods are not available merely because their backend exists.
 
-At fixed typed/stdio checkpoint `bd8bf2f`, the entire gate passes 290 unique
+At fixed typed/stdio checkpoint `8079970`, the entire gate passes 290 unique
 unit/integration tests and 3 doctests. The count is verified by `--list`. Scoped
-adapter review remains open. Workspace review identified real external-filter
+adapter review found the two client corrections recorded below. Workspace review identified real external-filter
 execution and damaged-repository classification defects; the fixes are integrated at `775235a` and independently verified under stable
 Git configuration/attributes. Uncoordinated concurrent changes remain a declared
 first-version limit. The integrated full gate passes 299 unique tests and 3
@@ -93,5 +93,12 @@ WSS checkpoint `bd8bf2f` reuses those same 25 routes through actual TLS and
 authenticated initialization, with network-only key-change invalidation. The
 complete gate passes 321 unique tests and 3 doctests. This is an embedding API,
 not complete process/reload assembly. Shared-client unknown-Fault and synchronous
-preparation review corrections remain separate, and independent WSS review has
-not been completed.
+preparation corrections are integrated through `5921c72`. Its full gate and
+independent scoped recheck pass 331 unique tests and 3 doctests; the original
+five probes, four additional actual WSS probes and repeated focused cases also
+pass. This does not complete product-wide method acceptance.
+
+Runtime 0.10 migration and the actual published dependency pin at `2751106` add
+nine real HTTP/Host regressions, bringing the integrated gate to 340 unique
+tests and 3 doctests without a local dependency override. The 25-route count
+is unchanged; ongoing observation/DSH topic work is not yet included here.
