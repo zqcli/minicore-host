@@ -37,4 +37,13 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shar
 - All four new real-tool cases pass after the sink fix: M2/T0 followed by M1/T1, first-input removal, failed T0 with retained inbox, and cancelled T0 with retained inbox. They assert real input order, ToolResults, original launch ToolResult unchanged, one notification, original parent, ordinary child retention, and explicit memory reclamation. Only the model is a gated test fixture.
 - Existing no-delegated-input, cross-scope, discard-only and one-handoff tests remain in the scope suite; an additional explicit owner-port fixture checks mismatched child and input-range facts before a valid single handoff.
 
-Complete workspace gates and unique test count are pending. Independent review is a separate step and is not claimed here.
+## Final local validation (2026-11-09 UTC)
+
+Production and permanent regression checkpoint: `aa76ff9a9257d10abefc0fb8cc5dc3023f9b4e99`.
+
+- `./scripts/check.sh`: passed, including whitespace, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`, `cargo test --workspace --doc --locked`, and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`.
+- `cargo test --workspace --all-targets --locked -- --list`: **450 unique target/test cases across 44 test targets**, including the eleven new permanent cases. The two identically named core/tools integration binaries are distinct targets. Nested storage subprocess probe output and archived temporary review probes are not extra cases.
+- **3 doctests passed**. No check was skipped or blocked. No live provider or TUI behavior is claimed.
+- `git diff --check` and SPEC checksum passed. Root manifests and Cargo.lock are unchanged; the actual pinned Runtime Git dependency remains version 0.10.0 at `69faf9196991524b5549499d6208a1eaf567bf56`.
+- Final logs: `full-gate.log`, `test-list.log`, and `test-count.txt` in the evidence directory above. Original red/green probes, the genuinely red/green real-tool sink case, and focused core/scope runs are retained there.
+- The independent reviewer received each exact code checkpoint and these evidence paths. Independent review and parent integration remain separate steps; this task does not claim their outcome. No commit was pushed.
