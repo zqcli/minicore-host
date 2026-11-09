@@ -374,6 +374,13 @@ impl ConnectionRegistry {
         self.check(&state, caller, false)?;
         action()
     }
+    pub(crate) fn control_state_owned(&self) -> ControlStateData {
+        let state = self.state.lock().expect("connection mutex poisoned");
+        ControlStateData {
+            occupied: state.operator.is_some(),
+            revision: state.revision,
+        }
+    }
     pub(crate) fn snapshot(&self, caller: &CallerContext) -> Result<ControlStateData, Fault> {
         let state = self.state.lock().expect("connection mutex poisoned");
         self.check(&state, caller, false)?;
