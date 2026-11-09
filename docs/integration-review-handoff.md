@@ -2,11 +2,18 @@
 
 ## Fixed review target
 
-Source branch: `dev`. Code checkpoint: `a5c4bf4451123d994bdd7cceb13787e94bbbcb99`.
-Compare source with `f03aaac58a784ffb754007e1d599a9e97e66c5a5`, published as
-`7900d21a8cc767f508d45a1687ade4376bc6dded`. This source is not yet remotely
-published; a verified source-to-remote mapping must accompany its publication.
-Do not infer availability from a local SHA or use an unqualified latest-dev ref.
+Published branch: `dev`. Fixed review target:
+[c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e](https://github.com/zqcli/minicore-host/commit/c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e).
+Compare with previously published `7900d21a8cc767f508d45a1687ade4376bc6dded`.
+Frozen source `705a3e8cfc14d56e51fc08e522df04ee0adca1f6` and the published
+head have identical tree `9ff9f0df4474ed75e1df3712c5e8bc7b4d46c3b9`.
+Reviewed source code `a5c4bf4451123d994bdd7cceb13787e94bbbcb99` maps to
+remote `4186c3d02954dabb43563b0bb0850a70db9db36e`; the later source/head
+delta is handoff documentation. The [64-commit publication mapping](owner-integration-publication.json)
+resolves all source hashes while retaining the original published history.
+Exact-head [CI run 42650587425](https://github.com/zqcli/minicore-host/actions/runs/42650587425)
+and quality job `129275534182` completed successfully, including the full quality gate.
+Do not use an unqualified latest-dev ref in place of this fixed target.
 The original foundation handoff remains [historical evidence](review-handoff.md).
 
 This is a reviewed engineering checkpoint, **not the complete v4.93 release**.

@@ -1,6 +1,6 @@
 # Integrate owners, observations and resources
 
-Status: local integration gate passed, independent scoped reviews and normal-path corrections continue. Not a complete v4.93 release or a newly published Host checkpoint. Shared instructions are in AGENTS.md.
+Status: the fixed owner/observation/resource checkpoint is published and exact-head hosted CI passed. The first v4.93 release remains incomplete. Earlier sections preserve the incremental local evidence. Shared instructions are in AGENTS.md.
 
 ## Fixed boundary
 
@@ -75,3 +75,11 @@ Source `f4101527ec2949f4eeee3f4cac81cac74631c61f` is integrated without conflict
 At exactly a5c4bf4, `./scripts/check.sh` passes all stages and `cargo test --workspace --all-targets --locked -- --list` reports **506 unique cases**, plus **3 doctests**. Logs are `dev-a5c4bf4-full.log` and `dev-a5c4bf4-test-list.txt` in the existing validation directory. Independent clean-tree review at the same SHA reproduces the 506/3 gate and passes all eight actual-process cleanup cases, all three claim cases, and five additional public probes covering save continuation, unconfirmed cleanup, multiple cleanup owners, unadmitted resources, and late cancellation retaining queued input. Detailed independent commands/probes are retained at `/workspace/shared/minicore-host-cleanup-review-artifacts`; the committed task033 tests reproduce the core regression boundaries.
 
 The independent hash-fix review at c372c65 separately passes 495/3 plus 100 parallel task024 repetitions, confirms the direct FD evidence and preserves all original byte assertions. Its report is `/workspace/shared/minicore-host-lock-fix-review-artifacts/REVIEW.md`. These scoped reviews do not certify the incomplete first-version surfaces. The current source has not yet been published; the next publication must retain remote 7900d21 as ancestor and supply a source-to-remote mapping. No ordinary read/edit/write/bash implementation, later canonical reload, or compaction implementation is included in this checkpoint.
+
+## Verified remote publication
+
+The frozen source `705a3e8cfc14d56e51fc08e522df04ee0adca1f6` is published as `c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e` on `zqcli/minicore-host:dev`, after `7900d21a8cc767f508d45a1687ade4376bc6dded`. Both trees are `9ff9f0df4474ed75e1df3712c5e8bc7b4d46c3b9`. Reviewed source a5c4bf4 maps to `4186c3d02954dabb43563b0bb0850a70db9db36e`.
+
+The [64-commit mapping](../../docs/owner-integration-publication.json) records every source/published pair. Raw commit messages, single-parent order, full trees and modes, 325 new and 516 existing blobs were verified. All original 103 published commit objects remain unchanged. Default GitHub author and committer are `zqcli <276883664+zqcli@users.noreply.github.com>`; no co-author trailers. API reads and independent `git ls-remote` confirm the exact dev SHA and unchanged main `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. No other ref, tag, PR or force update was involved.
+
+[Exact-head CI 42650587425](https://github.com/zqcli/minicore-host/actions/runs/42650587425), job `129275534182`, completed successfully, including the complete quality-gate step. The earlier 506/3 local and independent checks apply to the exact source tree; hosted CI independently ran that same committed source. This publication does not include later reload, compaction, ordinary-tool production binding, diagnostics or executable work. It is an incremental review checkpoint, not a complete v4.93 release or permission to merge main.
