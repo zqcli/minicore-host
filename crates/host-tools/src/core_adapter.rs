@@ -92,7 +92,8 @@ impl CoreTurnPort {
                 };
                 let info = self.capability.turn_info(&target, &turn_id)?;
                 let mut data = encoded(&info)?;
-                remove(&mut data, &["id", "session_id"]);
+                // Turn inspect is lightweight; explicit bound config belongs to turn.get.
+                remove(&mut data, &["id", "session_id", "config"]);
                 if request.include_output {
                     if let Some(range) = request.output_range {
                         let output = self.capability.turn_output_read(
