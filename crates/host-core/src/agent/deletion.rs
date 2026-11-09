@@ -234,7 +234,11 @@ impl AgentOwner {
     ) -> Result<(), Fault> {
         let close = matches!(scope, AgentDeleteScope::Sessions { close: true, .. });
         for child in children {
-            child.set_agent_enabled(false);
+            if close {
+                child.begin_delete_close_owned();
+            } else {
+                child.set_agent_enabled(false);
+            }
         }
         let initial = children
             .iter()
@@ -274,7 +278,7 @@ impl AgentOwner {
             }
             // Each child has its own admission boundary, even in a cascade.
             let result =
-                match child.claim_delete_owned(close) {
+                match child.claim_cascade_delete_owned(close) {
                     Ok(_) => {
                         let current = child.unattempted_deletion_owned();
                         {

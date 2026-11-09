@@ -5,6 +5,21 @@ impl SessionController {
     /// The direct Agent reserves this child before asking its actual owner to
     /// fence input/control admission. No parent lock is held across this call.
     pub(crate) fn claim_delete_owned(&self, close: bool) -> Result<SessionDeleteAccepted, Fault> {
+        self.claim_delete_state_owned(close, false)
+    }
+    /// A cascade already admitted normal close for every explicit child before
+    /// its Agent receipt. Claim data deletion without repeating scope cleanup.
+    pub(crate) fn claim_cascade_delete_owned(
+        &self,
+        close: bool,
+    ) -> Result<SessionDeleteAccepted, Fault> {
+        self.claim_delete_state_owned(close, close)
+    }
+    fn claim_delete_state_owned(
+        &self,
+        close: bool,
+        close_already_claimed: bool,
+    ) -> Result<SessionDeleteAccepted, Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.reclaimed {
             return Err(Fault::new(
@@ -29,9 +44,10 @@ impl SessionController {
             close,
             data: DataDeletion::Pending {},
         });
-        if close {
-            Self::fence_delete_close_locked(&mut state);
+        if close && !close_already_claimed {
+            self.fence_delete_close_locked(&mut state);
         }
+        debug_assert!(!close || state.lifecycle != SessionLifecycle::Open);
         self.publish(&mut state);
         Ok(SessionDeleteAccepted {
             lifecycle: match state.lifecycle {
@@ -41,31 +57,26 @@ impl SessionController {
             close,
         })
     }
-    /// Admission only: use the same Turn expiry and root-scope seal as normal
-    /// close before a delete receipt can escape. Runtime shutdown, scope hooks
-    /// and result handoff remain with the registered asynchronous cleanup owner.
-    fn fence_delete_close_locked(state: &mut SessionState) {
-        if state.lifecycle != SessionLifecycle::Closed {
-            state.lifecycle = SessionLifecycle::Closing;
-        }
-        if let Some(active) = &state.active {
-            active._activation.expire();
-        }
-        if let Some(scope) = &state.root_scope {
-            scope.sealed.store(true, Ordering::SeqCst);
-        }
+    /// Use normal close admission, including accepted-inbox disposition, before
+    /// a queued driver can conclude memory Closed. Scope callbacks are spawned,
+    /// not invoked here; Runtime shutdown and result handoff remain async work.
+    fn fence_delete_close_locked(&self, state: &mut SessionState) {
+        self.start_scope_cleanup_locked(state, true);
+        let _ = self.apply_close_locked(state);
     }
     pub(crate) fn fence_delete_close_owned(&self) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        Self::fence_delete_close_locked(&mut state);
+        self.fence_delete_close_locked(&mut state);
         self.publish(&mut state);
     }
     pub(crate) fn begin_delete_close_owned(&self) {
-        self.start_scope_cleanup_owned();
         let handle = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            debug_assert!(state.deleting);
-            self.apply_close_locked(&mut state)
+            let state = self.state.lock().expect("Session mutex poisoned");
+            debug_assert!(state.lifecycle != SessionLifecycle::Open);
+            state
+                .active
+                .as_ref()
+                .and_then(|active| active.handle.clone())
         };
         if let Some(handle) = handle {
             handle.shutdown();
