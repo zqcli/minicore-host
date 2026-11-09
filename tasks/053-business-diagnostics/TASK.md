@@ -82,3 +82,76 @@ They do not imply that any historical lost gate was rerun successfully.
 The entire workspace gate, independent review, owner diagnostics, HostInfo
 health binding, transport integration, process/stdio and actual filesystem
 failure regressions have not been completed in this reconstruction phase.
+
+Fixed provider source: `037b24ab3e5af58b68ea6282656281aa9609f0d0`
+(`feat(provider): reconstruct transport diagnostics`).
+
+## Transport metadata preparation
+
+The isolated `host-transport/src/diagnostics.rs` currently contains only narrow
+correlation extraction. Its typed structs and borrowed, independent server
+identity reads come from the rescued prefix. The existing-wire-byte adapter and
+six pure regression tests are new. At this checkpoint it is included by the
+standalone metadata test, not linked from the production crate. This is not
+production RPC/client coverage and introduces no live logging call site.
+
+Fresh focused validation passed: `cargo test -p minicore-host-transport --test
+diagnostic_metadata --locked --offline` (6 pure cases), the same focused strict
+Clippy target with `-- -D warnings`, `cargo fmt --all --check`, and
+`git diff --check`. Actual transport call-site tests remain pending.
+
+The server reads valid identity leaves independently, including initial-message
+links and known requested targets. A malformed target must not erase another
+valid original MessageId or in_reply_to. The wire-byte path accepts already
+encoded bytes, skips unknown fields, and cannot reject or rewrite business
+requests. No request is serialized solely for diagnostics. No body, config,
+Role, key, path, or raw error field exists in the extracted structure. IDs
+identify requested references, not proof that an owner published an object.
+
+## Remaining owner and shared-hook plan
+
+The new-base production inventory still has no core business diagnostic calls.
+The existing app emits process bootstrap/shutdown/transport events and owns one
+Guard; that does not cover direct-owner lifecycle, storage, Runtime outcomes,
+or HostInfo health. The provider slice adds transport facts only; authoritative
+retry severity, recovery and primary Turn failure belong to the Session owner.
+
+After shared paths are released, the minimal health patch is a Host
+`OnceLock<Health>`, read-only one-time binding, and `HostInfo.logging` obtained
+from the existing atomic process snapshot. An unbound Host reports disabled
+with unknown counters omitted. The application exposes a Health clone, never
+the Guard, and binds it after real Host construction. Backend status types need
+only Deserialize derives for the existing typed client response. Multiple Hosts
+share the same process pipeline and counters; Host shutdown must not close it.
+
+Owner diagnostic preparation and output remain separate. The direct owner
+extracts a scalar Record from its committed fact, and its caller emits only
+after the outermost state/admission fence is released. In particular:
+
+- Input acceptance returns metadata alongside the original receipt through all
+  public, accepted-creation and internal-notification paths. Queue binding uses
+  the same committed revision as Turn startup, not the pre-publish revision.
+- The first actual terminal claim returns the original failure metadata for an
+  immediate primary ERROR; later failed history saves must not delay or replace
+  that report. The finished summary waits for the existing real barriers.
+- Actual history/metadata read/write workers record their own I/O failures.
+  Queries waiting on an existing cold load do not invent another failed read.
+- Creation failures are recorded by the actual creation owner when its failed
+  receipt is claimed. Unpublished Agent/Session IDs remain absent. Child faults
+  forwarded by Host do not become another principal ERROR. Ordinary resource
+  validation refusal stays distinct from real Store failure.
+- Tool process exit and wait/cleanup facts use the original ToolCall identity
+  and actual CommandResult scalars after the existing adapter lock. A returned
+  tool future alone does not prove process wait or cleanup.
+- Cancel, scheduling, close, retirement, compaction and handoff diagnostics use
+  actual accepted/completed facts without moving existing atomic save or
+  lifecycle boundaries. No diagnostic queue, recovery entry, retry or extra
+  lifecycle state is added.
+
+Transport wiring must be coordinated across typed-local and RPC paths rather
+than adding two client summaries or claiming RPC-only coverage is complete.
+It needs a short operation span, existing request identities, and the original
+returned error classification. Server summaries are forwarding metadata, not
+another principal business ERROR. Client targets are target_* attributes, not
+an invented local owner chain. Shared Operation machinery will not acquire a
+generic logging framework and local calls will not serialize business requests.
