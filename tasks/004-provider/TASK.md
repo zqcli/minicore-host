@@ -25,6 +25,8 @@ The isolated crate lock was seeded from the pinned Agent lock because crates.io 
 
 ## Milestone 2: real transport and Runtime integration
 
+Integration/hardening commit: `8f389935367698267591e2cff3f77411b07bf7ab`.
+
 Milestone 1 code commit: `67b89ad5c53260df177df267b076724658b82ac8`.
 
 Implemented loopback TCP HTTP/SSE fixtures that call the real `OpenAiChatModel` and actual `AgentLoop`. Coverage includes request/system/user/tool-history encoding; fragmented ID/name/arguments; parallel tools and one-time execution; text/reasoning and Unicode event splitting; disjoint usage plus exact provider counts; missing/invalid usage; all actual finish mappings; truncated/malformed stream failure; cancellation and actual socket close; no SDK retries; recognized pre-start rejection versus post-role/output errors; Retry-After; redirects; bad content type; unsupported reasoning history; and pre-cancelled no-send.
