@@ -164,6 +164,8 @@ pub struct DelegationCompletion {
 pub struct DelegationInputRange {
     pub turn: TurnRef,
     pub message_ids: Vec<MessageId>,
+    /// The owner-confirmed delegated subset of the shared Turn's input range.
+    pub delegated_message_ids: Vec<MessageId>,
 }
 
 /// Only an actually created temporary memory Session grants this capability.

@@ -417,6 +417,7 @@ impl core::DelegationSink for CoreSink {
                 .map(|range| DelegationInputRange {
                     turn: range.turn,
                     message_ids: range.message_ids,
+                    delegated_message_ids: range.delegated_message_ids,
                 })
                 .collect(),
         })

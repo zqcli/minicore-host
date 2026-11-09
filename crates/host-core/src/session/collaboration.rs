@@ -6,8 +6,7 @@ pub(super) struct DelegationSlot {
     relation: Arc<DelegationState>,
     sink: Arc<dyn DelegationSink>,
     accepted: BTreeSet<MessageId>,
-    consumed: bool,
-    bound_task: Option<TurnId>,
+    first_bound_turn: Option<TurnId>,
     handed_off: bool,
     results: Vec<TurnResult>,
     inputs: Vec<DelegationInputRange>,
@@ -121,8 +120,7 @@ impl SessionController {
             relation: Arc::clone(&relation),
             sink,
             accepted: BTreeSet::new(),
-            consumed: false,
-            bound_task: None,
+            first_bound_turn: None,
             handed_off: false,
             results: Vec::new(),
             inputs: Vec::new(),
@@ -248,17 +246,11 @@ impl SessionController {
     }
     pub(super) fn record_delegated_input(
         state: &mut SessionState,
-        _turn: &TurnId,
+        turn: &TurnId,
         message: &MessageId,
     ) {
-        let Some(slot) = state.delegation.as_mut() else {
-            return;
-        };
-        if !slot.accepted.contains(message) {
-            return;
-        }
-        if message == &slot.relation.registration.task_message_id {
-            slot.consumed = true;
+        if let Some(slot) = state.delegation.as_mut() {
+            slot.record_bound(message, turn);
         }
     }
     pub(super) fn record_delegated_result(
@@ -267,7 +259,7 @@ impl SessionController {
         consumed_inputs: Vec<MessageId>,
     ) {
         if let Some(slot) = state.delegation.as_mut()
-            && slot.bound_task.is_some()
+            && slot.first_bound_turn.is_some()
             && !slot.handed_off
         {
             slot.inputs.push(DelegationInputRange {
@@ -275,6 +267,11 @@ impl SessionController {
                     session_id: state.info.id.clone(),
                     turn_id: result.info.id.clone(),
                 },
+                delegated_message_ids: consumed_inputs
+                    .iter()
+                    .filter(|id| slot.accepted.contains(*id))
+                    .cloned()
+                    .collect(),
                 message_ids: consumed_inputs,
             });
             slot.results.push(result.clone());
@@ -294,13 +291,11 @@ impl SessionController {
             {
                 return;
             }
-            let Some(slot) = state.delegation.as_mut().filter(|slot| {
-                (slot.bound_task.is_some()
-                    || slot
-                        .discarded
-                        .contains(&slot.relation.registration.task_message_id))
-                    && !slot.handed_off
-            }) else {
+            let Some(slot) = state
+                .delegation
+                .as_mut()
+                .filter(|slot| slot.needs_handoff())
+            else {
                 return;
             };
             let prepared = (
@@ -395,8 +390,10 @@ impl SessionController {
 }
 impl DelegationSlot {
     pub(super) fn record_bound(&mut self, id: &MessageId, turn: &TurnId) {
-        if id == &self.relation.registration.task_message_id {
-            self.bound_task = Some(turn.clone());
+        // Either queue can supply the first real input for this relationship.
+        // Retain the shared activity, not an exclusive result for its first message.
+        if self.accepted.contains(id) {
+            self.first_bound_turn.get_or_insert_with(|| turn.clone());
         }
     }
     pub(super) fn record_discarded(&mut self, id: &MessageId) {
@@ -408,7 +405,7 @@ impl DelegationSlot {
         self.relation.scope.sealed.load(Ordering::SeqCst)
     }
     pub(super) fn needs_handoff(&self) -> bool {
-        (self.bound_task.is_some()
+        (self.first_bound_turn.is_some()
             || self
                 .discarded
                 .contains(&self.relation.registration.task_message_id))

@@ -326,3 +326,134 @@ async fn failed_explicit_load_after_close_hands_off_real_discarded_input() {
 async fn failed_explicit_load_after_remove_hands_off_without_clearing_the_fault() {
     explicit_load_settles_discarded_input(true, false).await;
 }
+
+fn complete(call: &ModelCall, text: &str) {
+    call.events.send(ModelEvent::text_delta(text)).unwrap();
+    call.events
+        .send(ModelEvent::Finish {
+            reason: minicore_runtime::model::ModelFinishReason::Stop,
+        })
+        .unwrap();
+}
+async fn appended_steer_precedes_first_follow_up(remove_first: bool) {
+    let mut f = Fixture::new().await;
+    let parent = f.agent(StorageMode::Memory).await;
+    let child = f.agent(StorageMode::Memory).await;
+    f.send(&parent, input(MessageMode::FollowUp));
+    let cap = recv(&mut f.bindings).await.capability();
+    let _parent_call = recv(&mut f.calls).await;
+    cap.prepare_scope(Arc::new(Hooks)).unwrap();
+    let unrelated = input(MessageMode::FollowUp);
+    f.send(&child, unrelated.clone());
+    let old = recv(&mut f.bindings).await;
+    let old_call = recv(&mut f.calls).await;
+    let first = input(MessageMode::FollowUp);
+    let relation = registration(&cap, &child, &first);
+    let (sink, mut completions) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, first.clone()).unwrap();
+    let supplemental = input(MessageMode::Steer);
+    cap.send_delegated(&relation, supplemental.clone()).unwrap();
+    complete(&old_call, "old shared response");
+    let continuation = recv(&mut f.calls).await;
+    assert!(
+        matches!(f.host.message(&f.connection.caller(), &child, &supplemental.message_id).unwrap().binding,
+        MessageBinding::Bound { turn_id } if turn_id == old.source().turn.turn_id)
+    );
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &child, &first.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    if remove_first {
+        f.host
+            .remove_input(&f.connection.caller(), &child, &first.message_id)
+            .unwrap();
+    }
+    complete(&continuation, "real supplemental result");
+    if !remove_first {
+        let next = recv(&mut f.bindings).await;
+        assert_ne!(next.source().turn, old.source().turn);
+        let follow_up = recv(&mut f.calls).await;
+        assert!(completions.try_recv().is_err());
+        complete(&follow_up, "real first-message result");
+    }
+    let completion = recv(&mut completions).await;
+    assert_eq!(completion.results.len(), if remove_first { 1 } else { 2 });
+    assert_eq!(completion.inputs[0].turn, old.source().turn);
+    assert_eq!(
+        completion.inputs[0].message_ids,
+        vec![unrelated.message_id, supplemental.message_id.clone()]
+    );
+    assert_eq!(
+        completion.inputs[0].delegated_message_ids,
+        vec![supplemental.message_id]
+    );
+    let output = completion.results[0]
+        .history
+        .iter()
+        .filter_map(|item| {
+            if let minicore_runtime::HistoryItem::Assistant(response) = item {
+                Some(
+                    response
+                        .content
+                        .iter()
+                        .filter_map(|part| {
+                            if let minicore_runtime::model::AssistantPart::Text(text) = part {
+                                Some(text.as_ref())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        output,
+        vec!["old shared response", "real supplemental result"]
+    );
+    if remove_first {
+        assert_eq!(completion.discarded_inputs, vec![first.message_id]);
+    } else {
+        assert_eq!(
+            completion.inputs[1].message_ids,
+            vec![first.message_id.clone()]
+        );
+        assert_eq!(
+            completion.inputs[1].delegated_message_ids,
+            vec![first.message_id]
+        );
+        assert!(completion.discarded_inputs.is_empty());
+    }
+    let receipt = permit.notify(input(MessageMode::FollowUp)).await.unwrap();
+    assert!(permit.notify(input(MessageMode::FollowUp)).await.is_err());
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    assert!(completions.try_recv().is_err());
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+    f.host
+        .wait_turn(&f.connection.caller(), &parent, &cap.source().turn.turn_id)
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn appended_steer_retains_shared_turn_before_first_follow_up() {
+    appended_steer_precedes_first_follow_up(false).await;
+}
+#[tokio::test]
+async fn appended_steer_result_survives_removal_of_first_follow_up() {
+    appended_steer_precedes_first_follow_up(true).await;
+}

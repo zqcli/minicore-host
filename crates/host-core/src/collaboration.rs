@@ -222,6 +222,9 @@ pub struct DelegationRegistration {
 pub struct DelegationInputRange {
     pub turn: TurnRef,
     pub message_ids: Vec<MessageId>,
+    /// Inputs in this shared Turn that the Session accepted for this delegation.
+    /// Includes real bindings cancelled before the first model request.
+    pub delegated_message_ids: Vec<MessageId>,
 }
 #[derive(Clone, Debug)]
 pub struct DelegationCompletion {

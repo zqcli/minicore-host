@@ -500,6 +500,7 @@ pub fn completion(
                 turn_id,
             },
             message_ids: vec![registration.task_message_id.clone()],
+            delegated_message_ids: vec![registration.task_message_id.clone()],
         }],
     }
 }
