@@ -643,15 +643,11 @@ async fn resource_rpc_shape_and_validation_match_on_real_pipes_and_tls() {
         assert_eq!(stdio["error"]["code"], -32602);
         assert_public(&stdio);
     }
-    // A prepared core helper is not a public receipt-producing reload method.
-    assert!(!SUPPORTED_METHODS.contains(&"host.reload"));
-    let unimplemented = pipe.request(30, "host.reload", json!({})).await;
+    assert!(SUPPORTED_METHODS.contains(&"host.reload"));
+    let invalid = pipe.request(30, "host.reload", json!({})).await;
     let network = wss.request(30, "host.reload", json!({})).await;
-    assert_eq!(unimplemented, network);
-    assert_eq!(
-        unimplemented["error"]["data"]["code"],
-        FaultKind::HostMethodUnavailable.code()
-    );
+    assert_eq!(invalid, network);
+    assert_eq!(invalid["error"]["code"], -32602);
     assert_eq!(
         pipe.request(31, "host.reload_config", json!({})).await["error"]["code"],
         -32601

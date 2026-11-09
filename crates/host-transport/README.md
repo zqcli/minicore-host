@@ -92,7 +92,7 @@ carry `target` plus that method's ordinary fields in `params`. For example:
 
 These placeholders illustrate field layout only; real IDs use the protocol's
 validated ID format. `message.send`, `agent.create`, `session.create` and
-`host.shutdown` carry their existing request DTO directly. Transport IDs never
+`host.reload` and `host.shutdown` carry their existing request DTO directly. Transport IDs never
 replace `MessageId` or `OperationId`. `result` contains the whole actual receipt,
 including accepted/start-error and partial-create facts, without an extra local
 `Result` wrapper. A business rejection uses JSON-RPC `-32000`, with the complete
@@ -107,9 +107,9 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 34 real routes:
+`SUPPORTED_METHODS` lists these 35 real routes:
 
-- Host: `host.info`, `host.config.get`, `host.receipt.get`, `host.shutdown`.
+- Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
 - Session: `session.create`, `session.get`, `session.list`, `session.state`,
@@ -148,11 +148,23 @@ enabled set is distinct from a missing target or a selected tool removed by a
 successful configuration reload; those missing cases retain the owner's Fault.
 Known references can be used directly without first calling either list method.
 
-The prepared `Host::reload_configuration` embedding API is not a public
-`host.reload` adapter: operation-correlated Host receipts and their owner-backed
-lookup must be integrated before that route is exposed. No `host.reload_config`
-alias exists. Resource query coverage does not complete configuration loading,
-ordinary file-tool installation, or Session compaction.
+`HostClient::reload` and `host.reload` accept the canonical
+`HostReloadRequest<HostConfig>` directly: `operation_id`, `expected_revision`,
+and the full readable `candidate`. The initialization-time application preparer
+comes from `HostResourceBuilder` or an explicit embedding. A Host constructed
+without one returns `HOST_METHOD_UNAVAILABLE`; the adapter cannot install one.
+Operation rights, lifecycle and revision/reservation checks stay at the actual
+Host acceptance boundary. There is no `host.reload_config` alias.
+
+The returned `HostReloadReceipt` is an immutable snapshot, normally `preparing`,
+not a wait for publication. Later `host.receipt.get` reads the same configuration
+owner's current `preparing`, `applying`, `applied`, `restart_required` or `failed`
+facts. Preparation/save failures are retained in that receipt, while rejection
+before acceptance is a business Fault. Duplicate operation IDs create separate
+invocations and make a single-result lookup ambiguous; they are not replay keys.
+No transport cache or automatic retry is involved. Caller timeout, disconnect,
+or key invalidation cannot cancel accepted preparation/publication/cleanup.
+The low-level prepared `Host::reload_configuration` embedding API remains valid.
 
 ## Shared observations and client content
 
@@ -196,9 +208,9 @@ from end-to-end transport tests. No external-provider or TUI result is implied.
 ## Network authentication and key publication
 
 `serve_wss(host, listener, Arc<tls::ServerConfig>)` serves actual TLS WebSockets.
-It rejects startup unless `Host::configure_network_access(Some(key))` has supplied
-a nonblank key. A missing key never grants anonymous access. This is a trusted
-embedding hook, not a public JSON method. TLS certificates, listeners and client
+It rejects startup unless Host construction or the trusted
+`Host::configure_network_access(Some(key))` embedding hook has supplied a nonblank
+key. A missing key never grants anonymous access. TLS certificates, listeners and client
 trust roots are supplied explicitly; the library never loads credentials or
 disables TLS verification. Plain `ws://` clients are rejected.
 
@@ -211,17 +223,18 @@ client is a new connection and never inherits rights. Configured secret state is
 not serializable and its Debug implementation is redacted. Authentication failure
 messages never include supplied keys or raw authentication input.
 
-The trusted `Host::publish_network_configuration(caller, candidate_key, commit)`
-hook is reserved for the future Host configuration owner. It checks current
-operation rights and commits prepared configuration plus actual key invalidation
-at the same narrow boundary as owner acceptance. The commit closure must only
-check the prepared candidate version and publish state, with no I/O, child calls
-or Host reentry. Candidate preparation/complete validation happens beforehand;
-a candidate with restart-required changes must not call the hook. A failed
-commit or unchanged key preserves existing connections. An actual committed
-change revokes only old network connections immediately, regardless of when
-socket cleanup runs. Trusted local/stdio connections and accepted owner work
-survive. This hook is not a completed `host.reload` implementation.
+Canonical reload publishes the complete candidate and actual key invalidation
+at one Host-owned boundary, only after preparation and necessary saving succeed.
+Restart-required candidates do not partially apply. A failed candidate or an
+unchanged actual key preserves authenticated connections and subscriptions.
+A committed key change immediately revokes old network connections and their
+operation right, regardless of socket cleanup timing. Trusted local/stdio
+connections and accepted business work survive. The initiating WSS connection
+may end before receiving its receipt; reconnect explicitly using the new key and
+query the original operation ID, without resending the reload. The replacement
+is a new connection with ordinary first-arrival operation-right rules.
+The caller-checked `Host::publish_network_configuration` hook remains a low-level
+embedding API, not an additional JSON method.
 
 WSS and stdio use the same request decoder, business dispatch, error/result
 mapping and client correlation. WSS uses one complete text message per request

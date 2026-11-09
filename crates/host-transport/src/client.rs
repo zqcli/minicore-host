@@ -1,9 +1,10 @@
 use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
-    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfigSnapshot,
-    HostInfo, InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
-    ObservationNotification, SessionHistorySnapshot, SessionInfo, SessionSnapshot, StateEvent,
-    ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
+    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfig,
+    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageRecord, ModelDescription,
+    ModelTextSnapshot, ObservationNotification, SessionHistorySnapshot, SessionInfo,
+    SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult,
+    TurnSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_runtime::tools::ToolSpec;
@@ -178,6 +179,16 @@ impl HostClient {
     /// or executable resource handles. Available to read-only connections.
     pub async fn config(&self, options: CallOptions) -> Result<HostConfigSnapshot, CallError> {
         self.call(GetConfig(Empty {}), options).await
+    }
+    /// Accept a full candidate at the Host configuration owner. The returned
+    /// receipt is a snapshot, not a wait for publication. Read later facts with
+    /// `receipt`; timeout or connection loss does not cancel an accepted reload.
+    pub async fn reload(
+        &self,
+        request: HostReloadRequest<HostConfig>,
+        options: CallOptions,
+    ) -> Result<HostReloadReceipt, CallError> {
+        self.call(Reload(request), options).await
     }
     /// List configured models by their full reference in lexical order.
     pub async fn models(&self, options: CallOptions) -> Result<Vec<ModelDescription>, CallError> {

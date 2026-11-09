@@ -1,9 +1,10 @@
 //! One typed operation table drives direct calls and RPC dispatch.
 use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
-    AgentInfo, CallerContext, Host, HostConfigSnapshot, HostInfo, InteractionAnswerData,
-    MessageRecord, ModelDescription, ModelTextSnapshot, SessionHistorySnapshot, SessionInfo,
-    SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
+    AgentInfo, CallerContext, Host, HostConfig, HostConfigSnapshot, HostInfo,
+    InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
+    SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
+    TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_runtime::tools::ToolSpec;
@@ -149,6 +150,7 @@ macro_rules! operations {
 operations! {
     Info, "host.info", Empty => HostInfo, |h, c, _p| { h.info(&c) };
     GetConfig, "host.config.get", Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
+    Reload, "host.reload", HostReloadRequest<HostConfig> => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
     ListModels, "model.list", Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
     ListTools, "tool.list", ToolListRequest => Vec<ToolSpec>, |h, c, p| {
         match p.target {
