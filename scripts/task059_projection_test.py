@@ -112,31 +112,43 @@ class CurrentQueryProjection(unittest.TestCase):
 
 class CurrentAgentPage(unittest.TestCase):
     def page(self, ids=("a", "b")):
-        return {**HOST, "data": {"items": [{"id": value} for value in ids], "next_cursor": None}}
+        return {"items": [{"id": value, "host_id": HOST["host_id"]} for value in ids],
+                "next_cursor": None}
 
-    def test_items_not_envelope_keys_are_counted(self):
+    def test_concrete_page_items_and_empty_list(self):
         self.assertEqual(len(agent_items(self.page(), HOST)), 2)
         self.assertEqual(agent_items(self.page(()), HOST), [])
 
     def test_unpaged_result_must_not_have_more_items(self):
         value = self.page()
-        value["data"]["next_cursor"] = "b"
+        value["next_cursor"] = "b"
         with self.assertRaises(AssertionError):
             agent_items(value, HOST)
 
     def test_agent_ids_must_be_unique_and_lexical(self):
-        for ids in [("b", "a"), ("a", "a")]:
+        for ids in [("b", "a"), ("a", "a"), ("",), (None,)]:
             with self.subTest(ids=ids), self.assertRaises(AssertionError):
                 agent_items(self.page(ids), HOST)
 
-    def test_host_identity_and_current_envelope_are_required(self):
-        for key in HOST:
-            value = copy.deepcopy(self.page())
-            value[key] = "wrong"
-            with self.subTest(key=key), self.assertRaises(AssertionError):
+    def test_concrete_page_fields_and_agent_host_are_required(self):
+        value = self.page()
+        value["items"][0]["host_id"] = "wrong"
+        with self.assertRaises(AssertionError):
+            agent_items(value, HOST)
+        for key in ("items", "next_cursor"):
+            value = self.page()
+            del value[key]
+            with self.subTest(page_field=key), self.assertRaises(KeyError):
                 agent_items(value, HOST)
-        with self.assertRaises(TypeError):
-            agent_items(self.page()["data"]["items"], HOST)
+        for key in ("id", "host_id"):
+            value = copy.deepcopy(self.page())
+            del value["items"][0][key]
+            with self.subTest(item_field=key), self.assertRaises(KeyError):
+                agent_items(value, HOST)
+        with self.assertRaises(KeyError):
+            agent_items({**HOST, "data": self.page()}, HOST)
+        with self.assertRaises(AssertionError):
+            agent_items(self.page()["items"], HOST)
 
 
 if __name__ == "__main__":

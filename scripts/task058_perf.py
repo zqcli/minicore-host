@@ -393,11 +393,13 @@ def query_data(snapshot, identity):
 
 
 def agent_items(page, host_identity):
-    """An omitted agent.list limit returns the full current lexical list."""
-    data = query_data(page, host_identity)
-    items = data["items"]
+    """Read the concrete discovery page, without a snapshot-envelope fallback."""
+    assert isinstance(page, dict), page
+    items = page["items"]
     assert isinstance(items, list), items
-    assert data["next_cursor"] is None, "unpaged inventory must reach the current tail"
+    assert page["next_cursor"] is None, "unpaged inventory must reach the current tail"
+    for item in items:
+        assert_identity(item, {"host_id": host_identity["host_id"]})
     ids = [item["id"] for item in items]
     assert all(isinstance(value, str) and value for value in ids), ids
     assert ids == sorted(set(ids)), "agent.list IDs must be unique and lexical"
