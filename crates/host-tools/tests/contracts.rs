@@ -138,6 +138,7 @@ fn candidate_keeps_snapshot_revision_and_omissions() {
     );
     assert_eq!(candidate.name.as_deref(), Some("new"));
     let session_snapshot = SessionConfigSnapshot {
+        mode: StorageMode::Memory,
         config: SessionConfig::default(),
         config_revision: 23,
     };

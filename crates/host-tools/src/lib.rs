@@ -7,9 +7,15 @@
 mod action;
 mod config;
 mod ports;
+mod registry;
 mod schema;
+mod scope;
+mod tool;
 
 pub use action::*;
 pub use config::*;
 pub use ports::*;
+pub use registry::{AgentToolFactory, ToolFactory, ToolRegistry};
 pub use schema::agent_tool_spec;
+pub use scope::{DispatchContext, ScopeCloseAccepted, ScopeManager};
+pub use tool::AgentTool;

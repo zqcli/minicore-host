@@ -20,3 +20,6 @@ unsafe_code = "forbid"
 
 [lints.clippy]
 await_holding_lock = "deny"
+
+[dev-dependencies]
+futures-util = "=0.3.34"

@@ -119,6 +119,7 @@ pub struct AgentConfigSnapshot {
 }
 #[derive(Clone, Debug)]
 pub struct SessionConfigSnapshot {
+    pub mode: StorageMode,
     pub config: SessionConfig,
     pub config_revision: ConfigRevision,
 }

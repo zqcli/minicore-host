@@ -22,14 +22,27 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 - `cargo check -p minicore-host-tools --offline`: passed.
 - `cargo fmt --all`: passed.
 - `cargo test -p minicore-host-tools --locked`: 7 tests passed, 0 doc tests.
-- Full workspace gates and unique `--list` count: pending the next implementation stage.
+- Full workspace gates and unique `--list` count: see Stage 2 below.
+
+## Stage 2
+
+- Stage 1 implementation commit: `0ed6b2a`.
+- Implement Runtime AgentTool and selected-only ToolRegistry, ordinary business Fault output, and explicit wait facts with Runtime cancellation/deadline support.
+- Implement adapter-owned root/member relationships, registration before task acceptance, same-scope append, cross-scope delegation rejection, actual input-range qualification, one final notification, temporary cleanup, and scope seal/close without awaiting the current root ToolCall.
+- Separate current-Turn dispatch from independent notification permits. Root owner seal and actual root_closed hooks fence lifecycle and registry removal.
+- Preserve startup cleanup across a dropped Runtime ToolFuture. Ordinary empty creation is not auto-closed. A delegated memory creation's narrow cleanup permit only closes its actual new Session after task non-acceptance.
+- Notifications carry actual outcome and final public text, not full child history or reasoning. They retain original direct parent, original task MessageId and actual ToolCallRef; a failed delivery is recorded once with no retry.
+- 26 unique tools tests pass: 7 contracts, 9 adapter, 9 scope, 1 actual Runtime AgentLoop test. All owner ports and model replies in this stage are explicit fixtures.
+- `./scripts/check.sh`: full workspace whitespace, fmt, clippy with `-D warnings`, all-target tests, doctests and rustdoc with `-D warnings` passed against this stage baseline.
+- `cargo test --workspace --all-targets --locked -- --list`: 325 listed test cases. Nested storage subprocess output is not added to that count.
+- Gate log: `/workspace/shared/minicore-host-agent-tool-stage2-check.log`; unique list: `/workspace/shared/minicore-host-agent-tool-stage2-list.log`.
 
 ## Remaining integration
 
-- Core has no admitted-Turn internal operation capability or registered delegation result handoff yet. Parent is assigning its sole owner. The observation output hook runs after claim and must not be used for fallible business preparation.
+- Core admitted-Turn internal operation capability and registered delegation result handoff are being implemented by the assigned sole owner. The observation output hook runs after claim and must not be used for fallible business preparation.
 - Bind selected tool implementations before consuming initial input; preserve the frozen ToolSet across all internal loops.
-- Implement scope ownership, standard notification delivery, root cleanup hooks, and real Runtime Tool execution, initially with explicitly named port fixtures.
+- Connect the implemented scope/notification/Runtime adapter to the real core capability implementation.
 - Add real owner adapter and Host end-to-end tests once core capabilities land. Do not present fixture tests as real Host delegation.
 - Incorporate the observation owner's actual output/page request types rather than invent a parallel read protocol.
-- Metadata updates require atomic owner name/title plus config revision commits; unsupported paths must fail explicitly.
+- Metadata updates require atomic owner name/title plus config revision commits; bridge to core once that owner publishes the implementation.
 - Runtime quota-removal publication is in progress; current crate revision remains the existing reproducible `18a6ac9b82d003330cd870275efca793cdcc9a96` (0.9.2). No unpublished local SHA is presented as remote-reproducible.
