@@ -3,7 +3,7 @@
 - The complete design baseline is `SPEC.md` (v4.93, SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`). Preserve its contents and implement its ownership and acceptance contracts.
 - Develop on `dev` and short-lived topic branches/worktrees. Do not merge into `main` before independent review and required tests pass.
 - Follow the repository owner's current explicit publication authorization and applicable permissions. Confirm the exact destination and source checkpoint, preserve remote history, and never force-push.
-- Use descriptive English conventional commits. Do not add co-author trailers.
+- Use descriptive English commit subjects in the exact `type(scope): summary` form, for example `feat(core): bind execution resources`. A scope is required. Do not add co-author trailers. Preserve already published commit history.
 - Keep `PROJECT.md` and each task's `tasks/<id>/TASK.md` current with scope, exact commits, commands, outcomes, limits, and next steps.
 - Keep direct ownership: Host -> Agent -> SessionController -> bound Runtime Turn. Do not add cross-layer mutation shortcuts, capacity quotas, implicit retries, fake success, or fake integration data.
 - Use fixed dependency revisions and a committed Cargo.lock. Production results must come from real owners and Runtime. Test doubles must be named as test doubles and must not be presented as live provider or TUI validation.

@@ -1,13 +1,13 @@
 # Public method implementation map
 
-This checkpoint describes local Host code/test checkpoint `d107462e1e67b2270c268a0b4f51bb4ba01bde00` (published Runtime `69faf9196991524b5549499d6208a1eaf567bf56`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes local Host code/test checkpoint `04ba5bc07a7d9bb73eabb143839fbaeb264a0cea` (published Runtime `69faf9196991524b5549499d6208a1eaf567bf56`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
-`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Thirty-one actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
+`Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Thirty-four actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
 | Canonical method | Core status | Typed/stdio/WSS route | Existing implementation and remaining boundary |
 | --- | --- | --- | --- |
 | `host.info` | Partial | Routed | `Host::info`. Identity, incarnation, lifecycle and operation-right state; actual shutdown strategy/fault state; logging and complete resource configuration pending. |
-| `host.config.get` | Partial | Not routed | `Host::config_get` returns canonical HostConfig and committed revision, without secret values. Resource transport integration remains pending. |
+| `host.config.get` | Implemented typed query | Routed | `Host::config_get` returns canonical HostConfig and committed revision, without secret values. All three adapters use this same owner query. |
 | `host.reload` | Partial | Not routed | `Host::reload_configuration` owns prepared-candidate save/publication and atomic key invalidation. Canonical operation_id/Receipt and application preparation entry are still missing; no completed method is advertised. |
 | `host.receipt.get` | Partial | Routed | `Host::receipt_get` traverses direct owners for original-kind creation/control facts; 1202 means missing, 1203 means ambiguous independent invocations. Additional command families remain staged. |
 | `host.shutdown` | Implemented typed entry | Routed | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. All three adapters share this real entry; process assembly remains pending. |
@@ -22,12 +22,12 @@ This checkpoint describes local Host code/test checkpoint `d107462e1e67b2270c268
 | `session.create` | Partial | Routed | `Host::create_session_async`. Real owner-scoped creation and explicit modes; published objects survive later delivery failure. |
 | `session.get` | Partial | Routed | `Host::session_info`. Committed effective config and direct ownership; complete canonical record mapping pending. |
 | `session.list` | Partial | Routed | `Host::sessions`. Direct-child records; unhealthy persisted children have explicit load-failure facts. |
-| `session.update` | Partial | Not routed | Direct owner APIs update title/effective config with durable confirmation and frozen current Turn. Recoverable resource-start blocks and canonical external Receipt remain work. |
+| `session.update` | Partial | Not routed | Direct owner APIs update title/effective config with durable confirmation and frozen current Turn. Successful updates clear only the three recoverable resource/configuration startup faults; canonical external Receipt remains work. |
 | `session.state` | Partial | Routed | `Host::session_state`. Actual queues, active Turn, residency, saving and faults; final canonical state schema mapping pending. |
 | `session.load` | Implemented typed entry | Routed | `Host::session_load` returns actual load/residency and pause facts; owned validation continues without unpausing. |
 | `session.unload` | Implemented typed entry | Routed | `Host::session_unload` preserves needed memory context and original failed ranges; queued inputs cause an explicit unload pause reason. |
 | `session.pause` | Implemented typed entry | Routed | `Host::session_pause` forms paused facts at acceptance without cancelling the current Turn. |
-| `session.resume` | Implemented typed entry | Routed | Real load/save/pause ownership and original-save continuation. Explicit resource/configuration-start fault clearing is a known unfinished correction, not covered by this label. |
+| `session.resume` | Implemented typed entry | Routed | Real load/save/pause ownership and original-save continuation. Explicit resource repair permits one fresh preparation of original queued input; repeated failure leaves its actual Fault, and history/save blocks remain intact. |
 | `session.cancel` | Implemented typed entry | Routed | `Host::session_cancel` reports the actual selected current Turn or no active Turn; only the first cancellation claim clears its accepted inbox range. |
 | `session.close` | Implemented typed entry | Routed | Real closing/closed facts, accepted cleanup and source reclamation, including registered delegation-result transfer before temporary owner release. |
 | `session.delete` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
@@ -41,8 +41,8 @@ This checkpoint describes local Host code/test checkpoint `d107462e1e67b2270c268
 | `turn.cancel` | Implemented typed entry | Routed | `Host::turn_cancel` retains the exact Turn cancellation claim/state/revision; stale or repeated calls never clear later inputs or retarget another Turn. |
 | `turn.result` | Partial | Routed | `Host::turn_result`. Actual native history/partial and primary/persistence faults while retained; complete durable query reconstruction pending. |
 | `turn.output.read` | Implemented typed query | Routed | Actual owner-retained per-response output with UTF-8 byte ranges and fixed endpoints; missing/reclaimed source is a Fault. |
-| `model.list` | Implemented core query | Not routed | Current configured complete model references and explicit capability descriptions; canonical transport integration pending. |
-| `tool.list` | Implemented core query | Not routed | Actual static ToolSpecs or direct Agent/Session selection; missing configured resources produce Fault. Transport integration pending. |
+| `model.list` | Implemented typed query | Routed | Current configured complete model references and explicit capability descriptions; shared typed/stdio/WSS query. |
+| `tool.list` | Implemented typed query | Routed | Actual static ToolSpecs or direct Agent/Session selection; missing configured resources produce Fault. Shared typed/stdio/WSS query. |
 | `session.history.read` | Implemented typed query | Routed | Actual complete/partial Host history with provenance and fixed pagination; cold JSONL reads create no old Turn or Runtime and do not rewrite storage. |
 | `session.context` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
 | `session.compact` | Not implemented | Not routed | Required by SPEC; no completed business handler. |
@@ -55,7 +55,7 @@ This checkpoint describes local Host code/test checkpoint `d107462e1e67b2270c268
 | `changes.diff` | Partial | Not routed | `Workspace::changes_diff` and `diff_edit` compare actual Git/file or captured before/after bytes. Canonical routing and write-tool recording remain pending. |
 | `toolcall.get` | Implemented typed query | Routed | Actual invocation input, status and source association from owner facts, never reconstructed from presentation text. |
 | `toolcall.output.read` | Implemented typed query | Routed | Actual per-call retained process/result output and fixed UTF-8 ranges, respecting source lifetime. |
-| `interaction.answer` | Implemented typed entry | Routed | Original Runtime waiting point validates identity, Load, type and one settlement; answered/cancelled/expired facts remain distinct. Independent deadline correction review is pending. |
+| `interaction.answer` | Implemented typed entry | Routed | Original Runtime waiting point validates identity, Load, type and one settlement; answered/cancelled/expired facts remain distinct. Independent deadline correction review passed. |
 | `events.subscribe` | Implemented typed entry | Routed | Connection-owned scope/category subscriptions, dynamic direct descendants, initial state and exact source watermarks, early push/resync and real stdio/WSS delivery. |
 | `events.unsubscribe` | Implemented typed entry | Routed | Exact subscription cleanup without dropping another stream, the shared connection or accepted execution; stale ends do not target replacements. |
 
@@ -73,7 +73,7 @@ This checkpoint describes local Host code/test checkpoint `d107462e1e67b2270c268
 
 ## Cross-cutting open scope
 
-Remaining canonical commands/resource routes and reload receipts, production-process assembly, built-in filesystem tools/workspace/write capture, compaction/context, persistent deletion, diagnostics and later TUI integration remain separate work. Resource fault recovery is an active normal-path correction. Current output/subscriptions/DSH/interaction implementations are real but still require full product acceptance. Internal targeted review is useful evidence but does not replace the requested external Host review.
+Remaining canonical commands/resource routes and reload receipts, production-process assembly, built-in filesystem tools/workspace/write capture, compaction/context, persistent deletion, diagnostics and later TUI integration remain separate work. Resource fault recovery is independently verified. Current output/subscriptions/DSH/interaction implementations are real but still require full product acceptance. Internal targeted review is useful evidence but does not replace the requested external Host review.
 
 The targeted review findings for memory-owner root leases, empty-queue resume validation, unsafe-child isolation, duplicate caller operation IDs, worker retirement, late stop wakeups and initialization fencing are fixed in the recorded commits. `a088b00` adds file-scoped metadata snapshot/publication coordination; `d73b161` limits close dependencies to actual current or pending default references. The complete workspace gate at `0b9b390` passes 198 unit/integration tests and 2 doctests against the published Runtime revision. The same gate passed from a fresh local Git clone with an empty per-checkout build target and no local patch. Targeted follow-up review found no new blocker in these fixes; its seven additional regressions are now permanent tests. This is not full lifecycle or release completion, and the requested external review is still pending.
 
@@ -105,4 +105,4 @@ is unchanged; ongoing observation/DSH topic work is not yet included here.
 
 ## Later owner/resource integration
 
-Local `d107462` passes 477 unique tests and 3 doctests against actual published Runtime `69faf919`. Its 31 routes include standard interactions and observation queries; core resource queries and prepared reload publication are implemented but not yet canonical RPC methods. Task 029 distinguishes integrated scope, independent findings and current unfinished paths. Tasks 018–025 retain their own source checkpoints and validation boundaries; their historical local-patch runs are not confused with this actual-Git gate.
+Local `04ba5bc` passes 494 unique tests and 3 doctests against actual published Runtime `69faf919`. Its 34 routes include standard interactions, observation and resource queries; prepared reload publication is implemented but the canonical reload command/receipt is still absent. Task 029 distinguishes integrated scope, independent findings and current unfinished paths. Tasks 018–025 retain their own source checkpoints and validation boundaries; their historical local-patch runs are not confused with this actual-Git gate.
