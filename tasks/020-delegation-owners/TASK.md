@@ -50,3 +50,35 @@
 - SessionData now has optional title with an absent-field default. Storage rejects blank titles and same-revision config/name/title changes. Existing records without a title retain their original meaning.
 - Real Host/Runtime tests cover same-snapshot memory updates and stale-revision rejection; persistent tests read the confirmed actual files and reopen the Host to verify title/name/config values.
 - Delegation tests: 15/15 passed. Storage all-target tests passed. Core and storage all-target Clippy with `-D warnings` passed. All used the documented fixed local Runtime cd59b6e command-line patch; manifests/lock remain uncommitted validation scaffolding.
+
+## Coordinator integration checkpoint
+
+The independent integration worktree `stage/observation-delegation` combines the
+published-dependency Host foundation with scoped observation and these owner
+changes; it does not modify the frozen initial Host dev publication.
+
+Topic-to-stage mapping: connection bridges `1a87f53` -> `4a5ced6`, `0eeb57b` ->
+`fcabe86`; observer `da7c51e` -> `0abd4de`, `49af8f8` -> `d626914`, `39a138e` ->
+`32b6a86`; delegation `6536da6` -> `f9f8508`, `19738a4` -> `46c90e8`;
+metadata `5e41795` -> `b3a7bae`. The only initial cherry-pick conflict was
+`PROJECT.md`; the current handoff was retained and the new observation sections
+were appended. No production conflict was resolved by dropping behavior.
+
+Fixed `46c90e834ddb5f3e16a54b634964a1cf9a92175c` passed `cargo check
+--workspace --all-targets --locked`, then the full `scripts/check.sh` gate:
+whitespace, fmt, strict Clippy, **370 unique tests**, **3 doctests**, and strict
+rustdoc. The unique count was independently listed. This pass precedes metadata
+`b3a7bae`; it is not a pass for later changes or for the unfinished tools bridge.
+
+The check used the actual local Runtime retry source
+`3cf57e3e1947b0464bd8843ed0508bfddfb2639a` via explicit command-line Cargo patch,
+with a temporary lockfile restored afterward. No path override is committed.
+The Runtime publication is separately authorized and underway; the final
+integrated gate must use its verified remote revision. Linux/Rust 1.90.0,
+debug/incremental disabled, two build jobs and a separate target were used.
+Evidence: `stage-46c90e8-check.log`, `stage-46c90e8-full-local-runtime.log`,
+`stage-46c90e8-test-list.txt`, and the corresponding metadata JSON in the local
+validation directory. An initial validation wrapper incorrectly passed
+`--config` to the rustfmt subcommand and exited before tests; the corrected
+wrapper leaves fmt unchanged and patches only dependency-consuming Cargo
+commands. It is not counted as a passing gate or retained in the repository.
