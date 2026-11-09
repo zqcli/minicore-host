@@ -124,6 +124,7 @@ fn source_values_are_copied_and_overrides_replace_without_aliasing() {
 #[test]
 fn candidate_keeps_snapshot_revision_and_omissions() {
     let snapshot = AgentConfigSnapshot {
+        name: "fixture name".into(),
         config: AgentConfig::default(),
         config_revision: 17,
     };
@@ -136,8 +137,9 @@ fn candidate_keeps_snapshot_revision_and_omissions() {
         candidate.config.session_defaults.reasoning,
         ReasoningPreference::High
     );
-    assert_eq!(candidate.name.as_deref(), Some("new"));
+    assert_eq!(candidate.name.as_str(), "new");
     let session_snapshot = SessionConfigSnapshot {
+        title: Some("fixture title".into()),
         mode: StorageMode::Memory,
         config: SessionConfig::default(),
         config_revision: 23,
@@ -146,7 +148,7 @@ fn candidate_keeps_snapshot_revision_and_omissions() {
     let candidate = session_snapshot.apply(&changes).unwrap();
     assert_eq!(candidate.expected_revision, 23);
     assert_eq!(candidate.config, session_snapshot.config);
-    assert_eq!(candidate.title, NullablePatch::Clear);
+    assert_eq!(candidate.title, None);
 }
 #[test]
 fn actual_runtime_spec_has_only_six_actions_and_strict_objects() {

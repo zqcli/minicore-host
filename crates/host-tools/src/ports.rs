@@ -156,6 +156,7 @@ pub struct DelegationCompletion {
     /// Reuses the owner result and Runtime history; no fabricated final text.
     pub results: Vec<minicore_host_core::TurnResult>,
     pub inputs: Vec<DelegationInputRange>,
+    pub discarded_inputs: Vec<MessageId>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct DelegationInputRange {

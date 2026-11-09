@@ -114,11 +114,13 @@ pub fn agent_config_from_settings(
 /// Values and their matching revision must be fetched together by the backend.
 #[derive(Clone, Debug)]
 pub struct AgentConfigSnapshot {
+    pub name: String,
     pub config: AgentConfig,
     pub config_revision: ConfigRevision,
 }
 #[derive(Clone, Debug)]
 pub struct SessionConfigSnapshot {
+    pub title: Option<String>,
     pub mode: StorageMode,
     pub config: SessionConfig,
     pub config_revision: ConfigRevision,
@@ -127,13 +129,13 @@ pub struct SessionConfigSnapshot {
 pub struct AgentUpdateCandidate {
     pub expected_revision: ConfigRevision,
     pub config: AgentConfig,
-    pub name: Option<String>,
+    pub name: String,
 }
 #[derive(Clone, Debug)]
 pub struct SessionUpdateCandidate {
     pub expected_revision: ConfigRevision,
     pub config: SessionConfig,
-    pub title: NullablePatch<String>,
+    pub title: Option<String>,
 }
 impl AgentConfigSnapshot {
     pub fn apply(&self, changes: &AgentChanges) -> Result<AgentUpdateCandidate, Fault> {
@@ -141,7 +143,7 @@ impl AgentConfigSnapshot {
         Ok(AgentUpdateCandidate {
             expected_revision: self.config_revision,
             config: agent_config_from_settings(&self.config, &changes.settings)?,
-            name: changes.name.clone(),
+            name: changes.name.clone().unwrap_or_else(|| self.name.clone()),
         })
     }
 }
@@ -154,7 +156,11 @@ impl SessionConfigSnapshot {
                 .config
                 .apply_patch(&changes.settings)
                 .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?,
-            title: changes.title.clone(),
+            title: match &changes.title {
+                NullablePatch::Unchanged => self.title.clone(),
+                NullablePatch::Set(title) => Some(title.clone()),
+                NullablePatch::Clear => None,
+            },
         })
     }
 }

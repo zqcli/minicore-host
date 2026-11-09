@@ -92,7 +92,7 @@ async fn update_uses_one_snapshot_and_never_retries_a_conflict() {
         writes[0].config.session_defaults.model.as_str(),
         "new-model"
     );
-    assert_eq!(writes[0].name.as_deref(), Some("renamed"));
+    assert_eq!(writes[0].name.as_str(), "renamed");
 }
 #[tokio::test]
 async fn expired_turn_is_business_fault_and_cannot_use_owner_ports() {

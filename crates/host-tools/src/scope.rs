@@ -30,7 +30,8 @@ struct Scope {
     closing: CancellationToken,
     permit: OnceCell<Arc<dyn ScopePort>>,
     members: Mutex<HashMap<SessionRef, Arc<Member>>>,
-    cleanup: OnceCell<Result<(), Fault>>,
+    cleanup_gate: tokio::sync::Mutex<()>,
+    cleanup_done: AtomicBool,
 }
 struct Member {
     registration: DelegationRegistration,
@@ -129,7 +130,8 @@ impl ScopeManager {
                     closing: CancellationToken::new(),
                     permit: OnceCell::new(),
                     members: Mutex::new(HashMap::new()),
-                    cleanup: OnceCell::new(),
+                    cleanup_gate: tokio::sync::Mutex::new(()),
+                    cleanup_done: AtomicBool::new(false),
                 });
                 registry
                     .roots
@@ -357,9 +359,8 @@ impl ScopeManager {
         scope.closing.cancel();
         let operation = operation_id.clone();
         runtime.spawn(async move {
-            let _ = scope.close_members().await;
-            // The root owner receives the same hook and observes any retained
-            // cleanup failure instead of falsely publishing closed.
+            // The root owner invokes the registered cleanup hook once. A failed
+            // close is not immediately retried by a second adapter cleanup pass.
             if let Some(permit) = scope.permit.get() {
                 let _ = permit.close_root(operation).await;
             }
@@ -423,26 +424,29 @@ impl ScopeHooks for Scope {
     fn close_members(&self) -> PortFuture<'_, ()> {
         self.closing.cancel();
         Box::pin(async move {
-            self.cleanup
-                .get_or_init(|| async {
-                    let mut members = self
-                        .members
-                        .lock()
-                        .expect("scope members poisoned")
-                        .values()
-                        .cloned()
-                        .collect::<Vec<_>>();
-                    members.sort_by_key(|member| std::cmp::Reverse(member.depth));
-                    let mut first_error = None;
-                    for member in members {
-                        if let Err(error) = member.stop().await {
-                            first_error.get_or_insert(error);
-                        }
-                    }
-                    first_error.map_or(Ok(()), Err)
-                })
-                .await
-                .clone()
+            let _gate = self.cleanup_gate.lock().await;
+            if self.cleanup_done.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            let mut members = self
+                .members
+                .lock()
+                .expect("scope members poisoned")
+                .values()
+                .cloned()
+                .collect::<Vec<_>>();
+            members.sort_by_key(|member| std::cmp::Reverse(member.depth));
+            let mut first_error = None;
+            for member in members {
+                if let Err(error) = member.stop().await {
+                    first_error.get_or_insert(error);
+                }
+            }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+            self.cleanup_done.store(true, Ordering::Release);
+            Ok(())
         })
     }
 }
@@ -482,7 +486,17 @@ impl Member {
         // lifecycle owner lock. The independent completion task need not take it.
         let _dispatch = self.dispatch.lock().await;
         if self.settled.load(Ordering::Acquire) {
-            return self.wait_done().await;
+            if self.wait_done().await.is_ok() {
+                return Ok(());
+            }
+            // A later explicit scope close can continue the original owner
+            // cleanup. Never retry notification or replay the child execution.
+            if let Some(permit) = self.permit.get() {
+                permit.close(OperationId::new().map_err(id_fault)?).await?;
+                permit.release(DelegationDisposition::ScopeClosed).await?;
+            }
+            self.finish(Ok(()));
+            return Ok(());
         }
         if let Some(permit) = self.permit.get() {
             permit.close(OperationId::new().map_err(id_fault)?).await?;
@@ -532,24 +546,29 @@ impl Member {
 impl DelegationSink for Sink {
     fn handoff(&self, completion: DelegationCompletion) -> Result<(), Fault> {
         let member = self.0.upgrade().ok_or_else(closed)?;
-        if !completion.inputs.iter().any(|range| {
+        let consumed = completion.inputs.iter().any(|range| {
             range
                 .message_ids
                 .contains(&member.registration.task_message_id)
-        }) {
+        });
+        let discarded = completion
+            .discarded_inputs
+            .contains(&member.registration.task_message_id);
+        if !consumed && !discarded {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,
-                "completion does not include the registered task input",
+                "completion includes neither actual consumption nor explicit removal of its task input",
             ));
         }
-        if completion.results.is_empty()
+        if (consumed && completion.results.is_empty())
+            || (!consumed && !completion.results.is_empty())
             || completion.results.iter().any(|result| {
                 result.info.state != TurnState::Finished || result.info.outcome.is_none()
             })
         {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,
-                "completion requires actual settled Turn results",
+                "only actually consumed tasks can report settled Turn results",
             ));
         }
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
@@ -620,7 +639,8 @@ fn notification_text(
         .collect::<Vec<_>>();
     serde_json::to_string(&serde_json::json!({
         "source":registration.child,"task_message_id":registration.task_message_id,
-        "origin":registration.origin,"inputs":completion.inputs,"results":results,
+        "origin":registration.origin,"inputs":completion.inputs,"discarded_inputs":completion.discarded_inputs,
+        "status":if completion.results.is_empty() {"not_executed"} else {"ended"},"results":results,
     }))
     .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))
 }

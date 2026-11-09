@@ -450,3 +450,110 @@ async fn self_and_root_delegation_are_rejected_without_a_cycle() {
     );
     assert_eq!(root.state.relations.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn explicitly_discarded_unconsumed_task_never_fabricates_a_turn_result() {
+    let port = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let child = session();
+    scopes
+        .send(
+            port.port(),
+            origin(&port),
+            child.clone(),
+            input(),
+            true,
+            true,
+        )
+        .await
+        .unwrap();
+    let relation = port
+        .state
+        .relations
+        .lock()
+        .unwrap()
+        .get(&child)
+        .cloned()
+        .unwrap();
+    relation
+        .sink
+        .handoff(DelegationCompletion {
+            results: vec![],
+            inputs: vec![],
+            discarded_inputs: vec![relation.registration.task_message_id.clone()],
+        })
+        .unwrap();
+    released(&port.state, 1).await;
+    let messages = port.state.notifications.lock().unwrap();
+    let body: serde_json::Value = serde_json::from_str(&messages[0].1.text).unwrap();
+    assert_eq!(body["status"], "not_executed");
+    assert_eq!(body["results"], serde_json::json!([]));
+    assert_eq!(
+        body["discarded_inputs"][0],
+        relation.registration.task_message_id.as_str()
+    );
+}
+
+#[tokio::test]
+async fn cleanup_failure_is_not_retried_until_an_explicit_later_close() {
+    let port = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let child = session();
+    scopes
+        .send(
+            port.port(),
+            origin(&port),
+            child.clone(),
+            input(),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+    port.state.close_fails.store(true, Ordering::Release);
+    scopes.close_scope(port.as_ref()).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let changed = port.state.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            if port
+                .state
+                .events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|event| event == &format!("close:{}", child.session_id))
+            {
+                break;
+            }
+            changed.await;
+        }
+    })
+    .await
+    .unwrap();
+    tokio::task::yield_now().await;
+    assert_eq!(
+        port.state
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| *event == &format!("close:{}", child.session_id))
+            .count(),
+        1
+    );
+    port.state.close_fails.store(false, Ordering::Release);
+    scopes.close_scope(port.as_ref()).unwrap();
+    released(&port.state, 1).await;
+    assert_eq!(
+        port.state
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| *event == &format!("close:{}", child.session_id))
+            .count(),
+        2
+    );
+}

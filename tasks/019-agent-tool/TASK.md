@@ -48,3 +48,11 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 - Stage 2 code commit: `b9066a5`; its additional root-lock-only test dependency commit is `c8a51f0`.
 - Integrated parent baseline `275110695551c30582d1302e6b01ab23a3aad536` with local merge `8ca9ab9`. The tool crate now uses the actual published Runtime `59ee8ce668f72a21d408e6247d3ce075b260db14`, exact version `=0.10.0`, matching every other Host consumer. No local patch/path/vendor dependency is committed.
 - Re-ran all 27 tool tests on Runtime 0.10.0. Added explicit root/self delegation rejection (including an already registered member sending delegate:true to itself), without imposing an idle or capacity limit. Full integrated workspace gates remain pending the real core bridge stage.
+
+## Owner-interface refinements
+
+- Preserve name/title from the same atomic config snapshot; submit complete metadata and configuration with the original revision.
+- The completion contract separately carries actual consumed input ranges and explicitly discarded inputs. A task discarded before consumption reports `not_executed`, with no invented TurnResult or success outcome.
+- Scope cleanup retains failures as actual blockers, caches only success, and permits a later explicit close to continue original owner cleanup. The first close does not automatically retry it.
+- Runtime 0.10 focused gate: `cargo test -p minicore-host-tools --locked` has 29 passing tests; `cargo clippy -p minicore-host-tools --all-targets --locked -- -D warnings` and formatting pass.
+- A production `core_adapter.rs` and actual Host/Runtime integration tests are being prepared against the sole core owner's capability API. They are not included in the verified build until the corresponding integrated core and observation commits are available.

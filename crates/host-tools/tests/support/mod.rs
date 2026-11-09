@@ -60,6 +60,7 @@ pub struct FixtureState {
     pub finish_inline: AtomicBool,
     pub prepare_fails: AtomicBool,
     pub notify_fails: AtomicBool,
+    pub close_fails: AtomicBool,
     pub snapshot_reads: AtomicUsize,
     pub writes: Mutex<Vec<AgentUpdateCandidate>>,
     pub update_conflict: AtomicBool,
@@ -134,6 +135,7 @@ impl TurnPort for FixtureTurn {
         self.check_active()?;
         self.state.snapshot_reads.fetch_add(1, Ordering::Relaxed);
         Ok(AgentConfigSnapshot {
+            name: "fixture name".into(),
             config: AgentConfig::default(),
             config_revision: 7,
         })
@@ -141,6 +143,7 @@ impl TurnPort for FixtureTurn {
     fn session_snapshot(&self, _: &SessionRef) -> Result<SessionConfigSnapshot, Fault> {
         self.check_active()?;
         Ok(SessionConfigSnapshot {
+            title: Some("fixture title".into()),
             config: SessionConfig::default(),
             config_revision: 9,
             mode: StorageMode::Memory,
@@ -414,6 +417,13 @@ impl DelegationPort for FixtureDelegation {
                 .lock()
                 .unwrap()
                 .push(format!("close:{}", self.registration.child.session_id));
+            self.state.changed.notify_waiters();
+            if self.state.close_fails.load(Ordering::Acquire) {
+                return Err(Fault::new(
+                    FaultKind::SessionHistoryWriteFailed,
+                    "fixture close has an unresolved save",
+                ));
+            }
             Ok(())
         })
     }
@@ -480,6 +490,7 @@ pub fn completion(
             history: vec![],
             partials: vec![],
         }],
+        discarded_inputs: Vec::new(),
         inputs: vec![DelegationInputRange {
             turn: TurnRef {
                 session_id: registration.child.session_id.clone(),
