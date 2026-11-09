@@ -439,7 +439,7 @@ impl SessionStore {
         }
         if dir.contains("history.jsonl")? {
             let history = dir.open_file("history.jsonl", true, false)?;
-            crate::journal::lock_history(&history, &dir.path)?;
+            let _history = crate::journal::lock_history(history, &dir.path)?;
             dir.remove_file("history.jsonl")?;
         }
         dir.remove_file("session.json")?;

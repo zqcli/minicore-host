@@ -1,21 +1,22 @@
 //! A real child holds the exact open-file description, without timing a fork.
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     process::{Child, Command, Stdio},
 };
 
+type LockHook = Box<dyn FnOnce(&File)>;
 thread_local! {
-    static INHERIT_NEXT: Cell<bool> = const { Cell::new(false) };
+    static AFTER_LOCK: RefCell<Option<LockHook>> = const { RefCell::new(None) };
     static INHERITED: RefCell<Option<InheritedDescriptor>> = const { RefCell::new(None) };
 }
 
-pub(crate) fn inherit_next_lock() {
-    INHERIT_NEXT.with(|next| assert!(!next.replace(true)));
+pub(crate) fn on_next_lock(hook: impl FnOnce(&File) + 'static) {
+    AFTER_LOCK.with(|next| assert!(next.borrow_mut().replace(Box::new(hook)).is_none()));
 }
-pub(crate) fn after_lock(file: &File) {
-    if INHERIT_NEXT.with(|next| next.replace(false)) {
+pub(crate) fn inherit_next_lock() {
+    on_next_lock(|file| {
         INHERITED.with(|child| {
             assert!(
                 child
@@ -24,6 +25,12 @@ pub(crate) fn after_lock(file: &File) {
                     .is_none()
             );
         });
+    });
+}
+pub(crate) fn after_lock(file: &File) {
+    let hook = AFTER_LOCK.with(|next| next.borrow_mut().take());
+    if let Some(hook) = hook {
+        hook(file);
     }
 }
 pub(crate) fn inherited() -> InheritedDescriptor {

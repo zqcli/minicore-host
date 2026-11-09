@@ -1,7 +1,7 @@
 use crate::{
     CompactionProjection, FilePosition, HISTORY_SCHEMA_VERSION, HistoryEntry, HistoryProblem,
-    HistoryRecord, SCHEMA_VERSION, SaveRange, SessionStore, StorageError, filesystem::Directory,
-    strict_json,
+    HistoryRecord, SCHEMA_VERSION, SaveRange, SessionStore, StorageError, file_handle::FileHandle,
+    filesystem::Directory, strict_json,
 };
 use minicore_host_protocol::{PersistenceState, SessionId, TurnId, TurnOutcome};
 use minicore_runtime::{
@@ -77,10 +77,11 @@ struct Pending {
     bytes: Vec<u8>,
 }
 struct Persistent {
-    // The owner handle retains the root inode lock until pending I/O is gone.
-    _owner: SessionStore,
+    // Drop the history lease before its directory and final root owner. All
+    // accepted I/O must have finished before the owning worker drops this value.
+    file: FileHandle,
     dir: Directory,
-    file: File,
+    _owner: SessionStore,
     stamp: FileStamp,
     prefix_hash: Sha256,
     ends_with_newline: bool,
@@ -140,8 +141,8 @@ impl SessionJournal {
         }
     }
     pub(crate) fn persistent(owner: SessionStore, dir: Directory) -> Result<Self, StorageError> {
-        let mut file = dir.open_file("history.jsonl", true, false)?;
-        lock_history(&file, &dir.path)?;
+        let file = dir.open_file("history.jsonl", true, false)?;
+        let mut file = lock_history(file, &dir.path)?;
         let before = FileStamp::read(&file, &dir.path)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).map_err(|e| {
@@ -531,9 +532,9 @@ impl SessionStore {
     pub fn read_history(&self) -> Result<LoadedHistory, StorageError> {
         self.load()?;
         let dir = self.directory(false)?;
-        let mut file = dir.open_file("history.jsonl", false, false)?;
-        match file.try_lock_shared() {
-            Ok(()) => {}
+        let file = dir.open_file("history.jsonl", false, false)?;
+        let mut file = match FileHandle::shared(file) {
+            Ok(file) => file,
             Err(std::fs::TryLockError::WouldBlock) => return Err(StorageError::HistoryInUse),
             Err(std::fs::TryLockError::Error(e)) => {
                 return Err(crate::error::io_error(
@@ -542,7 +543,7 @@ impl SessionStore {
                     e,
                 ));
             }
-        }
+        };
         #[cfg(test)]
         crate::lease_tests::after_lock(&file);
         let before = FileStamp::read(&file, &dir.path)?;
@@ -558,12 +559,12 @@ impl SessionStore {
     }
 }
 
-pub(crate) fn lock_history(file: &File, directory: &Path) -> Result<(), StorageError> {
-    match file.try_lock() {
-        Ok(()) => {
+pub(crate) fn lock_history(file: File, directory: &Path) -> Result<FileHandle, StorageError> {
+    match FileHandle::exclusive(file) {
+        Ok(file) => {
             #[cfg(test)]
-            crate::lease_tests::after_lock(file);
-            Ok(())
+            crate::lease_tests::after_lock(&file);
+            Ok(file)
         }
         Err(std::fs::TryLockError::WouldBlock) => Err(StorageError::HistoryInUse),
         Err(std::fs::TryLockError::Error(e)) => Err(crate::error::io_error(

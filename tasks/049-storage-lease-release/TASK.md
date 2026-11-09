@@ -43,8 +43,28 @@ this run; only test hooks and regressions were added.
 
 ## Implementation and verification
 
-In progress. The fix must use a final-owner destructor around each successful
-lock, including initialization/error exits. Root Directory clones and child
-handles must share the actual guard, and journal cleanup must release its file
-before its root owners. No save-range, byte, sync, validation, or error behavior
-may be weakened. Full tests and independent review remain pending.
+- Red regression commit: `9fc1fb2ba625c94d91d18ae7f85fe92f896363d3`.
+- The private `FileHandle` owns an acquired lease and unlocks immediately before
+  its File is closed. Unlocked child directories never unlock. Root Directory
+  clones share `Arc<FileHandle>` rather than running per-clone cleanup or
+  inspecting reference counts. The guard is installed immediately after a
+  successful acquisition, before any fallible initialization work.
+- Persistent journals retain the guard through accepted writes, failed-sync
+  reconciliation, and save confirmation. Their fields release the history
+  descriptor before directory/root owners. Temporary readers and deletion
+  operations use the same guard through both success and error returns.
+- No bytes, range positions, validation, synchronization, acquisition policy,
+  business ownership, or public API change. Unlock is not a save confirmation.
+- Additional controls check independent concurrent readers, a moved accepted
+  worker after caller drop, and deletion failure preserving original bytes.
+
+Initial fixed-code checks pass: `cargo test -p minicore-host-storage --all-targets
+--locked` and `cargo clippy -p minicore-host-storage --all-targets --locked -- -D
+warnings`. Logs are `storage-green.log` and `storage-clippy.log` in the evidence
+directory. Formatting and `git diff --check` pass. Repeated normal-concurrency
+runs, full gate, and independent review are pending. `env.sh` fixes the Rust
+1.90.0 environment and a dedicated target directory; dependencies stay locked.
+
+The normal-cleanup fix does not claim to run Rust destructors after process
+kill or power loss. Abnormal-exit lease release still requires the OS to close
+all copies of the locked description. No recovery framework or timeout is added.

@@ -1,4 +1,4 @@
-use crate::{StorageError, error::io_error};
+use crate::{StorageError, error::io_error, file_handle::FileHandle};
 use metadata::MetadataGates;
 use rustix::fs::{self, AtFlags, Mode, OFlags};
 use std::{
@@ -14,7 +14,7 @@ use std::{
 
 #[derive(Clone)]
 pub(crate) struct Directory {
-    pub file: Arc<File>,
+    pub file: Arc<FileHandle>,
     pub path: PathBuf,
     parent: Option<Arc<Directory>>,
     metadata: Arc<MetadataGates>,
@@ -38,13 +38,13 @@ impl Directory {
             .map_err(|e| io_error("open data root", &canonical, e))?,
         );
         check_directory(&file)?;
-        match file.try_lock() {
-            Ok(()) => {}
+        let file = match FileHandle::exclusive(file) {
+            Ok(file) => file,
             Err(std::fs::TryLockError::WouldBlock) => return Err(StorageError::RootInUse),
             Err(std::fs::TryLockError::Error(e)) => {
                 return Err(io_error("lock data root", &canonical, e));
             }
-        }
+        };
         #[cfg(test)]
         crate::lease_tests::after_lock(&file);
         // Existence is not a durability proof, including after a previous failed
@@ -85,7 +85,7 @@ impl Directory {
         );
         check_directory(&file)?;
         Ok(Self {
-            file: Arc::new(file),
+            file: Arc::new(FileHandle::unlocked(file)),
             path,
             parent: Some(Arc::new(self.clone())),
             metadata: self.metadata.clone(),

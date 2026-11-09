@@ -142,3 +142,73 @@ fn accepted_worker_retains_root_and_history_after_callers_drop() {
         1
     );
 }
+
+#[test]
+fn releasing_one_reader_does_not_unlock_another_active_reader() {
+    use crate::lease_tests::on_next_lock;
+    use std::{sync::mpsc, time::Duration};
+    let (temp, session) = fixture();
+    let path = temp.path().join("host");
+    let history = session.canonical_path().join("history.jsonl");
+    let reader = session.clone();
+    let (ready, reading) = mpsc::channel();
+    let (release, proceed) = mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        on_next_lock(move |_| {
+            ready.send(()).unwrap();
+            proceed.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        reader.read_history()
+    });
+    reading.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert!(session.read_history().unwrap().records.is_empty());
+    assert!(matches!(
+        session.open_journal(),
+        Err(StorageError::HistoryInUse)
+    ));
+    drop(session);
+    assert!(matches!(
+        DataRoot::acquire(&path),
+        Err(StorageError::RootInUse)
+    ));
+    assert!(matches!(
+        File::open(&history).unwrap().try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    release.send(()).unwrap();
+    assert!(worker.join().unwrap().unwrap().records.is_empty());
+    let _next = DataRoot::acquire(&path).unwrap();
+    let next_history = File::open(history).unwrap();
+    next_history.try_lock().unwrap();
+    next_history.unlock().unwrap();
+}
+
+#[test]
+fn failed_deletion_releases_its_history_lease_without_deleting_original_bytes() {
+    use crate::lease_tests::on_next_lock;
+    use std::{cell::RefCell, os::unix::fs::PermissionsExt, rc::Rc};
+    let (_temp, session) = fixture();
+    let mut record = session.load().unwrap();
+    record.data.closed = Some(crate::SessionClosure {
+        reason: "explicit".into(),
+    });
+    session.save(&record).unwrap();
+    let path = session.canonical_path().join("history.jsonl");
+    let original = std::fs::read(&path).unwrap();
+    let contender = File::open(&path).unwrap();
+    let retained = Rc::new(RefCell::new(None));
+    let child = retained.clone();
+    let changed = path.clone();
+    on_next_lock(move |file| {
+        *child.borrow_mut() = Some(InheritedDescriptor::new(file));
+        // External permission mutation makes the next guarded removal fail.
+        std::fs::set_permissions(changed, std::fs::Permissions::from_mode(0o666)).unwrap();
+    });
+    let result = session.delete_closed();
+    let mut child = retained.borrow_mut().take().unwrap();
+    assert!(matches!(result, Err(StorageError::UnsafePath { .. })));
+    assert!(child.is_alive());
+    assert_eq!(std::fs::read(path).unwrap(), original);
+    contender.try_lock().unwrap();
+    contender.unlock().unwrap();
+}

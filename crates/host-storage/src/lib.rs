@@ -13,6 +13,7 @@ compile_error!(
 
 mod compaction;
 mod error;
+mod file_handle;
 mod filesystem;
 mod journal;
 mod objects;

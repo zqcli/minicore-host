@@ -15,9 +15,14 @@ platform support is made.
 exclusive lock on the directory inode itself. Root symlink aliases resolve to the
 same lock; no deletable lock-file marker or PID timeout decides ownership. A
 second handle opened independently, including in the same process, is rejected.
-Child storage handles retain the root guard. Process exit releases the OS lock;
-leftover marker files do not establish occupancy. Dropping the final handle is
-permitted only after the owner has joined all execution and necessary save work.
+Child storage handles and Directory clones retain the same root guard. The
+final actual owner explicitly unlocks before closing its descriptor, including
+initialization failures, so an unrelated forked child's inherited descriptor
+cannot prolong the lease. A caller's departure or save confirmation does not
+release live owner handles. Dropping the final handle is permitted only after
+the owner has joined all execution and necessary save work. Abnormal exit
+relies on the OS closing all copies of the locked description; leftover marker
+files do not establish occupancy.
 
 Below the established root, all operations are relative to open directory file
 descriptors. Components are fixed filenames or strictly validated protocol IDs.
@@ -163,6 +168,10 @@ All disk methods are synchronous. Invoke them in an owned blocking worker,
 outside Host, Agent and Session state locks. A caller stopping its wait must not
 drop the owner's accepted worker. A dedicated journal has one OS-locked writer;
 it is not a Host-wide request lock. Independent Sessions can write independently.
+The writer releases its history lease only when its actual owning worker drops
+it, before releasing the retained root owners. Temporary shared readers and
+explicit-deletion leases release on return, including error paths. None of these
+lease releases performs synchronization or confirms a pending save range.
 Each direct owner must serialize accepted saves of its own object outside its
 business-state lock. File-local metadata coordination is not a compare-and-swap
 for competing same-object revision updates or a multi-object transaction.
