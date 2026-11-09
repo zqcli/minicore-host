@@ -373,6 +373,78 @@ async fn real_partial_is_saved_as_partial_without_fabricated_assistant() {
     assert!(state.failure_paused);
 }
 
+#[tokio::test]
+async fn partial_and_terminal_acceptance_register_original_saves_before_gated_io() {
+    let model = model(vec![vec![ModelEvent::text_delta("unfinished actual text")]]);
+    let gates = (0..3)
+        .map(|_| Arc::new(Semaphore::new(0)))
+        .collect::<Vec<_>>();
+    let (entered, mut rx) = mpsc::unbounded_channel();
+    let fixture = setup(
+        Arc::new(Resources {
+            model: model.clone(),
+            tools: ToolSet::default(),
+        }),
+        |inner| {
+            Arc::new(GatedJournal {
+                inner,
+                gates: Mutex::new(gates.iter().cloned().collect()),
+                entered,
+                count: AtomicUsize::new(0),
+            })
+        },
+    );
+    send(&fixture, "respond partially");
+    for (boundary, gate) in gates.iter().enumerate() {
+        assert_eq!(rx.recv().await, Some(boundary));
+        let context = fixture
+            .session
+            .context(&fixture.connection.caller())
+            .await
+            .unwrap();
+        assert!(context.data.history_save.pending && context.data.history_save.running);
+        assert!(context.data.history_save.fault.is_none());
+        let history = context.data.history.unwrap();
+        assert_eq!(history.position, boundary as u64 + 1);
+        assert_eq!(history.raw_items, 1);
+        assert!(history.latest_response.is_none());
+        assert_eq!(records(&fixture).len(), boundary);
+        {
+            let state = fixture.session.state.lock().unwrap();
+            let active = state.active.as_ref().unwrap();
+            assert_eq!(active.info.persistence, PersistenceState::Pending);
+            assert_eq!(active.partial_accepted, boundary >= 1);
+            assert_eq!(active.partials.len(), usize::from(boundary >= 1));
+            assert_eq!(active.terminal_accepted, boundary == 2);
+            assert_eq!(
+                state.readable_history.as_ref().unwrap().len(),
+                1 + usize::from(boundary >= 1)
+            );
+            assert!(state.completed.is_empty());
+        }
+        gate.add_permits(1);
+    }
+    until(&fixture, |state| state.completed.len() == 1).await;
+    let saved = records(&fixture);
+    assert_eq!(saved.len(), 3);
+    assert!(matches!(saved[0].entry, HistoryEntry::Input { .. }));
+    assert!(matches!(saved[1].entry, HistoryEntry::Partial { .. }));
+    assert!(matches!(
+        saved[2].entry,
+        HistoryEntry::TurnFinished {
+            outcome: TurnOutcome::Failed,
+            ..
+        }
+    ));
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    let state = fixture.session.state.lock().unwrap();
+    let result = state.completed.values().next().unwrap();
+    assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));
+    assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert_eq!(result.partials.len(), 1);
+    assert!(state.history_work.is_none() && !state.saving);
+}
+
 struct FailedSave {
     count: AtomicUsize,
     inner: Arc<JournalHistory>,

@@ -1130,6 +1130,143 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
     assert_eq!(responses[1].request_index, 0);
 }
 
+async fn next_event(subscription: &mut EventSubscription) -> ObservationEvent {
+    match tokio::time::timeout(Duration::from_secs(5), subscription.recv())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap()
+    {
+        ObservationNotification::Event(push) => push.event,
+        notification => panic!("unexpected observation notification: {notification:?}"),
+    }
+}
+async fn accepted_history_and_save_are_published_together(mode: StorageMode) {
+    let directory = tempfile::tempdir().unwrap();
+    let gate = Arc::new(Semaphore::new(0));
+    let model = ScriptedModel::new(
+        4096,
+        vec![Script::gated(gate.clone()), Script::gated(gate.clone())],
+        None,
+    );
+    let resources = Resources::new(model.clone());
+    let (host, connection, target) = if mode == StorageMode::Persistent {
+        let (target, _) = seed(directory.path(), 0, false);
+        let (host, connection) = persistent(directory.path(), resources).await;
+        (host, connection, target)
+    } else {
+        memory(resources)
+    };
+    let caller = connection.caller();
+    let mut subscription = host
+        .events_subscribe(
+            &caller,
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: target.agent_id.clone(),
+                    session_id: target.session_id.clone(),
+                },
+                categories: BTreeSet::from([EventCategory::State, EventCategory::Completion]),
+            },
+        )
+        .unwrap();
+    host.send(
+        &caller,
+        SendMessage::new(
+            input("first request", MessageMode::FollowUp),
+            target.clone(),
+        ),
+    )
+    .unwrap();
+    for response_index in 0..2 {
+        entered(&model.entered).await;
+        let context = host.session_context(&caller, &target).await.unwrap();
+        let history = context.data.history.as_ref().unwrap();
+        assert_eq!(history.raw_items, response_index * 2);
+        assert_eq!(history.position, response_index * 2);
+        assert!(!context.data.history_save.pending);
+        let turn_id = &context.data.active_turn.as_ref().unwrap().turn_id;
+        if response_index == 0 {
+            host.send(
+                &caller,
+                SendMessage::new(
+                    input("same Turn continuation", MessageMode::Steer),
+                    target.clone(),
+                ),
+            )
+            .unwrap();
+        } else {
+            assert_eq!(
+                host.turn_info(&caller, &target, turn_id)
+                    .unwrap()
+                    .persistence,
+                if mode == StorageMode::Persistent {
+                    PersistenceState::Persisted
+                } else {
+                    PersistenceState::NotApplicable
+                }
+            );
+        }
+        gate.add_permits(1);
+        // ModelFinished and these two immediately following states are emitted
+        // by the acceptance boundary itself. Their queued values expose the old
+        // split-lock bug deterministically, without racing the query scheduler.
+        loop {
+            if let ObservationEvent::Activity(ActivityEvent::ModelFinished { source, .. }) =
+                next_event(&mut subscription).await
+            {
+                assert_eq!(&source.turn.turn_id, turn_id);
+                assert_eq!(source.response_index, response_index);
+                break;
+            }
+        }
+        let ObservationEvent::State(StateEvent::Session { data, .. }) =
+            next_event(&mut subscription).await
+        else {
+            panic!("accepted response must publish its Session state");
+        };
+        assert!(
+            data.saving,
+            "accepted response must include its original save"
+        );
+        let ObservationEvent::State(StateEvent::Turn { source, data }) =
+            next_event(&mut subscription).await
+        else {
+            panic!("accepted response must publish its Turn state");
+        };
+        assert_eq!(&source.turn_id, turn_id);
+        assert_eq!(
+            data.persistence,
+            if mode == StorageMode::Persistent {
+                PersistenceState::Pending
+            } else {
+                PersistenceState::NotApplicable
+            }
+        );
+    }
+    turn_finished(&host, &caller, &target, 1).await;
+    let context = host.session_context(&caller, &target).await.unwrap();
+    let history = context.data.history.unwrap();
+    assert_eq!(history.raw_items, 4);
+    assert_eq!(history.position, 5);
+    assert_eq!(history.latest_response.unwrap().raw_item_index, 3);
+    assert!(!context.data.history_save.pending && !context.data.history_save.running);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(model.utility_calls.load(Ordering::SeqCst), 0);
+    shutdown(&host, &caller).await;
+    if mode == StorageMode::Memory {
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn persistent_acceptance_publishes_pending_save_before_continuation_observers() {
+    accepted_history_and_save_are_published_together(StorageMode::Persistent).await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn memory_acceptance_publishes_registered_save_without_applicable_persistence() {
+    accepted_history_and_save_are_published_together(StorageMode::Memory).await;
+}
+
 #[tokio::test]
 async fn incomplete_model_output_is_not_complete_context_history_and_reclaimed_is_not_empty() {
     let model = ScriptedModel::new(
