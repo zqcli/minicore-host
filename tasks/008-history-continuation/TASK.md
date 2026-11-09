@@ -1,6 +1,6 @@
 # Continue Original History Saves
 
-Status: implementation in progress; integration with Host retirement is pending.
+Status: implemented and integrated; focused, lint, and documentation checks passed. The parent owns the final exact integrated workspace gate.
 
 ## Scope
 
@@ -47,3 +47,12 @@ Per the owner's clarified first-version scope, dropping the final root `Arc<Host
 - With sibling Host/memory integration (`577abca`, `4413b74`, `2080485`), `cargo clippy --workspace --all-targets --locked -- -D warnings` and `cargo fmt --all -- --check` passed. The temporary history-only internal alias is removed after the sibling's stopping route adopted `continue_saves_owned`.
 - The final combined-original regression now leaves a real follow-up queued while metadata remains failed. Confirming history alone does not resume it; after the exact metadata candidate confirms, a distinct new Turn starts using the new configuration revision. This tests the resume gate without inventing a new public state, retry layer, or recovery queue.
 - Latest focused command `cargo test -p minicore-host-core --test history_continuation --lib --locked` passed 20/20 (16 unit + 4 integration). Combined all-targets also passed 7 entity retirement, 10 Host shutdown, 1 HTTP, and 42 persistent owner cases. Four existing runtime owner assertions still expected readable closed-memory tombstones; the lifecycle owner is updating those public-contract assertions. No full final workspace pass is claimed until that integration update and fresh-target verification.
+
+
+## Final handoff
+
+- Final Session implementation cleanup: `ace9a70` (`fix(core): gate resumed work on all original Session saves`). No source changes followed this commit in this worker.
+- Fresh documentation target `/workspace/shared/minicore-host-history-docs-ace9a70` was empty at the start. With the same Rust/Cargo 1.90.0 environment above, `cargo test --workspace --doc --locked` passed 2 doctests and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked` passed. Output: `/workspace/shared/minicore-host-history-docs.log`.
+- Independent acceptance review reported its combined `6914e92` snapshot passing 12 independent and 38 repository focused tests, including original metadata failure plus force, factual repeated shutdown, explicit resume, and actual root release. It found no additional in-scope blocker. Final-root-handle destruction is scoped as described above, not normal stopped retirement.
+- The parent integrated the source commits and updated five old memory-tombstone assertions in `7fc6934`; it reported the 19 runtime-owner cases passing 25 consecutive runs. Those integration updates and repetitions were performed by the parent, not this worker. At handoff, the parent was running the final workspace gate at `413916c`; this document does not claim its still-pending outcome.
+- Worktree clean after this documentation handoff. No remote push, manifest/lockfile patch, Runtime/storage change, TUI change, new canonical method, or automatic recovery layer was introduced by this task.
