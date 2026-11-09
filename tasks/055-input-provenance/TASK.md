@@ -23,3 +23,8 @@ Implementation and permanent regression tests are in progress. Required checks: 
 ### First implementation checkpoint
 
 Coordinator-only shared hooks: `c42c1cedd8bef74cba4baedc0feb4f3508f2fe25` (4 files, 11 lines). Locked `cargo check -p minicore-host-core -p minicore-host-resources` passed. Five task055 pure core tests passed with `cargo test -p minicore-host-resources --test task055 -p minicore-host-core --lib --locked task055 -- --nocapture`; the explicit name filter ran only those five core tests, not the six differently named HTTP tests. HTTP tests have a separate unfiltered invocation and remain pending at this checkpoint. Logs are under `/workspace/shared/minicore-host-input-provenance-artifacts`; independent target is `/workspace/shared/minicore-host-input-provenance-target` (~614 MiB after this compile). Coordinator maintains the shared PROJECT.md.
+
+### Permanent HTTP regression checkpoint
+
+Production implementation and five pure tests: `53d84827716861b851cb041df55f9cccce28962b`.
+`cargo test -p minicore-host-resources --test task055 --locked -- --nocapture` passed all **6** permanent HTTP cases (`http-initial.log`). These use the audit's request-gating mechanism and task042's shared model-response/configuration helpers, with production Host, Runtime, provider encoding, agent tool and persistent stores. The test wait helpers poll public retained facts without installing event/state subscriptions. Framework and Role occur once; source/reply text is compared with exact owner facts; manual utility's per-item input equals its original normal HTTP projection; raw native history and persisted prefixes/markers remain byte-exact through compaction and restart. Summary answers are explicit fixtures, not a live-model behavior claim.
