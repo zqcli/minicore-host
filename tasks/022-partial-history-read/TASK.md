@@ -40,3 +40,19 @@ CARGO_BUILD_JOBS=2
 - Development-only fixture correction: the first transport regression attempted an undeclared tool, and Runtime correctly rejected it before the intended partial. The fixture now registers that tool and panics if its unfinished arguments are ever executed. The corrected test passed.
 
 Evidence directory: `/workspace/shared/minicore-host-history-read-evidence` contains the red/green original probe logs and focused-check output. Final workspace gate and exact unique test count are recorded after completion.
+
+## Final validation (2026-11-09 UTC)
+
+Production and permanent regression checkpoint:
+`f67e9813e194eeec1b5c9c664d05fd9c3832c7c9`.
+
+- `./scripts/check.sh`: passed, including whitespace, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`, `cargo test --workspace --doc --locked`, and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`.
+- `cargo test --workspace --all-targets --locked -- --list`: **389 unique target/test cases**. The three permanent partial-history tests are included; nested storage subprocess output and the archived temporary review probe are not additional cases.
+- **3 doctests passed**. No test or documentation check was skipped or blocked.
+- The exact Runtime Git source remains `69faf9196991524b5549499d6208a1eaf567bf56`; SPEC SHA-256 remains unchanged. `git diff --check` passed and no root manifest or lockfile changed.
+- The independent reviewer received the frozen code SHA, red/green original probe, permanent tests, gate log, and test list for revalidation. Independent review and parent integration are separate completion steps; this task does not claim their result.
+
+Final logs: `full-gate.log` and `test-list.log` in the evidence directory above.
+No live provider, external network service, or TUI execution is claimed. The new
+transport regression uses actual OS pipes; the existing workspace gate also
+covers its existing in-process and loopback TLS routes.
