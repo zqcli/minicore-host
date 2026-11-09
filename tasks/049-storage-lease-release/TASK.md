@@ -58,12 +58,46 @@ this run; only test hooks and regressions were added.
 - Additional controls check independent concurrent readers, a moved accepted
   worker after caller drop, and deletion failure preserving original bytes.
 
-Initial fixed-code checks pass: `cargo test -p minicore-host-storage --all-targets
---locked` and `cargo clippy -p minicore-host-storage --all-targets --locked -- -D
-warnings`. Logs are `storage-green.log` and `storage-clippy.log` in the evidence
-directory. Formatting and `git diff --check` pass. Repeated normal-concurrency
-runs, full gate, and independent review are pending. `env.sh` fixes the Rust
-1.90.0 environment and a dedicated target directory; dependencies stay locked.
+## Completed verification
+
+Fixed source commit: `9dd9f7c251506ceeeb1cabebde56a2f58682ec67`. A following
+record-only commit captures these results. The worktree remains isolated on
+`fix/storage-lease-release`; parent integration and independent review are
+separate acceptance steps.
+
+All checks use the evidence directory's `env.sh`, Rust 1.90.0, locked
+dependencies, jobs=2, debug=0, incremental=0, and the dedicated target
+`/workspace/shared/minicore-host-storage-lease-release-target`.
+
+- `cargo test -p minicore-host-storage --all-targets --locked`: **87 unique
+  storage cases passed** (36 unit and 51 integration), normal concurrency.
+  Log: `storage-green.log`.
+- `cargo clippy -p minicore-host-storage --all-targets --locked -- -D warnings`:
+  **passed**. Log: `storage-clippy.log`.
+- Direct final unit binary, normal default concurrency: **100/100 suites passed,
+  3,600 case executions**, no failure. Log: `unit-repeated-9dd9f7c.log`.
+- Direct complete storage integration binary, normal default concurrency:
+  **50/50 suites passed, 2,550 case executions**, no failure. Log:
+  `integration-repeated-9dd9f7c.log`; summary: `repeat-summary-9dd9f7c.log`.
+  Nested child probe invocations are not extra cases. These repetitions check
+  stability; the synchronized red/green experiments establish the cause.
+- `./scripts/check.sh`: **passed**, exit 0. Includes full-history/staged/worktree
+  whitespace, rustfmt, workspace all-target Clippy with `-D warnings`, workspace
+  all-target tests, doctests, and rustdoc with `-D warnings`. Log:
+  `full-gate-9dd9f7c.log`. The independently tracked diagnostics failure did not
+  occur in this gate run; diagnostics code is untouched by this topic.
+- `cargo test --workspace --all-targets --locked -- --list`: **661 unique
+  workspace target/test-name cases**, including 87 storage cases. Logs:
+  `test-list-9dd9f7c.log` and `test-count-9dd9f7c.log`.
+- `cargo metadata --locked --offline --format-version 1` confirms Runtime
+  0.10.0 at the exact `69faf9196991524b5549499d6208a1eaf567bf56` revision and
+  retained locked tokio 1.54.0. Artifact: `metadata-9dd9f7c.json`.
+- SPEC SHA-256 remains
+  `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+  No dependency, shared manifest, core, diagnostics, TUI, or remote change.
+
+No verification blocker remains in this topic. No live-provider, power-loss,
+network-filesystem, other-platform, or TUI acceptance claim is made.
 
 The normal-cleanup fix does not claim to run Rust destructors after process
 kill or power loss. Abnormal-exit lease release still requires the OS to close
