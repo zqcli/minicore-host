@@ -279,3 +279,233 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     assert_eq!(calls.load(Ordering::SeqCst), 2);
     assert_eq!(host.turns(&caller, &target).unwrap().len(), 2);
 }
+
+fn session_directory(root: &std::path::Path, target: &SessionRef) -> std::path::PathBuf {
+    root.join("agents")
+        .join(target.agent_id.as_str())
+        .join("sessions")
+        .join(target.session_id.as_str())
+}
+#[tokio::test]
+async fn resume_reconciles_only_this_sessions_original_metadata_candidate() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, _, _, calls) = resources();
+    let host = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    let path = session_directory(dir.path(), &target).join("session.json");
+    let original = host.session_info(&caller, &target).unwrap();
+    let original_bytes = std::fs::read(&path).unwrap();
+    std::fs::rename(&path, path.with_extension("original")).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    let role = Role {
+        name: "original candidate".into(),
+        description: String::new(),
+        instructions: "saved exact candidate".into(),
+    };
+    assert!(
+        host.update_session_async(
+            &caller,
+            &target,
+            original.config_revision,
+            &SessionConfigPatch {
+                role: Some(role.clone()),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    host.pause(&caller, &target).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(path.with_extension("original"), &path).unwrap();
+    let mut unrelated: minicore_host_storage::SessionRecord =
+        serde_json::from_slice(&original_bytes).unwrap();
+    unrelated.data.effective_config.role.name = "externally changed record".into();
+    let unrelated_bytes = serde_json::to_vec(&unrelated).unwrap();
+    std::fs::write(&path, &unrelated_bytes).unwrap();
+    host.resume(&caller, &target).unwrap();
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving && state.metadata_fault.is_some()).then_some(())
+    })
+    .await;
+    assert_eq!(std::fs::read(&path).unwrap(), unrelated_bytes);
+    assert_eq!(
+        host.session_info(&caller, &target).unwrap().config,
+        original.config
+    );
+    assert_eq!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .scheduling,
+        Scheduling::Paused
+    );
+    std::fs::write(&path, original_bytes).unwrap();
+    host.resume(&caller, &target).unwrap();
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving && state.metadata_fault.is_none()).then_some(())
+    })
+    .await;
+    let saved = host.session_info(&caller, &target).unwrap();
+    assert_eq!(saved.config_revision, original.config_revision + 1);
+    assert_eq!(saved.config.role, role);
+    assert_eq!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .scheduling,
+        Scheduling::Auto
+    );
+    let bytes = std::fs::read(&path).unwrap();
+    host.resume(&caller, &target).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn resume_settles_history_and_metadata_originals_without_cross_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, entered, release, calls) = resources();
+    let host = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    let directory = session_directory(dir.path(), &target);
+    host.send(
+        &caller,
+        SendMessage::new(input("one original execution"), target.clone()),
+    )
+    .unwrap();
+    entered.acquire().await.unwrap().forget();
+    let history = directory.join("history.jsonl");
+    std::fs::rename(&history, history.with_extension("original")).unwrap();
+    std::fs::write(&history, b"").unwrap();
+    release.add_permits(1);
+    let failed = until(|| {
+        host.turns(&caller, &target)
+            .unwrap()
+            .last()
+            .filter(|turn| {
+                turn.state == TurnState::Finalizing && turn.persistence == PersistenceState::Failed
+            })
+            .cloned()
+    })
+    .await;
+    let metadata = directory.join("session.json");
+    let original = host.session_info(&caller, &target).unwrap();
+    std::fs::rename(&metadata, metadata.with_extension("original")).unwrap();
+    std::fs::create_dir(&metadata).unwrap();
+    let role = Role {
+        name: "same Session candidate".into(),
+        description: String::new(),
+        instructions: "new config only after confirmation".into(),
+    };
+    assert!(
+        host.update_session_async(
+            &caller,
+            &target,
+            original.config_revision,
+            &SessionConfigPatch {
+                role: Some(role.clone()),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    std::fs::remove_file(&history).unwrap();
+    std::fs::rename(history.with_extension("original"), &history).unwrap();
+    host.pause(&caller, &target).unwrap();
+    // The first explicit request confirms history, while still-broken metadata
+    // remains its own original fault/version. Neither success stands in for both.
+    host.resume(&caller, &target).unwrap();
+    let result = tokio::time::timeout(
+        Duration::from_secs(3),
+        host.wait_turn(&caller, &target, &failed.id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving && state.metadata_fault.is_some()).then_some(())
+    })
+    .await;
+    assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert_eq!(result.info.outcome, failed.outcome);
+    assert_eq!(
+        host.session_info(&caller, &target).unwrap().config,
+        original.config
+    );
+    assert_eq!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .scheduling,
+        Scheduling::Paused
+    );
+    let confirmed_history = std::fs::read(&history).unwrap();
+    std::fs::remove_dir(&metadata).unwrap();
+    std::fs::rename(metadata.with_extension("original"), &metadata).unwrap();
+    host.resume(&caller, &target).unwrap();
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving && state.metadata_fault.is_none()).then_some(())
+    })
+    .await;
+    assert_eq!(
+        host.session_info(&caller, &target).unwrap().config.role,
+        role
+    );
+    assert_eq!(std::fs::read(&history).unwrap(), confirmed_history);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(host.turns(&caller, &target).unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn resume_can_finish_original_closure_record_without_reopening_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, _, _, calls) = resources();
+    let host = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    let path = session_directory(dir.path(), &target).join("session.json");
+    std::fs::rename(&path, path.with_extension("original")).unwrap();
+    std::fs::create_dir(&path).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (state.lifecycle == SessionLifecycle::Closing
+            && !state.metadata_saving
+            && state.metadata_fault.is_some())
+        .then_some(())
+    })
+    .await;
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(path.with_extension("original"), &path).unwrap();
+    host.resume(&caller, &target).unwrap();
+    until(|| {
+        (host.session_state(&caller, &target).unwrap().data.lifecycle == SessionLifecycle::Closed)
+            .then_some(())
+    })
+    .await;
+    assert_eq!(
+        host.resume(&caller, &target).unwrap_err().kind(),
+        FaultKind::SessionLifecycleClosed
+    );
+    let saved: minicore_host_storage::SessionRecord =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert!(saved.data.closed.is_some());
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}

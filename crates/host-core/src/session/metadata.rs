@@ -180,6 +180,29 @@ impl SessionController {
             )
         })?
     }
+    pub(super) fn record_continuation_candidate(
+        state: &SessionState,
+    ) -> Result<Option<SessionRecord>, Fault> {
+        let Some(work) = &state.record_work else {
+            return Ok(None);
+        };
+        if work.running {
+            return Err(Fault::new(
+                FaultKind::SessionBusy,
+                "original metadata save is still running",
+            ));
+        }
+        Ok(Some(work.candidate.clone()))
+    }
+    pub(super) fn start_record_continuation(
+        self: &Arc<Self>,
+        state: &mut SessionState,
+        candidate: SessionRecord,
+    ) {
+        let (sender, receiver) = oneshot::channel();
+        drop(receiver); // Waiting is not ownership. The accepted owner task persists.
+        self.spawn_record_save(state, candidate, sender);
+    }
     fn spawn_record_save(
         self: &Arc<Self>,
         state: &mut SessionState,
@@ -224,6 +247,7 @@ impl SessionController {
             .expect("owned save")
             .baseline
             .clone();
+        let expected_baseline = baseline.clone();
         let result = disk(FaultKind::SessionHistoryWriteFailed, move || {
             let current = store.load()?;
             if current != baseline && current != saved {
@@ -234,6 +258,14 @@ impl SessionController {
         .await;
         let updated = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.record_work.as_ref().is_none_or(|work| {
+                work.candidate != candidate || work.baseline != expected_baseline
+            }) {
+                return Err(Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "metadata completion does not match its original candidate and baseline",
+                ));
+            }
             match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
@@ -253,6 +285,7 @@ impl SessionController {
                     }
                     state.record_work = None;
                     state.close_fault = None;
+                    self.finish_save_resume(&mut state);
                     self.publish(&mut state);
                     Ok(state.info.clone())
                 }
@@ -260,6 +293,7 @@ impl SessionController {
                     let work = state.record_work.as_mut().expect("original save retained");
                     work.running = false;
                     work.fault = Some(fault.clone());
+                    state.resume_after_saves = None;
                     self.publish(&mut state);
                     Err(fault)
                 }

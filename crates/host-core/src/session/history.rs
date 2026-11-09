@@ -252,7 +252,16 @@ impl SessionController {
                         StorageMode::Memory => PersistenceState::NotApplicable,
                     } =>
             {
-                active.info.persistence = persistence;
+                active.info.persistence = if persistence == PersistenceState::Persisted
+                    && active.info.state == TurnState::Finalizing
+                    && binding.boundary != Boundary::Terminal
+                {
+                    // The original range is confirmed, but this already-returned
+                    // Turn still owns a report suffix/partial/terminal handoff.
+                    PersistenceState::Pending
+                } else {
+                    persistence
+                };
                 active.info.persistence_fault = None;
                 state.history_work = None;
                 if state
@@ -278,6 +287,7 @@ impl SessionController {
                 work.running = false;
                 work.fault = Some(fault.clone());
                 state.block_reason = Some(fault.clone());
+                state.resume_after_saves = None;
                 Err(fault)
             }
         };
@@ -391,18 +401,74 @@ impl SessionController {
         }
         self.publish(&mut state);
     }
-    /// Only the direct Agent's already-accepted saving workflow may call this
-    /// without a connection. No new Runtime work or implicit retries are started.
-    pub(crate) fn continue_history_owned(self: &Arc<Self>) -> Result<(), Fault> {
+    /// Only this direct Session's original saves, accepted explicitly via
+    /// session.resume. This never retries another owner's metadata or Runtime.
+    pub(crate) fn continue_saves_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.ensure_executor()?;
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        self.start_history_continuation(&mut state, false)
+        self.start_save_continuations(&mut state, false)
     }
-    pub(super) fn start_history_continuation(
+    // Compatibility for the lifecycle sibling until its call site is integrated.
+    pub(crate) fn continue_history_owned(self: &Arc<Self>) -> Result<(), Fault> {
+        self.continue_saves_owned()
+    }
+    pub(super) fn start_save_continuations(
         self: &Arc<Self>,
         state: &mut SessionState,
         resume_scheduling: bool,
     ) -> Result<(), Fault> {
+        Self::available(state)?;
+        let metadata = Self::record_continuation_candidate(state)?;
+        let history = state.history_work.is_some();
+        if !history && metadata.is_none() {
+            return Err(Fault::new(
+                FaultKind::SessionBusy,
+                "there is no original Session save to continue",
+            ));
+        }
+        // Both readiness checks precede spawning either original operation.
+        if history {
+            self.start_history_continuation(state)?;
+        }
+        if resume_scheduling {
+            state.resume_after_saves = Some(state.pause_generation);
+        }
+        if let Some(candidate) = metadata {
+            self.start_record_continuation(state, candidate);
+        }
+        Ok(())
+    }
+    pub(super) fn finish_save_resume(&self, state: &mut SessionState) -> bool {
+        if state.history_work.is_some()
+            || state.record_work.is_some()
+            || state.saving
+            || state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.info.state == TurnState::Finalizing)
+        {
+            return false;
+        }
+        let Some(pause_generation) = state.resume_after_saves.take() else {
+            return false;
+        };
+        if state.pause_generation == pause_generation
+            && state.lifecycle == SessionLifecycle::Open
+            && !state.host_stopping
+            && !state.releasing
+            && !state.released
+            && !state.reclaimed
+            && self.access.execution_allowed_owned()
+            && state.block_reason.is_none()
+        {
+            state.paused = false;
+            state.failure_paused = false;
+            true
+        } else {
+            false
+        }
+    }
+    fn start_history_continuation(self: &Arc<Self>, state: &mut SessionState) -> Result<(), Fault> {
         if state.reclaimed || state.released || state.releasing {
             return Err(stale_history());
         }
@@ -426,7 +492,6 @@ impl SessionController {
         let outcome = active.info.outcome.ok_or_else(stale_history)?;
         let fault = active.info.fault.clone();
         let report = active.report.clone();
-        let pause_generation = state.pause_generation;
         state
             .history_work
             .as_mut()
@@ -468,14 +533,7 @@ impl SessionController {
                 owner.finalize(&binding.turn_id, outcome, fault).await;
                 {
                     let mut state = owner.state.lock().expect("Session mutex poisoned");
-                    if resume_scheduling
-                        && state.pause_generation == pause_generation
-                        && state.completed.contains_key(&binding.turn_id)
-                        && state.lifecycle == SessionLifecycle::Open
-                        && !state.host_stopping
-                    {
-                        state.paused = false;
-                        state.failure_paused = false;
+                    if owner.finish_save_resume(&mut state) {
                         owner.publish(&mut state);
                     }
                 }

@@ -170,6 +170,7 @@ struct SessionState {
     saving: bool,
     history_work: Option<history::HistorySaveWork>,
     history_task: Option<tokio::task::JoinHandle<()>>,
+    resume_after_saves: Option<u64>,
     host_draining: bool,
     host_stopping: bool,
     releasing: bool,
@@ -251,6 +252,7 @@ impl SessionController {
             saving: false,
             history_work: None,
             history_task: None,
+            resume_after_saves: None,
             host_draining: false,
             host_stopping: false,
             releasing: false,
@@ -397,7 +399,11 @@ impl SessionController {
             && state.block_reason.is_none()
     }
     pub(crate) fn is_open_owned(&self) -> bool {
-        self.state.lock().expect("Session mutex poisoned").lifecycle == SessionLifecycle::Open
+        let state = self.state.lock().expect("Session mutex poisoned");
+        state.lifecycle == SessionLifecycle::Open
+            && !state.reclaimed
+            && !state.releasing
+            && !state.released
     }
     pub(crate) fn info(&self, caller: &CallerContext) -> Result<SessionInfo, Fault> {
         self.access.read(caller, || {
@@ -600,8 +606,8 @@ impl SessionController {
         self.ensure_executor()?;
         let continuing = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
-            if state.history_work.is_some() {
-                self.start_history_continuation(&mut state, true)?;
+            if state.history_work.is_some() || state.record_work.is_some() {
+                self.start_save_continuations(&mut state, true)?;
                 Ok(true)
             } else {
                 Ok(false)
