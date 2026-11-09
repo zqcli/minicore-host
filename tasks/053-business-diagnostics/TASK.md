@@ -192,3 +192,84 @@ Fresh health validation passed:
   keep their existing provenance; they are not claimed as new owner-path tests.
 - Strict rustdoc for `minicore-host-core` and `minicore-host-diagnostics`, formatting
   and diff checks. Whole-workspace and independent review remain pending.
+
+Fixed health source: `a6bec4a9757f264e968a98cffece5523272f7960`
+(`feat(core): expose shared process logging health`).
+
+### Typed and RPC call summaries
+
+The next transport slice newly implements the missing Call completion/data
+helpers and the current SDK/RPC wiring. It does not claim recovery of the lost
+full transport file. Every actual client invocation emits at most one DEBUG
+summary, after the original deadline-wrapped business call returns. The 47
+explicit typed entrances and the existing control macro pass only known identity
+leaves through a private field-reader callback, after that deadline is created.
+The Operation trait/table, typed business execution and wire shapes are unchanged.
+
+RPC reuses its existing encoded request bytes for narrow metadata reads, within
+the same deadline. DEBUG-disabled calls skip this parse. The server reads leaves
+independently from its existing borrowed parameters before validation, retaining
+valid MessageId/in_reply_to even when a target leaf is malformed. Initialization
+records only known connection identities, never the access key. Requested targets
+are target_* attributes rather than a client-local owner chain. A requested Host
+different from the connected peer cannot borrow that peer's incarnation.
+
+Server dispatch and subscription setup each emit one forwarding DEBUG summary
+after the actual result is available. The subscription request span/guard end
+after setup, not at the end of the long-lived stream. Client timeout and abandoned
+waits record unconfirmed delivery; neither claims cancellation, replay, failed
+execution or a confirmed business receipt. A successful RPC response similarly
+does not claim that the business outcome inside that response succeeded. Original
+Fault type/code/diagnostic_id are forwarded without messages or details, and RPC
+wrappers never manufacture a second principal ERROR.
+
+Lock boundary audit: client output is after Operation::execute or RpcClient::call
+and the complete deadline wait. RpcClient::request receives a borrowed diagnostic
+and never emits while its pending-correlation mutex is held. Server output is
+after initialize, dispatch or events_subscribe returns, outside their owner and
+admission scopes. Drop summaries belong to the enclosing invocation, after the
+inner business future and its guards have been destroyed. Spans use instrument
+for futures or in_scope for synchronous setup; no entered guard crosses await.
+
+New actual regression uses production resources/Host/Runtime, scripted HTTP,
+typed calls and actual OS-pipe stdio. It checks initial creation message IDs,
+requested Session targets, malformed-target -32602 with zero additional model
+calls, original read-only Fault forwarding, timeout/drop without cancelled or
+replayed business work, no observer dependency, and a new accepted/executed task
+after the logging writer closes. The latter is known output rejection, not disk
+exhaustion. Secret input, Role, model response, raw upstream error, key, endpoint,
+invalid target text and arbitrary method text are absent from the JSONL.
+
+The preparatory test-path wrapper was removed when diagnostics became a real
+production module. Its six pure cases now run once as crate unit tests; two more
+cover subscription scope and nested interaction load/operation identity. Initial
+new-tree compile failures (scope field accessed as a method, a shadowed test
+helper, and a diagnostic-only test assertion using the wrong BlockReason API)
+are retained in separate local outputs. A first actual regression also timed out
+because the fixture incorrectly expected a failed Session to schedule new work
+without resume. It was corrected to invoke the existing public resume operation;
+the correct production pause behavior was not changed.
+
+Final focused validation on this slice passed:
+
+- `cargo test -p minicore-host-transport --lib --test diagnostic_calls --test diagnostic_health --locked --offline`:
+  13 cases (11 crate unit cases, including 8 metadata cases, plus 2 actual
+  integration cases). The final dropped-wait exactly-once assertions passed.
+- `cargo clippy -p minicore-host-transport --all-targets --locked --offline -- -D warnings`:
+  passed on the final code, as did strict transport rustdoc, formatting and diff
+  checks. No manifest, lock, SPEC, Runtime or task054 fixture edits were made.
+
+The first full transport all-target attempt on the older f090-based fixture
+stopped at `raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_loops`:
+`task054_query_contracts.rs:503`, after `client.close()`, the actual stdio server
+join returned EPIPE (errno 32). Its business/query assertions had completed.
+The full failed output is retained as
+`/workspace/shared/task053-recovered-transport-all-targets.log`. This is not a
+passing full gate. The coordinator identified the already independently reviewed
+fix `5033e3b7bb316e6faf96a1362ca206013f58cde2` (fixture/private pipe helper only,
+already integrated at root as `91cd50d`). It resolves the SDK Drop's second
+unsubscribe reply racing the response reader close and keeps the original
+business assertions. It will be brought in as a separate existing baseline
+dependency after this functional slice is committed; it is not a diagnostics
+production fix. No current workspace-wide or independent approval claim is made
+for this slice.

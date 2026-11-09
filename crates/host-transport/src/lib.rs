@@ -20,6 +20,7 @@
 //! ```
 mod client;
 mod deadline;
+mod diagnostics;
 mod operations;
 mod output;
 mod resources;

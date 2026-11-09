@@ -1,3 +1,4 @@
+use crate::diagnostics::{self, Call, Correlation};
 use crate::operations::{Empty, Operation, dispatch, protocol_error};
 use minicore_host_core::{
     ConnectionHandle, Host, ObservationEvent, ObservationNotification, StateEvent,
@@ -15,6 +16,7 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
     task::{AbortHandle, JoinSet},
 };
+use tracing::Instrument;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -170,32 +172,52 @@ pub(crate) async fn serve_frames(
                 };
                 let _ = request.jsonrpc;
                 let Some(id) = request.id else { continue; };
+                let context = connection.as_ref()
+                    .map(|handle| diagnostics::server_context(handle.initial_info()))
+                    .unwrap_or_default();
+                let mut diagnostic = Call::server(context, &request.method, &request.params);
                 if request.method == "initialize" {
                     if connection.is_some() {
-                        queue_error(&outgoing, Some(id), protocol_error(-32600, "Connection is already initialized"))?;
+                        let error = protocol_error(-32600, "Connection is already initialized");
+                        diagnostic.server_error(&error);
+                        queue_error(&outgoing, Some(id), error)?;
                     } else {
-                        match initialization.connect(&host, request.params) {
+                        let span = diagnostic.span();
+                        match span.in_scope(|| initialization.connect(&host, request.params)) {
                             Ok(handle) => {
+                                diagnostic.connected(handle.initial_info());
+                                diagnostic.server_succeeded();
                                 queue_response(&outgoing, &RpcResponse::success(id, handle.initial_info()))?;
                                 connection = Some(handle);
                             }
-                            Err(error) => queue_error(&outgoing, Some(id), *error)?,
+                            Err(error) => {
+                                diagnostic.server_error(&error);
+                                queue_error(&outgoing, Some(id), *error)?;
+                            }
                         }
                     }
                     continue;
                 }
                 let Some(handle) = &connection else {
-                    queue_error(&outgoing, Some(id), protocol_error(-32002, "Connection is not initialized"))?;
+                    let error = protocol_error(-32002, "Connection is not initialized");
+                    diagnostic.server_error(&error);
+                    queue_error(&outgoing, Some(id), error)?;
                     continue;
                 };
                 let caller = handle.caller();
                 let host = Arc::clone(&host);
                 let outgoing = outgoing.clone();
+                let span = diagnostic.span();
                 requests.spawn(async move {
                     if request.method == "events.subscribe" {
-                        let subscription = serde_json::from_value::<SubscribeRequest>(request.params)
+                        let subscription = span.in_scope(|| serde_json::from_value::<SubscribeRequest>(request.params)
                             .map_err(|_| protocol_error(-32602, "Invalid method parameters"))
-                            .and_then(|params| host.events_subscribe(&caller, params).map_err(RpcError::business));
+                            .and_then(|params| host.events_subscribe(&caller, params).map_err(RpcError::business)));
+                        diagnostic.server_finished(&subscription);
+                        // Setup ended. The observation stream has no request span
+                        // or diagnostic guard held for its lifetime.
+                        drop(diagnostic);
+                        drop(span);
                         match subscription {
                             Ok(mut subscription) => {
                                 queue_response(&outgoing, &RpcResponse::success(id, subscription.result()))?;
@@ -210,7 +232,9 @@ pub(crate) async fn serve_frames(
                             Err(error) => return queue_error(&outgoing, Some(id), error),
                         }
                     }
-                    let response = match dispatch(host, caller, &request.method, request.params).await {
+                    let result = dispatch(host, caller, &request.method, request.params).instrument(span).await;
+                    diagnostic.server_finished(&result);
+                    let response = match result {
                         Ok(result) => RpcResponse::success(id, result),
                         Err(error) => RpcResponse::Failure(RpcFailure { jsonrpc: JsonRpcVersion::V2, id: Some(id), error }),
                     };
@@ -574,15 +598,22 @@ impl RpcClient {
         }
     }
     pub(crate) async fn initialize(&self) -> Result<ConnectionInfo, CallError> {
-        self.request("initialize", Empty {}, None).await
+        self.initialize_with(Empty {}).await
     }
     pub(crate) async fn authenticate(&self, access_key: &str) -> Result<ConnectionInfo, CallError> {
-        self.request(
-            "initialize",
-            serde_json::json!({ "access_key": access_key }),
-            None,
-        )
-        .await
+        self.initialize_with(serde_json::json!({ "access_key": access_key }))
+            .await
+    }
+    async fn initialize_with<P: Serialize>(&self, params: P) -> Result<ConnectionInfo, CallError> {
+        let mut diagnostic = Call::client(None, "initialize", Correlation::default());
+        let result = self
+            .request("initialize", params, None, &mut diagnostic)
+            .await;
+        if let Ok(info) = &result {
+            diagnostic.connected(info);
+        }
+        diagnostic.client_finished(&result);
+        result
     }
     pub(crate) fn initialized(mut self, initial: ConnectionInfo) -> Self {
         self.initial = Some(initial);
@@ -605,16 +636,21 @@ impl RpcClient {
         self.reader.abort();
         self.writer.abort();
     }
-    pub(crate) async fn call<O: Operation>(&self, request: O) -> Result<O::Output, CallError> {
-        self.request(O::METHOD, request, None).await
+    pub(crate) async fn call<O: Operation>(
+        &self,
+        request: O,
+        diagnostic: &mut Call,
+    ) -> Result<O::Output, CallError> {
+        self.request(O::METHOD, request, None, diagnostic).await
     }
     pub(crate) async fn subscribe(
         self: &Arc<Self>,
         request: SubscribeRequest,
+        diagnostic: &mut Call,
     ) -> Result<RpcSubscription, CallError> {
         let (sender, receiver) = mpsc::unbounded_channel();
         let result = self
-            .request("events.subscribe", request, Some(sender))
+            .request("events.subscribe", request, Some(sender), diagnostic)
             .await?;
         Ok(RpcSubscription {
             result,
@@ -627,6 +663,7 @@ impl RpcClient {
         method: &str,
         params: P,
         observation: Option<StreamSender>,
+        diagnostic: &mut Call,
     ) -> Result<O, CallError> {
         let (sender, receiver) = oneshot::channel();
         let id = {
@@ -654,17 +691,23 @@ impl RpcClient {
             sent: false,
         };
         let bytes = encode_request(id, method, params)?;
-        self.outgoing
-            .send(bytes)
-            .map_err(|_| connection_error("JSON-RPC writer closed"))?;
-        waiter.sent = true;
-        let value = receiver
-            .await
-            .map_err(|_| connection_error("JSON-RPC response reader closed"))??;
-        let result = serde_json::from_value(value)
-            .map_err(|error| protocol(&format!("invalid method result: {error}")))?;
-        waiter.complete();
-        Ok(result)
+        diagnostic.encoded(&bytes);
+        let span = diagnostic.span();
+        async {
+            self.outgoing
+                .send(bytes)
+                .map_err(|_| connection_error("JSON-RPC writer closed"))?;
+            waiter.sent = true;
+            let value = receiver
+                .await
+                .map_err(|_| connection_error("JSON-RPC response reader closed"))??;
+            let result = serde_json::from_value(value)
+                .map_err(|error| protocol(&format!("invalid method result: {error}")))?;
+            waiter.complete();
+            Ok(result)
+        }
+        .instrument(span)
+        .await
     }
 }
 fn encode_request<P: Serialize>(id: i64, method: &str, params: P) -> Result<Vec<u8>, CallError> {

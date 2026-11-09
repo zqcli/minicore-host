@@ -143,3 +143,29 @@ fn unextractable_encoded_metadata_has_no_business_error_or_fallback_identity() {
     assert!(empty.message_id.is_none());
     assert!(empty.target.is_none());
 }
+
+#[test]
+fn subscription_scope_keeps_requested_identity_leaves() {
+    let correlation = Correlation::from_params(&json!({
+        "scope": {"kind": "session", "agent_id": AGENT, "session_id": SESSION},
+        "categories": ["state"]
+    }));
+    let scope = correlation.scope.unwrap();
+    assert_eq!(scope.agent_id.unwrap().as_str(), AGENT);
+    assert_eq!(scope.session_id.unwrap().as_str(), SESSION);
+    assert!(scope.host_id.is_none());
+}
+
+#[test]
+fn interaction_request_keeps_the_original_load_and_operation_without_answer_data() {
+    let load = "00000000000000000008";
+    let correlation = Correlation::from_params(&json!({
+        "target": {"agent_id": AGENT, "session_id": SESSION},
+        "request": {"operation_id": OPERATION, "turn_id": TURN, "load_id": load,
+            "answer": {"private": "PRIVATE_TOOL_ANSWER"}}
+    }));
+    let request = correlation.request.unwrap();
+    assert_eq!(request.operation_id.unwrap().as_str(), OPERATION);
+    assert_eq!(request.turn_id.unwrap().as_str(), TURN);
+    assert_eq!(request.load_id.unwrap().as_str(), load);
+}

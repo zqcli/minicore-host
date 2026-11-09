@@ -1,4 +1,10 @@
-use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
+use crate::{
+    ToolListRequest,
+    deadline::Deadline,
+    diagnostics::{Call, Correlation},
+    operations::*,
+    rpc::RpcClient,
+};
 use minicore_host_core::{
     AgentDetails, AgentListPage, AgentListRequest, AgentSummary, CallerContext, ConnectionHandle,
     EventSubscription, Host, HostConfig, HostConfigSnapshot, HostInfo, InteractionAnswerData,
@@ -15,6 +21,7 @@ use minicore_host_workspace::{
 use minicore_runtime::tools::ToolSpec;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tracing::Instrument;
 
 /// The existing Host business entrance. Its context comes from an actual
 /// ConnectionHandle, never from serialized parameters or a claimed source.
@@ -123,19 +130,27 @@ impl HostClient {
         &self,
         request: O,
         options: CallOptions,
+        correlate: impl FnOnce(&O) -> Correlation,
     ) -> Result<O::Output, CallError> {
         let deadline = Deadline::new(options)?;
-        deadline
+        let mut diagnostic =
+            Call::client(Some(self.initial_info()), O::METHOD, correlate(&request));
+        let span = diagnostic.span();
+        let result = deadline
             .wait(async {
                 match &self.connection {
                     Connection::Local(local) => request
                         .execute(Arc::clone(&local.host), local.handle.caller())
                         .await
                         .map_err(CallError::Business),
-                    Connection::Rpc(rpc) => rpc.call(request).await,
+                    Connection::Rpc(rpc) => rpc.call(request, &mut diagnostic).await,
                 }
             })
-            .await
+            .instrument(span)
+            .await;
+        // Every owner/admission scope ended before this forwarding summary.
+        diagnostic.client_finished(&result);
+        result
     }
     /// Only setup uses the call deadline. The established stream has no timer.
     pub async fn subscribe(
@@ -144,7 +159,13 @@ impl HostClient {
         options: CallOptions,
     ) -> Result<ClientSubscription, CallError> {
         let deadline = Deadline::new(options)?;
-        deadline
+        let mut diagnostic = Call::client(
+            Some(self.initial_info()),
+            "events.subscribe",
+            Correlation::subscription(&request.scope),
+        );
+        let span = diagnostic.span();
+        let result = deadline
             .wait(async {
                 match &self.connection {
                     Connection::Local(local) => {
@@ -159,11 +180,16 @@ impl HostClient {
                         })
                     }
                     Connection::Rpc(rpc) => Ok(ClientSubscription {
-                        inner: SubscriptionConnection::Rpc(rpc.subscribe(request).await?),
+                        inner: SubscriptionConnection::Rpc(
+                            rpc.subscribe(request, &mut diagnostic).await?,
+                        ),
                     }),
                 }
             })
-            .await
+            .instrument(span)
+            .await;
+        diagnostic.client_finished(&result);
+        result
     }
     pub async fn unsubscribe(
         &self,
@@ -171,19 +197,23 @@ impl HostClient {
         options: CallOptions,
     ) -> Result<UnsubscribeResult, CallError> {
         let id = request.subscription_id.clone();
-        let result = self.call(Unsubscribe(request), options).await?;
+        let result = self
+            .call(Unsubscribe(request), options, |_| Correlation::default())
+            .await?;
         if let Connection::Rpc(rpc) = &self.connection {
             rpc.ended_subscription(&id);
         }
         Ok(result)
     }
     pub async fn info(&self, options: CallOptions) -> Result<HostInfo, CallError> {
-        self.call(Info(Empty {}), options).await
+        self.call(Info(Empty {}), options, |_| Correlation::default())
+            .await
     }
     /// Read committed values and credential source names, never private keys
     /// or executable resource handles. Available to read-only connections.
     pub async fn config(&self, options: CallOptions) -> Result<HostConfigSnapshot, CallError> {
-        self.call(GetConfig(Empty {}), options).await
+        self.call(GetConfig(Empty {}), options, |_| Correlation::default())
+            .await
     }
     /// Accept a full candidate at the Host configuration owner. The returned
     /// receipt is a snapshot, not a wait for publication. Read later facts with
@@ -193,11 +223,16 @@ impl HostClient {
         request: HostReloadRequest<HostConfig>,
         options: CallOptions,
     ) -> Result<HostReloadReceipt, CallError> {
-        self.call(Reload(request), options).await
+        self.call(Reload(request), options, |operation| {
+            let request = &operation.0;
+            Correlation::default().operation(&request.operation_id)
+        })
+        .await
     }
     /// List configured models by their full reference in lexical order.
     pub async fn models(&self, options: CallOptions) -> Result<Vec<ModelDescription>, CallError> {
-        self.call(ListModels(Empty {}), options).await
+        self.call(ListModels(Empty {}), options, |_| Correlation::default())
+            .await
     }
     /// List the Host's available tools or an explicit owner's enabled set.
     /// Missing targets or selected resources preserve the owner's Fault.
@@ -206,36 +241,65 @@ impl HostClient {
         request: ToolListRequest,
         options: CallOptions,
     ) -> Result<Vec<ToolSpec>, CallError> {
-        self.call(ListTools(request), options).await
+        self.call(ListTools(request), options, |operation| {
+            let request = &operation.0;
+            match request.target.as_ref() {
+                Some(crate::ToolListTarget::Agent(target)) => Correlation::agent(target),
+                Some(crate::ToolListTarget::Session(target)) => Correlation::session(target),
+                None => Correlation::default(),
+            }
+        })
+        .await
     }
     pub async fn receipt(
         &self,
         operation_id: OperationId,
         options: CallOptions,
     ) -> Result<Receipt, CallError> {
-        self.call(ReceiptGet(OperationTarget { operation_id }), options)
-            .await
+        self.call(
+            ReceiptGet(OperationTarget { operation_id }),
+            options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::default().operation(&request.operation_id)
+            },
+        )
+        .await
     }
     pub async fn shutdown(
         &self,
         request: HostShutdownRequest,
         options: CallOptions,
     ) -> Result<HostShutdownReceipt, CallError> {
-        self.call(Shutdown(request), options).await
+        self.call(Shutdown(request), options, |operation| {
+            let request = &operation.0;
+            Correlation::default().operation(&request.operation_id)
+        })
+        .await
     }
     pub async fn create_agent(
         &self,
         request: AgentCreate,
         options: CallOptions,
     ) -> Result<AgentCreateReceipt, CallError> {
-        self.call(CreateAgent(request), options).await
+        self.call(CreateAgent(request), options, |operation| {
+            let request = &operation.0;
+            Correlation::default()
+                .operation(&request.operation_id)
+                .initial_message(request.initial_message.as_ref())
+        })
+        .await
     }
     pub async fn agent(
         &self,
         target: AgentRef,
         options: CallOptions,
     ) -> Result<AgentDetails, CallError> {
-        self.call(GetAgent(AgentTarget { target }), options).await
+        self.call(GetAgent(AgentTarget { target }), options, |operation| {
+            let request = &operation.0;
+            Correlation::agent(&request.target)
+        })
+        .await
     }
     pub async fn agents(&self, options: CallOptions) -> Result<Vec<AgentSummary>, CallError> {
         Ok(self
@@ -248,7 +312,8 @@ impl HostClient {
         request: AgentListRequest,
         options: CallOptions,
     ) -> Result<AgentListPage, CallError> {
-        self.call(ListAgents(request), options).await
+        self.call(ListAgents(request), options, |_| Correlation::default())
+            .await
     }
     pub async fn stop_agent(
         &self,
@@ -262,6 +327,10 @@ impl HostClient {
                 operation_id: request.operation_id,
             }),
             options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target).operation(&request.operation_id)
+            },
         )
         .await
     }
@@ -278,6 +347,10 @@ impl HostClient {
                 operation_id: request.operation_id,
             }),
             options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target).operation(&request.operation_id)
+            },
         )
         .await
     }
@@ -297,6 +370,10 @@ impl HostClient {
                 changes: request.changes,
             }),
             options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target).operation(&request.operation_id)
+            },
         )
         .await
     }
@@ -313,6 +390,12 @@ impl HostClient {
                 session_id: request.session_id,
             }),
             options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target)
+                    .operation(&request.operation_id)
+                    .session_id(request.session_id.as_ref())
+            },
         )
         .await
     }
@@ -330,6 +413,10 @@ impl HostClient {
                 scope: request.scope,
             }),
             options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target).operation(&request.operation_id)
+            },
         )
         .await
     }
@@ -338,7 +425,13 @@ impl HostClient {
         request: SessionCreate,
         options: CallOptions,
     ) -> Result<SessionCreateReceipt, CallError> {
-        self.call(CreateSession(request), options).await
+        self.call(CreateSession(request), options, |operation| {
+            let request = &operation.0;
+            Correlation::agent(&request.target)
+                .operation(&request.operation_id)
+                .initial_message(request.initial_message.as_ref())
+        })
+        .await
     }
     pub async fn sessions(
         &self,
@@ -356,15 +449,26 @@ impl HostClient {
         query: SessionListRequest,
         options: CallOptions,
     ) -> Result<SessionListPage, CallError> {
-        self.call(ListSessions(ListSessionsParams { target, query }), options)
-            .await
+        self.call(
+            ListSessions(ListSessionsParams { target, query }),
+            options,
+            |operation| {
+                let request = &operation.0;
+                Correlation::agent(&request.target)
+            },
+        )
+        .await
     }
     pub async fn send(
         &self,
         request: SendMessage,
         options: CallOptions,
     ) -> Result<MessageAccepted, CallError> {
-        self.call(SendMessageOp(request), options).await
+        self.call(SendMessageOp(request), options, |operation| {
+            let request = &operation.0;
+            Correlation::send(request)
+        })
+        .await
     }
 }
 impl MessageClient for HostClient {
@@ -387,7 +491,8 @@ pub struct SessionClient {
 macro_rules! session_control {
     ($($name:ident, $operation:ident;)+) => {$(
         pub async fn $name(&self, request: SessionControlRequest, options: CallOptions) -> Result<SessionControlReceipt, CallError> {
-            self.client.call($operation(SessionOperation { target: self.target.clone(), operation_id: request.operation_id }), options).await
+            self.client.call($operation(SessionOperation { target: self.target.clone(), operation_id: request.operation_id }), options,
+                |operation| Correlation::session(&operation.0.target).operation(&operation.0.operation_id)).await
         }
     )+};
 }
@@ -411,6 +516,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -429,6 +538,10 @@ impl SessionClient {
                     changes: request.changes,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).operation(&request.operation_id)
+                },
             )
             .await
     }
@@ -439,6 +552,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -456,6 +573,12 @@ impl SessionClient {
                     expected_controller_revision: request.expected_controller_revision,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                        .operation(&request.operation_id)
+                        .message(&request.message_id, None)
+                },
             )
             .await
     }
@@ -468,6 +591,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -478,6 +605,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -497,6 +628,10 @@ impl SessionClient {
                     operation_id: request.operation_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).operation(&request.operation_id)
+                },
             )
             .await
     }
@@ -516,6 +651,12 @@ impl SessionClient {
                     target_operation_id: request.target_operation_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                        .operation(&request.operation_id)
+                        .target_operation(&request.target_operation_id)
+                },
             )
             .await
     }
@@ -532,6 +673,10 @@ impl SessionClient {
                     keep_inbox: request.keep_inbox,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).operation(&request.operation_id)
+                },
             )
             .await
     }
@@ -547,6 +692,10 @@ impl SessionClient {
                     operation_id: request.operation_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).operation(&request.operation_id)
+                },
             )
             .await
     }
@@ -564,6 +713,10 @@ impl SessionClient {
                     close: request.close,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).operation(&request.operation_id)
+                },
             )
             .await
     }
@@ -579,6 +732,10 @@ impl SessionClient {
                     message_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).message(&request.message_id, None)
+                },
             )
             .await
     }
@@ -589,6 +746,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -604,6 +765,10 @@ impl SessionClient {
                     turn_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).turn(&request.turn_id)
+                },
             )
             .await
     }
@@ -619,6 +784,10 @@ impl SessionClient {
                     turn_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).turn(&request.turn_id)
+                },
             )
             .await
     }
@@ -636,6 +805,12 @@ impl SessionClient {
                     keep_inbox: request.keep_inbox,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                        .operation(&request.operation_id)
+                        .turn(&request.turn_id)
+                },
             )
             .await
     }
@@ -651,6 +826,10 @@ impl SessionClient {
                     turn_id,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).turn(&request.turn_id)
+                },
             )
             .await
     }
@@ -666,6 +845,13 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                        .operation(&request.request.operation_id)
+                        .turn(&request.request.turn_id)
+                        .load(&request.request.load_id)
+                },
             )
             .await
     }
@@ -685,6 +871,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).turn(&request.turn_id)
+                },
             )
             .await
     }
@@ -700,6 +890,10 @@ impl SessionClient {
                     tool,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).tool(&request.tool)
+                },
             )
             .await
     }
@@ -717,6 +911,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target).tool(&request.tool)
+                },
             )
             .await
     }
@@ -733,6 +931,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -748,6 +950,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -763,6 +969,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -778,6 +988,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -793,6 +1007,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -806,6 +1024,10 @@ impl SessionClient {
                     target: self.target.clone(),
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
@@ -822,6 +1044,10 @@ impl SessionClient {
                     request,
                 }),
                 options,
+                |operation| {
+                    let request = &operation.0;
+                    Correlation::session(&request.target)
+                },
             )
             .await
     }
