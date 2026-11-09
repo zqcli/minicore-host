@@ -1,5 +1,7 @@
 //! Hold the same open-file description in a real child without timing a fork.
-use crate::{InitError, Options, Output, ShutdownOutcome, prepare, prepare_file};
+use crate::{
+    EventData, EventSpec, InitError, Options, Output, Scope, ShutdownOutcome, prepare, prepare_file,
+};
 use std::{
     fs::OpenOptions,
     io::{BufRead, BufReader, Read, Write},
@@ -64,6 +66,17 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     let (dispatch, guard) = prepare_file(options(&path), file).unwrap();
     held(&path);
     held(&alias);
+    tracing::dispatcher::with_default(&dispatch, || {
+        EventSpec {
+            level: tracing::Level::INFO,
+            scope: Scope::Host,
+            component: "test.writer",
+            event: "test.inherited_lease",
+            message: "Controlled inherited descriptor fixture",
+            attributes: &[],
+        }
+        .emit(EventData::default);
+    });
     drop(dispatch);
     let outcome = guard.shutdown(Duration::from_secs(2));
     let reopened = prepare(options(&alias));
@@ -73,6 +86,8 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     assert!(child.wait().unwrap().success());
     assert!(child_was_alive);
     assert_eq!(outcome, ShutdownOutcome::Flushed);
+    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(record["event"], "test.inherited_lease");
     let (_dispatch, next_guard) = reopened.unwrap();
     // Closing the inherited, already-unlocked description must not release the
     // new writer's independent lease.

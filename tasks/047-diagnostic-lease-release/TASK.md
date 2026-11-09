@@ -29,7 +29,8 @@ A pipe-synchronized Python fork probe established Linux flock ownership:
 closing the parent's descriptor does not release the lock while a live child
 holds the inherited open-file description. Explicit LOCK_UN releases it while
 the child remains alive. Both branches acquire after child exit. Probe log:
-`/workspace/shared/diagnostic-lease-fork-proof.log`. No tracing, ptrace, sleeps,
+`/workspace/shared/diagnostic-lease-fork-proof.log`; reusable source is
+`/workspace/shared/diagnostic-lease-fork-proof.py`. No tracing, ptrace, sleeps,
 or filesystem permission changes were used.
 
 The committed Linux regression preserves that inherited description in a real
@@ -46,10 +47,39 @@ private function, without changing behavior. It allows the regression to retain
 an ordinary duplicate before handing the original File to its actual owner.
 It is not a production injection hook or a mock lock.
 
+## Implementation and focused verification
+
+Red regression checkpoint: `fd23ff828c35a38f047568c80df9fc8c103cedb0`.
+The worker now calls the file's explicit `File::unlock` after draining accepted
+records and attempting its final flush, then drops the File before signaling
+completion. Stderr has no file lease. The private release function receives only
+the worker's own writer, not a shared service or a caller-owned lock.
+
+The caller's bounded shutdown does not perform release. A real FIFO writer keeps
+its lease after timeout until it actually drains and ends. The blocked-writer
+unit test separately verifies that release was not called while writing was
+blocked. Existing write/flush failures retain their actual counters and `Failed`
+outcome, and do not skip release. An observed unlock failure has one private
+health flag: `Failed` and `degraded`, without adding to write/drop counts or
+printing raw errors. No retry, sleep, process-wide test serialization, separate
+lock path, recovery framework, or new public API is introduced.
+
+Focused checks pass 21 unique diagnostics cases and 1 doctest:
+
+- `cargo test -p minicore-host-diagnostics --locked`
+- `cargo clippy -p minicore-host-diagnostics --all-targets --locked -- -D warnings`
+- `cargo fmt --all -- --check`
+- `git diff --check`
+
+Logs are `/workspace/shared/diagnostic-lease-green-focused.log` and
+`/workspace/shared/diagnostic-lease-focused-clippy.log`. The inherited-descriptor
+regression also checks real JSONL output and that child exit cannot unlock the
+next writer's independent lease. The subprocess stdout-isolation test now
+includes an injected release error.
+
 ## Status and next steps
 
-Deterministic regression is red. Implement explicit release only after the
-actual worker finishes writing and flushing, preserve timeout ownership and
-failure reporting, then run focused repetitions and the full fixed-code gate.
+Focused checks are green. Run repetitions and the full fixed-code workspace
+gate, then obtain independent review before parent integration.
 No storage correction is included. A separately reported storage HistoryInUse
 failure uses a similar primitive but needs its own ownership proof and fix.

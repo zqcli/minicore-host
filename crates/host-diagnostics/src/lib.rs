@@ -113,7 +113,7 @@ pub fn prepare(options: Options) -> Result<(Dispatch, Guard), InitError> {
         return Err(InitError::EmptyService);
     }
     match &options.output {
-        Output::Stderr => prepare_writer(options, io::stderr()),
+        Output::Stderr => prepare_writer(options, io::stderr(), |_| Ok(())),
         Output::File(path) => {
             let writer = OpenOptions::new()
                 .create(true)
@@ -141,15 +141,16 @@ fn prepare_file(options: Options, writer: File) -> Result<(Dispatch, Guard), Ini
             std::fs::TryLockError::Error(error) => error.kind(),
         })
     })?;
-    prepare_writer(options, writer)
+    prepare_writer(options, writer, File::unlock)
 }
 
-fn prepare_writer(
+fn prepare_writer<W: io::Write + Send + 'static>(
     options: Options,
-    writer: impl io::Write + Send + 'static,
+    writer: W,
+    release: fn(&W) -> io::Result<()>,
 ) -> Result<(Dispatch, Guard), InitError> {
     let (sender, guard) =
-        backend::start(writer).map_err(|error| InitError::StartWorker(error.kind()))?;
+        backend::start(writer, release).map_err(|error| InitError::StartWorker(error.kind()))?;
     let layer = subscriber::DiagnosticsLayer::new(options, sender);
     Ok((
         Dispatch::new(tracing_subscriber::registry().with(layer)),

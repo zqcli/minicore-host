@@ -35,6 +35,7 @@ pub enum LoggingState {
 struct Counters {
     dropped: AtomicU64,
     failed: AtomicU64,
+    release_failed: AtomicBool,
     closing: AtomicBool,
     uncertain: AtomicBool,
 }
@@ -49,7 +50,11 @@ impl Health {
         let failed = self.0.failed.load(Ordering::Relaxed);
         let dropped = self.0.dropped.load(Ordering::Relaxed);
         let uncertain = self.0.uncertain.load(Ordering::Relaxed);
-        let status = if failed != 0 || dropped != 0 || uncertain {
+        let status = if failed != 0
+            || dropped != 0
+            || uncertain
+            || self.0.release_failed.load(Ordering::Relaxed)
+        {
             LoggingState::Degraded
         } else if self.0.closing.load(Ordering::Relaxed) {
             LoggingState::Disabled
@@ -98,10 +103,10 @@ impl RecordSender {
 /// Result of bounded application shutdown, never a business-persistence claim.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ShutdownOutcome {
-    /// All accepted records were processed and the final flush succeeded. This
-    /// is not fsync, a storage receipt, or a durability guarantee.
+    /// All accepted records were processed, the final flush succeeded, and the
+    /// output lease was released. This is not fsync or a durability guarantee.
     Flushed,
-    /// The worker completed with an observed write/flush failure, or stopped
+    /// The worker completed with an observed write/flush/release failure, or stopped
     /// before reporting completion. Partial output may exist.
     Failed,
     /// Completion was not observed before the deadline. The writer thread may
@@ -135,7 +140,10 @@ impl Guard {
             return ShutdownOutcome::Failed;
         };
         match finished.recv_timeout(timeout) {
-            Ok(()) if self.sender.health.snapshot().write_failures == Some(0) => {
+            Ok(())
+                if self.sender.health.snapshot().write_failures == Some(0)
+                    && !self.sender.health.0.release_failed.load(Ordering::Relaxed) =>
+            {
                 ShutdownOutcome::Flushed
             }
             Ok(()) => ShutdownOutcome::Failed,
@@ -167,8 +175,9 @@ impl Drop for Guard {
     }
 }
 
-pub(crate) fn start(
-    mut writer: impl Write + Send + 'static,
+pub(crate) fn start<W: Write + Send + 'static>(
+    mut writer: W,
+    release: fn(&W) -> io::Result<()>,
 ) -> io::Result<(Arc<RecordSender>, Guard)> {
     let (send, receive) = mpsc::channel::<Vec<u8>>();
     let (done, finished) = mpsc::channel();
@@ -191,7 +200,12 @@ pub(crate) fn start(
             if writer.flush().is_err() {
                 health.write_failed();
             }
-            // Completion includes release of the actual output file lease.
+            // Only this worker releases after all output I/O has ended. Closing
+            // a File alone can leave its flock held by a concurrent fork's
+            // inherited open-file description until that child execs or exits.
+            if release(&writer).is_err() {
+                health.0.release_failed.store(true, Ordering::Relaxed);
+            }
             drop(writer);
             let _ = done.send(());
         })?;
