@@ -2,7 +2,7 @@
 
 ## Review target and authority
 
-The target is the `dev` foundation, with workspace-backend checkpoint `b0fdbfb`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
+The target is the `dev` foundation, with typed/stdio checkpoint `8079970`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
 
 Read `AGENTS.md`, the complete `SPEC.md`, `PROJECT.md`, and `docs/method-coverage.md` first. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`. The 52-method catalog describes names/contracts, not 52 finished handlers. No remote Host publication or main merge has been performed. Remote pushes require the owner's explicit approval.
 
@@ -56,7 +56,15 @@ At lifecycle checkpoint `413916c`, the entire gate passes 240 unit/integration t
 
 The subsequent canonical-control checkpoint `b961f9f` passes the complete 254-test/2-doctest gate. Formation-time control receipts and owner-backed lookup are implemented. A separate review passed the preceding 160 core/protocol cases and found one P2: lookup absence/ambiguity incorrectly used the unsupported-method Fault. The correction gives those facts separate registered lookup leaves and adds a real-owner regression. Independent verification of the fixed correction passed all 161 core/protocol cases in a fresh archive and separate build target, with no remaining scoped finding. This does not replace the full external review.
 
-The workspace backend at `b0fdbfb` adds 21 real filesystem/Git/edit-observation tests and passes the full integrated gate with 275 unique tests and 2 doctests. Counts were cross-checked with `--list`; storage child-process result lines are not additional cases. Its scoped independent review is in progress, and canonical workspace/changes routing remains unfinished.
+The workspace backend at `b0fdbfb` adds 21 real filesystem/Git/edit-observation tests and passes the full integrated gate with 275 unique tests and 2 doctests. Counts were cross-checked with `--list`; storage child-process result lines are not additional cases. Its scoped independent review found external Git clean/process filter execution and incorrect non-repository success after a missing HEAD. Fixes are being validated on the workspace topic and are not yet cleared or integrated; canonical workspace/changes routing remains unfinished.
+
+The typed/stdio adapters at `8079970` add 15 real-owner/pipe/deadline cases and
+one compile-only doctest. The full integrated gate passes 290 unique tests and
+3 doctests, with the count checked using `--list`. Twenty-five actual methods
+share direct-owner dispatch; unsupported methods still report their real fault.
+The independent adapter review is underway. No production Host executable, WSS
+listener, full event route or TUI validation is implied. Task 015 records the
+source-to-dev mapping and exact commands.
 
 ## Required scope still open
 

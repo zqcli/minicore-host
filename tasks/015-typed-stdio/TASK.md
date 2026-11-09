@@ -93,3 +93,25 @@ Host executable or child-process stdio boot, live-provider calls, TUI integratio
 network deployment and cross-process provider credentials. Existing query
 primitives still lack complete public pagination/history envelopes. This is not
 a claim that all 52 methods or the full first-version specification are done.
+
+## Integrated dev checkpoint
+
+The topic changes were integrated without duplicating canonical dependencies:
+`80899d1` -> `7b113d8`, `d7b6cd5` -> `cf07615`, `a0173ab` -> `774c884`,
+`899cd3f` -> `84700ce`, and the topic task evidence -> `8079970`.
+The workspace/transport manifest and lock conflict was resolved by retaining both
+crates and the existing workspace backend's Tokio process dependency graph.
+
+At fixed dev `8079970d3d7b35912ae4b45118d8e980d5f3e749`:
+
+- `./scripts/check.sh`: passed committed/staged/working whitespace, formatting,
+  strict workspace Clippy, all unit/integration tests, 3 doctests and strict
+  rustdoc.
+- `cargo test --workspace --all-targets --locked -- --list`: 290 unique cases.
+  The 21 workspace cases are additional to the topic's 269-case baseline.
+- Logs: `transport-integrated-8079970.log` and
+  `transport-test-list-8079970.txt` in the local validation output directory.
+- Runtime remains the published 0.9.2 Git revision. No local override was used.
+- A separate scoped read-only review is underway. Passing these gates does not
+  mark that review, WSS, event routing, a production Host process or first-version
+  acceptance complete.
