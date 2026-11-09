@@ -18,7 +18,7 @@ The manual worker receives the same admission-time RequestHistory by value. Norm
 
 ## Verification
 
-Implementation and permanent regression tests are in progress. Required checks: formatting, clippy, real Host/Runtime/production HTTP/SSE source/reply/delegation/Loop/partial/restart/manual+automatic compaction regressions, unknown metadata and projection unit tests, workspace tests, documentation and unique test inventory. Scripted summary wording is not a live-model quality claim. No remote refs or publication will be changed.
+Implementation and permanent regression tests are complete; final gate results are below. Required checks covered: formatting, clippy, real Host/Runtime/production HTTP/SSE source/reply/delegation/Loop/partial/restart/manual+automatic compaction regressions, unknown metadata and projection unit tests, workspace tests, documentation and unique test inventory. Scripted summary wording is not a live-model quality claim. No remote refs or publication will be changed.
 
 ### First implementation checkpoint
 
@@ -44,3 +44,30 @@ All these test paths now share one small test-only decoder under `host-core/test
 `cargo test -p minicore-host-core --lib --test http_host --test runtime_owners -p minicore-host-tools --test host_integration --test delegation_acceptance_fences -p minicore-host-resources --test task055 --locked` passed **142** cases (`strict-fixtures-final.log`). This is targeted coverage, not yet a successful full-workspace gate. Production source remains unchanged from `53d8482`.
 
 The third stopped aggregate at `60c2b8244447acf828cd7d4e0e14fa50d16015c5` reached resources task023: **11 passed, 5 failed** (`complete-gate.log`, status `101`). Inspection identified exactly three old whole-content equality/count assertions (task023.rs:551 and session_resource_resume.rs:83/144, expanded over both storage modes). Real requests and Turns had completed; the only mismatch was annotated model content versus bare original text. The repair keeps every resource/queue/configuration/binding assertion and now requires exactly one user message with the actual accepted MessageId, user source, no reply, and full original body via the same strict decoder. A repository-wide scan of ModelMessage::User and JSON content consumers found no additional plain-input presentation assumptions; remaining matches concern native input or framework/Role/assistant/tool content. The next workspace run uses `--no-fail-fast` to exercise every target in one pass rather than hiding later targets behind an early assertion stop.
+
+
+## Final fixed-source verification
+
+Code/test checkpoint: `8bd9bb7a6538e816ad663dbbbb4ef15d6bd608c9`. Subsequent task-record edits do not change the validated code. All commands use Rust 1.90.0 with `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shared/cargo`, Cargo bin first in PATH, `TMPDIR=/workspace/shared/minicore-host-tmp`, `CARGO_BUILD_JOBS=2`, `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`, `CARGO_INCREMENTAL=0`, and dedicated `CARGO_TARGET_DIR=/workspace/shared/minicore-host-input-provenance-target`.
+
+- `cargo test --workspace --all-targets --locked --no-fail-fast`: passed every target (`workspace-all-targets.log`, status `0`).
+- `./scripts/check.sh` at the clean fixed checkpoint: **passed**, exit `0` (`final-check-8bd9bb7.log` and `.status`). This includes whitespace, workspace rustfmt, all-target clippy with `-D warnings`, full locked workspace/all-target tests, locked workspace doctests and workspace/no-deps rustdoc with `-D warnings`.
+- `cargo test --workspace --all-targets --locked -- --list`: **790 unique test cases**, all **790** matched to successful execution in that final gate; **4 doctests** separately passed. No nested storage subprocess output is counted again. `test-inventory.log`, `verification-counts.json`.
+- Unchanged-baseline red: exact `e3d634a2b0cd9e662d8efc26284c85af82edd8e5` in `/workspace/shared/minicore-host-input-provenance-red`, with only the final permanent HTTP test/helper files copied in. `cargo test -p minicore-host-resources --test task055 --locked same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_restart -- --nocapture` fails at the absent input context, exit `101` (`red-final.log`, `.status`). Its independent target is `/workspace/shared/minicore-host-input-provenance-red-target`. The original audit and first red log are preserved.
+- `cargo metadata --locked --offline --format-version 1` confirms the sole Runtime dependency remains `0.10.0` at `69faf9196991524b5549499d6208a1eaf567bf56`. `source-integrity-final.json` records a clean worktree and no SPEC/lock diff. SPEC SHA-256 remains `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`; Cargo.lock SHA-256 remains `151d9fb90f96072c9655f4f8a58ae4f4848f5caa2d1dc491fc2faa27ee2e79b8`.
+
+The final gate includes the existing pending/failed-save, historical missing-tool-result, replay, ownership, queue, shutdown, cold-read and resource-rebinding suites as well as the 11 new provenance cases. The large HTTP test still checks complete >262 KiB Unicode input, Role and assistant output. No quotas, truncation, tool execution replay or observer-dependent source acquisition were introduced.
+
+### Incremental commits
+
+- `c42c1cedd8bef74cba4baedc0feb4f3508f2fe25`: coordinator's shared Session hooks.
+- `53d84827716861b851cb041df55f9cccce28962b`: bounded model/utility provenance projection and five pure regressions.
+- `9e32ea0a3441fe257539a93efdbc617753fb10ba`: six production HTTP regressions.
+- `2debf2aa46d693fc4871067dfb0eced3f8fcb796`: test-only lint cleanup.
+- `c6bed3e78b0668ba4e52955ffae7f434da0a553a`: existing large/ordinary HTTP expectations preserve exact original bytes and metadata.
+- `60c2b8244447acf828cd7d4e0e14fa50d16015c5`: strict shared test decoder and legacy scheduler/delegation fixture adaptation.
+- `8bd9bb7a6538e816ad663dbbbb4ef15d6bd608c9`: exact restored-input assertions in existing resource fixtures.
+
+## Remaining boundary
+
+Independent review and coordinator composition are owned by the parent task. All implementation/test changes are local; no push or remote ref change was made. SPEC, manifests, Cargo.lock, Runtime, TUI, production provider encoding, public DTOs, durable marker format and standard completion notification construction are unchanged. The latest main target is about 2.9 GiB and the independent red target about 463 MiB; shared disk had about 14 GiB free after verification. No other worker's cache was modified or removed. Requested Astra/max configuration and live model/TUI behavior remain explicitly unattested.
