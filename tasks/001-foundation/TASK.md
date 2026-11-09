@@ -1,6 +1,6 @@
 # Build Host Foundation
 
-Status: first real Runtime foundation milestone and aggregate validation complete. Persistent owner composition continues in task 006. The full v4.93 release is not complete.
+Status: the real Runtime foundation, scoped persistent-owner milestone and aggregate validation are complete. The full v4.93 release is not complete; remaining lifecycle/service/transport work is listed in PROJECT.md.
 
 ## Goal
 
@@ -143,3 +143,23 @@ git diff --exit-code
 ```
 
 The clean clone had an empty build target and no local Runtime patch. It used the same workspace Cargo download cache; the verified dependency source remained GitHub revision `18a6ac9b82d003330cd870275efca793cdcc9a96`. The entire 190-test/2-doctest gate passed again and the checkout remained clean. Logs: `minicore-host-validation/clean-source-gate-d73b161.log` and `clean-source-metadata-d73b161.json`. This checks a fresh local clone of unpublished Host commits, not a GitHub Host clone or remotely executed Host CI. The spec hash remains unchanged. TUI/live external provider validation, full v4.93 completion, Host publication and external review remain pending.
+
+## Final foundation handoff
+
+Final code/test checkpoint: `0b9b390750233f7b11ad006563da697014f162e2` on `dev`. Subsequent handoff edits are documentation only. Following `d73b161`, the integration retained these reviewable changes:
+
+- `d2c41ca`: explicit concurrent parent/default-child metadata regression, core README and the memory default precheck outside connection acceptance. The Agent's final closing-set publication check remains unchanged.
+- `603405a`, `e2f9ad7`: Linux CI and its exact local verification/provenance. No hosted Host workflow was run.
+- `8244ec1`: remove the obsolete member provider lockfile; only the committed root workspace lock governs dependencies. `cargo metadata --locked --no-deps`, provider tests/doctest and unchanged root-lock checks passed. No provider production behavior changed.
+- `6e6d43a`: retain six additional core review regressions for default references, close ordering, acceptance and revocation.
+- `0b9b390`: retain the storage gate reacquisition/retirement regression. Together, the seven new tests add no production path or application quota.
+
+The main-worktree `./scripts/check.sh` gate passed all 198 unit/integration tests plus 2 doctests, formatting, workspace all-target Clippy and rustdoc warnings denied, and diff checks. Counts: core 67 (5 unit, 42 persistent owners, 19 memory owners, 1 HTTP), protocol 47, provider 27 and storage 57. Log: `minicore-host-validation/review-regressions-integrated.log`.
+
+The final clean-source check repeated the earlier clone procedure with fixed source `0b9b390750233f7b11ad006563da697014f162e2` into `minicore-host-clean-check-0b9b390`, additionally unsetting `CARGO_TARGET_DIR` and asserting the new checkout's own empty target path. It verified one Runtime package from the published Git source, no active local patch/vendor path/member lockfile, and then passed the complete 198-test/2-doctest gate. The checkout remained clean and the spec hash was unchanged. Cargo source downloads and the installed toolchain were reused; no existing build target was shared. Logs: `minicore-host-validation/clean-source-gate-0b9b390.log` and `clean-source-metadata-0b9b390.json`.
+
+Targeted independent review checked the metadata gate, both current/pending default references and the memory precheck move. It found no new P1/P2 blocking issue in those changes. Its final exact production snapshot was `e2f9ad7` with only the same seven added test fragments; it used a dedicated empty target and passed core 67, storage 57 plus the storage doctest, formatting, Clippy and rustdoc warnings denied. During earlier comparative checks, a shared review build target reused a stale old-snapshot binary; those results were explicitly excluded and the final dedicated-target run replaced them. The intentional old-source failing precheck test is not a failure of the final source.
+
+The Linux workflow's YAML, official immutable action pin, toolchain/command alignment and Bash syntax were independently rechecked after integration. `actionlint`, `yamllint` and `shellcheck` were unavailable; they and the actual hosted Host workflow are not claimed tested. `git ls-remote --heads origin` returned no Host heads at the final read-only check. No Host ref was published or main merged.
+
+`docs/review-handoff.md` now supplies the cross-conversation handoff in the repository, with exact dependencies, commands, invariants and unfinished surfaces. The requested external review remains pending. Recommended next implementation stage: owner-level Host shutdown/history-save continuation and entity retirement, followed by complete canonical service/transport/observation contracts and the remaining DSH/tool/interaction/context surfaces. No first-version completion or TUI/live-provider/performance result is asserted.

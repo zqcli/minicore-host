@@ -12,10 +12,12 @@ The required Runtime history/partial extension is pinned to published commit `18
 
 ## Components
 
+- [In-process owners](crates/host-core/README.md)
 - [Protocol contracts](crates/host-protocol/README.md)
 - [Provider adapter](crates/host-provider/README.md)
 - [Storage schema](crates/host-storage/README.md)
 - [Public method implementation map](docs/method-coverage.md)
+- [Self-contained review handoff](docs/review-handoff.md)
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
 - [Controller and integration evidence](tasks/005-controllers/TASK.md)
 
