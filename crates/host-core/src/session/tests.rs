@@ -1267,3 +1267,5 @@ async fn until_releasing(session: &Arc<SessionController>) {
 }
 
 mod history_read;
+
+mod resource_resume;

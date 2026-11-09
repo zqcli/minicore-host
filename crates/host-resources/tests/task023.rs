@@ -779,3 +779,6 @@ async fn actual_tool_binding_failure_preserves_the_accepted_message() {
     assert!(host.turns(&caller, &target).unwrap().is_empty());
     assert!(host.history(&caller, &target).unwrap().is_empty());
 }
+
+#[path = "task023/session_resource_resume.rs"]
+mod session_resource_resume;

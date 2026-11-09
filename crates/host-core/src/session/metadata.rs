@@ -270,7 +270,14 @@ impl SessionController {
                         state.load_id = None;
                     }
                     if state.block_reason.as_ref().is_some_and(|fault| {
-                        fault.kind() == Some(FaultKind::SessionResourceMissing)
+                        matches!(
+                            fault.kind(),
+                            Some(
+                                FaultKind::SessionResourceMissing
+                                    | FaultKind::SessionConfigInvalid
+                                    | FaultKind::SessionConfigConflict
+                            )
+                        )
                     }) {
                         state.block_reason = None;
                     }
@@ -396,48 +403,54 @@ impl SessionController {
         self.resources_owned()?.validate(&config)?;
         self.ensure_executor()?;
         let (sender, receiver) = oneshot::channel();
-        let memory =
-            self.access.accept_execution(caller, || {
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                Self::open(&state)?;
-                if state.info.config_revision != expected {
-                    return Err(Fault::new(
-                        FaultKind::SessionConfigConflict,
-                        "Session configuration revision changed",
-                    ));
-                }
-                if state.record_work.is_some() {
-                    return Err(Fault::new(
-                        FaultKind::SessionBusy,
-                        "Session has a pending metadata save",
-                    ));
-                }
-                let revision = expected.checked_add(1).ok_or_else(|| {
-                    Fault::new(
-                        FaultKind::SessionInternalUnexpected,
-                        "configuration revision exhausted",
-                    )
-                })?;
-                if state.info.mode == StorageMode::Memory {
-                    state.info.config = config;
-                    state.info.title = title;
-                    state.info.config_revision = revision;
-                    if state.block_reason.as_ref().is_some_and(|fault| {
-                        fault.kind() == Some(FaultKind::SessionResourceMissing)
-                    }) {
-                        state.block_reason = None;
-                    }
-                    self.publish(&mut state);
-                    Ok(Some(state.info.clone()))
-                } else {
-                    let mut record = self.record(&state);
-                    record.data.effective_config = config;
-                    record.data.title = title;
-                    record.data.config_revision = revision;
-                    self.spawn_record_save(&mut state, record, sender);
-                    Ok(None)
-                }
+        let memory = self.access.accept_execution(caller, || {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            Self::open(&state)?;
+            if state.info.config_revision != expected {
+                return Err(Fault::new(
+                    FaultKind::SessionConfigConflict,
+                    "Session configuration revision changed",
+                ));
+            }
+            if state.record_work.is_some() {
+                return Err(Fault::new(
+                    FaultKind::SessionBusy,
+                    "Session has a pending metadata save",
+                ));
+            }
+            let revision = expected.checked_add(1).ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "configuration revision exhausted",
+                )
             })?;
+            if state.info.mode == StorageMode::Memory {
+                state.info.config = config;
+                state.info.title = title;
+                state.info.config_revision = revision;
+                if state.block_reason.as_ref().is_some_and(|fault| {
+                    matches!(
+                        fault.kind(),
+                        Some(
+                            FaultKind::SessionResourceMissing
+                                | FaultKind::SessionConfigInvalid
+                                | FaultKind::SessionConfigConflict
+                        )
+                    )
+                }) {
+                    state.block_reason = None;
+                }
+                self.publish(&mut state);
+                Ok(Some(state.info.clone()))
+            } else {
+                let mut record = self.record(&state);
+                record.data.effective_config = config;
+                record.data.title = title;
+                record.data.config_revision = revision;
+                self.spawn_record_save(&mut state, record, sender);
+                Ok(None)
+            }
+        })?;
         if let Some(info) = memory {
             self.wake();
             return Ok(info);

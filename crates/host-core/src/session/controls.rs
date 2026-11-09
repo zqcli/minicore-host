@@ -106,6 +106,21 @@ impl SessionController {
                     } else {
                         self.access.ensure_execution_owned()?;
                         Self::open(&state)?;
+                        if state.block_reason.as_ref().is_some_and(|fault| {
+                            matches!(
+                                fault.kind(),
+                                Some(
+                                    FaultKind::SessionResourceMissing
+                                        | FaultKind::SessionConfigInvalid
+                                        | FaultKind::SessionConfigConflict
+                                )
+                            )
+                        }) {
+                            // Explicit resume permits one fresh preparation of
+                            // queued input; the driver rechecks dependencies
+                            // before binding it and retains any new fault.
+                            state.block_reason = None;
+                        }
                         if state.residency == Residency::Loading {
                             state.resume_after_load = Some(state.pause_generation);
                             self.publish(&mut state);

@@ -717,11 +717,16 @@ impl SessionController {
                 )
             })?;
             state.info.config = candidate;
-            if state
-                .block_reason
-                .as_ref()
-                .is_some_and(|fault| fault.kind() == Some(FaultKind::SessionResourceMissing))
-            {
+            if state.block_reason.as_ref().is_some_and(|fault| {
+                matches!(
+                    fault.kind(),
+                    Some(
+                        FaultKind::SessionResourceMissing
+                            | FaultKind::SessionConfigInvalid
+                            | FaultKind::SessionConfigConflict
+                    )
+                )
+            }) {
                 state.block_reason = None;
             }
             self.publish(&mut state);
