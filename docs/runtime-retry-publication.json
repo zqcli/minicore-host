@@ -1,0 +1,131 @@
+{
+  "repository": "zqcli/minicore-runtime",
+  "branch": "feat/host-history-handoff",
+  "source_base": "cd59b6ecbad5ccfb67552660290992662253219b",
+  "source_head": "3cf57e3e1947b0464bd8843ed0508bfddfb2639a",
+  "source_tree": "6a29d8ed5a1ebfd634d067c6bbba8ddec625c801",
+  "base_sha": "59ee8ce668f72a21d408e6247d3ce075b260db14",
+  "published_head": "69faf9196991524b5549499d6208a1eaf567bf56",
+  "verification": {
+    "two_raw_commits_verified": true,
+    "trees_identical": true,
+    "messages_byte_identical": true,
+    "all_referenced_blobs_byte_identical": true,
+    "unique_referenced_blobs_checked": 507,
+    "created_blobs_verified": 26,
+    "single_parent_chain_verified": true,
+    "coauthor_absent": true,
+    "fast_forward_verified": true,
+    "source_head_unchanged": true,
+    "source_worktree_clean": true,
+    "full_index_diff_byte_identical": true,
+    "remote_ref_verified": true,
+    "independent_ls_remote_verified": true,
+    "dev_unchanged": true,
+    "main_absent_before_and_after": true,
+    "no_new_remote_branches": true,
+    "all_tags_unchanged": true,
+    "only_target_ref_changed": true
+  },
+  "final_ci_verification": {
+    "run_id": 42624211012,
+    "head_sha": "69faf9196991524b5549499d6208a1eaf567bf56",
+    "html_url": "https://github.com/zqcli/minicore-runtime/actions/runs/42624211012",
+    "source": "Authenticated GitHub fetch_workflow_run_jobs; exact run identity previously verified from workflow run metadata",
+    "jobs": [
+      {
+        "id": 129183675764,
+        "name": "cargo test (macos-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676007,
+        "name": "cargo test (windows-latest)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676062,
+        "name": "quality gate (ubuntu, stable)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676136,
+        "name": "Package (x86_64-apple-darwin)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676199,
+        "name": "Package (x86_64-unknown-linux-gnu)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676424,
+        "name": "Package (aarch64-apple-darwin)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "id": 129183676645,
+        "name": "Package (x86_64-pc-windows-msvc)",
+        "status": "completed",
+        "conclusion": "success"
+      }
+    ],
+    "all_jobs_success": true
+  },
+  "commits": [
+    {
+      "old_sha": "142412b11968a1d7a374894906ac2a478f22f4b9",
+      "new_sha": "8f2f6e859a4c9ccb41bcade13d6dfe93f73b627e",
+      "tree": "303eacfafdeb656123884ea34858bc2a39e78884",
+      "parent": "59ee8ce668f72a21d408e6247d3ce075b260db14",
+      "message": "feat(model): expose authoritative retry state and attempt counts\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T13:14:58Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794230098 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T13:14:58Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794230098 +0900"
+      }
+    },
+    {
+      "old_sha": "3cf57e3e1947b0464bd8843ed0508bfddfb2639a",
+      "new_sha": "69faf9196991524b5549499d6208a1eaf567bf56",
+      "tree": "6a29d8ed5a1ebfd634d067c6bbba8ddec625c801",
+      "parent": "8f2f6e859a4c9ccb41bcade13d6dfe93f73b627e",
+      "message": "test(model): verify retry observation and deadline boundaries\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T13:15:19Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794230119 +0900"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-09T13:15:19Z",
+        "timezone": "+0900",
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794230119 +0900"
+      }
+    }
+  ],
+  "source_validation": {
+    "unique_tests": 321,
+    "doctests": 2,
+    "independent_boundary_probes": 6,
+    "quality_gate": "passed"
+  }
+}
