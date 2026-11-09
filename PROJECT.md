@@ -6,6 +6,8 @@ The recovery backup is published on `dev` at [51e1ee495c82bc446ae4b569726d076880
 
 The next fixed local code checkpoint is `c92e27bf09ac1a50a1a88b04dedc5acb9bf798e0`. It adds the actual-process credential regression, query-fixture migrations, owner discovery/work summaries and the first reconstructed provider-diagnostics slice. [Task 069](tasks/069-workspace-recovery/TASK.md) distinguishes exact recovery from new implementation, records scoped independent approvals and the failed combined gate, and lists unfinished work. The credential inheritance fix has independent scoped approval; it is not an OS sandbox. Owner discovery still needs independent review, and core/transport business diagnostics remain incomplete.
 
+The later composition at `521c9ea9f61fde0aaab31805d668505dff852316` passes the full fresh gate: **858 unique Rust cases and 4 doctests**, strict Clippy/rustdoc, fmt and whitespace. [The verification manifest](docs/recovery-validation.json) records the actual Linux dependency check and the separate unfiltered offline-metadata cache miss. The real pipe-fixture ordering correction is independently approved; the earlier failed run is retained as evidence. Owner discovery independent review, remaining core/transport business diagnostics and fresh performance measurements are still unfinished.
+
 Development progress is backed up in five-commit batches. Scoped tests continue during development; the complete gate and final review are still required for a stage acceptance or merge. The original final local checkpoint and its raw performance artifacts were not recovered. Historical results below are not fresh validation of this reconstructed tree.
 
 ## Historical executable checkpoints before workspace replacement

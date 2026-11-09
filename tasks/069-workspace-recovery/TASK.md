@@ -1,5 +1,34 @@
 # Recover the development workspace
 
+## Successful reconstructed composition gate
+
+Fixed source `521c9ea9f61fde0aaab31805d668505dff852316` now passes
+`./scripts/check.sh`: committed/staged/worktree whitespace, rustfmt, all-target
+warning-denied Clippy, every workspace test, four doctests and warning-denied
+rustdoc. The separate `-- --list` inventory confirms **858 unique cases across
+102 test binaries**. [The verification manifest](../../docs/recovery-validation.json)
+records exact source, commands, hashes, successful checks and pending scope.
+This is a fresh gate, not the lost b291551 result.
+
+The previous 4daeb72 BrokenPipe failure is retained below. The test-only fix
+(source 5033e3b, integrated 91cd50d) has independently passed a six-case suite
+for 50 complete repetitions. Real SDK drop emits the second unsubscribe reply;
+reader-first closure reproduces the exact OS BrokenPipe, while controlled
+request EOF permits a strict successful server join. Both orders leave the real
+Runtime work intact. Production handling and all original business assertions
+are unchanged. The independent review at 8d724025 approved this narrow fix.
+
+The shell chain's later unfiltered `cargo metadata --locked --offline` exited
+101 because the fresh cache lacks cross-platform bumpalo 3.20.3. This occurred
+after the complete gate and case list had succeeded. The metadata check for the
+actual Linux target succeeds and selects the sole published Runtime pin
+69faf919. No lockfile or dependency version changed, and no cross-platform build
+is claimed. The manifest preserves this non-gate failure explicitly.
+
+Owner-discovery independent review and complete business diagnostics remain in
+progress. New performance measurements, live-provider checks, TUI work and the
+requested external final review are not covered by this green composition.
+
 ## Current reconstructed checkpoint and backup
 
 Public `dev` was advanced normally in two five-commit batches to
