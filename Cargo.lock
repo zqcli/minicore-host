@@ -663,7 +663,6 @@ dependencies = [
  "minicore-runtime",
  "serde",
  "serde_json",
- "tempfile",
  "tokio",
 ]
 
