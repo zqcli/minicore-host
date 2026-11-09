@@ -1,10 +1,14 @@
 # MiniCore Host
 
-## Workspace recovery in progress
+## Recovery backup and reconstructed work
 
-The former execution workspace was replaced. [Task 069](tasks/069-workspace-recovery/TASK.md) identifies the exact recovered Git prefix, missing unpublished work and verification limits. Current local recovery code is `7cc0bd2b399c3ea1320647e13d87bf57376934a5`, with tree equal to the verified thirteenth prepared source step; it is not the lost final b291551 checkpoint. Public dev remains `1a2935f60ad5cb58b6d45b82f40883149a9b4044`, whose CI is successful. Missing later source is being recovered or explicitly reconstructed and will receive a fresh gate. Configured credential inheritance remains an open synthetic-probe-confirmed security defect; no real-credential test or release readiness is claimed. The older sections below retain their own historical context.
+The recovery backup is published on `dev` at [51e1ee495c82bc446ae4b569726d076880b0c320](https://github.com/zqcli/minicore-host/commit/51e1ee495c82bc446ae4b569726d076880b0c320), exactly matching local source `c872e1d4d039684fa124d8b5a28fab8efc4ab11c`. [The publication map](docs/recovery-publication.json) preserves the 12 recovered commit objects and ten newly reconstructed commits, including both five-commit backup boundaries. Main remains `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. Both automatically triggered backup CI runs finished with failure; this is a backup, not a passing release gate. CI settings were not changed.
 
-## Current executable checkpoint
+The next fixed local code checkpoint is `c92e27bf09ac1a50a1a88b04dedc5acb9bf798e0`. It adds the actual-process credential regression, query-fixture migrations, owner discovery/work summaries and the first reconstructed provider-diagnostics slice. [Task 069](tasks/069-workspace-recovery/TASK.md) distinguishes exact recovery from new implementation, records scoped independent approvals and the failed combined gate, and lists unfinished work. The credential inheritance fix has independent scoped approval; it is not an OS sandbox. Owner discovery still needs independent review, and core/transport business diagnostics remain incomplete.
+
+Development progress is backed up in five-commit batches. Scoped tests continue during development; the complete gate and final review are still required for a stage acceptance or merge. The original final local checkpoint and its raw performance artifacts were not recovered. Historical results below are not fresh validation of this reconstructed tree.
+
+## Historical executable checkpoints before workspace replacement
 
 Latest local code is `7cf8e104bf84ee599331a3d96e181bba53fdf54c`: actual input MessageId/source/reply provenance now reaches normal and compaction requests without changing native history or durable bytes. Independent review passed 790 committed cases plus three extra real HTTP probes; the combined whole-workspace gate passes **822 unique tests and 4 doctests**. [The provenance manifest](docs/executable-provenance-verification.json), [task 055](tasks/055-input-provenance/TASK.md) and the 71-entry source map preserve exact evidence. Current query contract/revision corrections, auxiliary summaries/pagination, complete business diagnostics and performance work remain open. Publication is separately frozen at the preceding 9598f8f checkpoint; no new remote result is claimed here.
 
