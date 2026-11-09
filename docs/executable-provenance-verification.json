@@ -1,0 +1,28 @@
+{
+  "code_commit": "7cf8e104bf84ee599331a3d96e181bba53fdf54c",
+  "unique_tests": 822,
+  "nonempty_test_targets": 89,
+  "doctests": 4,
+  "runtime": [
+    {
+      "name": "minicore-runtime",
+      "version": "0.10.0",
+      "source": "git+https://github.com/zqcli/minicore-runtime?rev=69faf9196991524b5549499d6208a1eaf567bf56#69faf9196991524b5549499d6208a1eaf567bf56"
+    }
+  ],
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "logs": {
+    "executable-provenance-7cf8e10-full.log": {
+      "sha256": "a575bd6925df8cffcaff57c42f1ee721d4be3c5ed529e1ce8dd706d659f27731",
+      "bytes": 94819
+    },
+    "executable-7cf8e10-test-list.txt": {
+      "sha256": "de427738468d0e461499561ea2196860eec33f2da1a61a2cb32a8cb6cf679fad",
+      "bytes": 76665
+    },
+    "executable-7cf8e10-metadata.json": {
+      "sha256": "a1603c9c6b149a57a54e39f5e6d76bc6318652d6568e7777bb56fcabb7b123d3",
+      "bytes": 1165500
+    }
+  }
+}

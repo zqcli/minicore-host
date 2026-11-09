@@ -1,6 +1,14 @@
 # Executable checkpoint review handoff
 
-## Latest deletion composition
+## Latest input-provenance composition
+
+Fixed local code `7cf8e104bf84ee599331a3d96e181bba53fdf54c` adds the eight reviewed task055 commits without source conflicts. The normal full gate passes **822 unique tests and 4 doctests**, with 89 nonempty targets, strict Clippy/rustdoc, formatting and committed whitespace. [The manifest](executable-provenance-verification.json) preserves exact logs and the unchanged published Runtime/SPEC. The source map now has 71 topic entries. Publication remains separately frozen at the preceding `9598f8f47716be6fbf6041b62929eeb62936e12d`; this newer code is not silently included in that pending handoff.
+
+Actual MessageId, owner source and reply association are kept in a sparse private native-input index and projected into the existing model User message. Same-text inputs are never matched by text. Manual/automatic utility requests use the same known association. Native history, raw message text, JSONL, compaction markers and completion-notification bodies remain unchanged. Independent review passed 790 committed cases plus three separate real HTTP probes for initial FIFO batches, tool/compaction interleaving, authoritative partial and two restarts. Its unchanged probe fails on the original baseline. Native-only unknown projections do not imply support for old provenance-free JSONL; the existing storage validator rejects that format.
+
+Public query corrections, owner summaries/basic list pagination, full business diagnostics, performance and external review remain open. All 52 routes exist but are not declared full contract acceptance. Live external-model and TUI validation remain unrun.
+
+## Earlier deletion composition
 
 Fixed local code `4187899ef9b7301ed5af4cf36b84b5825fb83bed` adds the eleven reviewed task051 commits without source conflicts. The complete `./scripts/check.sh` passes **811 unique tests and 4 doctests**; locked `--list` confirms 88 nonempty targets. Formatting, all-target Clippy with warnings denied, strict rustdoc and committed whitespace pass. [The new manifest](executable-deletion-verification.json) records exact log hashes and dependency/SPEC verification. Prior manifests remain unchanged.
 

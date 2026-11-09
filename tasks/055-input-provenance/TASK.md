@@ -71,3 +71,9 @@ The final gate includes the existing pending/failed-save, historical missing-too
 ## Remaining boundary
 
 Independent review and coordinator composition are owned by the parent task. All implementation/test changes are local; no push or remote ref change was made. SPEC, manifests, Cargo.lock, Runtime, TUI, production provider encoding, public DTOs, durable marker format and standard completion notification construction are unchanged. The latest main target is about 2.9 GiB and the independent red target about 463 MiB; shared disk had about 14 GiB free after verification. No other worker's cache was modified or removed. Requested Astra/max configuration and live model/TUI behavior remain explicitly unattested.
+
+## Reviewed provenance composition
+
+Eight source commits through documentation-only `2b01a3a0052bc8de23a7b42b6ca752b458e8dac4` are integrated without conflicts at `7cf8e104bf84ee599331a3d96e181bba53fdf54c`. Independent review passed the unchanged original red probe on the correction, 790 committed cases plus three separate HTTP probes, and all lint/docs gates. The native-only unknown case is not a legacy JSONL migration promise.
+
+The root's normal `./scripts/check.sh` passes **822 unique tests and 4 doctests**. `cargo test --workspace --all-targets --locked -- --list` independently confirms 822 target/name pairs over 89 nonempty targets; locked metadata confirms sole Runtime69faf919. SPEC is unchanged and committed whitespace passes. Evidence hashes are in `docs/executable-provenance-verification.json`; external logs use `/workspace/shared/minicore-host-validation/executable-provenance-7cf8e10-full.log`, `executable-7cf8e10-test-list.txt` and `executable-7cf8e10-metadata.json`. Earlier stopped fixture gates are not relabeled as successful. No new remote publish or main merge is claimed.
