@@ -172,6 +172,7 @@ impl SessionController {
             // save failure. The final report supplements only the unseen suffix.
             active.accepted += items.len();
             state.history.extend_from_slice(items);
+            self.observe_history(&mut state, items);
             self.publish(&mut state);
             entries
         };
@@ -391,6 +392,7 @@ impl SessionController {
             history: state.history[active.start_history..].to_vec(),
             partials: active.partials,
         };
+        self.observe_finished(&result.info, state.runner_revision);
         state.completion_order.push(turn_id.clone());
         state.completed.insert(turn_id.clone(), result);
         if state.lifecycle == SessionLifecycle::Closing && state.info.mode == StorageMode::Memory {

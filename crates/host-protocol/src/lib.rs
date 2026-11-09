@@ -92,3 +92,6 @@ pub(crate) fn nullable<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'
 ) -> Result<Option<T>, D::Error> {
     <Option<T> as serde::Deserialize>::deserialize(deserializer)
 }
+
+mod observation;
+pub use observation::*;

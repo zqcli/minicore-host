@@ -1,0 +1,587 @@
+use super::*;
+use crate::observation::*;
+use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};
+
+#[derive(Default)]
+pub(super) struct TurnObservation {
+    pub(super) models: BTreeMap<u64, BTreeMap<String, Body>>,
+    pub(super) tools: BTreeMap<ToolCallId, ToolRecord>,
+}
+#[derive(Default)]
+pub(super) struct Body {
+    pub(super) live: String,
+    complete: Option<String>,
+}
+impl Body {
+    fn text(&self) -> &str {
+        self.complete.as_deref().unwrap_or(&self.live)
+    }
+}
+pub(super) struct ToolRecord {
+    pub(super) data: ToolCallData,
+    pub(super) output: BTreeMap<String, Body>,
+}
+
+impl SessionController {
+    pub(super) fn identity(&self) -> SessionIdentity {
+        SessionIdentity {
+            host_id: self.host_id.clone(),
+            host_incarnation: self.incarnation.clone(),
+            agent_id: self.agent_id.clone(),
+            session_id: self.id.clone(),
+        }
+    }
+    fn turn_identity(&self, info: &TurnInfo) -> TurnIdentity {
+        TurnIdentity {
+            session: self.identity(),
+            turn_id: info.id.clone(),
+            load_id: Some(info.load_id.clone()),
+        }
+    }
+    pub(super) fn turn_state(info: &TurnInfo, revision: u64) -> TurnStateData {
+        TurnStateData {
+            state: info.state,
+            runner_revision: revision,
+            config_revision: info.config_revision,
+            outcome: info.outcome,
+            persistence: info.persistence,
+            requests: info.requests,
+            tool_rounds: info.tool_rounds,
+            fault: info.fault.clone(),
+            persistence_fault: info.persistence_fault.clone(),
+        }
+    }
+    pub(super) fn publish_observation(&self, state: &mut SessionState, snapshot: &SessionSnapshot) {
+        self.access
+            .observation
+            .publish(ObservationEvent::State(StateEvent::Session {
+                source: self.identity(),
+                data: snapshot.data.clone(),
+            }));
+        if let Some(active) = &state.active {
+            self.access
+                .observation
+                .publish(ObservationEvent::State(StateEvent::Turn {
+                    source: self.turn_identity(&active.info),
+                    data: Self::turn_state(&active.info, state.runner_revision),
+                }));
+        }
+        if state.lifecycle == SessionLifecycle::Closed && !state.closed_published {
+            state.closed_published = true;
+            self.access.observation.publish(ObservationEvent::Activity(
+                ActivityEvent::SessionClosed {
+                    source: self.identity(),
+                    data: snapshot.data.clone(),
+                },
+            ));
+        }
+    }
+    pub(crate) fn publish_initial(&self) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        self.publish(&mut state);
+    }
+    pub(super) fn observe_message(
+        &self,
+        state: &SessionState,
+        record: &MessageRecord,
+        turn: Option<&TurnInfo>,
+    ) {
+        let data = MessageEventData {
+            text: record.input.text.clone(),
+            mode: record.input.mode,
+            source: record.source.clone(),
+            queue: record.queue,
+            order: record.order,
+            in_reply_to: record.input.in_reply_to.clone(),
+            controller_revision: state.controller_revision,
+        };
+        let message_id = record.input.message_id.clone();
+        let event = match turn {
+            Some(info) => ActivityEvent::MessageBound {
+                source: self.turn_identity(info),
+                message_id,
+                data,
+            },
+            None => ActivityEvent::MessageAccepted {
+                source: self.identity(),
+                message_id,
+                data,
+            },
+        };
+        self.access
+            .observation
+            .publish(ObservationEvent::Activity(event));
+    }
+    pub(super) fn observe_bound(&self, state: &SessionState, batch: &[QueuedInput]) {
+        if let Some(active) = &state.active {
+            for input in batch {
+                if let Some(record) = state.messages.iter().find(|record| {
+                    record.input.message_id == input.message.message_id
+                        && record.queue == input.queue
+                        && record.order == input.order
+                }) {
+                    self.observe_message(state, record, Some(&active.info));
+                }
+            }
+        }
+    }
+    pub(super) fn observe_history(&self, state: &mut SessionState, items: &[HistoryItem]) {
+        let active = state.active.as_ref().expect("accepted active Turn");
+        let source = self.turn_identity(&active.info);
+        let base = active.response_base;
+        let revision = state.runner_revision;
+        let observation = state.output.entry(active.info.id.clone()).or_default();
+        for item in items {
+            match item {
+                HistoryItem::Assistant(result) => {
+                    let response_index = base + u64::from(result.request_index);
+                    let channels = observation.models.entry(response_index).or_default();
+                    let mut text = String::new();
+                    let mut reasoning = String::new();
+                    for part in &result.content {
+                        match part {
+                            AssistantPart::Text(value) => text.push_str(value),
+                            AssistantPart::Reasoning(value) => {
+                                if let Some(value) = value.text() {
+                                    reasoning.push_str(value);
+                                }
+                            }
+                            AssistantPart::ToolCall(call) => {
+                                let id = ToolCallId(call.tool_call_id().as_str().to_owned());
+                                let record = ToolRecord {
+                                    data: ToolCallData {
+                                        state: ToolCallStateData {
+                                            runner_revision: revision,
+                                            response_index,
+                                            name: call.name().as_str().to_owned(),
+                                            state: ToolCallState::Pending,
+                                            progress: None,
+                                            outcome: None,
+                                        },
+                                        arguments: call.arguments().clone(),
+                                        result: None,
+                                    },
+                                    output: BTreeMap::new(),
+                                };
+                                self.access.observation.publish(ObservationEvent::State(
+                                    StateEvent::Toolcall {
+                                        source: ToolCallIdentity {
+                                            turn: source.clone(),
+                                            tool_call_id: id.clone(),
+                                        },
+                                        data: record.data.state.clone(),
+                                    },
+                                ));
+                                observation.tools.insert(id, record);
+                            }
+                        }
+                    }
+                    channels.entry("text".into()).or_default().complete = Some(text);
+                    channels.entry("reasoning".into()).or_default().complete = Some(reasoning);
+                    self.access.observation.publish(ObservationEvent::Activity(
+                        ActivityEvent::ModelFinished {
+                            source: ModelOutputIdentity {
+                                turn: source.clone(),
+                                response_index,
+                            },
+                            data: ModelFinishedData {
+                                result: result.into(),
+                                output_positions: positions(channels),
+                            },
+                        },
+                    ));
+                }
+                HistoryItem::ToolResult(result) => {
+                    let id = ToolCallId(result.call_id.as_str().to_owned());
+                    if let Some(record) = observation.tools.get_mut(&id) {
+                        record.data.state.state = ToolCallState::Finished;
+                        record.data.state.outcome = Some(result.outcome);
+                        record.data.state.runner_revision = revision;
+                        record.data.result = Some(result.into());
+                        let source = ToolCallIdentity {
+                            turn: source.clone(),
+                            tool_call_id: id,
+                        };
+                        self.access.observation.publish(ObservationEvent::State(
+                            StateEvent::Toolcall {
+                                source: source.clone(),
+                                data: record.data.state.clone(),
+                            },
+                        ));
+                        self.access.observation.publish(ObservationEvent::Activity(
+                            ActivityEvent::ToolFinished {
+                                source,
+                                data: ToolFinishedData {
+                                    result: result.into(),
+                                    output_positions: positions(&record.output),
+                                },
+                            },
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    pub(super) fn observe_runtime(&self, turn_id: &TurnId, loop_id: LoopId, event: LoopEvent) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        let Some(active) = state
+            .active
+            .as_ref()
+            .filter(|active| &active.info.id == turn_id && active.loop_id == Some(loop_id))
+        else {
+            return;
+        };
+        let source = self.turn_identity(&active.info);
+        let base = active.response_base;
+        state.runner_revision += 1;
+        let revision = state.runner_revision;
+        let output = state.output.entry(turn_id.clone()).or_default();
+        match event {
+            LoopEvent::RequestStarted {
+                loop_id: actual,
+                request_index,
+                ..
+            } if actual == loop_id => {
+                let channels = output
+                    .models
+                    .entry(base + u64::from(request_index))
+                    .or_default();
+                channels.entry("text".into()).or_default();
+                channels.entry("reasoning".into()).or_default();
+            }
+            LoopEvent::OutputDelta {
+                loop_id: actual,
+                request_index,
+                channel,
+                delta,
+            } if actual == loop_id => {
+                let response_index = base + u64::from(request_index);
+                let channel = match channel {
+                    OutputChannel::Text => "text",
+                    OutputChannel::Reasoning => "reasoning",
+                };
+                let body = output
+                    .models
+                    .entry(response_index)
+                    .or_default()
+                    .entry(channel.into())
+                    .or_default();
+                let start = body.live.len() as u64;
+                body.live.push_str(delta.as_str());
+                self.access.observation.publish(ObservationEvent::Activity(
+                    ActivityEvent::ModelOutput {
+                        source: ModelOutputIdentity {
+                            turn: source,
+                            response_index,
+                        },
+                        data: OutputDelta {
+                            channel: channel.into(),
+                            start,
+                            end: body.live.len() as u64,
+                            text: delta.as_str().to_owned(),
+                        },
+                    },
+                ));
+            }
+            LoopEvent::ToolStarted {
+                loop_id: actual,
+                call_id,
+                ..
+            } if actual == loop_id => {
+                if let Some(tool) = output
+                    .tools
+                    .get_mut(&ToolCallId(call_id.as_str().to_owned()))
+                {
+                    self.access.observation.publish(ObservationEvent::Activity(
+                        ActivityEvent::ToolStarted {
+                            source: ToolCallIdentity {
+                                turn: source.clone(),
+                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                            },
+                            data: ToolInvocationData {
+                                name: tool.data.state.name.clone(),
+                                arguments: tool.data.arguments.clone(),
+                            },
+                        },
+                    ));
+                    if tool.data.state.state == ToolCallState::Finished {
+                        return;
+                    }
+                    tool.data.state.state = ToolCallState::Running;
+                    tool.data.state.runner_revision = revision;
+                    self.access.observation.publish(ObservationEvent::State(
+                        StateEvent::Toolcall {
+                            source: ToolCallIdentity {
+                                turn: source,
+                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                            },
+                            data: tool.data.state.clone(),
+                        },
+                    ));
+                }
+            }
+            LoopEvent::ToolProgress {
+                loop_id: actual,
+                call_id,
+                progress,
+                ..
+            } if actual == loop_id => {
+                if let Some(tool) = output
+                    .tools
+                    .get_mut(&ToolCallId(call_id.as_str().to_owned()))
+                    && tool.data.state.state != ToolCallState::Finished
+                {
+                    tool.data.state.progress = Some(ToolProgressData {
+                        message: progress.message.map(|v| v.as_str().to_owned()),
+                        completed: progress.completed,
+                        total: progress.total,
+                    });
+                    tool.data.state.runner_revision = revision;
+                    self.access.observation.publish(ObservationEvent::State(
+                        StateEvent::Toolcall {
+                            source: ToolCallIdentity {
+                                turn: source,
+                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                            },
+                            data: tool.data.state.clone(),
+                        },
+                    ));
+                }
+            }
+            // ToolFinished is deliberately not used to synthesize a ToolResult.
+            _ => {}
+        }
+    }
+    pub(super) fn observe_finished(&self, info: &TurnInfo, revision: u64) {
+        let source = self.turn_identity(info);
+        let data = Self::turn_state(info, revision);
+        self.access
+            .observation
+            .publish(ObservationEvent::State(StateEvent::Turn {
+                source: source.clone(),
+                data: data.clone(),
+            }));
+        self.access
+            .observation
+            .publish(ObservationEvent::Activity(ActivityEvent::TurnFinished {
+                source,
+                data,
+            }));
+    }
+    pub(crate) fn observation_baseline(
+        &self,
+        turn: Option<&TurnId>,
+        states: bool,
+        outputs: bool,
+    ) -> Result<(Vec<StateEvent>, Vec<OutputPosition>), Fault> {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        if state.reclaimed {
+            return Err(Fault::new(
+                FaultKind::AgentSessionNotFound,
+                "Session source was reclaimed",
+            ));
+        }
+        let mut initial = Vec::new();
+        let mut watermarks = Vec::new();
+        if states && turn.is_none() {
+            initial.push(StateEvent::Session {
+                source: self.identity(),
+                data: Self::make_snapshot(
+                    &state,
+                    &self.host_id,
+                    &self.incarnation,
+                    &self.agent_id,
+                    &self.id,
+                )
+                .data,
+            });
+        }
+        let turns = state
+            .completed
+            .values()
+            .map(|result| &result.info)
+            .chain(state.active.iter().map(|active| &active.info));
+        let mut found = turn.is_none();
+        for info in turns.filter(|info| turn.is_none_or(|id| id == &info.id)) {
+            found = true;
+            let source = self.turn_identity(info);
+            if states {
+                initial.push(StateEvent::Turn {
+                    source: source.clone(),
+                    data: Self::turn_state(info, state.runner_revision),
+                });
+            }
+            if let Some(observation) = state.output.get(&info.id) {
+                for (id, record) in &observation.tools {
+                    let tool = ToolCallIdentity {
+                        turn: source.clone(),
+                        tool_call_id: id.clone(),
+                    };
+                    if states {
+                        initial.push(StateEvent::Toolcall {
+                            source: tool.clone(),
+                            data: record.data.state.clone(),
+                        });
+                    }
+                    if outputs {
+                        for (channel, body) in &record.output {
+                            watermarks.push(OutputPosition {
+                                source: OutputSource::Toolcall {
+                                    source: tool.clone(),
+                                },
+                                channel: channel.clone(),
+                                end: body.text().len() as u64,
+                            });
+                        }
+                    }
+                }
+                if outputs {
+                    for (response_index, channels) in &observation.models {
+                        for (channel, body) in channels {
+                            watermarks.push(OutputPosition {
+                                source: OutputSource::Model {
+                                    source: ModelOutputIdentity {
+                                        turn: source.clone(),
+                                        response_index: *response_index,
+                                    },
+                                },
+                                channel: channel.clone(),
+                                end: body.text().len() as u64,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if !found {
+            return Err(Fault::new(
+                FaultKind::SessionTurnNotFound,
+                "Turn is not held by this Session",
+            ));
+        }
+        Ok((initial, watermarks))
+    }
+    pub(crate) fn output_read(
+        &self,
+        caller: &CallerContext,
+        turn: &TurnId,
+        response: Option<u64>,
+        tool: Option<&ToolCallId>,
+        request: &TextReadRequest,
+    ) -> Result<TextRangeData, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            request
+                .validate()
+                .map_err(|e| Fault::new(FaultKind::SessionOutputRangeInvalid, e.to_string()))?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let output = state.output.get(turn).ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionTurnNotFound,
+                    "Turn output is not retained",
+                )
+            })?;
+            let channels = match (response, tool) {
+                (Some(index), None) => output.models.get(&index),
+                (None, Some(id)) => output.tools.get(id).map(|record| &record.output),
+                _ => None,
+            }
+            .ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionOutputNotFound,
+                    "output source is not retained",
+                )
+            })?;
+            let body = channels.get(&request.channel).ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionOutputNotFound,
+                    "output channel is not retained",
+                )
+            })?;
+            read_range(body.text(), request)
+        })
+    }
+    pub(crate) fn tool_get(
+        &self,
+        caller: &CallerContext,
+        turn: &TurnId,
+        tool: &ToolCallId,
+    ) -> Result<(ToolCallIdentity, ToolCallData), Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let info = state
+                .active
+                .as_ref()
+                .filter(|a| &a.info.id == turn)
+                .map(|a| &a.info)
+                .or_else(|| state.completed.get(turn).map(|r| &r.info))
+                .ok_or_else(|| {
+                    Fault::new(FaultKind::SessionTurnNotFound, "Turn is not retained")
+                })?;
+            let record = state
+                .output
+                .get(turn)
+                .and_then(|o| o.tools.get(tool))
+                .ok_or_else(|| {
+                    Fault::new(
+                        FaultKind::SessionToolCallNotFound,
+                        "ToolCall is not retained by this Turn",
+                    )
+                })?;
+            Ok((
+                ToolCallIdentity {
+                    turn: self.turn_identity(info),
+                    tool_call_id: tool.clone(),
+                },
+                record.data.clone(),
+            ))
+        })
+    }
+}
+fn positions(channels: &BTreeMap<String, Body>) -> Vec<ChannelPosition> {
+    channels
+        .iter()
+        .map(|(channel, body)| ChannelPosition {
+            channel: channel.clone(),
+            end: body.text().len() as u64,
+        })
+        .collect()
+}
+fn read_range(text: &str, request: &TextReadRequest) -> Result<TextRangeData, Fault> {
+    let invalid = || {
+        Fault::new(
+            FaultKind::SessionOutputRangeInvalid,
+            "read positions must be available UTF-8 boundaries",
+        )
+    };
+    let start = usize::try_from(request.start).map_err(|_| invalid())?;
+    let requested_end = usize::try_from(request.end).map_err(|_| invalid())?;
+    if start > text.len()
+        || !text.is_char_boundary(start)
+        || (requested_end <= text.len() && !text.is_char_boundary(requested_end))
+    {
+        return Err(invalid());
+    }
+    let fixed_end = requested_end.min(text.len());
+    let budget = usize::try_from(request.max_bytes).unwrap_or(usize::MAX);
+    let mut end = start.saturating_add(budget).min(fixed_end);
+    while end > start && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end == start && start < fixed_end {
+        end += text[start..fixed_end]
+            .chars()
+            .next()
+            .expect("nonempty range")
+            .len_utf8();
+    }
+    Ok(TextRangeData {
+        channel: request.channel.clone(),
+        start: start as u64,
+        end: end as u64,
+        text: text[start..end].to_owned(),
+        has_more: end < fixed_end,
+    })
+}

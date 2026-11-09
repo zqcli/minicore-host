@@ -227,6 +227,7 @@ impl SessionController {
             state.reclaimed = true;
             state.controls.clear();
             let retired = (
+                std::mem::take(&mut state.output),
                 std::mem::take(&mut state.history),
                 std::mem::take(&mut state.messages),
                 std::mem::take(&mut state.completed),

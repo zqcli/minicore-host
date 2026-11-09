@@ -78,6 +78,7 @@ impl Host {
                 child.begin_host_shutdown_owned(stopping);
             }
         }
+        self.publish_host_state_owned();
         self.changed.notify_waiters();
         Ok(receipt)
     }
@@ -125,6 +126,8 @@ impl Host {
                     self.access
                         .set_host_lifecycle_owned(HostLifecycle::Stopping);
                     self.changed.notify_waiters();
+                    drop(state);
+                    self.publish_host_state_owned();
                     continue;
                 }
             }
@@ -178,9 +181,12 @@ impl Host {
                     self.access.set_host_lifecycle_owned(HostLifecycle::Stopped);
                     state.shutdown_task.take();
                     self.changed.notify_waiters();
+                    drop(state);
+                    self.publish_host_state_owned();
                     return;
                 }
             }
+            self.publish_host_state_owned();
             notified.await;
         }
     }

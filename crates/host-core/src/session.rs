@@ -7,6 +7,9 @@ use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 mod controls;
 mod history;
 mod metadata;
+mod observation;
+mod tool_output;
+pub use tool_output::{ToolOutputBinding, ToolOutputSink};
 mod retirement;
 pub(crate) use retirement::SessionShutdownStatus;
 mod persistent;
@@ -68,6 +71,16 @@ pub trait ResourceResolver: Send + Sync + 'static {
     /// or filesystem here; resource preparation belongs in `resolve`.
     fn validate(&self, config: &SessionConfig) -> Result<(), Fault>;
     fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a>;
+    /// Attach only the original Turn's output sink to already-prepared tools.
+    /// This infallible, non-I/O step must not select resources or prepare business authority.
+    /// Those fallible steps belong in `resolve`, before input is consumed.
+    fn bind_tool_output(
+        &self,
+        execution: &ExecutionConfig,
+        _output: ToolOutputBinding,
+    ) -> ExecutionConfig {
+        execution.clone()
+    }
 }
 #[derive(Clone)]
 pub struct BoundResources {
@@ -168,6 +181,8 @@ struct SessionState {
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
     history: Vec<HistoryItem>,
+    output: BTreeMap<TurnId, observation::TurnObservation>,
+    closed_published: bool,
     history_loaded: bool,
     preparing: bool,
     saving: bool,
@@ -253,6 +268,8 @@ impl SessionController {
             controls: BTreeMap::new(),
             completion_order: Vec::new(),
             history,
+            output: BTreeMap::new(),
+            closed_published: false,
             history_loaded: backend.mode() == StorageMode::Memory,
             preparing: false,
             saving: false,
@@ -340,13 +357,19 @@ impl SessionController {
             .controller_revision
             .checked_add(1)
             .expect("controller revision exhausted");
-        self.snapshots.send_replace(Self::make_snapshot(
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
+        let snapshot = Self::make_snapshot(
             state,
             &self.host_id,
             &self.incarnation,
             &self.agent_id,
             &self.id,
-        ));
+        );
+        self.publish_observation(state, &snapshot);
+        self.snapshots.send_replace(snapshot);
         self.changed.notify_waiters();
         if let Some(parent_changed) = &self.parent_changed {
             parent_changed.notify_waiters();
@@ -545,13 +568,14 @@ impl SessionController {
         })?;
         let entry = QueuedInput {
             message: message.clone(),
-            source,
+            source: source.clone(),
             runtime,
             queue,
             order,
         };
         state.messages.push(MessageRecord {
             input: message.clone(),
+            source,
             queue,
             order,
             binding: MessageBinding::Queued,
@@ -561,6 +585,11 @@ impl SessionController {
             InputQueue::NextTurn => state.next_turn.push_back(entry),
         }
         self.publish(&mut state);
+        self.observe_message(
+            &state,
+            state.messages.last().expect("accepted message"),
+            None,
+        );
         let mut facts = MessageAcceptedFacts::new(queue, state.controller_revision);
         facts.load_id = state.load_id.clone();
         facts.start_error = if state.active.is_none() {
@@ -999,6 +1028,7 @@ impl SessionController {
                     partial_accepted: false,
                     terminal_accepted: false,
                 });
+                self.observe_bound(&state, &batch);
                 self.publish(&mut state);
                 batch
             };
@@ -1023,6 +1053,18 @@ impl SessionController {
         mut batch: Vec<QueuedInput>,
         resources: BoundResources,
     ) {
+        let resolver = match self.resources_owned() {
+            Ok(resolver) => resolver,
+            Err(fault) => {
+                self.finalize(&turn_id, TurnOutcome::Failed, Some(fault))
+                    .await;
+                return;
+            }
+        };
+        let execution = resolver.bind_tool_output(
+            &resources.execution,
+            ToolOutputBinding::new(self, turn_id.clone()),
+        );
         loop {
             let started = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
@@ -1059,7 +1101,7 @@ impl SessionController {
                     active.bound_pending.extend(batch.drain(..));
                     active.accepted = 0;
                     let started = AgentLoop::start(
-                        LoopRequest::new(history, first.runtime, resources.execution.clone()),
+                        LoopRequest::new(history, first.runtime, execution.clone()),
                         options,
                         inputs,
                     );
@@ -1086,21 +1128,33 @@ impl SessionController {
                 return;
             };
             let report = match started {
-                Ok(owner) => match owner.join().await {
-                    Ok(report) => report,
-                    Err(error) => {
-                        self.finalize(
-                            &turn_id,
-                            TurnOutcome::Failed,
-                            Some(Fault::new(
-                                FaultKind::TurnInternalUnexpected,
-                                error.to_string(),
-                            )),
-                        )
-                        .await;
-                        return;
+                Ok(mut owner) => {
+                    let mut events = owner
+                        .take_events()
+                        .expect("Session owns the Runtime event receiver");
+                    let loop_id = owner.id();
+                    let drain = async {
+                        while let Some(envelope) = events.recv().await {
+                            self.observe_runtime(&turn_id, loop_id, envelope.event);
+                        }
+                    };
+                    let (joined, ()) = tokio::join!(owner.join(), drain);
+                    match joined {
+                        Ok(report) => report,
+                        Err(error) => {
+                            self.finalize(
+                                &turn_id,
+                                TurnOutcome::Failed,
+                                Some(Fault::new(
+                                    FaultKind::TurnInternalUnexpected,
+                                    error.to_string(),
+                                )),
+                            )
+                            .await;
+                            return;
+                        }
                     }
-                },
+                }
                 Err(error) => {
                     self.finalize(
                         &turn_id,
@@ -1166,6 +1220,7 @@ impl SessionController {
                     && !state.next_step.is_empty();
                 if continue_same {
                     let next = take_batch(&mut state, false, &turn_id);
+                    self.observe_bound(&state, &next);
                     self.publish(&mut state);
                     Some(next)
                 } else {
@@ -1292,6 +1347,7 @@ impl LoopInputs for SessionInputs {
             })
         {
             let batch = take_batch(&mut state, false, &self.turn_id);
+            self.session.observe_bound(&state, &batch);
             values.extend(batch.iter().map(|input| input.runtime.clone()));
             state
                 .active

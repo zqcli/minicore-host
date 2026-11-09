@@ -57,3 +57,15 @@ The Ubuntu 24.04 workflow uses pinned Rust 1.90.0, an immutable official checkou
 Local development uses topic worktrees and integrates onto `dev`. Local `main` remains `98621c9`. The verified remote `main` is the README-only `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. The authorized Host dev publication preserved that README as an ancestor and reconstructed all 101 local commits in order. Every raw commit message, tree and 511 referenced blob contents were verified; actual authors and committers are `zqcli <276883664+zqcli@users.noreply.github.com>`, without co-author trailers. GitHub API and independent `git ls-remote` agree on the published head. Remote `main` and other refs were unchanged; there was no force-push, tag or PR. [Task 028](tasks/028-host-publication/TASK.md) records the fixed handoff, mapping and hosted verification. The requested independent review and required tests still precede any main merge.
 
 Workers were requested with `gpt-6-astra` and `max`. No independent runtime-model/effort attestation is exposed; the requested configuration is not claimed as proven actual identity.
+## Scoped observation checkpoint
+
+The source-owner observation stage adds typed scope/range DTOs, dynamic
+connection-bound subscription dispatch, per-owner initial states and fixed
+watermarks, UTF-8 catch-up reads, and Runtime event draining independent of
+clients. Complete model/tool results come from the existing real history
+handoff; process output remains separately owned by the original Session.
+Optional tool output capabilities are bound at the actual invocation and expire
+on return. A scripted gated model and a real temporary-file tool cover output,
+scope, cancellation cleanup, internal Loop indexing and source reclamation.
+This checkpoint does not claim finished interaction/retry projection, history
+pagination, transport event routing or live-provider/TUI acceptance. See task 018.

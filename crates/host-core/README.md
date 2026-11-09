@@ -65,3 +65,27 @@ Tests use temporary files, production owners, real Runtime and explicitly named 
 Run formatting, workspace tests, all-target Clippy with warnings denied, and rustdoc with warnings denied in the configured development checkout. Detailed checkpoints and commands are in tasks 006, 008, 009 and 012 at the repository root. The integrated canonical-control correction checkpoint `b961f9f` passed all 254 unit/integration tests and 2 doctests, with strict lint/documentation gates. A separate scoped review exercised 12 additional public-API acceptance cases; it is not the requested external review.
 
 Not implemented here: complete Host execution-resource configuration/reload, phased directory deletion, the complete canonical operation surface, transport/SDK adapters, DSH, full output/event reads, standard interaction and compaction. API/type presence is not evidence that these features are complete.
+
+## Source-owned observation
+
+`Host::events_subscribe` returns a local `EventSubscription` with its fixed
+`SubscribeResult` baseline and a `recv` stream. The same core payloads are ready
+for transport adapters; wire push routing is a separate integration step.
+Registration is connection-bound and precedes per-owner baseline collection.
+Host/Agent/Session/Turn scopes continue covering later direct descendants.
+Dropping a handle or ending its connection never cancels Session work.
+
+`turn_output_read` and `toolcall_output_read` use explicit UTF-8 `[start, end)`
+byte ranges. `end` is fixed for one catch-up operation; `max_bytes` chooses a
+page, rounding forward only when needed to return one complete UTF-8 character.
+Streamed text, complete Runtime history, execution completion and persistence
+confirmation remain distinct facts. Model response indices continue through
+internal Loops within one public Turn. Tool identity includes the original Turn.
+
+Trusted resource assemblers can override `ResourceResolver::bind_tool_output`
+to wrap already-prepared tools with `ToolOutputBinding::wrap`. This is an
+infallible, non-I/O sink binding, not resource selection or business permission
+preparation. During the real call, `ToolOutputSink::current()` provides the
+bound process-output capability. Clones become inactive when that call returns
+or is cancelled, and never hold a Session alive. Final ToolResult text is not
+re-emitted as invented process output.

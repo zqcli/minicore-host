@@ -17,6 +17,14 @@ pub use control::{CallerContext, ConnectionHandle};
 pub use host::Host;
 pub use session::{
     BoundResources, HistoryBackend, LoadFuture, MemoryHistory, ResourceFuture, ResourceResolver,
-    SaveFuture, SessionSubscription,
+    SaveFuture, SessionSubscription, ToolOutputBinding, ToolOutputSink,
 };
 pub use types::*;
+
+mod observation;
+pub use observation::{
+    ActivityEvent, EventSubscription, HostStateData, MessageEventData, ModelFinishedData,
+    ModelResponseData, ObservationEvent, ObservationNotification, StateEvent, ToolCallData,
+    ToolCallState, ToolCallStateData, ToolFinishedData, ToolInvocationData, ToolProgressData,
+    ToolResultData, TurnStateData,
+};

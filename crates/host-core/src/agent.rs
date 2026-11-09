@@ -288,6 +288,8 @@ impl AgentOwner {
         if make_default {
             state.info.default_session_id = Some(id);
         }
+        drop(state);
+        session.publish_initial();
         Ok(session)
     }
     pub(crate) fn set_default(

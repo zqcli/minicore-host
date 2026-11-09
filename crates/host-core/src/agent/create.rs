@@ -341,6 +341,7 @@ impl AgentOwner {
                 receipt.result.steps.message = Some(CreateStep::Running);
             }
         }
+        session.publish_initial();
         if let Some(message) = message {
             let delivered = session.send_owned(message);
             let mut state = self.state.lock().expect("Agent mutex poisoned");

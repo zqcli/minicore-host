@@ -56,6 +56,7 @@ pub enum MessageBinding {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageRecord {
     pub input: MessageInput,
+    pub source: MessageSource,
     pub queue: InputQueue,
     pub order: u64,
     pub binding: MessageBinding,
@@ -165,4 +166,23 @@ pub struct AgentLoadFailure {
 pub struct SessionLoadFailure {
     pub session_id: SessionId,
     pub fault: Fault,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelTextSnapshot {
+    #[serde(flatten)]
+    pub source: ModelOutputIdentity,
+    pub data: TextRangeData,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolTextSnapshot {
+    #[serde(flatten)]
+    pub source: ToolCallIdentity,
+    pub data: TextRangeData,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ToolCallSnapshot {
+    #[serde(flatten)]
+    pub source: ToolCallIdentity,
+    pub data: crate::ToolCallData,
 }

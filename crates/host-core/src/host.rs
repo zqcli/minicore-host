@@ -10,6 +10,7 @@ mod controls;
 mod create;
 mod metadata;
 mod network;
+mod observation;
 mod persistent;
 mod retirement;
 mod shutdown;
@@ -99,7 +100,9 @@ impl Host {
     /// The embedding process is trusted. A network adapter must authenticate
     /// before it can invoke an equivalent trusted initialization path.
     pub fn connect(&self) -> Result<ConnectionHandle, Fault> {
-        self.access.connect()
+        let connection = self.access.connect()?;
+        self.publish_host_state_owned();
+        Ok(connection)
     }
     pub fn info(&self, caller: &CallerContext) -> Result<HostInfo, Fault> {
         let control = self.access.snapshot(caller)?;
