@@ -20,6 +20,7 @@ pub use process::{HostProcessControl, HostProcessSnapshot};
 mod retirement;
 mod shutdown;
 mod tool_edits;
+mod workspace;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
 

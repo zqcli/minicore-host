@@ -8,6 +8,7 @@ description = "Typed in-process, stdio and authenticated WSS clients for the Min
 
 [dependencies]
 minicore-host-core = { path = "../host-core", version = "0.1.0" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
 serde = { version = "=1.0.229", features = ["derive"] }
