@@ -156,3 +156,64 @@ fn reconciliation_rejects_changed_prefix_even_when_suffix_matches() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), changed);
     assert_eq!(journal.positions().persisted, Some(1));
 }
+
+#[test]
+fn directory_sync_failure_does_not_confirm_a_readable_fully_written_range() {
+    let (_temp, session) = fixture();
+    let path = session.canonical_path().join("history.jsonl");
+    let mut journal = session.open_journal().unwrap();
+    let range = journal.accept(vec![entry("file sync succeeded")]).unwrap();
+    journal.failure = Some(TestFailure::DirectorySync);
+    assert!(matches!(
+        journal.persist_pending(),
+        Err(StorageError::Io {
+            operation: "injected history directory sync failure",
+            ..
+        })
+    ));
+    let before = std::fs::read(&path).unwrap();
+    assert!(!before.is_empty());
+    assert_eq!(journal.positions().persisted, Some(0));
+    assert_eq!(journal.reconcile_pending().unwrap().range, range);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(journal.positions().persisted, Some(1));
+}
+
+#[test]
+fn file_replacement_during_sync_cannot_be_confirmed_by_append_or_reconciliation() {
+    for reconcile in [false, true] {
+        let (_temp, session) = fixture();
+        let path = session.canonical_path().join("history.jsonl");
+        let mut journal = session.open_journal().unwrap();
+        journal.accept(vec![entry("accepted")]).unwrap();
+        if reconcile {
+            journal.failure = Some(TestFailure::FileSync);
+            assert!(journal.persist_pending().is_err());
+        }
+        journal.failure = Some(TestFailure::ReplaceFileAfterSync);
+        let result = if reconcile {
+            journal.reconcile_pending()
+        } else {
+            journal.persist_pending()
+        };
+        assert!(matches!(result, Err(StorageError::UncertainWrite)));
+        assert_eq!(journal.positions().persisted, Some(0));
+        assert_eq!(std::fs::read(path).unwrap(), b"replacement");
+    }
+}
+#[test]
+fn directory_replacement_during_sync_cannot_be_confirmed() {
+    let (_temp, session) = fixture();
+    let mut journal = session.open_journal().unwrap();
+    journal.accept(vec![entry("accepted")]).unwrap();
+    journal.failure = Some(TestFailure::ReplaceDirectoryAfterSync);
+    assert!(matches!(
+        journal.persist_pending(),
+        Err(StorageError::UncertainWrite)
+    ));
+    assert_eq!(journal.positions().persisted, Some(0));
+    assert_eq!(
+        std::fs::read(session.canonical_path().join("history.jsonl")).unwrap(),
+        b"replacement"
+    );
+}

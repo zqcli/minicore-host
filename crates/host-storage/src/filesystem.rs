@@ -15,19 +15,11 @@ use std::{
 pub(crate) struct Directory {
     pub file: Arc<File>,
     pub path: PathBuf,
+    parent: Option<Arc<Directory>>,
 }
 
 impl Directory {
     pub fn root(path: &Path) -> Result<Self, StorageError> {
-        let mut missing = Vec::new();
-        let mut cursor = path;
-        while !cursor.exists() {
-            missing.push(cursor.to_path_buf());
-            cursor = cursor
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-        }
         DirBuilder::new()
             .recursive(true)
             .mode(0o700)
@@ -51,22 +43,18 @@ impl Directory {
                 return Err(io_error("lock data root", &canonical, e));
             }
         }
-        // New directory entries are part of the persistence contract. Sync each
-        // created parent, not merely host.json once it exists.
-        for created in missing.iter().rev() {
-            let parent = created
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            File::open(parent)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| io_error("sync new data root parent", parent, e))?;
+        // Existence is not a durability proof, including after a previous failed
+        // acquisition. Confirm every ancestor entry needed to locate this root.
+        for parent in canonical.ancestors().skip(1) {
+            let parent_file = File::open(parent)
+                .map_err(|e| io_error("open root ancestor for sync", parent, e))?;
+            sync_file(&parent_file, parent, "sync data root ancestor")?;
         }
-        file.sync_all()
-            .map_err(|e| io_error("sync data root", &canonical, e))?;
+        sync_file(&file, &canonical, "sync data root")?;
         Ok(Self {
             file: Arc::new(file),
             path: canonical,
+            parent: None,
         })
     }
 
@@ -75,10 +63,11 @@ impl Directory {
         let path = self.path.join(name);
         if create {
             match fs::mkdirat(&*self.file, name, Mode::from_bits_truncate(0o700)) {
-                Ok(()) => self.sync()?,
+                Ok(()) => {}
                 Err(rustix::io::Errno::EXIST) => {}
                 Err(e) => return Err(io_error("create child directory", &path, e)),
             }
+            self.sync()?;
         }
         let file = File::from(
             fs::openat(
@@ -93,6 +82,7 @@ impl Directory {
         Ok(Self {
             file: Arc::new(file),
             path,
+            parent: Some(Arc::new(self.clone())),
         })
     }
 
@@ -157,13 +147,16 @@ impl Directory {
     }
 
     pub fn sync(&self) -> Result<(), StorageError> {
-        self.file
-            .sync_all()
-            .map_err(|e| io_error("sync storage directory", &self.path, e))
+        sync_file(&self.file, &self.path, "sync storage directory")?;
+        if let Some(parent) = &self.parent {
+            parent.sync()?;
+        }
+        Ok(())
     }
 
     pub fn atomic_write(&self, name: &str, bytes: &[u8]) -> Result<(), StorageError> {
         component(name)?;
+        self.verify_attached()?;
         if self.contains(name)? {
             self.open_file(name, false, false)?;
         }
@@ -182,7 +175,18 @@ impl Directory {
             })?;
             fs::renameat(&*self.file, &temporary, &*self.file, name)
                 .map_err(|e| io_error("publish object file", self.path.join(name), e))?;
-            self.sync()
+            self.sync()?;
+            self.verify_attached()?;
+            self.verify_file_identity(name, &file)?;
+            if file
+                .metadata()
+                .map_err(|e| io_error("inspect published object", self.path.join(name), e))?
+                .len()
+                != bytes.len() as u64
+            {
+                return Err(StorageError::UncertainWrite);
+            }
+            Ok(())
         })();
         // Only our private unpublished temporary is eligible for cleanup. Never
         // remove, truncate, replace, or repair an existing failed object file.
@@ -209,6 +213,41 @@ impl Directory {
             }
         })?;
         self.sync()
+    }
+
+    pub fn verify_attached(&self) -> Result<(), StorageError> {
+        if let Some(parent) = &self.parent {
+            parent.verify_attached()?;
+            let name =
+                self.path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .ok_or(StorageError::UnsafePath {
+                        reason: "invalid stored directory name",
+                    })?;
+            self.verify_directory_identity(&parent.child(name, false)?)
+        } else {
+            let current = File::from(
+                fs::open(
+                    &self.path,
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+                    Mode::empty(),
+                )
+                .map_err(|e| path_error("verify data root identity", &self.path, e))?,
+            );
+            check_directory(&current)?;
+            let a = self
+                .file
+                .metadata()
+                .map_err(|e| io_error("inspect original root", &self.path, e))?;
+            let b = current
+                .metadata()
+                .map_err(|e| io_error("inspect current root", &self.path, e))?;
+            if a.dev() != b.dev() || a.ino() != b.ino() {
+                return Err(StorageError::UncertainWrite);
+            }
+            Ok(())
+        }
     }
 
     pub fn verify_directory_identity(&self, other: &Self) -> Result<(), StorageError> {
@@ -288,3 +327,39 @@ fn path_error(operation: &'static str, path: &Path, error: rustix::io::Errno) ->
         io_error(operation, path, error)
     }
 }
+
+/// Explicit synchronization also reused for existing initial files after an
+/// earlier failed creation. Test hooks are thread-local and never in production.
+pub(crate) fn sync_file(
+    file: &File,
+    path: &Path,
+    operation: &'static str,
+) -> Result<(), StorageError> {
+    #[cfg(test)]
+    {
+        SYNC_TRACE.with(|trace| trace.borrow_mut().push(path.to_owned()));
+        let fail = SYNC_FAILURE.with(|failure| {
+            if failure.borrow().as_deref() == Some(path) {
+                failure.borrow_mut().take();
+                true
+            } else {
+                false
+            }
+        });
+        if fail {
+            return Err(io_error(
+                operation,
+                path,
+                std::io::Error::from_raw_os_error(5),
+            ));
+        }
+    }
+    file.sync_all().map_err(|e| io_error(operation, path, e))
+}
+#[cfg(test)]
+thread_local! {
+    static SYNC_FAILURE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+    static SYNC_TRACE: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+#[cfg(test)]
+mod tests;

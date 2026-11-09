@@ -56,6 +56,19 @@ struct Persistent {
     prefix_hash: Sha256,
     ends_with_newline: bool,
 }
+impl Persistent {
+    fn checked_stamp(&self, expected_len: u64) -> Result<FileStamp, StorageError> {
+        self.dir.verify_attached()?;
+        self.dir
+            .verify_directory_identity(&self._owner.directory(false)?)?;
+        self.dir.verify_file_identity("history.jsonl", &self.file)?;
+        let stamp = FileStamp::read(&self.file, &self.dir.path)?;
+        if stamp.len != expected_len {
+            return Err(StorageError::UncertainWrite);
+        }
+        Ok(stamp)
+    }
+}
 enum Backend {
     Memory,
     Persistent(Box<Persistent>),
@@ -195,7 +208,7 @@ impl SessionJournal {
         }
         let start = self.positions.accepted;
         let mut next = start;
-        let mut validation = self.validation.clone();
+        let mut validation = Validator::new(&self.validation);
         let mut bytes = Vec::new();
         if let Backend::Persistent(backend) = &self.backend
             && backend.stamp.len != 0
@@ -229,7 +242,7 @@ impl SessionJournal {
             next = next.checked_add(1).ok_or(StorageError::PositionOverflow)?;
         }
         let range = SaveRange { start, end: next };
-        self.validation = validation;
+        self.validation.merge(validation.finish());
         self.positions.accepted = next;
         self.last_memory_range = range;
         if matches!(self.backend, Backend::Persistent(_)) && !range.is_empty() {
@@ -310,7 +323,8 @@ impl SessionJournal {
                 crate::error::io_error("append history", backend.dir.path.join("history.jsonl"), e)
             })?;
             #[cfg(test)]
-            if matches!(self.failure.take(), Some(TestFailure::FileSync)) {
+            if matches!(self.failure, Some(TestFailure::FileSync)) {
+                self.failure = None;
                 return Err(crate::error::io_error(
                     "injected history sync failure",
                     backend.dir.path.join("history.jsonl"),
@@ -320,8 +334,24 @@ impl SessionJournal {
             backend.file.sync_all().map_err(|e| {
                 crate::error::io_error("sync history", backend.dir.path.join("history.jsonl"), e)
             })?;
+            #[cfg(test)]
+            if matches!(self.failure, Some(TestFailure::DirectorySync)) {
+                self.failure = None;
+                return Err(crate::error::io_error(
+                    "injected history directory sync failure",
+                    backend.dir.path.join("history.jsonl"),
+                    std::io::Error::from_raw_os_error(5),
+                ));
+            }
+            #[cfg(test)]
+            test_after_sync(&mut self.failure, backend)?;
             backend.dir.sync()?;
-            FileStamp::read(&backend.file, &backend.dir.path)
+            let expected_len = backend
+                .stamp
+                .len
+                .checked_add(pending.bytes.len() as u64)
+                .ok_or(StorageError::PositionOverflow)?;
+            backend.checked_stamp(expected_len)
         })();
         match result {
             Ok(stamp) => self.confirm(stamp),
@@ -421,18 +451,24 @@ impl SessionJournal {
             self.failed = false;
             return self.persist_original();
         }
-        let sync_result = backend
-            .file
-            .sync_all()
-            .map_err(|e| {
+        let sync_result = (|| {
+            backend.file.sync_all().map_err(|e| {
                 crate::error::io_error(
                     "sync original pending range",
                     backend.dir.path.join("history.jsonl"),
                     e,
                 )
-            })
-            .and_then(|()| backend.dir.sync())
-            .and_then(|()| FileStamp::read(&backend.file, &backend.dir.path));
+            })?;
+            #[cfg(test)]
+            test_after_sync(&mut self.failure, backend)?;
+            backend.dir.sync()?;
+            let expected_len = backend
+                .stamp
+                .len
+                .checked_add(pending.bytes.len() as u64)
+                .ok_or(StorageError::PositionOverflow)?;
+            backend.checked_stamp(expected_len)
+        })();
         match sync_result {
             Ok(stamp) => self.confirm(stamp),
             Err(e) => {
@@ -530,7 +566,8 @@ fn decode_history(
     session: &SessionId,
 ) -> Result<(LoadedHistory, Validation), StorageError> {
     let mut records = Vec::new();
-    let mut validation = Validation::default();
+    let baseline = Validation::default();
+    let mut validation = Validator::new(&baseline);
     let mut offset = 0_u64;
     let mut next = 0_u64;
     for line in bytes.split_inclusive(|b| *b == b'\n') {
@@ -576,7 +613,7 @@ fn decode_history(
             records,
             next_position: next,
         },
-        validation,
+        validation.finish(),
     ))
 }
 fn invalid(position: FilePosition, problem: HistoryProblem) -> StorageError {
@@ -619,7 +656,7 @@ fn validate_envelope(
     Ok(())
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct Validation {
     loops: BTreeMap<LoopId, TurnId>,
     response_next: BTreeMap<TurnId, u32>,
@@ -627,6 +664,7 @@ struct Validation {
     calls: BTreeMap<(TurnId, String), SavedCall>,
     finished: BTreeSet<TurnId>,
     partial_turns: BTreeSet<TurnId>,
+    partial_loops: BTreeSet<LoopId>,
 }
 #[derive(Clone)]
 struct SavedCall {
@@ -637,9 +675,39 @@ struct SavedCall {
     has_result: bool,
 }
 impl Validation {
+    fn merge(&mut self, delta: Self) {
+        self.loops.extend(delta.loops);
+        self.response_next.extend(delta.response_next);
+        self.requests.extend(delta.requests);
+        self.calls.extend(delta.calls);
+        self.finished.extend(delta.finished);
+        self.partial_turns.extend(delta.partial_turns);
+        self.partial_loops.extend(delta.partial_loops);
+    }
+}
+// An overlay owns only this batch's index changes. Failed validation drops the
+// overlay without copying or mutating any accumulated historical index.
+struct Validator<'a> {
+    base: &'a Validation,
+    delta: Validation,
+}
+impl<'a> Validator<'a> {
+    fn new(base: &'a Validation) -> Self {
+        Self {
+            base,
+            delta: Validation::default(),
+        }
+    }
+    fn finish(self) -> Validation {
+        self.delta
+    }
+
     fn entry(&mut self, entry: &HistoryEntry) -> Result<(), HistoryProblem> {
         let bad = |reason: &str| HistoryProblem::InvalidRecord(reason.to_owned());
-        if entry.turn_id().is_some_and(|id| self.finished.contains(id)) {
+        if entry
+            .turn_id()
+            .is_some_and(|id| self.delta.finished.contains(id) || self.base.finished.contains(id))
+        {
             return Err(bad("record follows an already finished Turn"));
         }
         match entry {
@@ -671,10 +739,11 @@ impl Validation {
                     self.response(turn_id, item.loop_id, item.request_index, *response_index)?;
                     for call in item.content.iter().filter_map(AssistantPart::as_tool_call) {
                         let key = (turn_id.clone(), call.tool_call_id().as_str().to_owned());
-                        if self.calls.contains_key(&key) {
+                        if self.delta.calls.contains_key(&key) || self.base.calls.contains_key(&key)
+                        {
                             return Err(bad("duplicate ToolCall identity within one Turn"));
                         }
-                        self.calls.insert(
+                        self.delta.calls.insert(
                             key,
                             SavedCall {
                                 loop_id: item.loop_id,
@@ -688,10 +757,19 @@ impl Validation {
                 }
                 HistoryItem::ToolResult(item) => {
                     self.loop_owner(item.loop_id, turn_id)?;
+                    let key = (turn_id.clone(), item.call_id.as_str().to_owned());
+                    if !self.delta.calls.contains_key(&key) {
+                        let old =
+                            self.base.calls.get(&key).ok_or_else(|| {
+                                bad("ToolResult has no preceding matching ToolCall")
+                            })?;
+                        self.delta.calls.insert(key.clone(), old.clone());
+                    }
                     let saved = self
+                        .delta
                         .calls
-                        .get_mut(&(turn_id.clone(), item.call_id.as_str().to_owned()))
-                        .ok_or_else(|| bad("ToolResult has no preceding matching ToolCall"))?;
+                        .get_mut(&key)
+                        .expect("call exists in the batch overlay");
                     if saved.loop_id != item.loop_id
                         || saved.request_index != item.request_index
                         || saved.response_index != *response_index
@@ -781,30 +859,45 @@ impl Validation {
                         next_call += 1;
                     }
                 }
-                self.partial_turns.insert(turn_id.clone());
+                self.delta.partial_turns.insert(turn_id.clone());
+                self.delta.partial_loops.insert(*loop_id);
             }
             HistoryEntry::TurnFinished {
                 turn_id, outcome, ..
             } => {
-                if *outcome == TurnOutcome::Completed && self.partial_turns.contains(turn_id) {
+                if *outcome == TurnOutcome::Completed
+                    && (self.delta.partial_turns.contains(turn_id)
+                        || self.base.partial_turns.contains(turn_id))
+                {
                     return Err(bad(
                         "completed Turn contains an unfinished terminal model response",
                     ));
                 }
-                self.finished.insert(turn_id.clone());
+                self.delta.finished.insert(turn_id.clone());
             }
             HistoryEntry::Summary { .. } => {}
         }
         Ok(())
     }
     fn loop_owner(&mut self, loop_id: LoopId, turn: &TurnId) -> Result<(), HistoryProblem> {
-        match self.loops.get(&loop_id) {
+        if self.delta.partial_loops.contains(&loop_id) || self.base.partial_loops.contains(&loop_id)
+        {
+            return Err(HistoryProblem::InvalidRecord(
+                "record follows this Loop's terminal partial".into(),
+            ));
+        }
+        match self
+            .delta
+            .loops
+            .get(&loop_id)
+            .or_else(|| self.base.loops.get(&loop_id))
+        {
             Some(owner) if owner != turn => Err(HistoryProblem::InvalidRecord(
                 "Loop belongs to another Turn".into(),
             )),
             Some(_) => Ok(()),
             None => {
-                self.loops.insert(loop_id, turn.clone());
+                self.delta.loops.insert(loop_id, turn.clone());
                 Ok(())
             }
         }
@@ -817,20 +910,30 @@ impl Validation {
         response: u32,
     ) -> Result<(), HistoryProblem> {
         self.loop_owner(loop_id, turn)?;
-        let next = self.response_next.entry(turn.clone()).or_default();
-        if response != *next {
+        let next = self
+            .delta
+            .response_next
+            .get(turn)
+            .or_else(|| self.base.response_next.get(turn))
+            .copied()
+            .unwrap_or_default();
+        if response != next {
             return Err(HistoryProblem::InvalidRecord(
                 "response_index is not the next contiguous Turn response".into(),
             ));
         }
-        if !self.requests.insert((loop_id, request)) {
+        let key = (loop_id, request);
+        if self.delta.requests.contains(&key) || self.base.requests.contains(&key) {
             return Err(HistoryProblem::InvalidRecord(
                 "duplicate Runtime logical response".into(),
             ));
         }
-        *next = next
-            .checked_add(1)
-            .ok_or_else(|| HistoryProblem::InvalidRecord("response index overflow".into()))?;
+        self.delta.requests.insert(key);
+        self.delta.response_next.insert(
+            turn.clone(),
+            next.checked_add(1)
+                .ok_or_else(|| HistoryProblem::InvalidRecord("response index overflow".into()))?,
+        );
         Ok(())
     }
 }
@@ -840,7 +943,37 @@ impl Validation {
 enum TestFailure {
     WritePrefix(usize),
     FileSync,
+    DirectorySync,
+    ReplaceFileAfterSync,
+    ReplaceDirectoryAfterSync,
 }
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+fn test_after_sync(
+    failure: &mut Option<TestFailure>,
+    backend: &Persistent,
+) -> Result<(), StorageError> {
+    match failure {
+        Some(TestFailure::ReplaceFileAfterSync) => {
+            *failure = None;
+            let path = backend.dir.path.join("history.jsonl");
+            std::fs::rename(&path, path.with_extension("detached")).unwrap();
+            std::fs::write(&path, b"replacement").unwrap();
+        }
+        Some(TestFailure::ReplaceDirectoryAfterSync) => {
+            *failure = None;
+            std::fs::rename(
+                &backend.dir.path,
+                backend.dir.path.with_extension("detached"),
+            )
+            .unwrap();
+            std::fs::create_dir(&backend.dir.path).unwrap();
+            std::fs::write(backend.dir.path.join("history.jsonl"), b"replacement").unwrap();
+        }
+        _ => {}
+    }
+    Ok(())
+}

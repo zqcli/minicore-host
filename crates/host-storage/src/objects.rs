@@ -86,6 +86,23 @@ impl HostStore {
         if dir.contains("host.json")? {
             let old: HostRecord<C> = self.load_host()?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
+            if old.data.config_revision == record.data.config_revision {
+                let before = serde_json::to_value(&old.data.config).map_err(|e| {
+                    StorageError::InvalidObject {
+                        reason: e.to_string(),
+                    }
+                })?;
+                let after = serde_json::to_value(&record.data.config).map_err(|e| {
+                    StorageError::InvalidObject {
+                        reason: e.to_string(),
+                    }
+                })?;
+                if before != after {
+                    return Err(StorageError::InvalidObject {
+                        reason: "configuration changed without a new revision".into(),
+                    });
+                }
+            }
         }
         write_object(dir, "host.json", record)?;
         Ok(ObjectSave {
@@ -101,6 +118,7 @@ impl HostStore {
         }
     }
     pub fn list_agents(&self) -> Result<Vec<AgentId>, StorageError> {
+        self.check_host()?;
         if !self.root.inner.directory.contains("agents")? {
             return Ok(Vec::new());
         }
@@ -188,6 +206,13 @@ impl AgentStore {
             let old: AgentRecord = read_object(&dir, "agent.json")?;
             self.validate(&old)?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
+            if old.data.config_revision == record.data.config_revision
+                && old.data.config != record.data.config
+            {
+                return Err(StorageError::InvalidObject {
+                    reason: "configuration changed without a new revision".into(),
+                });
+            }
         }
         self.check_default(record)?;
         write_object(&dir, "agent.json", record)?;
@@ -211,6 +236,7 @@ impl AgentStore {
         })
     }
     pub fn list_sessions(&self) -> Result<Vec<SessionId>, StorageError> {
+        self.load()?;
         let dir = self.directory(false)?;
         if !dir.contains("sessions")? {
             return Ok(Vec::new());
@@ -316,6 +342,20 @@ impl SessionStore {
         if dir.contains("session.json")? {
             let old = self.load()?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
+            if old.data.config_revision == record.data.config_revision
+                && old.data.effective_config != record.data.effective_config
+            {
+                return Err(StorageError::InvalidObject {
+                    reason: "configuration changed without a new revision".into(),
+                });
+            }
+            if old.data.agent_config_revision != record.data.agent_config_revision
+                || old.data.parent != record.data.parent
+            {
+                return Err(StorageError::InvalidObject {
+                    reason: "Session creation provenance cannot change".into(),
+                });
+            }
             if old.data.closed.is_some() && record.data.closed != old.data.closed {
                 return Err(StorageError::InvalidObject {
                     reason: "a committed Session close cannot be reopened or rewritten".into(),
@@ -325,21 +365,19 @@ impl SessionStore {
             // Initial publication is deliberately not a multi-file transaction.
             // The empty history is confirmed before the Session record. A later
             // error reports the actual partial creation, never fake rollback.
-            if dir.contains("history.jsonl")? {
+            let history = if dir.contains("history.jsonl")? {
                 if !dir.read("history.jsonl")?.is_empty() {
                     return Err(StorageError::UncertainWrite);
                 }
+                dir.open_file("history.jsonl", true, false)?
             } else {
                 dir.open_file("history.jsonl", true, true)?
-                    .sync_all()
-                    .map_err(|e| {
-                        crate::error::io_error(
-                            "sync initial history",
-                            dir.path.join("history.jsonl"),
-                            e,
-                        )
-                    })?;
-            }
+            };
+            crate::filesystem::sync_file(
+                &history,
+                &dir.path.join("history.jsonl"),
+                "sync initial history",
+            )?;
             dir.sync()?;
         }
         write_object(&dir, "session.json", record)?;
@@ -359,13 +397,14 @@ impl SessionStore {
     /// Existing journal writers hold a file lock, so deletion fails until their
     /// save workers have actually released the file and root handles.
     pub fn delete_closed(&self) -> Result<(), StorageError> {
-        let record = self.load()?;
+        let dir = self.directory(false)?;
+        let record: SessionRecord = read_object(&dir, "session.json")?;
+        self.validate(&record)?;
         if record.data.closed.is_none() {
             return Err(StorageError::InvalidObject {
                 reason: "Session is not closed".into(),
             });
         }
-        let dir = self.directory(false)?;
         if dir
             .entries()?
             .iter()
@@ -373,9 +412,11 @@ impl SessionStore {
         {
             return Err(StorageError::DirectoryNotEmpty);
         }
-        let history = dir.open_file("history.jsonl", true, false)?;
-        crate::journal::lock_history(&history, &dir.path)?;
-        dir.remove_file("history.jsonl")?;
+        if dir.contains("history.jsonl")? {
+            let history = dir.open_file("history.jsonl", true, false)?;
+            crate::journal::lock_history(&history, &dir.path)?;
+            dir.remove_file("history.jsonl")?;
+        }
         dir.remove_file("session.json")?;
         self.agent
             .directory(false)?

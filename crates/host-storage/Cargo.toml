@@ -11,7 +11,7 @@ minicore-host-protocol = { path = "../host-protocol", version = "=0.1.0" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3fd5ecda1fb7c717ab0a39218d90268b4d97909c", version = "=0.9.2" }
 rustix = { version = "=1.1.6", features = ["fs", "process"] }
 serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
+serde_json = { version = "=1.0.154", features = ["arbitrary_precision", "raw_value"] }
 sha2 = "=0.10.9"
 thiserror = "=2.0.21"
 

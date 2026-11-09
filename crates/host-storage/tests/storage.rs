@@ -839,9 +839,13 @@ fn atomic_object_save_keeps_original_on_real_os_write_failure() {
         .arg(std::env::current_exe().unwrap())
         .args(["--exact", "object_write_failure_probe", "--nocapture"])
         .env("MINICORE_STORAGE_FAILURE_PROBE", &root_path)
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success());
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
     assert_eq!(fs::read(root_path.join("host.json")).unwrap(), original);
     assert!(fs::read_dir(&root_path).unwrap().all(|entry| {
         !entry
@@ -910,9 +914,13 @@ fn real_os_partial_history_write_remains_blocked_without_repair() {
         .arg(std::env::current_exe().unwrap())
         .args(["--exact", "journal_write_failure_probe", "--nocapture"])
         .env("MINICORE_STORAGE_JOURNAL_FAILURE_PROBE", &root_path)
-        .status()
+        .output()
         .unwrap();
-    assert!(status.success());
+    assert!(
+        status.status.success(),
+        "{}",
+        String::from_utf8_lossy(&status.stderr)
+    );
     let partial = fs::read(&history_path).unwrap();
     assert!(!partial.is_empty());
     let root = DataRoot::acquire(root_path).unwrap();
@@ -929,4 +937,183 @@ fn real_os_partial_history_write_remains_blocked_without_repair() {
         .unwrap();
     assert!(session.read_history().is_err());
     assert_eq!(fs::read(history_path).unwrap(), partial);
+}
+
+#[test]
+fn same_revision_config_changes_and_creation_provenance_changes_are_rejected() {
+    let f = Fixture::new();
+    let path = f.session.canonical_path().join("session.json");
+    let before = fs::read(&path).unwrap();
+    let original = f.session.load().unwrap();
+    let mut changed = original.clone();
+    changed
+        .data
+        .effective_config
+        .role
+        .instructions
+        .push_str("changed");
+    assert!(f.session.save(&changed).is_err());
+    changed = original.clone();
+    changed.data.agent_config_revision += 1;
+    assert!(f.session.save(&changed).is_err());
+    changed = original;
+    changed.data.config_revision = 0;
+    assert!(f.session.save(&changed).is_err());
+    assert_eq!(fs::read(&path).unwrap(), before);
+    let mut host = f.host.load_host::<HostConfig>().unwrap();
+    host.data.config.label = "changed without revision".into();
+    assert!(f.host.save_host(&host).is_err());
+    let mut agent = f.agent.load().unwrap();
+    agent.data.config.role.instructions.push_str("changed");
+    assert!(f.agent.save(&agent).is_err());
+}
+
+#[test]
+fn child_listing_checks_direct_owner_records_before_enumeration() {
+    let f = Fixture::new();
+    assert!(matches!(
+        f.root.host(HostId::new().unwrap()).list_agents(),
+        Err(StorageError::OwnershipMismatch)
+    ));
+    let path = f
+        .root
+        .canonical_path()
+        .join("agents")
+        .join(f.agent.id().as_str())
+        .join("agent.json");
+    let mut record: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    record["host_id"] = serde_json::json!(HostId::new().unwrap());
+    fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
+    assert!(matches!(
+        f.agent.list_sessions(),
+        Err(StorageError::OwnershipMismatch)
+    ));
+}
+
+#[test]
+fn a_terminal_partial_prevents_further_records_for_that_loop_without_mutating_accepted_state() {
+    use minicore_runtime::model::ModelPartial;
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let partial = |request_index, response_index| HistoryEntry::Partial {
+        turn_id: turn.clone(),
+        loop_id,
+        response_index,
+        partial: ModelPartial {
+            request_index,
+            content: vec![AssistantPart::Text("partial".into())],
+            incomplete_tool_calls: Vec::new(),
+            usage: None,
+            provider_replay: None,
+        },
+    };
+    let mut later_response = response(turn.clone(), loop_id);
+    if let HistoryEntry::Runtime {
+        response_index,
+        item: HistoryItem::Assistant(item),
+        ..
+    } = &mut later_response
+    {
+        *response_index = 1;
+        item.request_index = 1;
+    }
+    for entries in [
+        vec![partial(0, 0), partial(1, 1)],
+        vec![partial(0, 0), later_response],
+    ] {
+        let mut memory = SessionJournal::memory(f.session.id().clone());
+        assert!(memory.accept(entries.clone()).is_err());
+        assert_eq!(memory.positions().accepted, 0);
+        // All speculative index changes from a rejected batch were discarded.
+        memory
+            .accept(vec![response(turn.clone(), loop_id)])
+            .unwrap();
+        let bad = record_bytes(&f.session, entries);
+        fs::write(f.history_path(), &bad).unwrap();
+        assert!(f.session.read_history().is_err());
+        assert_eq!(fs::read(f.history_path()).unwrap(), bad);
+    }
+    let valid = record_bytes(
+        &f.session,
+        vec![response(turn.clone(), loop_id), partial(1, 1)],
+    );
+    fs::write(f.history_path(), &valid).unwrap();
+    assert!(f.session.read_history().is_ok());
+}
+#[test]
+fn exact_json_numbers_are_preserved_or_explicitly_rejected_by_native_codec() {
+    let f = Fixture::new();
+    let exact = "18446744073709551617";
+    let config: serde_json::Value = serde_json::from_str(&format!("{{\"n\":{exact}}}")).unwrap();
+    let host = HostRecord::new(f.host.id().clone(), config, 2);
+    f.host.save_host(&host).unwrap();
+    let loaded = f.root.load_host::<serde_json::Value>().unwrap().unwrap();
+    assert_eq!(loaded.data.config["n"].to_string(), exact);
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let good = record_bytes(&f.session, vec![tool_response(turn, loop_id)]);
+    let mut value: serde_json::Value = serde_json::from_slice(&good).unwrap();
+    value["entry"]["data"]["item"]["data"]["content"][0]["data"]["arguments"]["n"] =
+        serde_json::from_str(exact).unwrap();
+    let bytes = serde_json::to_vec(&value).unwrap();
+    fs::write(f.history_path(), &bytes).unwrap();
+    match f.session.read_history() {
+        Ok(loaded) => {
+            let HistoryEntry::Runtime {
+                item: HistoryItem::Assistant(item),
+                ..
+            } = &loaded.records[0].entry
+            else {
+                panic!("wrong native item")
+            };
+            assert_eq!(
+                item.content[0].as_tool_call().unwrap().arguments()["n"].to_string(),
+                exact
+            );
+        }
+        // serde's tagged-enum content buffer may reject u128 rather than retain
+        // it. That is an explicit unsupported native encoding, never rounding.
+        Err(StorageError::InvalidHistory {
+            problem: HistoryProblem::InvalidRecord(reason),
+            ..
+        }) => assert!(
+            reason.contains("u128"),
+            "unexpected native failure: {reason}"
+        ),
+        other => panic!("unexpected numeric loading result: {other:?}"),
+    }
+    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+}
+#[test]
+fn failed_batch_validation_never_commits_a_finished_turn_or_native_normalization() {
+    let mut journal = SessionJournal::memory(SessionId::new().unwrap());
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    assert!(
+        journal
+            .accept(vec![
+                HistoryEntry::TurnFinished {
+                    turn_id: turn.clone(),
+                    outcome: TurnOutcome::Failed,
+                    reason: None
+                },
+                input(turn.clone(), loop_id)
+            ])
+            .is_err()
+    );
+    let mut invalid = response(turn.clone(), loop_id);
+    if let HistoryEntry::Runtime {
+        item: HistoryItem::Assistant(item),
+        ..
+    } = &mut invalid
+    {
+        item.content = vec![AssistantPart::Text("changes\rcontent".into())];
+    }
+    assert!(journal.accept(vec![invalid]).is_err());
+    assert_eq!(journal.positions().accepted, 0);
+    journal
+        .accept(vec![input(turn.clone(), loop_id), response(turn, loop_id)])
+        .unwrap();
+    assert_eq!(journal.positions().accepted, 2);
 }

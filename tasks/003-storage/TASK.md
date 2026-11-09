@@ -33,3 +33,12 @@ The local protocol symlink is test scaffolding, not committed. Root workspace/Ca
 - Added full native tool-call/result association, missing-result history, authoritative partial roundtrip, moved-directory, active-writer deletion, and lossy/native unknown-null rejection tests.
 - The tests found that serde callbacks can miss fields buffered inside tagged enums. Removed that dependency and made the lossless decode check reject every discarded field, including null; no stored text is silently normalized.
 - Latest checks: 4 unit tests + 27 integration tests passed; Clippy `--all-targets -- -D warnings` passed; rustdoc with `RUSTDOCFLAGS='-D warnings'` passed. Final format and task handoff follow.
+
+## Focused review corrections
+
+- `936cdf3` added lossy-record rejection and real OS write-failure regression tests.
+- Read-only focused review identified metadata-sync retry gaps, replacement during I/O, terminal partial association, numeric rounding before comparison and copying accumulated validation indexes. All five were corrected with targeted regressions.
+- Root/child directory ancestry and visible initial history files are explicitly re-synchronized on retry. Successful save confirmation rechecks current file/directory identity and expected file length after I/O.
+- Strict JSON parsing preserves numeric tokens before native decoding; an unsupported native numeric representation is explicitly rejected, never rounded.
+- Validation uses a batch-local overlay and commits only touched indexes. Rejected batches leave accepted positions and historical indexes unchanged.
+- Explicit deletion can continue after history removal when the closed ownership record remains. No generic transaction or execution recovery was added. If the ownership record itself is removed and later directory cleanup fails, owner-level phased continuation remains outside this foundation adapter and must not be claimed complete.

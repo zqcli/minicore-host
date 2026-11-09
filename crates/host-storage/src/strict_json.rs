@@ -1,74 +1,63 @@
 use serde::{
     Deserialize, Deserializer, Serialize,
-    de::{self, DeserializeOwned, MapAccess, SeqAccess, Visitor},
+    de::{self, DeserializeOwned, MapAccess, Visitor},
 };
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value, value::RawValue};
 use std::fmt;
 
-/// serde_json::Value alone silently accepts duplicate map keys. Persisted data
-/// must not contain ambiguous fields, including inside native Runtime payloads.
-struct UniqueValue(Value);
-impl<'de> Deserialize<'de> for UniqueValue {
+// Parse each raw subtree without first converting numeric tokens to f64. This
+// also avoids interpreting an actual object key as serde_json's private numeric
+// transport marker. Duplicate fields are rejected before any map can overwrite.
+struct ObjectFields(Vec<(String, Box<RawValue>)>);
+impl<'de> Deserialize<'de> for ObjectFields {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct UniqueVisitor;
-        impl<'de> Visitor<'de> for UniqueVisitor {
-            type Value = UniqueValue;
+        struct FieldsVisitor;
+        impl<'de> Visitor<'de> for FieldsVisitor {
+            type Value = ObjectFields;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("unambiguous JSON")
-            }
-            fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::Bool(v)))
-            }
-            fn visit_i64<E: de::Error>(self, v: i64) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::Number(v.into())))
-            }
-            fn visit_u64<E: de::Error>(self, v: u64) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::Number(v.into())))
-            }
-            fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
-                Number::from_f64(v)
-                    .map(|v| UniqueValue(Value::Number(v)))
-                    .ok_or_else(|| E::custom("non-finite JSON number"))
-            }
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::String(v.to_owned())))
-            }
-            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::String(v)))
-            }
-            fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::Null))
-            }
-            fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-                Ok(UniqueValue(Value::Null))
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
-                let mut out = Vec::new();
-                while let Some(UniqueValue(v)) = seq.next_element()? {
-                    out.push(v);
-                }
-                Ok(UniqueValue(Value::Array(out)))
+                f.write_str("an object without duplicate fields")
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
-                let mut out = Map::new();
-                while let Some(key) = map.next_key::<String>()? {
-                    if out.contains_key(&key) {
+                let mut names = std::collections::BTreeSet::new();
+                let mut fields = Vec::new();
+                while let Some(name) = map.next_key::<String>()? {
+                    if !names.insert(name.clone()) {
                         return Err(de::Error::custom("duplicate JSON field"));
                     }
-                    let UniqueValue(v) = map.next_value()?;
-                    out.insert(key, v);
+                    fields.push((name, map.next_value::<Box<RawValue>>()?));
                 }
-                Ok(UniqueValue(Value::Object(out)))
+                Ok(ObjectFields(fields))
             }
         }
-        deserializer.deserialize_any(UniqueVisitor)
+        deserializer.deserialize_map(FieldsVisitor)
     }
 }
-
 pub(crate) fn value(bytes: &[u8]) -> Result<Value, String> {
-    serde_json::from_slice::<UniqueValue>(bytes)
-        .map(|v| v.0)
-        .map_err(|e| e.to_string())
+    let raw: Box<RawValue> = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    parse_raw(&raw)
+}
+fn parse_raw(raw: &RawValue) -> Result<Value, String> {
+    let source = raw.get().trim();
+    match source.as_bytes().first() {
+        Some(b'{') => {
+            let ObjectFields(fields) = serde_json::from_str(source).map_err(|e| e.to_string())?;
+            let mut object = Map::new();
+            for (name, value) in fields {
+                object.insert(name, parse_raw(&value)?);
+            }
+            Ok(Value::Object(object))
+        }
+        Some(b'[') => {
+            let items: Vec<Box<RawValue>> =
+                serde_json::from_str(source).map_err(|e| e.to_string())?;
+            items
+                .iter()
+                .map(|value| parse_raw(value))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Value::Array)
+        }
+        _ => serde_json::from_str(source).map_err(|e| e.to_string()),
+    }
 }
 
 pub(crate) fn decode<T: DeserializeOwned + Serialize>(original: Value) -> Result<T, String> {
