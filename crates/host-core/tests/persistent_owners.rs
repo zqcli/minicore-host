@@ -2777,3 +2777,227 @@ async fn review_meta_check_confirmed_update_does_not_rebind_active_turn() {
         5
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unrelated_failed_agent_record_does_not_block_nondefault_close() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("test"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[1].clone(),
+    };
+    let path = agent_path(directory.path(), &agent_id);
+    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    assert!(
+        host.update_agent_async(
+            &caller,
+            &agent,
+            7,
+            &AgentConfigPatch {
+                role: Some(Role {
+                    name: "retained Agent candidate".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    std::fs::remove_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed || state.metadata_fault.is_some()
+    })
+    .await;
+    assert_eq!(
+        state.lifecycle,
+        SessionLifecycle::Closed,
+        "a retained unrelated Agent candidate cannot broaden a nondefault close dependency"
+    );
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(ids[0].clone())
+    );
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_some()
+    );
+    assert!(
+        host.agent_info(&caller, &agent)
+            .unwrap()
+            .metadata_fault
+            .is_some()
+    );
+    assert_eq!(
+        host.reconcile_agent_record(&caller, &agent)
+            .await
+            .unwrap()
+            .config_revision,
+        8
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pending_default_candidate_still_orders_its_target_close() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("test"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[1].clone(),
+    };
+    let path = agent_path(directory.path(), &agent_id);
+    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    assert!(
+        host.set_default_session_async(&caller, &agent, Some(target.session_id.clone()))
+            .await
+            .is_err()
+    );
+    std::fs::remove_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.metadata_fault.is_some() || state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert_eq!(state.lifecycle, SessionLifecycle::Closing);
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_none()
+    );
+    assert_eq!(
+        host.agent_info(&caller, &agent).unwrap().default_session_id,
+        Some(ids[0].clone())
+    );
+    assert_eq!(
+        host.reconcile_agent_record(&caller, &agent)
+            .await
+            .unwrap()
+            .default_session_id,
+        Some(target.session_id.clone())
+    );
+    host.close_session(&caller, &target).unwrap();
+    wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert!(read_agent(&path).data.default_session_id.is_none());
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_some()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_lifecycle_check_child_notify_leaves_no_owner_cycle() {
+    // Exercise every Session construction route wired to the parent's token:
+    // sync memory, async M/M, async P/M, async P/P, and persistent discovery.
+    for case in 0..5 {
+        let directory = tempfile::tempdir().unwrap();
+        let seeded = (case == 4).then(|| seed(directory.path()));
+        let (resources, entered, release) = review_gate_resources();
+        let host = Host::open_persistent(directory.path(), settings("notify ownership"), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let (agent, target) = if let Some((host_id, agent_id, sessions)) = seeded {
+            (
+                AgentRef {
+                    host_id,
+                    agent_id: agent_id.clone(),
+                },
+                SessionRef {
+                    agent_id,
+                    session_id: sessions[0].clone(),
+                },
+            )
+        } else {
+            let mut request = create_request(if case < 2 {
+                StorageMode::Memory
+            } else {
+                StorageMode::Persistent
+            });
+            request.default_session = Some(SessionOptions {
+                mode: Some(if case == 3 {
+                    StorageMode::Persistent
+                } else {
+                    StorageMode::Memory
+                }),
+                overrides: None,
+            });
+            let receipt = if case == 0 {
+                host.create_agent(&caller, request).unwrap()
+            } else {
+                host.create_agent_async(&caller, request).await.unwrap()
+            };
+            let agent_id = receipt.agent_id.unwrap();
+            (
+                AgentRef {
+                    host_id: receipt.host_id,
+                    agent_id: agent_id.clone(),
+                },
+                SessionRef {
+                    agent_id,
+                    session_id: receipt.session_id.unwrap(),
+                },
+            )
+        };
+        host.send(
+            &caller,
+            SendMessage::new(input("stop and release real work"), target.clone()),
+        )
+        .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        host.stop_agent(&caller, &agent).unwrap();
+        release.add_permits(1);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if host.agent_info(&caller, &agent).unwrap().lifecycle == AgentLifecycle::Stopped {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the child completion must settle the direct Agent's stop");
+        assert_eq!(
+            host.session_state(&caller, &target).unwrap().data.lifecycle,
+            SessionLifecycle::Open
+        );
+        drop(connection);
+        drop(host);
+        wait_for_root_release(directory.path()).await;
+    }
+}

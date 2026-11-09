@@ -344,6 +344,17 @@ impl AgentOwner {
             notified.as_mut().enable();
             let candidate = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
+                let references_child = state.info.default_session_id.as_ref() == Some(id)
+                    || state
+                        .record_work
+                        .as_ref()
+                        .is_some_and(|work| work.runtime_default.as_ref() == Some(id));
+                if !references_child {
+                    // An unrelated record candidate does not own this child's
+                    // close. In particular, a prior failed Agent config save
+                    // must not block healthy nondefault Session closure.
+                    return Ok(());
+                }
                 if let Some(work) = &state.record_work {
                     if let Some(fault) = &work.fault {
                         return Err(fault.clone());

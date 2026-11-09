@@ -69,3 +69,9 @@ Remaining review corrections are tracked separately: a stop aggregate must wake 
 - Added independent review regressions for the late-child metadata completion wake and start during gated initial creation. Also included actual metadata/close/stop cancellation ownership, pending-load close retaining the root through durable closure, and a confirmed configuration update leaving the current real Runtime Turn bound to its old version while the next Turn uses the new version.
 
 Verification: 56 core tests (36 persistent owners) passed; the five metadata/lifecycle review tests passed 25 consecutive runs; formatting, core all-target Clippy with warnings denied, and core rustdoc with warnings denied passed. The prior creation/retirement correction is `d7fe459`. The storage-level concurrent metadata replacement finding remains separate and pending its dedicated fix and regression.
+
+## Close dependency scope correction
+
+A real-file regression found that a retained failed Agent config save could unnecessarily block closing a healthy nondefault Session even after the shared storage path was usable again. The Agent now waits for its metadata only when the current default or the original pending candidate actually names the child being closed. A pending candidate that would make that child the default still fences its durable close until the same candidate is reconciled and the default is cleared. Unrelated Agent candidates remain retained and queryable; this change neither discards them nor retries them automatically.
+
+Both opposing default-reference cases pass, together with the review's root-release/no-owner-cycle check across sync memory, async M/M, P/M, P/P and discovered persistent Session construction. Full core tests: 59 passed (39 persistent owners). Formatting, core all-target Clippy and core rustdoc with warnings denied passed. The prior lifecycle correction is `94e6029`.
