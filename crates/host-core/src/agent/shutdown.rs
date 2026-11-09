@@ -61,6 +61,7 @@ impl AgentOwner {
             (
                 state.sessions.values().cloned().collect::<Vec<_>>(),
                 state.creating == 0
+                    && !state.retirement_joining
                     && state.creation_committed
                     && state.record_work.is_none()
                     && state.close_running.is_empty(),
@@ -106,6 +107,10 @@ impl AgentOwner {
         };
         for child in children {
             child.release_host_resources_owned().await?;
+            if child.storage_mode() == StorageMode::Memory {
+                child.reclaim_shutdown_memory_owned()?;
+                self.remove_retired_session_owned(&child);
+            }
         }
         // No new business may enter after the Host fence. Reconciliation only
         // accepts a retained original range, and there are none at this boundary.
@@ -147,7 +152,11 @@ impl AgentOwner {
         );
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         state.resources_released = true;
-        if !matches!(
+        if state.info.mode == StorageMode::Memory {
+            state.creations.clear();
+            state.info.default_session_id = None;
+            state.info.lifecycle = AgentLifecycle::Retired;
+        } else if !matches!(
             state.info.lifecycle,
             AgentLifecycle::Retiring | AgentLifecycle::Retired
         ) {

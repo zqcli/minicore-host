@@ -94,6 +94,7 @@ impl Host {
                     state.creating -= 1;
                 }
                 owner.changed.notify_waiters();
+                owner.remove_retired_agents_owned();
                 // Returning the final receipt also retires this owned creation
                 // task. Its temporary root lease must not race an immediate
                 // drop/reopen by a caller that has awaited the result.
@@ -211,6 +212,7 @@ impl Host {
                 )
                 .await;
             agent.finish_initial_creation();
+            agent.try_retire_empty_owned();
             result
         }
         .await;

@@ -293,6 +293,10 @@ impl AgentOwner {
             })?;
             child.begin_close_owned()?;
             self.clear_default_if(id);
+            if child.retire_closed_immediately_owned()? {
+                self.remove_retired_session_owned(&child);
+                self.try_retire_empty_owned();
+            }
             return Ok(());
         }
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {

@@ -40,7 +40,8 @@ impl Host {
         let incarnation = HostIncarnation::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
         let access = ConnectionRegistry::new(settings.id.clone(), incarnation.clone());
-        let owner = Arc::new(Self {
+        let owner = Arc::new_cyclic(|weak| Self {
+            self_weak: weak.clone(),
             id: settings.id.clone(),
             incarnation,
             access,
@@ -54,6 +55,7 @@ impl Host {
                 shutdown_fault: None,
                 shutdown_task: None,
                 creating: 0,
+                retirement_watch: None,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),

@@ -9,13 +9,15 @@ use minicore_runtime::HistoryItem;
 mod create;
 mod metadata;
 mod persistent;
+mod retirement;
 mod shutdown;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 /// In-process entry point. Persistent initialization and memory construction
 /// share the same direct owners, input queues and Runtime execution path.
 pub struct Host {
+    self_weak: Weak<Self>,
     id: HostId,
     incarnation: HostIncarnation,
     access: Arc<ConnectionRegistry>,
@@ -31,6 +33,7 @@ struct HostState {
     shutdown_fault: Option<Fault>,
     shutdown_task: Option<tokio::task::JoinHandle<()>>,
     creating: usize,
+    retirement_watch: Option<tokio::task::JoinHandle<()>>,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
     // The generated object identity distinguishes accepted invocations. The
     // caller's operation_id is correlation data, never an idempotency key.
@@ -45,7 +48,8 @@ impl Host {
         let incarnation = HostIncarnation::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
         let access = ConnectionRegistry::new(id.clone(), incarnation.clone());
-        Ok(Arc::new(Self {
+        let owner = Arc::new_cyclic(|weak| Self {
+            self_weak: weak.clone(),
             id,
             incarnation,
             access,
@@ -59,12 +63,14 @@ impl Host {
                 shutdown_fault: None,
                 shutdown_task: None,
                 creating: 0,
+                retirement_watch: None,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
             }),
-        }))
+        });
+        Ok(owner)
     }
     fn resources_owned(&self) -> Result<Arc<dyn ResourceResolver>, Fault> {
         self.resources
@@ -253,6 +259,9 @@ impl Host {
         state.creations.insert(id, receipt.clone());
         state.creating -= 1;
         self.changed.notify_waiters();
+        drop(state);
+        agent.try_retire_empty_owned();
+        self.remove_retired_agents_owned();
         Ok(receipt)
     }
     pub fn receipt(
@@ -535,8 +544,12 @@ impl Host {
             .cancel(caller, Some(turn_id), keep_inbox)
     }
     pub fn close_session(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        self.agent(caller, &target.agent_id)?
-            .close_session(caller, &target.session_id)
+        let agent = self.agent(caller, &target.agent_id)?;
+        agent.close_session(caller, &target.session_id)?;
+        self.ensure_retirement_watch();
+        agent.try_retire_empty_owned();
+        self.remove_retired_agents_owned();
+        Ok(())
     }
     pub fn turns(
         &self,
@@ -576,6 +589,21 @@ impl Host {
                 return self.turn_result(caller, target, id);
             }
             states.changed().await?;
+        }
+    }
+}
+
+impl Drop for Host {
+    fn drop(&mut self) {
+        // This monitor is observational, not an accepted execution/save owner.
+        if let Some(task) = self
+            .state
+            .get_mut()
+            .expect("Host mutex poisoned")
+            .retirement_watch
+            .take()
+        {
+            task.abort();
         }
     }
 }

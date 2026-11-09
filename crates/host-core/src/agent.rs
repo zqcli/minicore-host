@@ -6,6 +6,7 @@ use minicore_host_storage::{AgentRecord, AgentStore};
 mod create;
 mod metadata;
 mod persistent;
+mod retirement;
 pub(crate) mod shutdown;
 use minicore_host_protocol::*;
 use std::collections::BTreeMap;
@@ -36,6 +37,7 @@ struct AgentState {
     creation_committed: bool,
     resources_released: bool,
     host_shutdown_phase: u8,
+    retirement_joining: bool,
     executor: Option<tokio::runtime::Handle>,
     stop_task: Option<tokio::task::JoinHandle<()>>,
     record_base: Option<AgentRecord>,
@@ -44,6 +46,19 @@ struct AgentState {
     closing: std::collections::BTreeSet<SessionId>,
     close_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     close_running: std::collections::BTreeSet<SessionId>,
+}
+struct SynchronousCreation<'a> {
+    owner: &'a AgentOwner,
+}
+impl Drop for SynchronousCreation<'_> {
+    fn drop(&mut self) {
+        self.owner
+            .state
+            .lock()
+            .expect("Agent mutex poisoned")
+            .creating -= 1;
+        self.owner.changed.notify_waiters();
+    }
 }
 impl AgentOwner {
     pub(crate) fn new(
@@ -86,6 +101,7 @@ impl AgentOwner {
                 creation_committed: false,
                 resources_released: false,
                 host_shutdown_phase: 0,
+                retirement_joining: false,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,
                 record_base: None,
@@ -213,7 +229,7 @@ impl AgentOwner {
         // Snapshot only direct-owner values, then release this lock before child
         // construction. Publication rechecks the actual lifecycle boundary.
         let (config, source_revision) = {
-            let state = self.state.lock().expect("Agent mutex poisoned");
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
             if state.info.lifecycle != AgentLifecycle::Active
                 && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
             {
@@ -227,15 +243,15 @@ impl AgentOwner {
                 .mode
                 .session_mode(options.mode)
                 .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-            (
-                SessionConfig::from_agent(
-                    &state.info.config,
-                    &options.overrides.unwrap_or_default(),
-                )
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-                state.info.config_revision,
+            let config = SessionConfig::from_agent(
+                &state.info.config,
+                &options.overrides.unwrap_or_default(),
             )
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+            state.creating += 1;
+            (config, state.info.config_revision)
         };
+        let _creation = SynchronousCreation { owner: self };
         self.resources_owned()?.validate(&config)?;
         let backend: Arc<dyn HistoryBackend> = Arc::new(MemoryHistory);
         let session = SessionController::new(

@@ -116,10 +116,31 @@ impl Host {
                     state.lifecycle = HostLifecycle::Stopping;
                     self.access
                         .set_host_lifecycle_owned(HostLifecycle::Stopping);
+                    self.changed.notify_waiters();
                     continue;
                 }
             }
             if stopping && quiescent && fault.is_none() {
+                // A normal-close reaper may already own a child retirement.
+                // Join that real cleanup before final shutdown resource release.
+                let watcher = self
+                    .state
+                    .lock()
+                    .expect("Host mutex poisoned")
+                    .retirement_watch
+                    .take();
+                if let Some(watcher) = watcher
+                    && watcher.await.is_err()
+                {
+                    self.state
+                        .lock()
+                        .expect("Host mutex poisoned")
+                        .shutdown_fault = Some(Fault::new(
+                        FaultKind::HostInternalUnexpected,
+                        "memory retirement owner did not join cleanly",
+                    ));
+                    return;
+                }
                 let mut failure = None;
                 for child in children {
                     if let Err(error) = child.release_host_resources_owned().await {
@@ -133,6 +154,7 @@ impl Host {
                         .expect("Host mutex poisoned")
                         .shutdown_fault = Some(error);
                 } else {
+                    self.remove_retired_agents_owned();
                     // Every actual writer and child resource is now retired.
                     // Retaining this public Host handle must not retain the lock.
                     drop(self.store.lock().expect("Host store mutex poisoned").take());

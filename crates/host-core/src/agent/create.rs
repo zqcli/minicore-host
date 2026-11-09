@@ -198,6 +198,7 @@ impl AgentOwner {
             state.create_tasks.remove(&task_id);
             owner.changed.notify_waiters();
             drop(state);
+            owner.try_retire_empty_owned();
             drop(owner);
             let _ = sender.send(receipt);
         });

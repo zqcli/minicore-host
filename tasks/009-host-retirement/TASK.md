@@ -63,3 +63,54 @@ reopen without implicit close; execution resource graph release.
 - Full workspace formatting, Clippy, tests and docs gates remain for the combined
   candidate. Existing close-query tests may need expectations changed only where
   reclaimed memory sources now correctly return registered missing-source Faults.
+
+## Memory retirement increment
+
+Shutdown implementation commit: `577abca`.
+Session follow-ups: original `f179a0d` / local `72657d9`, original `291d36b` /
+local `07d4fe5`. Integrate only one copy of each.
+
+- Ordinary memory Sessions now release after explicit close and actual worker
+  joins/resource cleanup. Built-in idle memory can reclaim without a Tokio executor.
+  An ordinary final or cancelled Turn with retained inbox does not reclaim it.
+- Last child removal, new creation registration and retiring claim use AgentState.
+  Creating count protects accepted in-flight Session construction. Empty memory
+  Agents retire only after committed creation and settled direct work; Host then
+  removes their registration. Persistent Agents remain without replacement defaults.
+- Host lifetime completion drops runtime memory registrations and bodies after
+  real resource retirement. Persistent Sessions retain their original open/closed
+  business state; no file deletion is performed.
+- Existing subscriptions contain weak Session owners, and Host waits reacquire
+  their source. Reclaimed queries/observers return registered missing-source Faults.
+- The cleanup monitor starts only for explicit close work, holds no idle ownership,
+  exits when cleanup is done, and is joined by shutdown. Starting it on every
+  creation was rejected after a real immediate-root-reopen regression; the existing
+  `awaited_creation_retires_its_owner_before_immediate_root_reopen` now passes.
+- Added a real Runtime ordinary-tool cancellation/save test, distinct from a
+  managed subprocess or DSH delegation integration claim.
+
+Checks on this increment:
+
+```sh
+cargo test -p minicore-host-core --offline --test host_shutdown --test entity_retirement
+cargo clippy -p minicore-host-core --all-targets --offline -- -D warnings
+cargo test -p minicore-host-core --offline --test persistent_owners awaited_creation_retires_its_owner_before_immediate_root_reopen
+```
+
+Pass: 10 shutdown tests, 7 retirement tests, strict all-target core Clippy, and the
+immediate-reopen regression. Full core run reached 41/42 legacy persistent tests
+before the monitor regression was corrected; rerun of that failed case passes.
+Legacy runtime tests: 15/19 pass. Four explicitly expect closed memory bodies or
+Agents to remain queryable: `close_clears_default_and_unload_preserves_memory_history`,
+`review_memory_default_close_orders_remain_authoritative`,
+`review_memory_default_close_race_preserves_actual_acceptance_order`, and
+`review_preparation_panic_must_be_reported_and_close_settle`. Parent owns those test
+updates; their replacement assertions must retain the original pre-close checks
+and require actual missing-source Faults after reclaim.
+
+Failed creation follow-up is still pending. Repeated shutdown requests must remain
+current-fact controls, not retry triggers. The earlier contemplated interpretation
+of repeated shutdown as original-save continuation was rejected before any such
+code was written. Last-public-Host-drop handling of already-failed saves is a
+separate destruction-versus-abandonment contract question being resolved by parent;
+no permanent self-retention was added in this increment.

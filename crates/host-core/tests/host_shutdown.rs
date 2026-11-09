@@ -761,3 +761,173 @@ fn force_keeps_owned_save_and_directory_after_callers_and_host_handle_drop() {
         );
     });
 }
+
+struct ToolModelFixture {
+    descriptor: ModelDescriptor,
+    calls: Arc<AtomicUsize>,
+}
+impl Model for ToolModelFixture {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {
+            Ok(Box::pin(stream::iter([
+                Ok(ModelEvent::ToolCallStart {
+                    tool_call_id: "audit-tool-call".parse().unwrap(),
+                    tool_name: "audit_pending".parse().unwrap(),
+                }),
+                Ok(
+                    ModelEvent::tool_call_arguments_delta("audit-tool-call".parse().unwrap(), "{}")
+                        .unwrap(),
+                ),
+                Ok(ModelEvent::ToolCallEnd {
+                    tool_call_id: "audit-tool-call".parse().unwrap(),
+                }),
+                Ok(ModelEvent::Finish {
+                    reason: ModelFinishReason::ToolCalls,
+                }),
+            ])) as ModelStream)
+        })
+    }
+}
+struct PendingTool {
+    spec: minicore_runtime::tools::ToolSpec,
+    entered: Arc<Semaphore>,
+    cancelled_drop: Arc<AtomicUsize>,
+}
+struct CancellationDrop {
+    cancellation: tokio_util::sync::CancellationToken,
+    cancelled_drop: Arc<AtomicUsize>,
+}
+impl Drop for CancellationDrop {
+    fn drop(&mut self) {
+        if self.cancellation.is_cancelled() {
+            self.cancelled_drop.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+}
+impl minicore_runtime::tools::Tool for PendingTool {
+    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+        &self.spec
+    }
+    fn execute<'a>(
+        &'a self,
+        _: minicore_runtime::tools::ToolInvocation,
+        context: minicore_runtime::tools::ToolContext,
+    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        Box::pin(async move {
+            let _guard = CancellationDrop {
+                cancellation: context.cancellation,
+                cancelled_drop: self.cancelled_drop.clone(),
+            };
+            self.entered.add_permits(1);
+            std::future::pending().await
+        })
+    }
+}
+struct ToolResources {
+    model: Arc<dyn Model>,
+    tools: ToolSet,
+}
+impl ResourceResolver for ToolResources {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        config
+            .validate()
+            .map_err(|e| Fault::new(FaultKind::SessionConfigInvalid, e.to_string()))
+    }
+    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+        Box::pin(async move {
+            Ok(BoundResources {
+                execution: ExecutionConfig::new(
+                    self.model.clone(),
+                    ReasoningPreference::Auto,
+                    self.tools.clone(),
+                    None,
+                    Arc::new(DefaultPromptProvider::new(None)),
+                )
+                .unwrap(),
+                options: LoopOptions::default_checked().unwrap(),
+            })
+        })
+    }
+}
+#[tokio::test]
+async fn force_cancels_actual_runtime_tool_and_saves_result_before_root_release() {
+    let dir = tempfile::tempdir().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(Semaphore::new(0));
+    let cancelled_drop = Arc::new(AtomicUsize::new(0));
+    let model = Arc::new(ToolModelFixture {
+        descriptor: ModelDescriptor::new(
+            "audit/model".parse().unwrap(),
+            128_000,
+            BTreeSet::from([ReasoningPreference::Auto]),
+            true,
+        )
+        .unwrap(),
+        calls: calls.clone(),
+    });
+    let mut tools = ToolSet::builder();
+    tools.register(PendingTool {
+        spec: minicore_runtime::tools::ToolSpec::new(
+            "audit_pending".parse().unwrap(),
+            "Deterministic pending tool fixture",
+            serde_json::json!({}),
+        )
+        .unwrap(),
+        entered: entered.clone(),
+        cancelled_drop: cancelled_drop.clone(),
+    });
+    let resources: Arc<dyn ResourceResolver> = Arc::new(ToolResources {
+        model,
+        tools: tools.build().unwrap(),
+    });
+    let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    host.send(
+        &caller,
+        SendMessage::new(input("cancel actual tool"), target.clone()),
+    )
+    .unwrap();
+    entered.acquire().await.unwrap().forget();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    shutdown(&host, &caller, HostShutdownStrategy::Force);
+    stopped(&host, &caller).await;
+    assert_eq!(
+        cancelled_drop.load(Ordering::SeqCst),
+        1,
+        "actual tool future must receive cancellation before release"
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "force must prevent the next model request"
+    );
+    let records: Vec<HistoryRecord> = std::fs::read_to_string(history_path(dir.path(), &target))
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(records.len(), 4);
+    assert!(
+        matches!(&records[2].entry, HistoryEntry::Runtime { item: minicore_runtime::HistoryItem::ToolResult(tool), .. }
+        if tool.outcome == minicore_runtime::tools::ToolResultOutcome::Cancelled)
+    );
+    assert!(matches!(
+        &records[3].entry,
+        HistoryEntry::TurnFinished {
+            outcome: TurnOutcome::Cancelled,
+            ..
+        }
+    ));
+    let reopened = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    assert!(reopened.connect().is_ok());
+}
