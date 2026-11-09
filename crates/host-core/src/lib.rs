@@ -8,6 +8,7 @@ mod agent;
 mod backend;
 mod collaboration;
 mod configuration;
+mod context;
 mod control;
 pub use collaboration::*;
 pub use configuration::{
@@ -15,6 +16,7 @@ pub use configuration::{
     HostReloadResult, LogLevel, LogOutput, LogSettings, ModelDescription, NetworkSettings,
     OpenAiModelSettings, PreparedHostConfiguration, RestartField,
 };
+pub use context::*;
 mod host;
 mod persistence;
 mod prompt_history;

@@ -9,6 +9,7 @@ use minicore_runtime::HistoryItem;
 
 mod collaboration;
 mod configuration;
+mod context;
 mod controls;
 mod create;
 mod metadata;

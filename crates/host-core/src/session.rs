@@ -7,6 +7,7 @@ use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 mod collaboration;
 mod compaction;
 pub use compaction::{BoundCompactionResources, CompactionResourceFuture};
+mod context;
 mod controls;
 mod history;
 mod history_read;
@@ -192,6 +193,7 @@ impl QueuedInput {
 struct ActiveTurn {
     _activation: crate::collaboration::ActivationLease,
     tool_cleanup: tool_cleanup::ToolCleanupWork,
+    context_binding: crate::context::BoundContextConfiguration,
     info: TurnInfo,
     loop_id: Option<LoopId>,
     handle: Option<LoopHandle>,
@@ -1143,6 +1145,10 @@ impl SessionController {
                     return;
                 }
             };
+            let context_binding = crate::context::BoundContextConfiguration::new(
+                &preparation.0,
+                resources.execution.model().descriptor(),
+            );
             let load_id = match LoadId::new() {
                 Ok(id) => id,
                 Err(error) => {
@@ -1171,6 +1177,7 @@ impl SessionController {
                 state.active = Some(ActiveTurn {
                     _activation: activation,
                     tool_cleanup: tool_cleanup::ToolCleanupWork::new(cleanup),
+                    context_binding,
                     info: TurnInfo {
                         id: turn_id.clone(),
                         session_id: self.id.clone(),
