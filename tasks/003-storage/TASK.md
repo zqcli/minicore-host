@@ -42,3 +42,9 @@ The local protocol symlink is test scaffolding, not committed. Root workspace/Ca
 - Strict JSON parsing preserves numeric tokens before native decoding; an unsupported native numeric representation is explicitly rejected, never rounded.
 - Validation uses a batch-local overlay and commits only touched indexes. Rejected batches leave accepted positions and historical indexes unchanged.
 - Explicit deletion can continue after history removal when the closed ownership record remains. No generic transaction or execution recovery was added. If the ownership record itself is removed and later directory cleanup fails, owner-level phased continuation remains outside this foundation adapter and must not be claimed complete.
+
+## Owner initialization boundary
+
+- Hardening commit: `2366ff23c442f68040d7637596d95e3c99663da9` (11 unit + 32 integration tests passed; the compiling rustdoc example follows in the documentation commit).
+- Added `AgentStore::load_record()` to validate only the Agent's authoritative schema/identity/mode/config. `list_sessions()` uses the same direct-owner boundary, so broken default Session metadata or a missing history cannot prevent enumeration or initialization of healthy siblings.
+- Strict `load()` remains available and still validates the saved default. The actual Agent owner must retain the broken Session's fault and unavailable default; no pointer is cleared or redirected automatically.

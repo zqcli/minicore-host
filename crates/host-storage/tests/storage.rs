@@ -1117,3 +1117,46 @@ fn failed_batch_validation_never_commits_a_finished_turn_or_native_normalization
         .unwrap();
     assert_eq!(journal.positions().accepted, 2);
 }
+
+#[test]
+fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initialization() {
+    let f = Fixture::new();
+    let healthy = f
+        .agent
+        .session(SessionId::new().unwrap(), StorageMode::Persistent)
+        .unwrap();
+    healthy
+        .save(&SessionRecord::new(
+            healthy.id().clone(),
+            f.agent.id().clone(),
+            SessionData {
+                mode: StorageMode::Persistent,
+                agent_config_revision: 1,
+                config_revision: 1,
+                effective_config: SessionConfig::default(),
+                parent: None,
+                closed: None,
+            },
+        ))
+        .unwrap();
+    let mut agent = f.agent.load_record().unwrap();
+    agent.data.default_session_id = Some(f.session.id().clone());
+    f.agent.save(&agent).unwrap();
+    let metadata = f.session.canonical_path().join("session.json");
+    let original = fs::read(&metadata).unwrap();
+    fs::write(&metadata, b"broken Session metadata").unwrap();
+    assert_eq!(f.agent.load_record().unwrap(), agent);
+    assert!(f.agent.load().is_err());
+    assert!(f.agent.list_sessions().unwrap().contains(healthy.id()));
+    assert!(healthy.load().is_ok());
+    assert!(f.session.load().is_err());
+    // No replacement/default selection or original-file repair took place.
+    assert_eq!(fs::read(&metadata).unwrap(), b"broken Session metadata");
+    fs::write(&metadata, &original).unwrap();
+    fs::remove_file(f.history_path()).unwrap();
+    assert_eq!(f.agent.load_record().unwrap(), agent);
+    assert!(f.agent.load().is_err());
+    assert!(f.agent.list_sessions().unwrap().contains(healthy.id()));
+    assert!(healthy.load().is_ok());
+    assert!(!f.history_path().exists());
+}

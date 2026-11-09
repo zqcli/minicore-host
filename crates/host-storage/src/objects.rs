@@ -157,9 +157,18 @@ impl AgentStore {
             .child("agents", create)?
             .child(self.agent_id.as_str(), create)
     }
-    pub fn load(&self) -> Result<AgentRecord, StorageError> {
+    /// Read only this Agent's authoritative record. Initialization uses this
+    /// boundary so a broken default Session cannot block healthy siblings. The
+    /// owner initializes each child independently and keeps an unusable default
+    /// unavailable; it must not silently choose another Session.
+    pub fn load_record(&self) -> Result<AgentRecord, StorageError> {
         let record: AgentRecord = read_object(&self.directory(false)?, "agent.json")?;
         self.validate(&record)?;
+        Ok(record)
+    }
+    /// Strict convenience read including the saved default reference.
+    pub fn load(&self) -> Result<AgentRecord, StorageError> {
+        let record = self.load_record()?;
         self.check_default(&record)?;
         Ok(record)
     }
@@ -236,7 +245,7 @@ impl AgentStore {
         })
     }
     pub fn list_sessions(&self) -> Result<Vec<SessionId>, StorageError> {
-        self.load()?;
+        self.load_record()?;
         let dir = self.directory(false)?;
         if !dir.contains("sessions")? {
             return Ok(Vec::new());
