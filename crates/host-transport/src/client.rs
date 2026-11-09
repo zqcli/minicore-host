@@ -1,10 +1,11 @@
 use crate::{deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
-    AgentInfo, CallerContext, ConnectionHandle, Host, HostInfo, MessageRecord, SessionInfo,
-    SessionSnapshot, TurnInfo, TurnResult,
+    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostInfo, MessageRecord,
+    ModelTextSnapshot, ObservationNotification, SessionHistorySnapshot, SessionInfo,
+    SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult,
+    TurnSnapshot,
 };
 use minicore_host_protocol::*;
-use minicore_runtime::HistoryItem;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -29,7 +30,7 @@ impl MessageService<CallerContext> for HostService {
     }
 }
 
-struct LocalConnection {
+pub(crate) struct LocalConnection {
     host: Arc<Host>,
     handle: ConnectionHandle,
 }
@@ -128,6 +129,46 @@ impl HostClient {
                 }
             })
             .await
+    }
+    /// Only setup uses the call deadline. The established stream has no timer.
+    pub async fn subscribe(
+        &self,
+        request: SubscribeRequest,
+        options: CallOptions,
+    ) -> Result<ClientSubscription, CallError> {
+        let deadline = Deadline::new(options)?;
+        deadline
+            .wait(async {
+                match &self.connection {
+                    Connection::Local(local) => {
+                        let subscription = local
+                            .host
+                            .events_subscribe(&local.handle.caller(), request)?;
+                        Ok(ClientSubscription {
+                            inner: SubscriptionConnection::Local {
+                                subscription: Box::new(subscription),
+                                _connection: Arc::clone(local),
+                            },
+                        })
+                    }
+                    Connection::Rpc(rpc) => Ok(ClientSubscription {
+                        inner: SubscriptionConnection::Rpc(rpc.subscribe(request).await?),
+                    }),
+                }
+            })
+            .await
+    }
+    pub async fn unsubscribe(
+        &self,
+        request: UnsubscribeRequest,
+        options: CallOptions,
+    ) -> Result<UnsubscribeResult, CallError> {
+        let id = request.subscription_id.clone();
+        let result = self.call(Unsubscribe(request), options).await;
+        if let Connection::Rpc(rpc) = &self.connection {
+            rpc.ended_subscription(&id);
+        }
+        result
     }
     pub async fn info(&self, options: CallOptions) -> Result<HostInfo, CallError> {
         self.call(Info(Empty {}), options).await
@@ -316,7 +357,11 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn turn(&self, turn_id: TurnId, options: CallOptions) -> Result<TurnInfo, CallError> {
+    pub async fn turn(
+        &self,
+        turn_id: TurnId,
+        options: CallOptions,
+    ) -> Result<TurnSnapshot, CallError> {
         self.client
             .call(
                 GetTurn(TurnTarget {
@@ -374,14 +419,99 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn history(&self, options: CallOptions) -> Result<Vec<HistoryItem>, CallError> {
+    pub async fn turn_output(
+        &self,
+        turn_id: TurnId,
+        response_index: u64,
+        request: TextReadRequest,
+        options: CallOptions,
+    ) -> Result<ModelTextSnapshot, CallError> {
         self.client
             .call(
-                ReadHistory(SessionTarget {
+                ReadModelOutput(ModelReadParams {
                     target: self.target.clone(),
+                    turn_id,
+                    response_index,
+                    request,
                 }),
                 options,
             )
             .await
+    }
+    pub async fn toolcall(
+        &self,
+        tool: ToolCallRef,
+        options: CallOptions,
+    ) -> Result<ToolCallSnapshot, CallError> {
+        self.client
+            .call(
+                GetToolcall(ToolTargetParams {
+                    target: self.target.clone(),
+                    tool,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn tool_output(
+        &self,
+        tool: ToolCallRef,
+        request: TextReadRequest,
+        options: CallOptions,
+    ) -> Result<ToolTextSnapshot, CallError> {
+        self.client
+            .call(
+                ReadToolOutput(ToolReadParams {
+                    target: self.target.clone(),
+                    tool,
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn history(
+        &self,
+        request: HistoryReadRequest,
+        options: CallOptions,
+    ) -> Result<SessionHistorySnapshot, CallError> {
+        self.client
+            .call(
+                ReadHistory(HistoryParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+}
+
+/// One observation on a shared connection. Dropping it ends only this stream,
+/// never accepted work or another observer. It retains no Session or Runner.
+pub struct ClientSubscription {
+    inner: SubscriptionConnection,
+}
+enum SubscriptionConnection {
+    Local {
+        subscription: Box<EventSubscription>,
+        _connection: Arc<LocalConnection>,
+    },
+    Rpc(crate::rpc::RpcSubscription),
+}
+impl ClientSubscription {
+    pub fn result(&self) -> &SubscribeResult<StateEvent> {
+        match &self.inner {
+            SubscriptionConnection::Local { subscription, .. } => subscription.result(),
+            SubscriptionConnection::Rpc(subscription) => subscription.result(),
+        }
+    }
+    pub async fn recv(&mut self) -> Result<Option<ObservationNotification>, CallError> {
+        match &mut self.inner {
+            SubscriptionConnection::Local { subscription, .. } => {
+                subscription.recv().await.map_err(CallError::Business)
+            }
+            SubscriptionConnection::Rpc(subscription) => subscription.recv().await,
+        }
     }
 }

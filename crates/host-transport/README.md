@@ -45,7 +45,7 @@ make it trusted; use `serve_wss` for the authenticated network boundary.
 One UTF-8 JSON object occupies one LF-terminated line. Newlines inside JSON text
 are escaped normally. CRLF is also valid JSON whitespace. There is no added frame
 size, request count or send-buffer quota. Existing business/Runtime validation
-still applies, including its pinned structural text bounds. EOF in a partial
+still applies, without adding transport text limits. EOF in a partial
 frame is a connection error, not a complete request/response. Batch arrays are
 not supported and receive `-32600`.
 
@@ -67,7 +67,7 @@ Accepted owner work remains independent of those transport tasks.
 Requests dispatch concurrently. A slow create or `turn.wait` cannot serialize
 unrelated controls/queries behind it. One writer owns each output stream; no
 business-state lock is held while writing. Per-connection bookkeeping contains
-only pending response correlation, never a business operation/result store.
+pending response correlation and live observations, never a business operation/result store.
 
 For methods without parameters, send `{}`. Methods with an independent target
 carry `target` plus that method's ordinary fields in `params`. For example:
@@ -96,12 +96,12 @@ inside errors, receipts and queries. `Fault::kind()` is `None` for those leaves,
 never a guessed known class. Unknown methods use `-32601`, malformed requests
 `-32600`, malformed JSON `-32700`, and invalid parameters `-32602`. Canonical
 methods without an adapter return `HOST_METHOD_UNAVAILABLE` (1401). Missing or
-ambiguous retained receipts instead retain 1202/1203. Notifications are ignored
+ambiguous retained receipts instead retain 1202/1203. Client-to-server notifications are ignored
 and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 25 real routes:
+`SUPPORTED_METHODS` lists these 30 real routes:
 
 - Host: `host.info`, `host.receipt.get`, `host.shutdown`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
@@ -109,21 +109,59 @@ and never dispatch `message.send` or other business work.
   `session.load`, `session.unload`, `session.pause`, `session.resume`,
   `session.cancel`, `session.close`, `session.history.read`.
 - Message: `message.send`, `message.get`.
-- Turn: `turn.get`, `turn.list`, `turn.wait`, `turn.cancel`, `turn.result`.
+- Turn: `turn.get`, `turn.list`, `turn.wait`, `turn.cancel`, `turn.result`, `turn.output.read`.
+- Tool calls: `toolcall.get`, `toolcall.output.read`.
+- Observations: `events.subscribe`, `events.unsubscribe`.
 
 The count describes adapters for current core primitives, not completion of all
-SPEC details for those methods. Query DTOs and available data are exactly the
-current core's: lists do not yet provide public pagination, history is the
-existing `Vec<HistoryItem>`, and current snapshots/results are not the complete
-§9 event/output surface. Receipt lookup follows actual owner retention; closing
-a memory Session may retire the lookup source immediately without invalidating
-the already returned close receipt.
+SPEC §8. Lists retain basic current-owner results. `turn.get` returns
+`TurnSnapshot { source, data }` with the source flattened on the wire, using the
+same atomic Session factory as `turn.state` and initial snapshots.
+`session.history.read` takes `{ target, request: { cursor, limit } }` and returns
+`SessionHistorySnapshot`; it reads real retained/cold persistent history without
+creating a Runner or restoring old Turns. Text reads take the original Session,
+Turn plus response index or ToolCall, and `request: { channel, start, end,
+max_bytes }`. `end` is the fixed catch-up endpoint; all positions are UTF-8 bytes.
+Missing/reclaimed sources return the real owner's Fault, not an empty success.
 
-Not implemented here: remaining §8 routes, canonical event subscriptions/output
-streams, complete production process/configuration loading,
-live-provider operation, or TUI changes/validation. The transport tests use real
-Host owners, real Runtime and real OS pipes/duplex IO with explicitly named model
-and delayed-response fixtures. No external provider or TUI result is implied.
+## Shared observations and client content
+
+`HostClient::subscribe(request, options)` returns a `ClientSubscription` with its
+`SubscribeResult<StateEvent>` and asynchronous `recv()`. Only setup has the
+ordinary call deadline. The established stream has no 30-second timeout.
+`HostClient::unsubscribe` and dropping a subscription end just that observation,
+without closing other streams, cancelling work, or retaining a Session/Runner.
+An observation itself keeps its shared connection handle until dropped.
+Read-only clients can manage only their own connection-bound observations.
+
+The server uses standard JSON-RPC notifications:
+
+- `events.push` has the existing `SubscriptionPush<ObservationEvent>` as params.
+- `events.resync_required` has `ResyncRequired` as params, outside business events
+  and category filtering. It ends only the named subscription.
+
+The SDK separates notifications from responses, buffers early notifications by
+subscription ID while setup is pending, and registers the returned baseline
+without resurrecting an already ended stream. A late result from timed-out or
+abandoned setup cancels only its actual registration. It neither closes the
+shared connection nor repeats business execution. Old unsubscribe/resync frames
+cannot affect a new subscription. Reconnection and resubscription remain explicit.
+
+`OutputBuffer` is an optional client-owned helper for one exact source/channel.
+It accepts the initial watermark, actual output/completion events and range-read
+results. It retains late noncontiguous pieces, returns a fixed missing interval
+with `next_read`, and merges overlapping UTF-8 bytes once. Completion before the
+last body bytes is not treated as complete content. A source read Fault remains
+visible to the caller; already received text is preserved. It does not silently
+retry, resubscribe, retain source owners or invent missing content. Callers apply
+state snapshots by the documented controller/Runner revisions, not output offsets.
+
+Not implemented here: the remaining §8 routes, complete production
+process/configuration loading, live-provider operation, or TUI changes/validation.
+Tests use real Host/Runtime owners, actual OS pipes and loopback TLS with named,
+gated model/tool fixtures. Ordering relays delay genuine Host frames rather than
+manufacturing their business contents. Correlation unit tests are distinguished
+from end-to-end transport tests. No external-provider or TUI result is implied.
 
 ## Network authentication and key publication
 

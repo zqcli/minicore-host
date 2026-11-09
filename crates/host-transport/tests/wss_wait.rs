@@ -249,6 +249,7 @@ async fn long_turn_wait_and_waiter_cancellation_leave_real_runtime_and_connectio
             .turn(turn.clone(), options(500))
             .await
             .unwrap()
+            .data
             .state,
         TurnState::Running
     );

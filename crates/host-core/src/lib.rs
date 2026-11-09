@@ -29,5 +29,5 @@ pub use observation::{
     InteractionResolution, InteractionResolvedData, MessageEventData, ModelFinishedData,
     ModelResponseData, ObservationEvent, ObservationNotification, PendingInteractionData,
     StateEvent, ToolCallData, ToolCallState, ToolCallStateData, ToolFinishedData,
-    ToolInvocationData, ToolProgressData, ToolResultData, TurnStateData,
+    ToolInvocationData, ToolProgressData, ToolResultData, TurnSnapshot, TurnStateData,
 };

@@ -1,5 +1,7 @@
 use crate::operations::{Empty, Operation, dispatch, protocol_error};
-use minicore_host_core::{ConnectionHandle, Host};
+use minicore_host_core::{
+    ConnectionHandle, Host, ObservationEvent, ObservationNotification, StateEvent,
+};
 use minicore_host_protocol::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -190,6 +192,24 @@ pub(crate) async fn serve_frames(
                 let host = Arc::clone(&host);
                 let outgoing = outgoing.clone();
                 requests.spawn(async move {
+                    if request.method == "events.subscribe" {
+                        let subscription = serde_json::from_value::<SubscribeRequest>(request.params)
+                            .map_err(|_| protocol_error(-32602, "Invalid method parameters"))
+                            .and_then(|params| host.events_subscribe(&caller, params).map_err(RpcError::business));
+                        match subscription {
+                            Ok(mut subscription) => {
+                                queue_response(&outgoing, &RpcResponse::success(id, subscription.result()))?;
+                                while let Some(notification) = subscription.recv().await.map_err(io::Error::other)? {
+                                    match serde_json::to_vec(&WireNotification::from(notification)) {
+                                        Ok(bytes) => outgoing.send(bytes).map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "JSON-RPC writer closed"))?,
+                                        Err(_) => subscription.end_after_delivery_failure(Fault::new(FaultKind::HostObservationResyncRequired, "unable to encode an observation payload")),
+                                    }
+                                }
+                                return Ok(());
+                            }
+                            Err(error) => return queue_error(&outgoing, Some(id), error),
+                        }
+                    }
                     let response = match dispatch(host, caller, &request.method, request.params).await {
                         Ok(result) => RpcResponse::success(id, result),
                         Err(error) => RpcResponse::Failure(RpcFailure { jsonrpc: JsonRpcVersion::V2, id: Some(id), error }),
@@ -234,18 +254,83 @@ async fn write_frames(
     writer.close().await
 }
 
-// This is only per-connection response correlation, not business operation
-// retention. A timed-out/dropped waiter removes its sender. Late replies are
-// discarded using their original transport ID, never dispatched as requests.
+// Notifications never enter response decoding or consume an RPC request ID.
+#[derive(Serialize, Deserialize)]
+struct WireNotification {
+    jsonrpc: JsonRpcVersion,
+    #[serde(flatten)]
+    payload: NotificationPayload,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "method", content = "params")]
+enum NotificationPayload {
+    #[serde(rename = "events.push")]
+    Event(Box<SubscriptionPush<ObservationEvent>>),
+    #[serde(rename = "events.resync_required")]
+    ResyncRequired(ResyncRequired),
+}
+impl From<ObservationNotification> for WireNotification {
+    fn from(value: ObservationNotification) -> Self {
+        Self {
+            jsonrpc: JsonRpcVersion::V2,
+            payload: match value {
+                ObservationNotification::Event(event) => NotificationPayload::Event(event),
+                ObservationNotification::ResyncRequired(resync) => {
+                    NotificationPayload::ResyncRequired(resync)
+                }
+            },
+        }
+    }
+}
+impl From<WireNotification> for ObservationNotification {
+    fn from(value: WireNotification) -> Self {
+        match value.payload {
+            NotificationPayload::Event(event) => Self::Event(event),
+            NotificationPayload::ResyncRequired(resync) => Self::ResyncRequired(resync),
+        }
+    }
+}
+fn notification_id(value: &ObservationNotification) -> &SubscriptionId {
+    match value {
+        ObservationNotification::Event(event) => &event.subscription_id,
+        ObservationNotification::ResyncRequired(resync) => &resync.subscription_id,
+    }
+}
+
+// Only live stream registration and in-flight setup buffering are kept here.
+// No business source, replay store, subscription tombstone or global event ID.
 type Reply = oneshot::Sender<Result<Value, CallError>>;
+type StreamSender = mpsc::UnboundedSender<Result<ObservationNotification, CallError>>;
+struct PendingRequest {
+    reply: Option<Reply>,
+    observation: Option<StreamSender>,
+}
 struct PendingState {
     next_id: i64,
-    calls: BTreeMap<i64, Reply>,
+    calls: BTreeMap<i64, PendingRequest>,
+    streams: BTreeMap<SubscriptionId, StreamSender>,
+    early: BTreeMap<SubscriptionId, Vec<ObservationNotification>>,
+    completed_setups: BTreeMap<i64, SubscriptionId>,
     failure: Option<CallError>,
+}
+impl PendingState {
+    fn allocate_id(&mut self) -> Result<i64, CallError> {
+        let id = self.next_id;
+        self.next_id = id
+            .checked_add(1)
+            .ok_or_else(|| protocol("RPC correlation sequence exhausted"))?;
+        Ok(id)
+    }
+    fn clear_finished_setup(&mut self) {
+        if !self.calls.values().any(|call| call.observation.is_some()) {
+            self.early.clear();
+        }
+    }
 }
 struct Pending {
     state: Mutex<PendingState>,
     closed: watch::Sender<bool>,
+    outgoing: mpsc::UnboundedSender<Vec<u8>>,
 }
 impl Pending {
     fn fail(&self, failure: CallError) {
@@ -254,10 +339,52 @@ impl Pending {
             return;
         }
         state.failure = Some(failure.clone());
-        for (_, sender) in std::mem::take(&mut state.calls) {
+        for (_, call) in std::mem::take(&mut state.calls) {
+            if let Some(sender) = call.reply {
+                let _ = sender.send(Err(failure.clone()));
+            }
+        }
+        for (_, sender) in std::mem::take(&mut state.streams) {
             let _ = sender.send(Err(failure.clone()));
         }
+        state.early.clear();
+        state.completed_setups.clear();
         self.closed.send_replace(true);
+    }
+    fn unsubscribe(&self, id: &SubscriptionId) {
+        let mut state = self.state.lock().expect("RPC correlation mutex poisoned");
+        state.streams.remove(id);
+        self.queue_unsubscribe(&mut state, id);
+    }
+    fn queue_unsubscribe(&self, state: &mut PendingState, subscription_id: &SubscriptionId) {
+        if state.failure.is_some() {
+            return;
+        }
+        if let Ok(id) = state.allocate_id() {
+            // A real request, not a forbidden business notification. Its late
+            // response needs no waiter and cannot affect another subscription.
+            if let Ok(bytes) = encode_request(
+                id,
+                "events.unsubscribe",
+                UnsubscribeRequest {
+                    subscription_id: subscription_id.clone(),
+                },
+            ) {
+                let _ = self.outgoing.send(bytes);
+            }
+        }
+    }
+    fn notification(&self, notification: ObservationNotification) {
+        let id = notification_id(&notification).clone();
+        let ended = matches!(notification, ObservationNotification::ResyncRequired(_));
+        let mut state = self.state.lock().expect("RPC correlation mutex poisoned");
+        if let Some(sender) = state.streams.get(&id) {
+            if sender.send(Ok(notification)).is_err() || ended {
+                state.streams.remove(&id);
+            }
+        } else if state.calls.values().any(|call| call.observation.is_some()) {
+            state.early.entry(id).or_default().push(notification);
+        }
     }
     fn receive(&self, response: RpcResponse<Value>) {
         let (id, result) = match response {
@@ -277,17 +404,45 @@ impl Pending {
         };
         match id {
             Some(RpcId::Integer(id)) => {
-                let sender = self
-                    .state
-                    .lock()
-                    .expect("RPC correlation mutex poisoned")
-                    .calls
-                    .remove(&id);
-                if let Some(sender) = sender {
-                    let _ = sender.send(result);
+                let mut state = self.state.lock().expect("RPC correlation mutex poisoned");
+                if let Some(call) = state.calls.remove(&id) {
+                    if let Some(sender) = call.observation {
+                        match result.as_ref().ok().and_then(|value| {
+                            serde_json::from_value::<SubscribeResult<StateEvent>>(value.clone())
+                                .ok()
+                        }) {
+                            Some(baseline) => {
+                                let subscription_id = baseline.subscription_id;
+                                if sender.is_closed()
+                                    || call.reply.as_ref().is_none_or(oneshot::Sender::is_closed)
+                                {
+                                    self.queue_unsubscribe(&mut state, &subscription_id);
+                                } else {
+                                    let mut ended = false;
+                                    for notification in
+                                        state.early.remove(&subscription_id).unwrap_or_default()
+                                    {
+                                        ended |= matches!(
+                                            notification,
+                                            ObservationNotification::ResyncRequired(_)
+                                        );
+                                        let _ = sender.send(Ok(notification));
+                                    }
+                                    if !ended {
+                                        state.streams.insert(subscription_id.clone(), sender);
+                                    }
+                                    state.completed_setups.insert(id, subscription_id);
+                                }
+                            }
+                            None => { /* Failed setup has no registered subscription. */ }
+                        }
+                    }
+                    if let Some(sender) = call.reply {
+                        let _ = sender.send(result);
+                    }
                 }
+                state.clear_finished_setup();
             }
-            // String/unknown integer IDs cannot match this client's requests.
             Some(RpcId::String(_)) => {}
             None => self.fail(
                 result
@@ -300,15 +455,59 @@ impl Pending {
 struct PendingCall {
     pending: Arc<Pending>,
     id: i64,
+    sent: bool,
 }
-impl Drop for PendingCall {
-    fn drop(&mut self) {
+impl PendingCall {
+    fn complete(&self) {
         self.pending
             .state
             .lock()
             .expect("RPC correlation mutex poisoned")
-            .calls
+            .completed_setups
             .remove(&self.id);
+    }
+}
+impl Drop for PendingCall {
+    fn drop(&mut self) {
+        let mut state = self
+            .pending
+            .state
+            .lock()
+            .expect("RPC correlation mutex poisoned");
+        if let Some(id) = state.completed_setups.remove(&self.id) {
+            state.streams.remove(&id);
+            self.pending.queue_unsubscribe(&mut state, &id);
+        }
+        if let Some(call) = state.calls.get_mut(&self.id) {
+            if self.sent && call.observation.is_some() {
+                // Setup may already have reached the owner. Keep only its
+                // correlation until the response can identify what to cancel.
+                call.reply = None;
+            } else {
+                state.calls.remove(&self.id);
+            }
+        }
+        state.clear_finished_setup();
+    }
+}
+pub(crate) struct RpcSubscription {
+    result: SubscribeResult<StateEvent>,
+    receiver: mpsc::UnboundedReceiver<Result<ObservationNotification, CallError>>,
+    client: Arc<RpcClient>,
+}
+impl RpcSubscription {
+    pub(crate) fn result(&self) -> &SubscribeResult<StateEvent> {
+        &self.result
+    }
+    pub(crate) async fn recv(&mut self) -> Result<Option<ObservationNotification>, CallError> {
+        self.receiver.recv().await.transpose()
+    }
+}
+impl Drop for RpcSubscription {
+    fn drop(&mut self) {
+        self.client
+            .pending
+            .unsubscribe(&self.result.subscription_id);
     }
 }
 pub(crate) struct RpcClient {
@@ -337,15 +536,19 @@ impl RpcClient {
         writer: impl FrameWriter + 'static,
     ) -> Self {
         let (closed, _) = watch::channel(false);
+        let (outgoing, lines) = mpsc::unbounded_channel();
         let pending = Arc::new(Pending {
             state: Mutex::new(PendingState {
                 next_id: 1,
                 calls: BTreeMap::new(),
+                streams: BTreeMap::new(),
+                early: BTreeMap::new(),
+                completed_setups: BTreeMap::new(),
                 failure: None,
             }),
             closed,
+            outgoing: outgoing.clone(),
         });
-        let (outgoing, lines) = mpsc::unbounded_channel();
         let read_pending = Arc::clone(&pending);
         let reader = tokio::spawn(async move {
             read_responses(reader, read_pending).await;
@@ -371,12 +574,13 @@ impl RpcClient {
         }
     }
     pub(crate) async fn initialize(&self) -> Result<ConnectionInfo, CallError> {
-        self.request("initialize", Empty {}).await
+        self.request("initialize", Empty {}, None).await
     }
     pub(crate) async fn authenticate(&self, access_key: &str) -> Result<ConnectionInfo, CallError> {
         self.request(
             "initialize",
             serde_json::json!({ "access_key": access_key }),
+            None,
         )
         .await
     }
@@ -387,6 +591,14 @@ impl RpcClient {
     pub(crate) fn initial_info(&self) -> &ConnectionInfo {
         self.initial.as_ref().expect("initialized client")
     }
+    pub(crate) fn ended_subscription(&self, id: &SubscriptionId) {
+        self.pending
+            .state
+            .lock()
+            .expect("RPC correlation mutex poisoned")
+            .streams
+            .remove(id);
+    }
     pub(crate) fn close(&self) {
         self.pending
             .fail(connection_error("JSON-RPC connection closed"));
@@ -394,20 +606,28 @@ impl RpcClient {
         self.writer.abort();
     }
     pub(crate) async fn call<O: Operation>(&self, request: O) -> Result<O::Output, CallError> {
-        self.request(O::METHOD, request).await
+        self.request(O::METHOD, request, None).await
+    }
+    pub(crate) async fn subscribe(
+        self: &Arc<Self>,
+        request: SubscribeRequest,
+    ) -> Result<RpcSubscription, CallError> {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let result = self
+            .request("events.subscribe", request, Some(sender))
+            .await?;
+        Ok(RpcSubscription {
+            result,
+            receiver,
+            client: Arc::clone(self),
+        })
     }
     async fn request<P: Serialize, O: DeserializeOwned>(
         &self,
         method: &str,
         params: P,
+        observation: Option<StreamSender>,
     ) -> Result<O, CallError> {
-        #[derive(Serialize)]
-        struct WireRequest<'a, P> {
-            jsonrpc: JsonRpcVersion,
-            id: RpcId,
-            method: &'a str,
-            params: P,
-        }
         let (sender, receiver) = oneshot::channel();
         let id = {
             let mut state = self
@@ -418,33 +638,50 @@ impl RpcClient {
             if let Some(error) = &state.failure {
                 return Err(error.clone());
             }
-            let id = state.next_id;
-            state.next_id = id
-                .checked_add(1)
-                .ok_or_else(|| protocol("RPC correlation sequence exhausted"))?;
-            state.calls.insert(id, sender);
+            let id = state.allocate_id()?;
+            state.calls.insert(
+                id,
+                PendingRequest {
+                    reply: Some(sender),
+                    observation,
+                },
+            );
             id
         };
-        let _waiter = PendingCall {
+        let mut waiter = PendingCall {
             pending: Arc::clone(&self.pending),
             id,
+            sent: false,
         };
-        let bytes = serde_json::to_vec(&WireRequest {
-            jsonrpc: JsonRpcVersion::V2,
-            id: RpcId::Integer(id),
-            method,
-            params,
-        })
-        .map_err(|error| protocol(&error.to_string()))?;
+        let bytes = encode_request(id, method, params)?;
         self.outgoing
             .send(bytes)
             .map_err(|_| connection_error("JSON-RPC writer closed"))?;
+        waiter.sent = true;
         let value = receiver
             .await
             .map_err(|_| connection_error("JSON-RPC response reader closed"))??;
-        serde_json::from_value(value)
-            .map_err(|error| protocol(&format!("invalid method result: {error}")))
+        let result = serde_json::from_value(value)
+            .map_err(|error| protocol(&format!("invalid method result: {error}")))?;
+        waiter.complete();
+        Ok(result)
     }
+}
+fn encode_request<P: Serialize>(id: i64, method: &str, params: P) -> Result<Vec<u8>, CallError> {
+    #[derive(Serialize)]
+    struct WireRequest<'a, P> {
+        jsonrpc: JsonRpcVersion,
+        id: RpcId,
+        method: &'a str,
+        params: P,
+    }
+    serde_json::to_vec(&WireRequest {
+        jsonrpc: JsonRpcVersion::V2,
+        id: RpcId::Integer(id),
+        method,
+        params,
+    })
+    .map_err(|error| protocol(&error.to_string()))
 }
 impl Drop for RpcClient {
     fn drop(&mut self) {
@@ -457,10 +694,8 @@ async fn read_responses(mut reader: impl FrameReader, pending: Arc<Pending>) {
         return;
     }
     loop {
-        let read = tokio::select! {
-            _ = closed.changed() => return,
-            result = reader.read() => result,
-        };
+        let read =
+            tokio::select! { _ = closed.changed() => return, result = reader.read() => result };
         match read {
             Ok(None) => {
                 pending.fail(connection_error(
@@ -469,21 +704,31 @@ async fn read_responses(mut reader: impl FrameReader, pending: Arc<Pending>) {
                 return;
             }
             Err(error) => {
-                let failure = if error.kind() == io::ErrorKind::InvalidData {
+                pending.fail(if error.kind() == io::ErrorKind::InvalidData {
                     protocol(&error.to_string())
                 } else {
                     connection_error(error.to_string())
-                };
-                pending.fail(failure);
+                });
                 return;
             }
-            Ok(Some(frame)) => match serde_json::from_slice::<RpcResponse<Value>>(&frame) {
-                Ok(response) => pending.receive(response),
-                Err(_) => {
-                    pending.fail(protocol("malformed JSON-RPC response"));
-                    return;
+            Ok(Some(frame)) => {
+                let decoded = serde_json::from_slice::<Value>(&frame).ok();
+                if let Some(value) = decoded {
+                    if value.get("method").is_some() {
+                        if let Ok(notification) = serde_json::from_value::<WireNotification>(value)
+                        {
+                            pending.notification(notification.into());
+                            continue;
+                        }
+                    } else if let Ok(response) = serde_json::from_value::<RpcResponse<Value>>(value)
+                    {
+                        pending.receive(response);
+                        continue;
+                    }
                 }
-            },
+                pending.fail(protocol("malformed JSON-RPC response or notification"));
+                return;
+            }
         }
     }
 }
@@ -495,5 +740,158 @@ fn protocol(message: &str) -> CallError {
 fn connection_error(message: impl Into<String>) -> CallError {
     CallError::Connection {
         message: message.into(),
+    }
+}
+
+#[cfg(test)]
+mod observation_correlation_tests {
+    use super::*;
+    use minicore_host_core::{BoundResources, ResourceFuture, ResourceResolver};
+
+    struct UnusedResources;
+    impl ResourceResolver for UnusedResources {
+        fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
+            Ok(())
+        }
+        fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+            Box::pin(async {
+                Err::<BoundResources, _>(Fault::new(
+                    FaultKind::SessionResourceMissing,
+                    "no execution requested in correlation test",
+                ))
+            })
+        }
+    }
+    fn pending() -> (Arc<Pending>, mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (outgoing, frames) = mpsc::unbounded_channel();
+        let (closed, _) = watch::channel(false);
+        (
+            Arc::new(Pending {
+                state: Mutex::new(PendingState {
+                    next_id: 3,
+                    calls: BTreeMap::new(),
+                    streams: BTreeMap::new(),
+                    early: BTreeMap::new(),
+                    completed_setups: BTreeMap::new(),
+                    failure: None,
+                }),
+                outgoing,
+                closed,
+            }),
+            frames,
+        )
+    }
+    type TestReply = oneshot::Receiver<Result<Value, CallError>>;
+    type TestEvents = mpsc::UnboundedReceiver<Result<ObservationNotification, CallError>>;
+    fn setup(pending: &Pending, id: i64) -> (TestReply, TestEvents) {
+        let (reply, result) = oneshot::channel();
+        let (observation, events) = mpsc::unbounded_channel();
+        pending.state.lock().unwrap().calls.insert(
+            id,
+            PendingRequest {
+                reply: Some(reply),
+                observation: Some(observation),
+            },
+        );
+        (result, events)
+    }
+    #[tokio::test]
+    async fn real_host_early_resync_stays_ended_and_old_control_cannot_end_a_new_subscription() {
+        let host = Host::memory(Arc::new(UnusedResources)).unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let request = SubscribeRequest {
+            scope: SubscriptionScope::Host {
+                host_id: connection.initial_info().host_id.clone(),
+            },
+            categories: [EventCategory::State].into_iter().collect(),
+        };
+        let mut old = host.events_subscribe(&caller, request.clone()).unwrap();
+        let (pending, _frames) = pending();
+        let (reply, mut events) = setup(&pending, 1);
+        // This control frame is produced by the real Host observation owner.
+        old.end_after_delivery_failure(Fault::new(
+            FaultKind::HostObservationResyncRequired,
+            "test adapter confirmed a missed dispatch",
+        ));
+        let control = old.recv().await.unwrap().unwrap();
+        pending.notification(control.clone());
+        pending.receive(RpcResponse::success(
+            RpcId::Integer(1),
+            serde_json::to_value(old.result()).unwrap(),
+        ));
+        reply.await.unwrap().unwrap();
+        assert!(matches!(
+            events.recv().await.unwrap().unwrap(),
+            ObservationNotification::ResyncRequired(_)
+        ));
+        assert!(events.recv().await.is_none());
+        assert!(pending.state.lock().unwrap().streams.is_empty());
+        let fresh = host.events_subscribe(&caller, request).unwrap();
+        let (reply, mut events) = setup(&pending, 2);
+        pending.receive(RpcResponse::success(
+            RpcId::Integer(2),
+            serde_json::to_value(fresh.result()).unwrap(),
+        ));
+        reply.await.unwrap().unwrap();
+        pending.notification(control);
+        pending.unsubscribe(&old.result().subscription_id);
+        assert!(
+            pending
+                .state
+                .lock()
+                .unwrap()
+                .streams
+                .contains_key(&fresh.result().subscription_id)
+        );
+        assert!(matches!(
+            events.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn cancelling_setup_after_reader_registers_it_still_releases_only_that_observation() {
+        let host = Host::memory(Arc::new(UnusedResources)).unwrap();
+        let connection = host.connect().unwrap();
+        let subscription = host
+            .events_subscribe(
+                &connection.caller(),
+                SubscribeRequest {
+                    scope: SubscriptionScope::Host {
+                        host_id: connection.initial_info().host_id.clone(),
+                    },
+                    categories: [EventCategory::State].into_iter().collect(),
+                },
+            )
+            .unwrap();
+        let (pending, mut frames) = pending();
+        let (_reply, _events) = setup(&pending, 1);
+        let waiter = PendingCall {
+            pending: pending.clone(),
+            id: 1,
+            sent: true,
+        };
+        pending.receive(RpcResponse::success(
+            RpcId::Integer(1),
+            serde_json::to_value(subscription.result()).unwrap(),
+        ));
+        assert!(
+            pending
+                .state
+                .lock()
+                .unwrap()
+                .streams
+                .contains_key(&subscription.result().subscription_id)
+        );
+        drop(waiter);
+        assert!(pending.state.lock().unwrap().streams.is_empty());
+        let cleanup: Value = serde_json::from_slice(&frames.recv().await.unwrap()).unwrap();
+        assert_eq!(cleanup["method"], "events.unsubscribe");
+        assert_eq!(
+            cleanup["params"]["subscription_id"],
+            subscription.result().subscription_id.to_string()
+        );
+        assert!(!*pending.closed.borrow());
     }
 }

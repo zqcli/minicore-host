@@ -30,6 +30,13 @@ pub struct TurnStateData {
     pub fault: Option<Fault>,
     pub persistence_fault: Option<Fault>,
 }
+/// The same atomic Turn identity and state used by subscription baselines.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TurnSnapshot {
+    #[serde(flatten)]
+    pub source: TurnIdentity,
+    pub data: TurnStateData,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCallState {

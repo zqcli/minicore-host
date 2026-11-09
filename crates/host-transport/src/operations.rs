@@ -1,10 +1,10 @@
 //! One typed operation table drives direct calls and RPC dispatch.
 use minicore_host_core::{
-    AgentInfo, CallerContext, Host, HostInfo, MessageRecord, SessionInfo, SessionSnapshot,
-    TurnInfo, TurnResult,
+    AgentInfo, CallerContext, Host, HostInfo, MessageRecord, ModelTextSnapshot,
+    SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
+    TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
-use minicore_runtime::HistoryItem;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{future::Future, sync::Arc};
@@ -79,6 +79,34 @@ pub(crate) struct CancelSessionParams {
     pub keep_inbox: bool,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct HistoryParams {
+    pub target: SessionRef,
+    pub request: HistoryReadRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ModelReadParams {
+    pub target: SessionRef,
+    pub turn_id: TurnId,
+    pub response_index: u64,
+    pub request: TextReadRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ToolTargetParams {
+    pub target: SessionRef,
+    pub tool: ToolCallRef,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ToolReadParams {
+    pub target: SessionRef,
+    pub tool: ToolCallRef,
+    pub request: TextReadRequest,
+}
+
 macro_rules! operations {
     ($($name:ident, $method:literal, $params:ty => $output:ty, |$host:ident, $caller:ident, $p:ident| $body:block;)+) => {
         $(#[derive(Serialize, Deserialize)]
@@ -95,7 +123,7 @@ macro_rules! operations {
 
         /// Resource methods with real handlers in this adapter increment.
         /// This is not the full SPEC §8 implementation or a runtime negotiation.
-        pub const SUPPORTED_METHODS: &[&str] = &[$($method,)+];
+        pub const SUPPORTED_METHODS: &[&str] = &["events.subscribe", $($method,)+];
 
         pub(crate) async fn dispatch(host: Arc<Host>, caller: CallerContext, method: &str, params: Value) -> Result<Value, RpcError> {
             match method {
@@ -129,12 +157,16 @@ operations! {
     CloseSession, "session.close", SessionOperation => SessionCloseReceipt, |h, c, p| { h.session_close(&c, &p.target, SessionCloseRequest { operation_id: p.operation_id }) };
     SendMessageOp, "message.send", SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };
     GetMessage, "message.get", MessageTargetParams => MessageRecord, |h, c, p| { h.message(&c, &p.target, &p.message_id) };
-    GetTurn, "turn.get", TurnTarget => TurnInfo, |h, c, p| { h.turn_info(&c, &p.target, &p.turn_id) };
+    GetTurn, "turn.get", TurnTarget => TurnSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
     ListTurns, "turn.list", SessionTarget => Vec<TurnInfo>, |h, c, p| { h.turns(&c, &p.target) };
     WaitTurn, "turn.wait", TurnTarget => TurnResult, |h, c, p| { h.wait_turn(&c, &p.target, &p.turn_id).await };
     CancelTurn, "turn.cancel", CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
     GetTurnResult, "turn.result", TurnTarget => TurnResult, |h, c, p| { h.turn_result(&c, &p.target, &p.turn_id) };
-    ReadHistory, "session.history.read", SessionTarget => Vec<HistoryItem>, |h, c, p| { h.history(&c, &p.target) };
+    ReadHistory, "session.history.read", HistoryParams => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
+    ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
+    GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
+    ReadToolOutput, "toolcall.output.read", ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
+    Unsubscribe, "events.unsubscribe", UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
 }
 
 async fn run<O: Operation>(

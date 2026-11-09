@@ -2,6 +2,24 @@ use super::*;
 use crate::observation::*;
 
 impl Host {
+    pub fn turn_snapshot(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        turn_id: &TurnId,
+    ) -> Result<TurnSnapshot, Fault> {
+        let session = self.session(caller, target)?;
+        let (states, _) = session.observation_baseline(Some(turn_id), true, false)?;
+        let snapshot = states
+            .into_iter()
+            .find_map(|state| match state {
+                StateEvent::Turn { source, data } => Some(TurnSnapshot { source, data }),
+                _ => None,
+            })
+            .ok_or_else(|| Fault::new(FaultKind::SessionTurnNotFound, "Turn is not retained"))?;
+        self.access.read(caller, || Ok(snapshot))
+    }
+
     pub async fn history_read(
         &self,
         caller: &CallerContext,
