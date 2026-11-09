@@ -1,78 +1,67 @@
 # Remove the prompt-history fixture's inherited-lock race
 
-## Scope and fixed sources
+## Scope and finding
 
-- Base Host: `34641c5ab1784237cb73bdb0f36f9923697d0c34`, isolated branch
-  `fix/history-lock-reopen`.
-- Actual Runtime: Git `69faf9196991524b5549499d6208a1eaf567bf56`, version 0.10.0,
-  with no dependency source override. SPEC v4.93 remains unchanged.
-- Shared manifest bootstrap `0fb766ed22be24177d1d06b4d665b4f1da21fae8` is locally
-  cherry-picked as `aea4712`; it adds the already locked `sha2 = 0.10.9` as a
-  core dev-dependency. The parent already owns this bootstrap.
-- Only task024's hash fixture and this task record are changed here. Production
-  file locks, storage ownership, Session cleanup, and public APIs are unchanged.
-  No retry, sleep, serialization, explicit early unlock, or remote push is added.
+Base Host: `34641c5ab1784237cb73bdb0f36f9923697d0c34`. Runtime remains actual Git
+`69faf9196991524b5549499d6208a1eaf567bf56`, version 0.10.0, without overrides.
+SPEC v4.93 is unchanged. The parent owns the aggregate `PROJECT.md` update.
 
-## Reproduction and root cause
+The final dev gate failed in task024's synchronous seed with `HistoryInUse`
+after journal drop and `HostStorageUnavailable` after returning from seed.
+The original binary reproduced a root-lock failure on run 39 of 39 normal
+parallel runs. Its hash helper spawned `sha256sum`; that process could inherit
+another parallel test's locked open file descriptions until close-on-exec.
+Dropping the parent's handle therefore did not yet release the actual lock.
 
-The final dev gate failed at task024's synchronous `seed`: dropping its journal
-was followed by `HistoryInUse`, and returning from seed was followed by
-`HostStorageUnavailable` while reopening the same data root. Distinct tests use
-separate temporary directories; no Rust save task survives this seed.
+Direct diagnostic evidence captures both classes. A real hash child retained
+the exact inode's `FLOCK WRITE`; the parent's original descriptor then closed
+successfully, and its new descriptor's lock attempt returned `EAGAIN` before
+that child's `posix_spawnp` returned. History evidence is in
+`trace-v4-run-5.log` (child198 / inode363573), root evidence in
+`trace-v4-run-12.log` (child247 / inode364115).
 
-The TCP/SSE fixture does not create a process, but the hash helper used
-`Command::new("sha256sum").spawn()`. In a parallel suite this process creation
-briefly inherits the open file descriptions of other tests, including their
-exclusive `flock` locks, before close-on-exec runs. Dropping a parent's last
-handle does not release a lock while that inherited description remains open.
+Evidence directory: `/workspace/shared/minicore-host-lock-reopen-logs`.
+`DIAGNOSTICS.md` records commands, exact event order, run counts, diagnostic
+source and limits. `strace` was blocked by `PTRACE_TRACEME = EPERM`; no settings
+or permissions were changed to bypass it. Alternative observation uses libc
+boundaries and only this test process's direct-child FD lock metadata, not a
+kernel syscall trace. Logging can change scheduling; the uninstrumented red
+run remains separate. The older storage-suite flake is not diagnosed here.
 
-Evidence is retained at `/workspace/shared/minicore-host-lock-reopen-logs`:
+## Change and commits
 
-- Original gate: `../minicore-host-validation/dev-reviewed-final-full.log`.
-- The unmodified original test binary reproduced the root-lock failure on run
-  39 of 39 normal parallel repetitions (`baseline-run-39.log`). Earlier green
-  repetitions are not treated as proof that the defect is absent.
-- `strace` was unavailable: `PTRACE_TRACEME` returned `EPERM`, including the
-  approved diagnostic execution route. No permissions or security settings
-  were changed.
-- An external, diagnostic-only libc interposer logs successful `close`, actual
-  `flock` results, and the real `posix_spawnp` call. Its observer reads only
-  direct children of this test process and their lock metadata. It adds no
-  delay, retry, altered spawn arguments, or production code. This is libc
-  boundary and `/proc` evidence, not a complete kernel syscall trace.
-- `trace-v4-run-5.log`: child 198, created for `sha256sum`, has fd 30 with
-  `FLOCK WRITE`, device 39 / inode 363573 at time 26607.668670382. Parent 169
-  closes its fd 30 successfully at 26607.669158469; a new reader on the same
-  inode fails `flock` with `EAGAIN` at 26607.670336337. That spawn returns only
-  at 26607.672264774. The actual seed fails with `HistoryInUse` at line 443.
-- `trace-v4-run-12.log` independently captures a root inode (device 39 / inode
-  364115) retained by hash child 247, the parent's successful close, and a
-  failed exclusive reopen before that child's spawn returns. The actual test
-  fails with `HostStorageUnavailable`.
-
-These traces establish the hash subprocess as the transient inherited owner
-for both task024 failures. They do not diagnose the separately reported older
-storage-suite failure, and this change does not claim to fix that observation.
-
-## Minimal fix and regression
-
-Hash the same bytes in process with `Sha256::digest`. All existing before/after
-SHA-256 comparisons, exact byte-prefix checks, native history checks, real
-Host/Runtime/storage behavior, HTTP/SSE calls, and ordinary test concurrency
-remain in place. A small known-answer test covers the standard empty-input and
-`abc` SHA-256 values. No new production dependency is added.
+- Shared manifest bootstrap `0fb766ed22be24177d1d06b4d665b4f1da21fae8`, locally
+  `aea4712`, adds the existing locked `sha2 = 0.10.9` as a core dev-dependency.
+  The parent already owns this commit and must not replay the local cherry-pick.
+- Fix `d2edb50411045b805e86828cd72025b79e7bdf31` hashes the same bytes in process.
+  All original SHA-256 comparisons, exact byte-prefix/native-history checks,
+  actual Host/Runtime/storage/HTTP tests and normal concurrency are preserved.
+  One known-answer test checks empty-input and `abc` standard SHA-256 vectors.
+- No production lock, ownership, cleanup, API or dependency is changed. No
+  sleep, application retry, suite serialization, early unlock or push is added.
 
 ## Validation
 
-Environment: pinned shared Rust/Cargo homes, `TMPDIR` set to the shared Host
-fixture temp directory, jobs=2, debug info and incremental compilation disabled,
-and independent `CARGO_TARGET_DIR=/workspace/shared/minicore-host-lock-reopen-target`.
+Exact environment: `env.sh` in the evidence directory; independent target
+`/workspace/shared/minicore-host-lock-reopen-target`, Rust 1.90.0, jobs=2.
 
 - `cargo test -p minicore-host-core --test task024_prompt_history --locked`:
-  **12 passed**, including the new digest regression (`fixed-task024.log`).
-- Full whitespace/fmt/Clippy/workspace-test/doctest/rustdoc gate and repeated
-  fixed parallel suite: pending at this checkpoint. Independent review and
-  parent integration remain separate steps; no release-readiness claim is made.
+  **12 passed** (`fixed-task024.log`).
+- Corrected binary, normal default concurrency: **200 suites / 2400 case
+  executions, zero failures** (`fixed-repeat-summary.log`). Repeating green
+  runs is a stability check, not the cause proof. The same diagnostic observer
+  also confirms no hash process is spawned (`fixed-trace.log`).
+- `./scripts/check.sh` on `d2edb504`: **passed**, including full-history/staged/
+  worktree whitespace, rustfmt, all-target Clippy with `-D warnings`, all
+  workspace targets, **3 doctests**, and rustdoc with `-D warnings`
+  (`full-gate.log`).
+- `cargo test --workspace --all-targets --locked -- --list`: **495 unique
+  target/test-name cases**, excluding repeated storage subprocess output
+  (`test-list.log`, `test-count.log`).
+- `cargo metadata --locked --offline --format-version 1` verifies the actual
+  Runtime pin. SPEC SHA-256 remains
+  `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
 
-The parent owns the aggregate `PROJECT.md` update and should cherry-pick this
-fix's commits, not the already owned manifest bootstrap.
+A following documentation-only commit records these completed checks. Parent
+integration and independent review remain separate; this is not full-product
+release acceptance. No remote action was attempted.
