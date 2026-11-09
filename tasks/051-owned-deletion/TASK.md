@@ -38,7 +38,7 @@ Read minicore-agent reference `f36a87366d8e2fe0a1c8216463887902e471c739`, `src/a
 4. `af9132a32aaf3fa948b0250b87727d1d1ec61f2f` — `test(tools): preserve received results across scoped deletion`.
 5. `b918790c63dc2916b1a8c0ba91b1a46fcf46b838` — `feat(transport): route canonical owned deletion controls`.
 
-The code is frozen at the fifth checkpoint for independent review. This task record is updated separately. The integration owner applied the narrow shared Session declarations and AgentInfo/SessionStateData projections before they were committed here. PROJECT.md remains under that owner's coordination.
+The fifth checkpoint was the initial independent-review source. The acceptance-fence correction below supersedes that code checkpoint. This task record is updated separately. The integration owner applied the narrow shared Session declarations and AgentInfo/SessionStateData projections before they were committed here. PROJECT.md remains under that owner's coordination.
 
 - Host retains Agent deletion work and its accepted receipt. Agent retains Session deletion work and its accepted receipt. Their existing shutdown/retirement barriers include these real tasks; no global task table or receipt archive is added.
 - Agent admission freezes the exact registered child set and fences create/start/update/default/close/delete work. Session admission fences send/update/close/delete. Work accepted before a fence either settles through its existing owner or causes factual admission rejection.
@@ -93,3 +93,62 @@ One development aggregate command, `cargo test -p minicore-host-core -p minicore
 The integration owner independently fixed those assertions at `1bf0969288e24f3f77c00ff742acd93280ef005e` and reported 12/12 focused adapter tests. That separate fix is deliberately not copied into this branch. The failed aggregate was not repeatedly rerun, and its earlier success count is not a final full-suite pass.
 
 Storage/diagnostics lease corrections and the cold-history/context work are independently owned, excluded from this source, and require the final composition gate. No full workspace execution, live-provider test, TUI test, push or merge was performed here. Independent deletion review and integrated validation remain the next steps; reaching the canonical route count is not product completion.
+
+## Independent-review acceptance-fence correction
+
+The independent reviewer found a real admission defect in `b918790`: Session deletion returned Closing before expiring its bound Turn capability or sealing its root collaboration scope, and Agent deletion returned Retiring before its async worker expired owned Turn capabilities. On current-thread Tokio, an immediate capability send or descendant registration could therefore accept new work after the deletion receipt, without any await in the gap. The earlier focused green suite did not cover this boundary.
+
+The original reviewer probes and red run remain unchanged at `/workspace/shared/minicore-host-review-owned-deletion/crates/host-core/tests/task051_review_probe.rs` and `/workspace/shared/minicore-host-review-owned-deletion-evidence/review-probes.log`. SHA-256 of that original red log: `40831c208f0540dc92ac54d5ddc34c30fea52b2e317223066487a38179911e4e`.
+
+Incremental commits:
+
+- `1f50a25c401fca37082c7f20f446579f5e264ed0` — `test(core): expose deletion acceptance capability gaps`. Adds four permanent current-thread regressions in `crates/host-core/tests/task051_deletion_fences.rs`: Session source capability expiry; Session-root descendant scope admission; Agent-root descendant scope admission; and capability expiry for every active directly owned Session in an Agent cascade. All four fail on the unchanged production source, demonstrating actual MessageAccepted outcomes.
+- `fd6051c398732b00f0aed015550078fa94266e2d` — `fix(core): fence deletion capabilities before acceptance returns`. Production changes are confined to the existing Agent and Session deletion modules: 31 lines added, 3 removed. The Session admission helper uses the existing Turn activation expiry and ScopeState seal, with Closing, before the receipt is formed. Agent fixes its direct child set, releases AgentState, then applies this same fence to each child under the shared admission boundary. Runtime cancellation, scope callbacks, joins, result handoff and saves remain existing asynchronously owned work. No callback, I/O or child call was added under an owner state lock; no cleanup retry or recovery service was added.
+
+Red/green command:
+
+```sh
+cargo test -p minicore-host-core --test task051_deletion_fences --locked --offline
+```
+
+It produced **0 passed, 4 failed** at `1f50a25`, then **4 passed, 0 failed** at `fd6051c`. Logs: `/workspace/shared/task051-deletion-fences-red.log` and `/workspace/shared/task051-deletion-fences-green.log`. The fixture uses real persistent Host/Session/Runtime owners and gated test models. Its external scope hooks are an explicit no-op test double; each actual delegated member is settled through its original result/permit owner before controlled Host shutdown. Existing real host-tools scope-cleanup coverage is also rerun below.
+
+Verification at exact fixed code `fd6051c398732b00f0aed015550078fa94266e2d`, using the same isolated environment and locked dependencies recorded above:
+
+```sh
+cargo test -p minicore-host-protocol --test deletion \
+  -p minicore-host-core --test task051_deletion --test task051_deletion_fences \
+  --test task033_tool_cleanup --test entity_retirement --test delegation_owners \
+  --test delegation_acceptance_fences --test host_shutdown \
+  -p minicore-host-tools --test host_integration --test scopes \
+  -p minicore-host-transport --test deletion --test public_controls \
+  --locked --offline
+cargo test -p minicore-host-core --lib task051 --locked --offline
+```
+
+The integration command passed **116 cases**, and the real Journal append/release gate passed **1**, for **117 unique executed cases**. All **30 newly added deletion cases** are covered. Formatting, `git diff --check accc5dd..HEAD`, the same four-package all-target Clippy with `-D warnings`, the same **1 doctest**, and strict rustdoc passed again. The unchanged earlier adapter aggregate failures were not rerun or hidden by this correction. Logs: `/workspace/shared/task051-fence-final-focused.log`, `task051-fence-final-save-gate.log`, `task051-fence-final-clippy.log`, `task051-fence-doc-tests.log`, and `task051-fence-rustdoc.log`.
+
+The workspace inventory at that intermediate checkpoint compiled and listed **754 cases in 88 binaries**. This intermediate green gate did not complete review: the reviewer next exposed the unbound-input race below.
+
+## Normal-close disposition correction
+
+The reviewer's next current-thread probe accepted a delegated input into a real memory Session, then synchronously accepted deletion before its queued driver ran. Both `b918790` and `fd6051c` could publish memory Closed before disposing that input; the async delete worker then skipped normal close's inbox clearing because the Session was already Closed. The actual snapshot retained `next_turn` with deletion Pending, and no discarded-input handoff arrived. The matching normal `session.close` probe passed. Agent cascade had the same defect. No save retry or recovery behavior was involved.
+
+Original evidence is preserved in `/workspace/shared/minicore-host-review-owned-deletion-evidence/original-unbound-probe.log`, `fixed-unbound-probe.log`, and `fixed-unbound-both-probe.log`. The reviewer's disposable probe is `crates/host-core/tests/task051_review_unbound_probe.rs` in its original and fixed review worktrees. SHA-256 of `original-unbound-probe.log`: `42c9280ab544c725b4856cb373b1a96d3cdcac2f8b7a200fdf13dab0f85b4bd9`.
+
+- `7dab5c96388653a25bdb506670499f90cdc1c790` — `test(core): expose unbound memory deletion handoff race`. Adds permanent real-memory Session and Agent variants to `task051_deletion_fences.rs`. Both fail before the fix with the same retained Closed/inbox/Pending state.
+- `4b379623faa2398a00efe8a456d7c6085c65ffc3` — `fix(core): admit deletion through normal close disposition`. Replaces the partial Closing fence with the existing `start_scope_cleanup_locked` and `apply_close_locked` admission semantics. Inbox disposition, scope sealing/owned cleanup registration, and cancellation claims occur synchronously before receipt formation. Runtime handle shutdown and necessary result handoff remain asynchronous. Cascade child deletion reuses its already-admitted close instead of starting scope cleanup again, so one accepted deletion does not retry a completed failed cleanup. No additional state fields, callbacks under locks, storage changes, or recovery service are introduced.
+
+Red command at `7dab5c9`:
+
+```sh
+cargo test -p minicore-host-core --test task051_deletion_fences unbound --locked --offline
+```
+
+Result: **0 passed, 2 failed**, 4 filtered out. Log: `/workspace/shared/task051-unbound-fences-red.log`. At `4b37962`, the complete `task051_deletion_fences` target passes **6/6**; log: `/workspace/shared/task051-unbound-fences-green.log`. The two added cases verify the actual discarded-input handoff, no fabricated Runtime result, no child Runtime binding, final notification through the original permit, one handoff, source reclamation, and controlled Host shutdown.
+
+At exact final code `4b379623faa2398a00efe8a456d7c6085c65ffc3`, the expanded focused command printed in the preceding section passed **118 cases**, and the same real Journal gate passed **1**, for **119 unique executed cases** covering all **32 new deletion cases**. The same formatting/diff checks, four-package all-target Clippy with warnings denied, **1 doctest**, and strict rustdoc passed. Logs use the `/workspace/shared/task051-close-` prefix: `final-focused.log`, `final-save-gate.log`, `final-clippy.log`, `doc-tests.log`, and `rustdoc.log`.
+
+The independent reviewer reported its unchanged probes green at this exact final code: original acceptance plus ordinary controls **6/6**, Session/Agent unbound-memory plus normal-close control **3/3**, and actual-process failed-save/force-shutdown **1/1**. It also confirmed that the normal-close/cascade reuse added no I/O, joins or child waits under owner state locks. Those independent probes are separate evidence, not additional repository inventory cases or a composition gate. Final independent broad checks and integration remain owned by their reviewers.
+
+The final `cargo test --workspace --all-targets --locked --offline -- --list` command compiled and listed **756 unique cases in 88 binaries**, 0 benchmarks, at `4b37962`; log: `/workspace/shared/task051-close-workspace-list.log`. This is not a full workspace execution claim. SPEC, Cargo.lock, Runtime revision, storage implementation and TUI remain unchanged; no push or merge was performed. The only correction paths after `cb5c82c` are the two deletion modules, their new fence regression target and this task record.
