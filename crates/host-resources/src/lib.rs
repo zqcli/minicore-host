@@ -6,11 +6,13 @@
 use minicore_host_core::{
     BoundCompactionResources, BoundResources, CompactionResourceFuture, HostConfig,
     HostConfigurationFuture, HostConfigurationPreparer, PreparedHostConfiguration,
-    PreparedTurnBinding, ResourceFuture, ResourceResolver,
+    PreparedTurnBinding, ResourceFuture, ResourceResolver, ToolOutputBinding,
 };
 use minicore_host_protocol::{Fault, FaultKind, ReasoningPreference, SessionConfig};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_host_tools::{AgentToolFactory, CoreTurnPort, ScopeManager, ToolRegistry};
+use minicore_host_tools::{
+    AgentToolFactory, BoundLocalTools, CoreTurnPort, ScopeManager, ToolRegistry,
+};
 use minicore_host_workspace::Workspace;
 use minicore_runtime::{
     ExecutionConfig, LoopOptions, Text,
@@ -20,11 +22,14 @@ use minicore_runtime::{
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
+mod workspaces;
+
 /// The deployment's statically compiled registry. Keep one builder across
 /// reloads: agent-tool delegation scopes remain owned across public Turns.
 #[derive(Clone)]
 pub struct HostResourceBuilder {
     tools: Arc<ToolRegistry>,
+    workspaces: Arc<workspaces::WorkspaceBindings>,
 }
 /// Explicit private inputs, for embedding and isolated tests. Never serialized.
 pub struct HostCredentials {
@@ -39,11 +44,15 @@ impl std::fmt::Debug for HostCredentials {
 
 impl HostResourceBuilder {
     pub fn new(tools: Arc<ToolRegistry>) -> Self {
-        Self { tools }
+        Self {
+            tools,
+            workspaces: Arc::default(),
+        }
     }
     pub fn builtins() -> Result<Self, Fault> {
         let mut tools = ToolRegistry::new();
         tools.register(Arc::new(AgentToolFactory::new(ScopeManager::new())))?;
+        tools.register_local_tools()?;
         Ok(Self::new(Arc::new(tools)))
     }
     /// Explicitly read only the credential environment names in this candidate.
@@ -88,6 +97,7 @@ impl HostResourceBuilder {
         config.validate()?;
         let tools = Arc::clone(&self.tools);
         let preparer = Arc::new(self.clone());
+        let workspaces = Arc::clone(&self.workspaces);
         tokio::task::spawn_blocking(move || {
             let declared = tools.specs();
             let mut selected_specs = Vec::new();
@@ -146,6 +156,7 @@ impl HostResourceBuilder {
             }
             let access_key = credentials.network_access_key;
             let resources = Arc::new(ProductionResources {
+                workspaces,
                 models,
                 tools,
                 enabled: config.tools.iter().map(|tool| tool.name.clone()).collect(),
@@ -166,6 +177,7 @@ impl HostConfigurationPreparer for HostResourceBuilder {
 }
 
 struct ProductionResources {
+    workspaces: Arc<workspaces::WorkspaceBindings>,
     models: BTreeMap<minicore_host_protocol::ModelRef, Arc<dyn Model>>,
     tools: Arc<ToolRegistry>,
     enabled: std::collections::BTreeSet<String>,
@@ -179,11 +191,7 @@ impl ProductionResources {
     ) -> Result<BoundResources, Fault> {
         self.validate(config)?;
         let workspace = match &config.workspace {
-            Some(selection) => {
-                Some(Workspace::bind(Some(selection)).await.map_err(|error| {
-                    session_invalid(format!("workspace binding failed: {error}"))
-                })?)
-            }
+            Some(selection) => Some(self.workspaces.bind(selection).await?),
             None => None,
         };
         let selected = if config.tools.is_empty() {
@@ -192,8 +200,20 @@ impl ProductionResources {
             let binding = binding.ok_or_else(|| {
                 session_invalid("selected tools require an owner-prepared Turn binding")
             })?;
-            self.tools
-                .bind(&config.tools, CoreTurnPort::prepared(binding))?
+            let port = CoreTurnPort::prepared(binding.clone());
+            if self.tools.requires_local(&config.tools) {
+                let local = BoundLocalTools::production(
+                    binding,
+                    workspace
+                        .as_ref()
+                        .expect("validated local workspace")
+                        .as_ref()
+                        .clone(),
+                )?;
+                self.tools.bind_with_local(&config.tools, port, &local)?
+            } else {
+                self.tools.bind(&config.tools, port)?
+            }
         };
         let prompt = Arc::new(BoundPrompt {
             framework: Text::new(&self.framework),
@@ -226,6 +246,26 @@ impl ProductionResources {
     }
 }
 impl ResourceResolver for ProductionResources {
+    fn bind_tool_output(
+        &self,
+        execution: &ExecutionConfig,
+        output: ToolOutputBinding,
+    ) -> ExecutionConfig {
+        let mut selected = ToolSet::builder();
+        for spec in self.tools.specs() {
+            if let Some(tool) = execution.tools().get(spec.name()) {
+                selected.register_arc(output.wrap(tool));
+            }
+        }
+        ExecutionConfig::new(
+            execution.model().clone(),
+            execution.reasoning(),
+            selected.build().expect("unique frozen tool declarations"),
+            execution.policy().cloned(),
+            execution.prompt().clone(),
+        )
+        .expect("unchanged validated execution configuration")
+    }
     fn resolve_for_compaction(self: Arc<Self>, config: SessionConfig) -> CompactionResourceFuture {
         Box::pin(async move {
             self.validate(&config)?;
@@ -258,7 +298,7 @@ impl ResourceResolver for ProductionResources {
                 prompt: Arc::new(BoundPrompt {
                     framework: Text::new(&self.framework),
                     role: Text::new(&config.role.instructions),
-                    workspace,
+                    workspace: workspace.map(Arc::new),
                 }),
             })
         })
@@ -292,6 +332,11 @@ impl ResourceResolver for ProductionResources {
                 config.model
             )));
         }
+        if self.tools.requires_local(&config.tools) && config.workspace.is_none() {
+            return Err(session_invalid(
+                "local tools require a configured workspace",
+            ));
+        }
         if let Some(workspace) = &config.workspace
             && !Path::new(&workspace.path).is_absolute()
         {
@@ -313,11 +358,11 @@ impl ResourceResolver for ProductionResources {
 
 /// Frozen Turn context. Workspace owns its canonical root and is never a
 /// process cwd; the model receives it as explicit context. Ordinary filesystem
-/// tools can use that same Workspace backend when their static modules land.
+/// tools share this exact binding and its mutation ordering capability.
 struct BoundPrompt {
     framework: Text,
     role: Text,
-    workspace: Option<Workspace>,
+    workspace: Option<Arc<Workspace>>,
 }
 impl PromptProvider for BoundPrompt {
     fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
@@ -363,3 +408,4 @@ fn session_invalid(message: impl Into<String>) -> Fault {
 fn missing(message: impl Into<String>) -> Fault {
     Fault::new(FaultKind::SessionResourceMissing, message)
 }
+
