@@ -654,6 +654,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicore-host-transport"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "minicore-host-core",
+ "minicore-host-protocol",
+ "minicore-runtime",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+
+[[package]]
 name = "minicore-host-workspace"
 version = "0.1.0"
 dependencies = [
