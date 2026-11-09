@@ -26,10 +26,14 @@ Original CompactReceipt and CompactCancelReceipt facts stay immutable. Later pro
 
 Consulted minicore-agent code reference `f36a87366d8e2fe0a1c8216463887902e471c739`, especially `src/rpc/server/dispatch.rs` compaction branches. Its strict target parsing and delegation to the Session owner are useful reference patterns. Its completion-waiting RPC operation reservations, load wrapper and single operation-ID cancellation shape are not adopted: Host v4.93 requires immediate factual acceptance and an independent cancellation ID plus explicit original target. The mature shared Host operation/deadline/dispatch stack already fits this contract and is reused rather than adding a second stack. Agent is code reference only, not a compatibility or behavior baseline.
 
-## Validation progress
+## Fixed source and validation
 
 - Nine new focused integration tests pass with real Host, Runtime, production resource assembly and provider HTTP/SSE on a local scripted endpoint. The first focused run had a test expectation error: public history reads append the genuine summary item, rather than remaining byte-identical. The corrected test verifies every original item is unchanged and exactly one real summary is appended. No production change masked that test error.
-- Production route/client checkpoint: `57ab6bd` (`feat(transport): expose owned session compaction controls`). Full workspace gate is running. The test checkpoint, final gate results and unique inventory will be recorded after the source is fixed.
+- Production route/client checkpoint: `57ab6bd8d38172205714b79b9d640d2081a0b348` (`feat(transport): expose owned session compaction controls`). Test/functional checkpoint: `c6aa0a52b8d70673002327a8d4ec2b12fbff7892` (`test(transport): verify owned compaction across real connections`). This completion report is documentation-only.
+- At exactly `c6aa0a52b8d70673002327a8d4ec2b12fbff7892`, `./scripts/check.sh` passes whitespace, formatting, strict all-target workspace Clippy, all unit/integration targets, **3 doctests**, and strict rustdoc. The earlier gate on the identical source also passed. Logs: `/workspace/shared/minicore-host-compaction-transport-fixed-gate.log` and `/workspace/shared/minicore-host-compaction-transport-gate.log`.
+- `cargo test --workspace --all-targets --locked -- --list` reports **631 listed / 631 unique target-test cases**. Nested storage subprocess probe output is not counted again. Inventory: `/workspace/shared/minicore-host-compaction-transport-inventory.log`.
+- `cargo test -p minicore-host-transport --test compaction --test compaction_wire --test compaction_wait --locked` passes **10 consecutive repetitions**, all nine new cases each time (90 successful case executions). Log: `/workspace/shared/minicore-host-compaction-transport-repeated.log`.
+- Final SPEC hash remains unchanged. All implementation changes after the prerequisite owner fixes are inside the assigned transport/task paths. No validation gate remains blocked; external-provider, production-process and TUI runs are intentionally outside this stage.
 - Independent review and integration remain the coordinator's responsibility.
 
 ## Coverage and limits
