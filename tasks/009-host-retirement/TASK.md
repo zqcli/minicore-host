@@ -1,29 +1,61 @@
 # Implement Host shutdown and memory retirement
 
-## Scope and ownership
+## Scope and outcome
 
-Baseline: `6d29cdca4c265c3f1eaee906d97f7855c9d74545`, SPEC v4.93.
-Runtime remains the published exact revision `18a6ac9b82d003330cd870275efca793cdcc9a96`.
-This task owns Host, Agent, connection admission, public core projections, and new
-shutdown/retirement tests. Session/history implementation is coordinated with
-`tasks/008-history-continuation/TASK.md`. TUI is unchanged. No remote writes.
+Baseline: `6d29cdca4c265c3f1eaee906d97f7855c9d74545`, complete SPEC v4.93.
+Runtime is still the published exact `18a6ac9b82d003330cd870275efca793cdcc9a96`.
+TUI, protocol method inventory and persistent physical deletion are unchanged.
+No remote writes were made.
 
-## Local commits and checkpoints
+Implemented the local direct-owner lifecycle stage:
 
-- `08025ac`: Host admission/execution fences. Standalone `rustfmt` passed; this
-  narrow dependency intentionally precedes its call sites, so no standalone
-  warning-free Clippy claim is made.
-- Session dependency `28f1ba0` was locally cherry-picked as `397d7a5`; the parent
-  integrates the original Session commit once, not both copies.
-- Current shutdown implementation: canonical immediate current-fact receipts,
-  monotonic graceful/force, owned shutdown task, direct-owner stopping and release,
-  releasable Host/Agent store and resource slots, genuine Session task/resource
-  retirement, root lease held through pending saves, no implicit persistent close.
-  Host waits now hold weak Session observations rather than a Session Arc.
+- `Host::shutdown` uses the canonical request/receipt and current operator. It
+  returns current facts immediately, preserves each operation ID, and only upgrades
+  graceful to explicit force. Repeated requests do not restart or retry work.
+- Host admission fences reject new root input/objects during draining. Accepted
+  work drains normally; paused backlog is not silently resumed. Force fences
+  consumption and new Runtime work, cancels through actual owners and joins real
+  reports, partials, ordinary ToolResults, original saves and cleanup.
+- Necessary save failure remains queryable with stopping and the directory leased.
+  `session.resume` can continue that Session's captured history/metadata saves while
+  stopping, without rerunning business work or reopening a closed Session.
+- Host/Agent/Session release real stores, backend handles and execution resources
+  only after their obligations settle. A retained Host handle, subscription or
+  abandoned Turn wait does not keep the directory locked after stopped. Multiple
+  Hosts remain independent, and shutdown never exits the shared process/runtime.
+- Ordinary memory Sessions survive multiple Turns and failed/cancelled work with
+  retained inbox. Explicit close reclaims them only after actual cleanup. Accepted
+  Session creation, last-child removal and empty Agent retirement share the Agent
+  boundary. Creating Agents are not prematurely reclaimed.
+- Persistent Agents remain without replacement defaults. Shutdown does not mark
+  persistent Sessions closed or remove their files. Memory bodies and registrations
+  end with their actual ownership lifetime, including completed Host shutdown.
+- Existing observers/waits cannot preserve source bodies. Reclaimed sources return
+  registered missing-source Faults rather than empty success or cached tombstones.
+- Close cleanup has a bounded watcher only while needed. Its exit and a concurrent
+  new close share a Host generation boundary, preventing lost cleanup handoffs.
+  Shutdown joins any cleanup already owned by that watcher.
 
-## Checks
+## Original commit integration order
 
-Environment for these commands:
+Integrate each original commit once; worktree cherry-pick copies are not additional
+changes:
+
+1. `08025ac` — Host admission and execution fences.
+2. `28f1ba0` — Session original history-save ownership (task 008).
+3. `577abca` — graceful/force Host shutdown and initial acceptance tests.
+4. `f179a0d` — Session save/retirement tests and immediate-memory hook (task 008).
+5. `291d36b` — Session resource retirement and Host-end memory reclaim (task 008).
+6. `4413b74` — closed memory Session/Agent retirement and required owner joins.
+7. `4dfef35` — Session metadata continuation through resume (task 008).
+8. `2080485` — route stopping resume through both original Session save types.
+9. `1a59cbd` — atomic close/cleanup-watcher handoff and concurrent-close regression.
+10. `ace9a70` — gate resumed work on all captured Session saves (task 008).
+
+Task 008 owns Session/backend changes. This task owns Host, Agent, admission,
+core projections, `host_shutdown.rs` and `entity_retirement.rs`.
+
+## Verification
 
 ```sh
 export RUSTUP_HOME=/workspace/shared/rustup
@@ -31,86 +63,67 @@ export CARGO_HOME=/workspace/shared/cargo
 export PATH=/workspace/shared/cargo/bin:$PATH
 export TMPDIR=/workspace/shared/minicore-host-tmp
 export CARGO_TARGET_DIR=/workspace/shared/minicore-host-retirement-target
-cargo check -p minicore-host-core --offline
-cargo test -p minicore-host-core --test host_shutdown --offline -- --nocapture
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --offline -- -D warnings
+RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --offline
+cargo test -p minicore-host-core --offline --test host_shutdown --test entity_retirement --test history_continuation
+cargo test -p minicore-host-core --offline --test persistent_owners
 ```
 
-Both passed; 9 shutdown tests pass. Transitional dead-code warnings are the old
-Session wait helper (sibling removal pending) and the normal memory retirement
-hook (used by the next task commit). Tests use production Runtime, storage, and
-real temporary files. Model responses are explicitly named deterministic
-fixtures, not live provider or TUI validation. Gates use Semaphores, notifications,
-current-thread execution, or a held blocking pool, not arbitrary sleeps.
+Focused tests pass: 10 shutdown, 8 memory retirement and 4 original-save public
+integration cases. All 42 inherited persistent-owner tests pass, including immediate
+root reopening after awaited successful creation/metadata. Strict workspace gates
+and the final filtered workspace test result are recorded below after execution.
 
-Covered: paused backlog remains draining; explicit force upgrade and no downgrade;
-active accepted follow-ups drain; root inputs/creation reject after fence; genuine
-Runtime partial and final history; failed original history continues only through
-explicit resume while stopping; dropped waiter/operator/Host handles; necessary
-save/root guard barrier; two Hosts; retained observer/wait future; read-only and
-revoked operator rejection; repeated and old operation identifiers; persistent
-reopen without implicit close; execution resource graph release.
+Tests use production Runtime and storage with real temporary files; model/tool
+fixtures are explicitly deterministic in-process implementations. Coordination uses
+actual notifications, Semaphores or held I/O-worker gates, not arbitrary sleeps.
+Coverage includes real partial and cancelled ordinary ToolResult persistence,
+held-save directory ownership, dropped call/connection/Host handles after accepted
+shutdown, paused draining and explicit force, two Hosts, accepted create/force,
+close/create competition, concurrent cleanup handoffs, weak observers and missing
+sources. This is not live-provider, managed-tool-process, DSH or TUI validation.
 
-## Remaining work and boundaries
+The parent owns legacy `runtime_owners.rs` expectation updates. Four tests failed
+because they explicitly expected closed memory bodies/Agents to remain queryable;
+one additional preparation-close test has the same timing-sensitive expectation.
+Their pre-close execution and ordering checks must remain intact, while completed
+reclaim requires missing-source Faults. A filtered workspace pass is not an
+unqualified full-suite pass; the parent must rerun the complete integrated suite
+once those baseline assertions are updated.
 
-- Add ordinary memory Session removal only after explicit close and cleanup, then
-  atomic empty memory Agent retirement; verify create-versus-retire and observers.
-- Retain failed initial creation save candidates and support safe original-range
-  continuation through later explicit shutdown. No claim that a failed write is
-  absent; current conservative barrier keeps stopping and directory leased.
-- Root delegation scope and DSH tool surface are not implemented in the foundation.
-  No fake delegation, notification, subprocess, or live-provider result is claimed.
-- Physical persistent deletion is separate and is not introduced here.
-- Full workspace formatting, Clippy, tests and docs gates remain for the combined
-  candidate. Existing close-query tests may need expectations changed only where
-  reclaimed memory sources now correctly return registered missing-source Faults.
+## Deliberate limits and first-version scope
 
-## Memory retirement increment
+- No unpublished-creation recovery API, retained recovery-candidate framework,
+  extra storage witness or repeated-shutdown retry was introduced. Draft work in
+  that direction was removed before committing, following the user's scope decision.
+  A genuine creation save failure can remain stopping/faulted with its directory
+  leased rather than claim success. New recovery behavior is outside this stage.
+- Losing the last root `Arc<Host>` after work has already failed is uncontrolled
+  instance destruction, not a reported stopped state. No permanent self-cycle was
+  added for that case. Accepted running work, abandoned call waits, closed client
+  connections and explicitly accepted shutdown retain their actual owners.
+- Root delegation scopes and the DSH agent-tool surface remain separate foundation
+  work. No delegation result/notification is invented to fill that absent surface.
+- Persistent deletion, unrelated history, workspaces and independent artifacts are
+  not implicitly removed. Full-version transport/TUI acceptance is not claimed here.
 
-Shutdown implementation commit: `577abca`.
-Session follow-ups: original `f179a0d` / local `72657d9`, original `291d36b` /
-local `07d4fe5`. Integrate only one copy of each.
-
-- Ordinary memory Sessions now release after explicit close and actual worker
-  joins/resource cleanup. Built-in idle memory can reclaim without a Tokio executor.
-  An ordinary final or cancelled Turn with retained inbox does not reclaim it.
-- Last child removal, new creation registration and retiring claim use AgentState.
-  Creating count protects accepted in-flight Session construction. Empty memory
-  Agents retire only after committed creation and settled direct work; Host then
-  removes their registration. Persistent Agents remain without replacement defaults.
-- Host lifetime completion drops runtime memory registrations and bodies after
-  real resource retirement. Persistent Sessions retain their original open/closed
-  business state; no file deletion is performed.
-- Existing subscriptions contain weak Session owners, and Host waits reacquire
-  their source. Reclaimed queries/observers return registered missing-source Faults.
-- The cleanup monitor starts only for explicit close work, holds no idle ownership,
-  exits when cleanup is done, and is joined by shutdown. Starting it on every
-  creation was rejected after a real immediate-root-reopen regression; the existing
-  `awaited_creation_retires_its_owner_before_immediate_root_reopen` now passes.
-- Added a real Runtime ordinary-tool cancellation/save test, distinct from a
-  managed subprocess or DSH delegation integration claim.
-
-Checks on this increment:
+Final local verification at `6914e92` (local copy of original `ace9a70`, after
+`1a59cbd`): workspace formatting, strict all-target Clippy and strict rustdoc passed.
+The following workspace test invocation also passed, including both doctests,
+with exactly the five parent-owned legacy expectations filtered out:
 
 ```sh
-cargo test -p minicore-host-core --offline --test host_shutdown --test entity_retirement
-cargo clippy -p minicore-host-core --all-targets --offline -- -D warnings
-cargo test -p minicore-host-core --offline --test persistent_owners awaited_creation_retires_its_owner_before_immediate_root_reopen
+cargo test --workspace --offline -- \
+  --skip close_clears_default_and_unload_preserves_memory_history \
+  --skip review_memory_default_close_orders_remain_authoritative \
+  --skip review_memory_default_close_race_preserves_actual_acceptance_order \
+  --skip review_preparation_panic_must_be_reported_and_close_settle \
+  --skip review_close_during_preparation_must_finish_after_resolution
 ```
 
-Pass: 10 shutdown tests, 7 retirement tests, strict all-target core Clippy, and the
-immediate-reopen regression. Full core run reached 41/42 legacy persistent tests
-before the monitor regression was corrected; rerun of that failed case passes.
-Legacy runtime tests: 15/19 pass. Four explicitly expect closed memory bodies or
-Agents to remain queryable: `close_clears_default_and_unload_preserves_memory_history`,
-`review_memory_default_close_orders_remain_authoritative`,
-`review_memory_default_close_race_preserves_actual_acceptance_order`, and
-`review_preparation_panic_must_be_reported_and_close_settle`. Parent owns those test
-updates; their replacement assertions must retain the original pre-close checks
-and require actual missing-source Faults after reclaim.
-
-Failed creation follow-up is still pending. Repeated shutdown requests must remain
-current-fact controls, not retry triggers. The earlier contemplated interpretation
-of repeated shutdown as original-save continuation was rejected before any such
-code was written. Last-public-Host-drop handling of already-failed saves is a
-separate destruction-versus-abandonment contract question being resolved by parent;
-no permanent self-retention was added in this increment.
+Focused totals at this checkpoint are unchanged: 10 shutdown, 8 retirement, 4
+history/metadata continuation and 42 persistent-owner cases passed. Independent
+review at `4413b74` also passed its 11 applicable acceptance cases. Full unfiltered
+integration belongs to the parent after its legacy assertion updates; it was not
+claimed by this worktree.
