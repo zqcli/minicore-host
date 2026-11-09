@@ -16,6 +16,7 @@ tempfile = "=3.27.0"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "=0.30.1", default-features = false, features = ["signal", "process"] }
+process-wrap = { version = "=8.2.2", default-features = false, features = ["tokio1", "process-group", "kill-on-drop"] }
 
 [dev-dependencies]
 futures-util = "=0.3.34"
