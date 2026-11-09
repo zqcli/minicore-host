@@ -1,0 +1,18 @@
+[package]
+name = "minicore-host-protocol"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+description = "Strict MiniCore Host v4.93 shared contracts"
+
+[dependencies]
+getrandom = "=0.4.3"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+# Temporary standalone workspace; the integration owner removes this section.
+[workspace]
