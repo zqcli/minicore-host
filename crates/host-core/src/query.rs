@@ -1,6 +1,6 @@
 //! Public query values. Source owners retain the underlying data; these values
 //! neither reconstruct previous executions nor add a second retention store.
-use crate::{HistoryItemData, MessageBinding, ModelPartialData, TurnInfo, TurnStateData};
+use crate::{HistoryItemData, MessageBinding, ModelPartialData, TurnStateData};
 use minicore_host_protocol::*;
 use serde::{Deserialize, Serialize};
 
@@ -66,44 +66,10 @@ pub struct TurnPartialData {
     pub response_index: u64,
     pub partial: ModelPartialData,
 }
-/// Immutable terminal facts already retained by the Turn result. Unlike a
-/// current state query, this does not borrow the Session's live runner revision.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct TurnResultInfo {
-    pub state: TurnState,
-    pub config_revision: ConfigRevision,
-    pub outcome: Option<TurnOutcome>,
-    pub persistence: PersistenceState,
-    pub requests: u64,
-    pub tool_rounds: u64,
-    pub phase: Option<TurnPhase>,
-    pub model_retry: Option<ModelRetryProgress>,
-    pub model_attempts: Vec<u8>,
-    pub fault: Option<Fault>,
-    pub persistence_fault: Option<Fault>,
-    pub cleanup_faults: Vec<Fault>,
-}
-impl From<&TurnInfo> for TurnResultInfo {
-    fn from(info: &TurnInfo) -> Self {
-        Self {
-            state: info.state,
-            config_revision: info.config_revision,
-            outcome: info.outcome,
-            persistence: info.persistence,
-            requests: info.requests,
-            tool_rounds: info.tool_rounds,
-            phase: info.phase,
-            model_retry: info.model_retry.clone(),
-            model_attempts: info.model_attempts.clone(),
-            fault: info.fault.clone(),
-            persistence_fault: info.persistence_fault.clone(),
-            cleanup_faults: info.cleanup_faults.clone(),
-        }
-    }
-}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnResultData {
-    pub info: TurnResultInfo,
+    /// The original terminal state, shared with get/list and observations.
+    pub info: TurnStateData,
     pub config: SessionConfig,
     /// Complete native records only. Unfinished responses remain in `partials`.
     pub history: Vec<TurnHistoryItemData>,

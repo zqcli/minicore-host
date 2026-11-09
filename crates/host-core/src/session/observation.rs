@@ -6,6 +6,8 @@ use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};
 
 #[derive(Default)]
 pub(super) struct TurnObservation {
+    // Retained with the original Turn, never projected from a later Runner.
+    terminal_state: Option<TurnStateData>,
     pub(super) interactions: BTreeMap<minicore_runtime::InteractionId, InteractionRecord>,
     pub(super) models: BTreeMap<u64, BTreeMap<String, Body>>,
     pub(super) tools: BTreeMap<ToolCallId, ToolRecord>,
@@ -84,6 +86,18 @@ impl SessionController {
             fault: info.fault.clone(),
             persistence_fault: info.persistence_fault.clone(),
             cleanup_faults: info.cleanup_faults.clone(),
+        }
+    }
+    pub(super) fn retained_turn_state(state: &SessionState, info: &TurnInfo) -> TurnStateData {
+        if info.state == TurnState::Finished {
+            state
+                .output
+                .get(&info.id)
+                .and_then(|turn| turn.terminal_state.as_ref())
+                .expect("finished Turn retains its terminal observation")
+                .clone()
+        } else {
+            Self::turn_state(info, state.runner_revision)
         }
     }
     pub(super) fn publish_observation(&self, state: &mut SessionState, snapshot: &SessionSnapshot) {
@@ -544,6 +558,11 @@ impl SessionController {
         info: &TurnInfo,
         report: Option<&LoopReport>,
     ) {
+        // Finished is a new state transition, not another view of Finalizing.
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
         let revision = state.runner_revision;
         if let Some(resolution) = match info.outcome {
             Some(TurnOutcome::Cancelled)
@@ -579,6 +598,11 @@ impl SessionController {
         }
         let source = self.turn_identity(info);
         let data = Self::turn_state(info, revision);
+        state
+            .output
+            .entry(info.id.clone())
+            .or_default()
+            .terminal_state = Some(data.clone());
         self.access
             .observation
             .publish(ObservationEvent::State(StateEvent::Turn {
@@ -632,7 +656,7 @@ impl SessionController {
             if states {
                 initial.push(StateEvent::Turn {
                     source: source.clone(),
-                    data: Self::turn_state(info, state.runner_revision),
+                    data: Self::retained_turn_state(&state, info),
                 });
             }
             if let Some(observation) = state.output.get(&info.id) {

@@ -50,7 +50,7 @@ impl SessionController {
             let info = retained_turn(&state, id)?;
             Ok(TurnDetailsSnapshot {
                 source: self.turn_identity(info),
-                data: details(info, state.runner_revision),
+                data: details(&state, info),
             })
         })
     }
@@ -67,7 +67,7 @@ impl SessionController {
                 .map(|info| TurnListEntry {
                     turn_id: info.id.clone(),
                     load_id: info.load_id.clone(),
-                    data: details(info, state.runner_revision),
+                    data: details(&state, info),
                 })
                 .collect();
             Ok(TurnListSnapshot {
@@ -89,7 +89,7 @@ impl SessionController {
             Ok(TurnResultSnapshot {
                 source: self.turn_identity(&result.info),
                 data: TurnResultData {
-                    info: (&result.info).into(),
+                    info: Self::retained_turn_state(&state, &result.info),
                     config: result.info.config.clone(),
                     history: project_history(result, state.output.get(id))?,
                     partials: result
@@ -115,9 +115,9 @@ fn retained_turn<'a>(state: &'a SessionState, id: &TurnId) -> Result<&'a TurnInf
         .or_else(|| state.completed.get(id).map(|result| &result.info))
         .ok_or_else(missing_turn)
 }
-fn details(info: &TurnInfo, revision: u64) -> TurnDetailsData {
+fn details(state: &SessionState, info: &TurnInfo) -> TurnDetailsData {
     TurnDetailsData {
-        state: SessionController::turn_state(info, revision),
+        state: SessionController::retained_turn_state(state, info),
         config: info.config.clone(),
     }
 }
