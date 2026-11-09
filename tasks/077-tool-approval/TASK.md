@@ -87,3 +87,18 @@ semantics and limits. There is no TUI change, live-provider result, benchmark
 measurement, approval platform, cache or Runtime modification. Producer scope
 is complete; independent task078 re-review, the full combined workspace gate,
 README/PROJECT integration and authorized publication remain with the parent.
+
+
+## Follow-up: transport edit-fixture integration
+
+The parent reported task078's independent source-origin re-review passed 12/12
+probes, then task076's combined `376a463` transport run exposed two existing
+workspace edit fixtures still relying on implicit unattended execution. This is
+an additional fixture omission, not a reversal of the earlier 211-case scoped
+evidence.
+
+- Reproduced at this topic's `2047889`: `cargo test -p minicore-host-transport --test workspace_tool_changes --locked --offline` failed both cases at the existing five-second HTTP request wait. The actual production Ask policy correctly waited for an answer.
+- Changed only the two mutating creation requests in `crates/host-transport/tests/workspace_tool_changes.rs` to select `ApprovalMode::Auto`. The shared `workspace_common::request` retains default Ask, as do read-only/default and approval tests. All existing file-byte, edit-origin, revision, output/source, cross-Session and persistent-reopen assertions are unchanged. No transport production code was modified.
+- Scanned production HostResourceBuilder usage in transport workspace, compaction, reload, resource-query and diagnostic-health fixtures. Only these two tests emit mutating HTTP tool calls. Other paths remain unchanged.
+- Re-ran the target: **2/2 passed**. `cargo test -p minicore-host-transport --all-targets --locked --offline` passed all **135 unique target/test-name cases**, confirmed by the same command with `-- --list`. `cargo clippy -p minicore-host-transport --all-targets --locked --offline -- -D warnings`, rustfmt and whitespace checks also pass.
+- This follow-up adds no test cases, changes no production policy and performs no remote push. The parent still owns the combined workspace gate and publication.

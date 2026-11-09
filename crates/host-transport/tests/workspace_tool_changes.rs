@@ -40,13 +40,17 @@ async fn actual_edits_remain_bound_to_original_tool_while_workspace_config_chang
     let current = tempfile::tempdir().unwrap();
     repository(current.path());
     fs::write(current.path().join("file"), "current workspace only\n").unwrap();
-    let target = create(
-        &host,
-        &operator.caller(),
-        Some(original.path()),
-        selection(&["write", "edit"]),
-    )
-    .await;
+    let mut creation = request(Some(original.path()), selection(&["write", "edit"]));
+    // This fixture verifies actual edit ownership, not interactive approval.
+    creation.config.session_defaults.execution.approval = ApprovalMode::Auto;
+    let receipt = host
+        .create_agent_async(&operator.caller(), creation)
+        .await
+        .unwrap();
+    let target = SessionRef {
+        agent_id: receipt.agent_id.unwrap(),
+        session_id: receipt.session_id.unwrap(),
+    };
     let other = create(&host, &operator.caller(), Some(current.path()), vec![]).await;
     let observer = HostClient::in_process(host.clone())
         .unwrap()
@@ -287,6 +291,8 @@ async fn reopened_sessions_expose_missing_edit_coverage_but_current_turn_edits_a
     let host = persistent(data.path(), &http).await;
     let first = HostClient::in_process(host.clone()).unwrap();
     let mut create = request(Some(root.path()), selection(&["write"]));
+    // Preserve unattended execution across the persistent edit-source reopen.
+    create.config.session_defaults.execution.approval = ApprovalMode::Auto;
     create.mode = StorageMode::Persistent;
     let receipt = first.create_agent(create, options()).await.unwrap();
     let target = SessionRef {
