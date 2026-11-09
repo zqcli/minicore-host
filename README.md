@@ -1,5 +1,7 @@
 # minicore-host
 
+Workspace restoration is in progress after the execution environment was replaced. See [task 069](tasks/069-workspace-recovery/TASK.md) for the exact recovered source boundary and missing later changes. Configured credential inheritance remains an open security finding; this restored prefix is not the previously measured final local checkpoint or a release-ready build.
+
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
 The implementation contains strict contracts, Linux durable storage, real Runtime scheduling, production HTTP/SSE resources, scoped observation/interaction adapters and the owner-bound agent tool. It is not yet the complete first version. See [PROJECT.md](PROJECT.md) for exact baselines, implemented boundaries and remaining work.

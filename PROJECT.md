@@ -1,5 +1,9 @@
 # MiniCore Host
 
+## Workspace recovery in progress
+
+The former execution workspace was replaced. [Task 069](tasks/069-workspace-recovery/TASK.md) identifies the exact recovered Git prefix, missing unpublished work and verification limits. Current local recovery code is `7cc0bd2b399c3ea1320647e13d87bf57376934a5`, with tree equal to the verified thirteenth prepared source step; it is not the lost final b291551 checkpoint. Public dev remains `1a2935f60ad5cb58b6d45b82f40883149a9b4044`, whose CI is successful. Missing later source is being recovered or explicitly reconstructed and will receive a fresh gate. Configured credential inheritance remains an open synthetic-probe-confirmed security defect; no real-credential test or release readiness is claimed. The older sections below retain their own historical context.
+
 ## Current executable checkpoint
 
 Latest local code is `7cf8e104bf84ee599331a3d96e181bba53fdf54c`: actual input MessageId/source/reply provenance now reaches normal and compaction requests without changing native history or durable bytes. Independent review passed 790 committed cases plus three extra real HTTP probes; the combined whole-workspace gate passes **822 unique tests and 4 doctests**. [The provenance manifest](docs/executable-provenance-verification.json), [task 055](tasks/055-input-provenance/TASK.md) and the 71-entry source map preserve exact evidence. Current query contract/revision corrections, auxiliary summaries/pagination, complete business diagnostics and performance work remain open. Publication is separately frozen at the preceding 9598f8f checkpoint; no new remote result is claimed here.
