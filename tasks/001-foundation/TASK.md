@@ -1,6 +1,6 @@
 # Build Host Foundation
 
-Status: first real Runtime foundation milestone implemented; final storage hardening and complete workspace gate in progress. The full v4.93 release is not complete.
+Status: first real Runtime foundation milestone and aggregate validation complete. Persistent owner composition continues in task 006. The full v4.93 release is not complete.
 
 ## Goal
 
@@ -67,3 +67,26 @@ The core integration runs actual Host/Agent/SessionController/AgentLoop code. Sc
 2. Integrate final storage review fixes and re-run the aggregate gate at a stable Runtime cleanup commit.
 3. Continue persistent entity composition in its own topic worktree, then the remaining full-version lifecycle/API/transport/tool stages. See `PROJECT.md` for the complete open scope.
 4. The separate external review and required integration gates must pass before any main merge. Runtime and Host pushes both still need explicit owner approval.
+
+## Final foundation and persistent-initialization gate
+
+The following small commits followed the first 125-test checkpoint:
+
+- `dcc1fc6`: durability retry, I/O identity checks, terminal partial, exact numeric decoding and incremental validation overlay.
+- `9291f0d`: read each Agent's own record without requiring its default Session to be healthy.
+- `f70ae2e`: multi-thread owner regressions, condition-based waits and the final-claim-wins steer ordering.
+- `7308ae9`: complete storage schema/limits documentation.
+- `3945488`: initial persistent direct-owner startup, identity and lazy history/Runtime integration. Persistent mutations are still in progress separately.
+
+At Host `3945488` with Runtime `4f976b41f2381e2b09f3383aa66318b7aee2a8b3`, `./scripts/check.sh` passed:
+
+- Formatting and Clippy for all workspace targets with warnings denied.
+- 144 unit/integration tests: core 26, protocol 47, provider 27, storage 44; 0 failures.
+- 2 compiling doctests, rustdoc with warnings denied and `git diff --check`.
+- The 16-case owner suite separately passed 25 repeated runs. Repetition increases scheduling exposure, not distinct test coverage or a concurrency limit.
+
+Validation output is retained in the engineering workspace as `minicore-host-validation/persistent-initialization-3945488.log`; exact command is `./scripts/check.sh` using the environment above. Earlier checkpoint logs are retained separately, not silently overwritten with newer results.
+
+Runtime cleanup removed superseded test scans/constant assertions and incorrect old handoff guidance; no production source or dependency was removed because the inspected paths remain used. Its final full gate passed 307 tests, 2 doctests, 70 acceptance items and the required architecture/documentation/lint gates. A separate read-only review re-ran 307 tests and 51 focused tests at that exact SHA and found no new blocking issue. This is not the external Host review required before main merge.
+
+The owner approved publishing only Runtime `feat/host-history-handoff` at that exact SHA. The one push attempt returned exit 128 because this environment could not obtain a GitHub username/credential. Subsequent remote reads show the target ref and commit absent; workflow runs for that SHA are empty. No other ref was modified, no force push was attempted, and Host publication remains unapproved. The GitHub connector's create-commit API omits author/committer/time fields and cannot preserve these original commit IDs, so it is not used to manufacture substitute commits.
