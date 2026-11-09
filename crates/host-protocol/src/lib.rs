@@ -37,3 +37,41 @@ impl std::error::Error for ValidationError {}
 pub(crate) fn invalid(message: impl Into<String>) -> ValidationError {
     ValidationError(message.into())
 }
+
+pub(crate) fn present<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+
+// Cross-field validated DTOs reject invalid combinations in both directions.
+macro_rules! validated_dto {
+    ($name:ident, $wire:ident, $wire_name:literal { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
+        #[derive(Clone, Debug, Eq, PartialEq)]
+        pub struct $name { $(pub $field: $ty),* }
+        #[derive(serde::Serialize, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct $wire { $($(#[$attr])* $field: $ty),* }
+        impl serde::Serialize for $name {
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok,S::Error> {
+                self.validate().map_err(serde::ser::Error::custom)?;
+                $wire { $($field: self.$field.clone()),* }.serialize(serializer)
+            }
+        }
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self,D::Error> {
+                let wire = $wire::deserialize(deserializer)?;
+                let value = Self { $($field: wire.$field),* };
+                value.validate().map_err(serde::de::Error::custom)?;
+                Ok(value)
+            }
+        }
+    };
+}
+pub(crate) use validated_dto;
+
+mod message;
+pub use message::*;
+
+mod receipt;
+pub use receipt::*;

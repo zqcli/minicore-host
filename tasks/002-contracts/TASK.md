@@ -27,3 +27,11 @@ Tests: 1 internal uniform-encoding test and 13 integration tests passed. Clippy 
 ## Next
 
 Strict text requests and typed receipts, connection/control facts, exact 52-method catalog with explicit staged availability, additional positive and negative wire tests.
+
+## Milestone 2: text requests and receipt facts
+
+- Milestone 1 commit: `a87e35978c20d8b7fa2339345bf7ee77f75bce8c`.
+- Text-only MessageInput/SendMessage rejects source/authority/attachment/wait options; direct-owner message targets and trusted historical provenance are separate.
+- Typed message.send acceptance retains actual queue and optional known startup Fault without asserting execution or persistence.
+- Agent/Session creation requests and complete/partial/progress receipts enforce publication IDs, requested-message presence, prerequisite order and acceptance facts in both serialization directions. Ordinary create-call return validation is distinct from pending/running progress queries.
+- Added 12 positive/negative message/creation tests. Initial test exposed serde's unknown-field handling for tagged unit variants; CreateStep now has explicit strict wire validation. Final 26 total tests and clippy passed using the commands above.
