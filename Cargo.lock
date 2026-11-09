@@ -789,6 +789,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicore-host-tools"
+version = "0.1.0"
+dependencies = [
+ "minicore-host-core",
+ "minicore-host-protocol",
+ "minicore-runtime",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "minicore-host-transport"
 version = "0.1.0"
 dependencies = [
