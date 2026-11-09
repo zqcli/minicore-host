@@ -29,9 +29,9 @@ pub use control::{CallerContext, ConnectionHandle};
 pub use host::{Host, HostProcessControl, HostProcessSnapshot, WorkspaceSnapshot};
 pub use session::{
     ApprovalAnswer, BoundCompactionResources, BoundResources, CompactionResourceFuture,
-    HistoryBackend, InteractionAnswerData, LoadFuture, MemoryHistory, ResourceFuture,
-    ResourceResolver, SaveFuture, SessionSubscription, ToolOutputBinding, ToolOutputLease,
-    ToolOutputSink, TurnToolCleanup,
+    HistoryBackend, HistoryReadFuture, InteractionAnswerData, LoadFuture, MemoryHistory,
+    ResourceFuture, ResourceResolver, SaveFuture, SessionSubscription, ToolOutputBinding,
+    ToolOutputLease, ToolOutputSink, TurnToolCleanup,
 };
 pub use types::*;
 

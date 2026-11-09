@@ -136,11 +136,25 @@ pub type SaveFuture<'a> =
 /// batches through cancellation and perform disk work outside owner state locks.
 pub type LoadFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Vec<HistoryEntry>, Fault>> + Send + 'a>>;
+/// A validated cold snapshot, or None when the existing execution owner has
+/// acquired the journal and must publish its accepted history instead.
+pub type HistoryReadFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Vec<HistoryEntry>>, Fault>> + Send + 'a>>;
 pub trait HistoryBackend: Send + Sync + std::any::Any {
     fn mode(&self) -> StorageMode;
     /// Original entries in save order. The Session separately projects readable
     /// content and complete Runtime context; partials never enter the latter.
     fn load(&self) -> LoadFuture<'_>;
+    /// Observe cold content without loading execution or reconciling a save.
+    /// Custom backends opt in explicitly; reading never falls back to load.
+    fn read_cold(&self) -> HistoryReadFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryLoadFailed,
+                "this history backend does not support cold content reads",
+            ))
+        })
+    }
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
     /// Explicitly continue only the original retained append. Never reload,
     /// accept another batch, or infer confirmation from readable bytes.
@@ -1080,6 +1094,7 @@ impl SessionController {
                         state.residency = Residency::Unloaded;
                         state.load_id = None;
                         self.finish_load_resume(&mut state);
+                        self.publish(&mut state);
                     }
                     Err(fault) => {
                         self.preparation_failed(fault);
