@@ -201,6 +201,21 @@ impl SessionController {
         self.reclaim_bodies();
         Ok(true)
     }
+    /// Host stopped ends a memory entity's running lifetime, independently of
+    /// business close. The direct Agent invokes this only after actual release.
+    pub(crate) fn reclaim_shutdown_memory_owned(&self) -> Result<(), Fault> {
+        {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            if state.info.mode != StorageMode::Memory || !state.released || state.releasing {
+                return Err(Fault::new(
+                    FaultKind::SessionBusy,
+                    "shutdown memory reclamation requires completed resource retirement",
+                ));
+            }
+        }
+        self.reclaim_bodies();
+        Ok(())
+    }
     pub(crate) async fn retire_closed_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.release_resources(true).await?;
         self.reclaim_bodies();
@@ -287,7 +302,16 @@ impl SessionController {
                 return Err(fault);
             }
         }
-        if let Err(fault) = self.backend.release().await {
+        let released = AssertUnwindSafe(async { self.backend.release().await })
+            .catch_unwind()
+            .await
+            .unwrap_or_else(|_| {
+                Err(Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "history resource retirement panicked",
+                ))
+            });
+        if let Err(fault) = released {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             state.releasing = false;
             state.close_fault = Some(fault.clone());

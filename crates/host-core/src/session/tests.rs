@@ -605,7 +605,7 @@ impl HistoryBackend for FailureJournal {
             self.inner.reconcile().await
         })
     }
-    fn release(&self) -> SaveFuture<'_> {
+    fn release(&self) -> Pin<Box<dyn Future<Output = Result<(), Fault>> + Send + '_>> {
         self.inner.release()
     }
 }
@@ -1187,4 +1187,62 @@ async fn synchronous_backend_panics_are_failed_saves_not_lost_owners() {
         state.active.as_ref().unwrap().info.outcome,
         original.outcome
     );
+}
+
+#[tokio::test]
+async fn save_acknowledgement_does_not_replace_actual_worker_retirement() {
+    let dir = tempfile::tempdir().unwrap();
+    let root_path = dir.path().join("root");
+    let root = DataRoot::acquire(&root_path).unwrap();
+    let host_id = HostId::new().unwrap();
+    let incarnation = HostIncarnation::new().unwrap();
+    let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
+    let connection = access.connect().unwrap();
+    let session = SessionController::new(
+        SessionId::new().unwrap(),
+        AgentId::new().unwrap(),
+        host_id,
+        incarnation,
+        SessionConfig::default(),
+        access,
+        Arc::new(Resources {
+            model: model(Vec::new()),
+            tools: ToolSet::default(),
+        }),
+        Arc::new(MemoryHistory),
+        Vec::new(),
+        Arc::new(AtomicBool::new(true)),
+    )
+    .hold_root(Some(Arc::new(root)));
+    let gate = Arc::new(Semaphore::new(0));
+    let worker_gate = gate.clone();
+    // Explicit worker-retirement fixture, not a fabricated Runtime execution:
+    // all public save/business flags are settled while the actual task is alive.
+    session.state.lock().unwrap().driver_task = Some(tokio::spawn(async move {
+        worker_gate.acquire().await.unwrap().forget();
+    }));
+    session.begin_host_shutdown_owned(true);
+    assert!(session.shutdown_status_owned().quiescent);
+    let owner = session.clone();
+    let release = tokio::spawn(async move { owner.release_host_resources_owned().await });
+    until_releasing(&session).await;
+    assert!(!release.is_finished());
+    assert!(DataRoot::acquire(&root_path).is_err());
+    assert_eq!(
+        session.pause(&connection.caller()).unwrap_err().kind(),
+        FaultKind::HostLifecycleUnavailable
+    );
+    gate.add_permits(1);
+    release.await.unwrap().unwrap();
+    assert!(DataRoot::acquire(&root_path).is_ok());
+}
+async fn until_releasing(session: &Arc<SessionController>) {
+    // The state claim is the deterministic gate; yields do not guess elapsed I/O time.
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !session.state.lock().unwrap().releasing {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
 }

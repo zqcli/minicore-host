@@ -97,8 +97,8 @@ pub trait HistoryBackend: Send + Sync + std::any::Any {
     /// Called by a fenced owner after actual workers have returned. Implementors
     /// retaining external storage handles must release them here, not merely
     /// publish a persisted acknowledgement.
-    fn release(&self) -> SaveFuture<'_> {
-        Box::pin(async { Ok(PersistenceState::NotApplicable) })
+    fn release(&self) -> Pin<Box<dyn Future<Output = Result<(), Fault>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
     }
 }
 pub struct MemoryHistory;
@@ -929,6 +929,7 @@ impl SessionController {
                 })
         })
     }
+    #[cfg(test)]
     pub(crate) async fn wait_turn(
         &self,
         caller: &CallerContext,

@@ -1,7 +1,11 @@
 use crate::session::{HistoryBackend, LoadFuture, SaveFuture};
 use minicore_host_protocol::{Fault, FaultDetails, FaultKind, HistoryLoadDetails, StorageMode};
 use minicore_host_storage::{HistoryEntry, SaveRange, SessionJournal, SessionStore};
-use std::sync::{Arc, Mutex};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 
 /// A save task retains the journal and its exclusive root guard even if the
 /// caller abandons its future. This disk-only mutex is never an owner/access lock.
@@ -179,9 +183,8 @@ impl HistoryBackend for JournalHistory {
             .map_err(save_worker_fault)?
         })
     }
-    fn release(&self) -> SaveFuture<'_> {
+    fn release(&self) -> Pin<Box<dyn Future<Output = Result<(), Fault>> + Send + '_>> {
         let state = Arc::clone(&self.state);
-        let mode = self.mode;
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
                 let mut current = state.lock().expect("journal mutex poisoned");
@@ -202,11 +205,7 @@ impl HistoryBackend for JournalHistory {
                 drop(current);
                 drop(journal);
                 drop(store);
-                Ok(if mode == StorageMode::Memory {
-                    minicore_host_protocol::PersistenceState::NotApplicable
-                } else {
-                    minicore_host_protocol::PersistenceState::Persisted
-                })
+                Ok(())
             })
             .await
             .map_err(save_worker_fault)?
