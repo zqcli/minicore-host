@@ -1,8 +1,11 @@
 mod query;
 
 use super::*;
+use crate::diagnostics::{self as diagnostic, Record};
 use crate::observation::*;
+use minicore_host_diagnostics::{EventData, Scope};
 use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};
+use tracing::Level;
 
 #[derive(Default)]
 pub(super) struct TurnObservation {
@@ -390,6 +393,30 @@ impl SessionController {
         };
         let source = self.turn_identity(&active.info);
         let base = active.response_base;
+        // RequestStarted is an actual Runtime fact consumed by this direct
+        // owner, not an observer callback or a reconstructed provider request.
+        let diagnostic = match &event {
+            LoopEvent::RequestStarted {
+                loop_id: actual,
+                request_index,
+                ..
+            } if *actual == loop_id => Some(Record::new(
+                diagnostic::event(
+                    Level::DEBUG,
+                    Scope::Runtime,
+                    "session.runtime",
+                    "model.started",
+                    "Runtime started a model request",
+                    &["response_index", "loop_id", "request_index"],
+                ),
+                EventData::default()
+                    .context(diagnostic::turn_context(&source))
+                    .attribute("response_index", base + u64::from(*request_index))
+                    .attribute("loop_id", actual.to_string())
+                    .attribute("request_index", u64::from(*request_index)),
+            )),
+            _ => None,
+        };
         state.runner_revision = state
             .runner_revision
             .checked_add(1)
@@ -552,6 +579,10 @@ impl SessionController {
             // ToolFinished is deliberately not used to synthesize a ToolResult.
             _ => {}
         }
+        drop(state);
+        // Called only by the owned Runtime receiver outside admission scopes.
+        // Both Session state and observation publication locks have ended.
+        diagnostic::emit(diagnostic);
     }
     pub(super) fn observe_finished(
         &self,

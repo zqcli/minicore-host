@@ -273,3 +273,38 @@ business assertions. It will be brought in as a separate existing baseline
 dependency after this functional slice is committed; it is not a diagnostics
 production fix. No current workspace-wide or independent approval claim is made
 for this slice.
+
+Fixed transport source: `520d6f13993c67a2f22b966deb6fe4f892317170`.
+The already-owned fixture dependency was then cherry-picked as
+`55e3bcdd2af889898b9ecb0054cbd045525e563c` from source `5033e3b7bb316e6faf96a1362ca206013f58cde2`.
+It must not be re-integrated at the root. On that fixed source, full transport
+all-target tests passed: 138 unique cases, counted by `--list`. The green output
+is `/workspace/shared/task053-recovered-transport-all-targets-fixed.log`; the red
+pre-dependency output remains separate. This is not a workspace-wide gate.
+
+### Owner record helper and first real Runtime consumer
+
+The reconstructed core helper separates the owned scalar `Record(EventSpec,
+EventData)` from emission. Its frozen crate-private API is `Record::new`,
+`Record::emit`, `emit(IntoIterator<Item = Record>)`, `event`, `session_context`
+and `turn_context`. It retains no owner, lock, queue, retry mechanism or body.
+Callers must return these records through any outer admission fence and emit only
+once all owner/observation/connection locks have ended. This is a small adaptation
+of recovered source fragments, not a claim of a complete byte-identical old file.
+
+The first consumer is the actual bound Runtime `RequestStarted` event in
+`SessionController::observe_runtime`. It builds only the existing Turn identity,
+LoopId, request index and response index under the existing Session boundary,
+then emits after that lock and observation publication scopes end. This receiver
+is called by the owned Runtime driver outside admission wrappers. It neither
+synthesizes model attempts nor estimates unavailable retry-wait time.
+
+The existing real Host/Runtime/local HTTP compound regression now checks all
+three pre-close model starts against the actual completed/failed/resumed Turn
+identities and the provider's original LoopId/request index. No observer is
+installed. `cargo test -p minicore-host-transport --test diagnostic_calls --locked
+--offline` and the same target's strict Clippy both passed; formatting and diff
+checks passed. Logs are `task053-recovered-owner-helper-tests.log` and
+`task053-recovered-owner-helper-clippy.log` under `/workspace/shared/`. Broader
+owner lifecycle, Session acceptance/finalization/storage and tool diagnostics
+remain unfinished and do not inherit a full approval from this helper slice.

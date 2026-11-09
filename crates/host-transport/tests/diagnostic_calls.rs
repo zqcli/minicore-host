@@ -191,6 +191,43 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    let starts: Vec<_> = records
+        .iter()
+        .filter(|row| row["component"] == "session.runtime" && row["event"] == "model.started")
+        .collect();
+    assert_eq!(starts.len(), 3);
+    for source in [&completed.source, &failed.source, &resumed.source] {
+        let started: Vec<_> = starts
+            .iter()
+            .filter(|row| row["turn_id"] == source.turn_id.as_str())
+            .collect();
+        assert_eq!(started.len(), 1);
+        let started = started[0];
+        assert_eq!(started["scope"], "RUNTIME");
+        assert_eq!(started["host_id"], source.session.host_id.as_str());
+        assert_eq!(
+            started["host_incarnation"],
+            source.session.host_incarnation.as_str()
+        );
+        assert_eq!(started["agent_id"], source.session.agent_id.as_str());
+        assert_eq!(started["session_id"], source.session.session_id.as_str());
+        assert_eq!(
+            started["load_id"],
+            source.load_id.as_ref().unwrap().as_str()
+        );
+        assert_eq!(started["attributes"]["response_index"], 0);
+        assert_eq!(started["attributes"]["request_index"], 0);
+        // Match the actual provider attempt rather than inventing a new link.
+        assert_eq!(
+            records
+                .iter()
+                .filter(|row| row["event"] == "model.transport_started"
+                    && row["attributes"]["loop_id"] == started["attributes"]["loop_id"]
+                    && row["attributes"]["request_index"] == started["attributes"]["request_index"])
+                .count(),
+            1
+        );
+    }
     for private in [
         KEY,
         ROLE,

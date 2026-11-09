@@ -10,6 +10,7 @@ mod collaboration;
 mod configuration;
 mod context;
 mod control;
+mod diagnostics;
 pub use collaboration::*;
 pub use configuration::{
     HostConfig, HostConfigSnapshot, HostConfigurationFuture, HostConfigurationPreparer,
