@@ -11,9 +11,11 @@ impl HistoryItemData {
             HistoryEntry::Partial { partial, .. } => Some(Self::Partial {
                 partial: partial.into(),
             }),
-            HistoryEntry::Summary { summary } => Some(Self::Summary {
-                text: summary.content.as_str().to_owned(),
-            }),
+            HistoryEntry::Summary { summary } | HistoryEntry::Compaction { summary, .. } => {
+                Some(Self::Summary {
+                    text: summary.content.as_str().to_owned(),
+                })
+            }
             HistoryEntry::TurnFinished { .. } => None,
         }
     }
