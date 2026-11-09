@@ -39,16 +39,14 @@ impl CoreTurnPort {
             InspectTarget::Agent { host_id, agent_id } => {
                 self.check_host(&host_id)?;
                 let target = AgentRef { host_id, agent_id };
-                let details = self.capability.agent_details(&target)?;
-                let info = details.info;
-                let mut data = encoded(&info)?;
+                let summary = self.capability.agent_summary(&target)?;
+                let mut data = encoded(&summary)?;
                 remove(&mut data, &["id", "host_id"]);
-                if !request.include_config {
-                    remove(&mut data, &["config"]);
+                if request.include_config {
+                    data["config"] = encoded(self.capability.agent_snapshot(&target)?.config)?;
                 }
-                data["sessions"] = encoded(details.sessions)?;
                 Ok(
-                    json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":info.id,"data":data}),
+                    json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":summary.id,"data":data}),
                 )
             }
             InspectTarget::Session {

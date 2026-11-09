@@ -167,8 +167,8 @@ impl TurnCapability {
     pub fn agent_snapshot(&self, target: &AgentRef) -> Result<AgentInfo, Fault> {
         self.host()?.agent_info(&self.caller()?, target)
     }
-    pub fn agent_details(&self, target: &AgentRef) -> Result<crate::AgentDetails, Fault> {
-        self.host()?.agent_details(&self.caller()?, target)
+    pub fn agent_summary(&self, target: &AgentRef) -> Result<crate::AgentSummary, Fault> {
+        self.host()?.agent_summary(&self.caller()?, target)
     }
     pub fn session_snapshot(&self, target: &SessionRef) -> Result<SessionInfo, Fault> {
         self.host()?.session_info(&self.caller()?, target)

@@ -5,6 +5,15 @@ use crate::{
 };
 
 impl Host {
+    pub(crate) fn agent_summary(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+    ) -> Result<AgentSummary, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?.summary(caller)
+    }
+
     pub fn agent_details(
         &self,
         caller: &CallerContext,
