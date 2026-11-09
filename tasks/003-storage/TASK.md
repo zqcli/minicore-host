@@ -44,7 +44,7 @@ Exact commands, all passed against the final working tree:
 - `cargo test --manifest-path crates/host-storage/Cargo.toml --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"'`
 - `RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path crates/host-storage/Cargo.toml --no-deps --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"'`
 
-Final results: **11 unit tests + 33 integration tests + 1 compiling rustdoc example** passed. Formatting, Clippy warnings-as-errors and rustdoc warnings-as-errors passed. Standalone test Cargo.lock/target files and the temporary protocol symlink are not committed. The parent integrates the reproducible workspace lock and vendored Runtime patch, then runs the full workspace gates.
+Final results after the child-entry isolation follow-up: **11 unit tests + 36 integration tests + 1 compiling rustdoc example** passed. Formatting, Clippy warnings-as-errors and rustdoc warnings-as-errors passed. Standalone test Cargo.lock/target files and the temporary protocol symlink are not committed. The parent integrates the reproducible workspace lock and vendored Runtime patch, then runs the full workspace gates.
 
 ## Integration rules and remaining limits
 
@@ -55,3 +55,14 @@ Final results: **11 unit tests + 33 integration tests + 1 compiling rustdoc exam
 - Standalone Summary records preserve native summary content; they do not imply prefix replacement. Actual compaction replacement needs its owner-level commit contract.
 - No power-loss experiment, network-filesystem certification, other-OS validation, live provider execution or TUI validation was performed by this storage task. The focused read-only review does not replace the user's separate independent review.
 - No remote push or tag was attempted.
+
+
+## Follow-up: isolate unsafe child entries during enumeration
+
+- Persistent-owner composition review of baseline `3945488` exposed an additional boundary error: an otherwise canonical Session ID entry made writable by others caused `list_ids` to reject the whole Agent before the Session owner could record its own fault. The same helper affected Host-level Agent enumeration.
+- Added regressions first: both the Session and Agent child-isolation tests failed on real chmod 0777 directories before the production change.
+- Enumeration now returns canonical direct-child IDs without opening child paths. Each actual child load/write retains every existing no-follow, directory permission, file type, schema and ownership check. No symlink target is traversed during enumeration.
+- The two isolation tests cover writable directories, regular-file replacements and symlinks to otherwise valid objects. In every case the bad child remains explicitly unreadable/unwritable, original data stays unchanged and a healthy sibling can load and complete a durable append.
+- A third regression verifies that unsafe shared `agents` or `sessions` collection containers still fail at their actual owner boundary. Invalid names without a canonical object ID remain structural errors; they are not silently skipped.
+- Focused pre-fix command: the exact test command above with `unsafe_child_ -- --nocapture` appended; 2 tests failed as expected. Post-fix focused commands with `unsafe_child_ -- --nocapture` and `unsafe_shared_collection_ -- --nocapture` passed (2 and 1 tests respectively).
+- Full follow-up gates use the exact fmt, Clippy, test and rustdoc commands above. Result: 11 unit + 36 integration + 1 compiling doc example passed; no warnings, remote writes or scope changes.

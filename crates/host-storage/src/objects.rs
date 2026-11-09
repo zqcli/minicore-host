@@ -117,6 +117,9 @@ impl HostStore {
             mode,
         }
     }
+    /// Discover canonical direct-child IDs without opening their entries. Each
+    /// Agent's load checks its directory safety and authoritative ownership; one
+    /// unsafe child must not prevent other Agents from being initialized.
     pub fn list_agents(&self) -> Result<Vec<AgentId>, StorageError> {
         self.check_host()?;
         if !self.root.inner.directory.contains("agents")? {
@@ -244,6 +247,8 @@ impl AgentStore {
             mode,
         })
     }
+    /// Discover canonical direct-child IDs, not a claim that their objects are
+    /// usable. Session loads perform all path/ownership checks independently.
     pub fn list_sessions(&self) -> Result<Vec<SessionId>, StorageError> {
         self.load_record()?;
         let dir = self.directory(false)?;
@@ -441,7 +446,10 @@ fn list_ids<I: std::str::FromStr>(dir: &Directory) -> Result<Vec<I>, StorageErro
             let id = name.parse().map_err(|_| StorageError::UnsafePath {
                 reason: "object directory name is not a canonical ID",
             })?;
-            dir.child(&name, false)?;
+            // Never open or follow a child while enumerating its owner. A
+            // canonical ID names the fault target even when its entry is a
+            // symlink, non-directory or unsafe directory. Actual object reads
+            // and writes still require Directory::child's no-follow checks.
             Ok(id)
         })
         .collect()

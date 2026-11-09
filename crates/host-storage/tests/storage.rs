@@ -1160,3 +1160,211 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
     assert!(healthy.load().is_ok());
     assert!(!f.history_path().exists());
 }
+
+fn create_sibling_session(agent: &AgentStore) -> SessionStore {
+    let session = agent
+        .session(SessionId::new().unwrap(), StorageMode::Persistent)
+        .unwrap();
+    session
+        .save(&SessionRecord::new(
+            session.id().clone(),
+            agent.id().clone(),
+            SessionData {
+                mode: StorageMode::Persistent,
+                agent_config_revision: 1,
+                config_revision: 1,
+                effective_config: SessionConfig::default(),
+                parent: None,
+                closed: None,
+            },
+        ))
+        .unwrap();
+    session
+}
+
+#[derive(Clone, Copy, Debug)]
+enum UnsafeChildEntry {
+    WritableDirectory,
+    File,
+    Symlink,
+}
+
+fn make_child_entry_unsafe(
+    path: &std::path::Path,
+    outside: &std::path::Path,
+    kind: UnsafeChildEntry,
+) {
+    match kind {
+        UnsafeChildEntry::WritableDirectory => {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o777)).unwrap()
+        }
+        UnsafeChildEntry::File => {
+            fs::rename(path, outside).unwrap();
+            fs::write(path, b"not a directory").unwrap();
+        }
+        UnsafeChildEntry::Symlink => {
+            // The target is otherwise a fully valid object, so the subsequent
+            // load must reject the link rather than succeed by following it.
+            fs::rename(path, outside).unwrap();
+            symlink(outside, path).unwrap();
+        }
+    }
+}
+
+fn assert_healthy_session_can_persist(session: &SessionStore) {
+    assert!(session.load().is_ok());
+    let mut journal = session.open_journal().unwrap();
+    journal
+        .accept(vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())])
+        .unwrap();
+    assert_eq!(
+        journal.persist_pending().unwrap().persistence,
+        PersistenceState::Persisted
+    );
+    drop(journal);
+    assert_eq!(session.read_history().unwrap().records.len(), 1);
+}
+
+#[test]
+fn unsafe_child_session_entries_are_isolated_without_following_links() {
+    for kind in [
+        UnsafeChildEntry::WritableDirectory,
+        UnsafeChildEntry::File,
+        UnsafeChildEntry::Symlink,
+    ] {
+        let f = Fixture::new();
+        let healthy = create_sibling_session(&f.agent);
+        let record = f.session.load().unwrap();
+        let path = f.session.canonical_path();
+        let original = fs::read(path.join("session.json")).unwrap();
+        let outside = f.temp.path().join("outside-session");
+        make_child_entry_unsafe(&path, &outside, kind);
+        let ids = f
+            .agent
+            .list_sessions()
+            .expect("one unsafe Session entry must not prevent sibling enumeration");
+        assert_eq!(ids.len(), 2, "{kind:?}");
+        assert!(ids.contains(f.session.id()));
+        assert!(ids.contains(healthy.id()));
+        assert!(
+            matches!(f.session.load(), Err(StorageError::UnsafePath { .. })),
+            "{kind:?}"
+        );
+        assert!(
+            matches!(
+                f.session.save(&record),
+                Err(StorageError::UnsafePath { .. })
+            ),
+            "{kind:?}"
+        );
+        assert!(
+            matches!(
+                f.session.open_journal(),
+                Err(StorageError::UnsafePath { .. })
+            ),
+            "{kind:?}"
+        );
+        let preserved = if matches!(kind, UnsafeChildEntry::WritableDirectory) {
+            &path
+        } else {
+            &outside
+        };
+        assert_eq!(fs::read(preserved.join("session.json")).unwrap(), original);
+        assert_eq!(fs::read(preserved.join("history.jsonl")).unwrap(), b"");
+        assert_healthy_session_can_persist(&healthy);
+    }
+}
+
+#[test]
+fn unsafe_child_agent_entries_are_isolated_without_following_links() {
+    for kind in [
+        UnsafeChildEntry::WritableDirectory,
+        UnsafeChildEntry::File,
+        UnsafeChildEntry::Symlink,
+    ] {
+        let f = Fixture::new();
+        let healthy = f
+            .host
+            .agent(AgentId::new().unwrap(), StorageMode::Persistent);
+        healthy
+            .save(&AgentRecord::new(
+                healthy.id().clone(),
+                f.host.id().clone(),
+                AgentData {
+                    name: "healthy".into(),
+                    mode: StorageMode::Persistent,
+                    config: AgentConfig::default(),
+                    config_revision: 1,
+                    default_session_id: None,
+                },
+            ))
+            .unwrap();
+        let session = create_sibling_session(&healthy);
+        let record = f.agent.load_record().unwrap();
+        let path = f
+            .root
+            .canonical_path()
+            .join("agents")
+            .join(f.agent.id().as_str());
+        let original = fs::read(path.join("agent.json")).unwrap();
+        let outside = f.temp.path().join("outside-agent");
+        make_child_entry_unsafe(&path, &outside, kind);
+        let ids = f
+            .host
+            .list_agents()
+            .expect("one unsafe Agent entry must not prevent sibling enumeration");
+        assert_eq!(ids.len(), 2, "{kind:?}");
+        assert!(ids.contains(f.agent.id()));
+        assert!(ids.contains(healthy.id()));
+        assert!(
+            matches!(f.agent.load_record(), Err(StorageError::UnsafePath { .. })),
+            "{kind:?}"
+        );
+        assert!(
+            matches!(f.agent.save(&record), Err(StorageError::UnsafePath { .. })),
+            "{kind:?}"
+        );
+        assert!(
+            matches!(
+                f.agent.list_sessions(),
+                Err(StorageError::UnsafePath { .. })
+            ),
+            "{kind:?}"
+        );
+        let preserved = if matches!(kind, UnsafeChildEntry::WritableDirectory) {
+            &path
+        } else {
+            &outside
+        };
+        assert_eq!(fs::read(preserved.join("agent.json")).unwrap(), original);
+        assert!(healthy.load_record().is_ok());
+        assert_eq!(healthy.list_sessions().unwrap(), vec![session.id().clone()]);
+        assert_healthy_session_can_persist(&session);
+    }
+}
+
+#[test]
+fn unsafe_shared_collection_directories_still_fail_at_their_owner_boundary() {
+    for kind in [
+        UnsafeChildEntry::WritableDirectory,
+        UnsafeChildEntry::File,
+        UnsafeChildEntry::Symlink,
+    ] {
+        let f = Fixture::new();
+        let sessions = f.session.canonical_path().parent().unwrap().to_owned();
+        make_child_entry_unsafe(&sessions, &f.temp.path().join("outside-sessions"), kind);
+        assert!(
+            matches!(
+                f.agent.list_sessions(),
+                Err(StorageError::UnsafePath { .. })
+            ),
+            "{kind:?}"
+        );
+        let agents = f.root.canonical_path().join("agents");
+        make_child_entry_unsafe(&agents, &f.temp.path().join("outside-agents"), kind);
+        assert!(
+            matches!(f.host.list_agents(), Err(StorageError::UnsafePath { .. })),
+            "{kind:?}"
+        );
+    }
+}

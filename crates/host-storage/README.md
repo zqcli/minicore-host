@@ -57,7 +57,13 @@ direct-owner fields must agree with the selected hierarchy. Unsupported schemas,
 unknown/discarded fields, duplicate JSON keys, content normalization and ownership
 mismatch fail without migration or rewriting. `AgentStore::load_record()` validates
 only the Agent record; initialization then loads each Session independently.
-`list_sessions()` uses that same direct-owner boundary. A broken default does not
+`list_sessions()` uses that same direct-owner boundary. Both Session and Agent
+listing enumerate canonical direct-child names without opening those entries;
+each child's load independently checks directory safety, schema and ownership.
+A bad child directory is a fault for that child, not a failed enumeration for its
+healthy siblings. Shared collection directories still require safe no-follow
+access, and invalid names without a canonical object ID remain structural errors.
+A broken default does not
 block healthy siblings or silently redirect the default. The stricter `load()`
 convenience method also checks the default reference. Changing configuration requires a
 new configuration revision; Session creation provenance remains immutable.
