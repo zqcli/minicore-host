@@ -383,7 +383,9 @@ async fn compaction_manual_keeps_both_queues_and_explicit_pause_and_stale_cancel
     seed(&fixture, false).await;
     fixture.session.pause(&fixture.connection.caller()).unwrap();
     let first = start(&fixture);
+    let formed_first = fixture.session.control_receipts_owned(&first);
     model.entered().await;
+    assert_eq!(fixture.session.control_receipts_owned(&first), formed_first);
     send(&fixture, "follow-up queued");
     fixture
         .session
@@ -411,7 +413,8 @@ async fn compaction_manual_keeps_both_queues_and_explicit_pause_and_stale_cancel
             .kind(),
         Some(FaultKind::SessionBusy)
     );
-    assert!(cancel(&fixture, first.clone()).result.cancel_claimed);
+    let claimed = cancel(&fixture, first.clone());
+    assert!(claimed.result.cancel_claimed);
     assert!(!cancel(&fixture, first.clone()).result.cancel_claimed);
     let result = compacted(&fixture).await;
     assert!(matches!(
@@ -422,8 +425,11 @@ async fn compaction_manual_keeps_both_queues_and_explicit_pause_and_stale_cancel
     ));
     assert_eq!(markers(&fixture), 0);
     let second = start(&fixture);
+    let formed_second = fixture.session.control_receipts_owned(&second);
     model.entered().await;
-    assert!(!cancel(&fixture, first).result.cancel_claimed);
+    let late = cancel(&fixture, first.clone());
+    assert!(!late.result.cancel_claimed);
+    assert_eq!(late.result.target.state, result.state);
     assert!(
         !fixture
             .session
@@ -438,14 +444,89 @@ async fn compaction_manual_keeps_both_queues_and_explicit_pause_and_stale_cancel
     );
     model.utility_gate.as_ref().unwrap().add_permits(10);
     compacted(&fixture).await;
+    // Later work replaces the public latest activity, not the original
+    // operation's actual result or any already formed control receipt.
+    let late = cancel(&fixture, first.clone());
+    assert!(!late.result.cancel_claimed);
+    assert_eq!(late.result.target.state, result.state);
+    assert!(late.result.target.cancellation_requested);
+    assert_eq!(fixture.session.control_receipts_owned(&first), formed_first);
+    assert_eq!(
+        fixture.session.control_receipts_owned(&second),
+        formed_second
+    );
+    assert_eq!(
+        fixture
+            .session
+            .control_receipts_owned(&claimed.operation_id),
+        vec![Receipt::CompactCancel(claimed)]
+    );
     let state = fixture.session.state.lock().unwrap();
     assert!(state.paused);
     assert!(state.active.is_none());
     assert!(state.completed.is_empty());
     assert_eq!(state.next_step.len(), 1);
     assert_eq!(state.next_turn.len(), 1);
+    assert!(state.last_compaction.as_ref().unwrap().state.finished());
+}
+
+#[tokio::test]
+async fn compaction_reused_operation_id_does_not_redirect_cancellation_to_later_work() {
+    let model = UtilityModel::new(Vec::new(), true);
+    let fixture = setup(
+        UtilityResources::new(model.clone(), ToolSet::default()),
+        |inner| inner,
+    );
+    seed(&fixture, false).await;
+    let operation = start(&fixture);
+    let formed = fixture.session.control_receipts_owned(&operation);
+    model.entered().await;
+    assert!(cancel(&fixture, operation.clone()).result.cancel_claimed);
+    compacted(&fixture).await;
+    let second = fixture
+        .session
+        .compact(
+            &fixture.connection.caller(),
+            CompactRequest {
+                operation_id: operation.clone(),
+            },
+        )
+        .unwrap();
+    model.entered().await;
+    let error = fixture
+        .session
+        .compact_cancel(
+            &fixture.connection.caller(),
+            CompactCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                target_operation_id: operation.clone(),
+            },
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), Some(FaultKind::HostReceiptAmbiguous));
     assert!(
-        matches!(&state.controls[&second][0],Receipt::Compact(receipt) if receipt.result.state.finished())
+        !fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .compaction
+            .as_ref()
+            .unwrap()
+            .activity
+            .cancellation_requested
+    );
+    model.utility_gate.as_ref().unwrap().add_permits(10);
+    let completed = compacted(&fixture).await;
+    assert!(matches!(
+        completed.state,
+        CompactionState::Finished {
+            result: CompactionOutcome::Compacted { .. }
+        }
+    ));
+    assert_eq!(
+        fixture.session.control_receipts_owned(&operation),
+        [formed, vec![Receipt::Compact(second)]].concat()
     );
 }
 

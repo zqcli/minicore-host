@@ -101,6 +101,13 @@ impl CompactionWork {
     }
 }
 
+/// The original manual invocation's final facts, retained with its control
+/// receipt. Progress never rewrites that receipt's formation-time facts.
+pub(super) struct FinishedManualCompaction {
+    outcome: CompactionOutcome,
+    cancellation_requested: bool,
+}
+
 /// Base/appended retain the actual internal Loop distinction. Only the
 /// unhanded suffix is protected; earlier batches of this same Turn are eligible.
 struct RequestHistory {
@@ -284,35 +291,8 @@ impl SessionController {
             controller_revision: state.controller_revision,
         }
     }
-    fn update_compact_receipt(
-        state: &mut SessionState,
-        binding: &CompactionBinding,
-        activity: &CompactionActivity,
-    ) {
-        if let CompactionBinding::Manual {
-            operation_id,
-            receipt_index,
-            ..
-        } = binding
-        {
-            let facts = Self::compact_facts(state, activity);
-            if let Some(Receipt::Compact(receipt)) = state
-                .controls
-                .get_mut(operation_id)
-                .and_then(|values| values.get_mut(*receipt_index))
-            {
-                receipt.result = facts;
-            }
-        }
-    }
     fn publish_compaction(&self, state: &mut SessionState) {
         self.publish(state);
-    }
-    pub(super) fn refresh_compact_receipt(state: &mut SessionState) {
-        if let Some(work) = &state.compaction {
-            let (binding, activity) = (work.binding.clone(), work.activity.clone());
-            Self::update_compact_receipt(state, &binding, &activity);
-        }
     }
     pub(crate) fn compact_cancel(
         &self,
@@ -322,14 +302,69 @@ impl SessionController {
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::available(&state)?;
-            let targets = state.controls.get(&request.target_operation_id).into_iter().flatten().filter_map(|receipt| match receipt { Receipt::Compact(receipt) => Some(receipt.result.clone()), _ => None }).collect::<Vec<_>>();
-            if targets.is_empty() { return Err(Fault::new(FaultKind::SessionCompactionNotFound, "the original manual compaction is not retained by this Session")); }
-            if targets.len() != 1 { return Err(Fault::new(FaultKind::HostReceiptAmbiguous, "operation_id identifies multiple compaction invocations")); }
-            let current = state.compaction.as_ref().is_some_and(|work| matches!(&work.binding, CompactionBinding::Manual { operation_id, .. } if operation_id == &request.target_operation_id));
+            let targets = state
+                .controls
+                .get(&request.target_operation_id)
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .filter_map(|(index, receipt)| {
+                    matches!(receipt, Receipt::Compact(_)).then_some(index)
+                })
+                .collect::<Vec<_>>();
+            let receipt_index = match targets.as_slice() {
+                [] => {
+                    return Err(Fault::new(
+                        FaultKind::SessionCompactionNotFound,
+                        "the original manual compaction is not retained by this Session",
+                    ));
+                }
+                [index] => *index,
+                _ => {
+                    return Err(Fault::new(
+                        FaultKind::HostReceiptAmbiguous,
+                        "operation_id identifies multiple compaction invocations",
+                    ));
+                }
+            };
+            let current = state.compaction.as_ref().is_some_and(|work| {
+                matches!(&work.binding,
+                CompactionBinding::Manual { operation_id, receipt_index: index, .. }
+                    if operation_id == &request.target_operation_id && *index == receipt_index)
+            });
             let claimed = current && Self::cancel_compaction_locked(&mut state);
             self.publish_compaction(&mut state);
-            let target = if current { Self::compact_facts(&state, &state.compaction.as_ref().expect("current work").activity) } else { targets[0].clone() };
-            let receipt = CompactCancelReceipt {kind:CompactCancelKind::CompactCancel, host_id:self.host_id.clone(), host_incarnation:self.incarnation.clone(), operation_id:request.operation_id,target_operation_id:request.target_operation_id,agent_id:self.agent_id.clone(),session_id:self.id.clone(),result:CompactCancelResult {cancel_claimed:claimed,target}};
+            let target = if current {
+                Self::compact_facts(
+                    &state,
+                    &state.compaction.as_ref().expect("current work").activity,
+                )
+            } else {
+                let finished = state
+                    .finished_manual_compactions
+                    .get(&(request.target_operation_id.clone(), receipt_index))
+                    .expect("retained manual receipt has its original completion facts");
+                CompactFacts {
+                    state: CompactionState::Finished {
+                        result: finished.outcome.clone(),
+                    },
+                    cancellation_requested: finished.cancellation_requested,
+                    controller_revision: state.controller_revision,
+                }
+            };
+            let receipt = CompactCancelReceipt {
+                kind: CompactCancelKind::CompactCancel,
+                host_id: self.host_id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                operation_id: request.operation_id,
+                target_operation_id: request.target_operation_id,
+                agent_id: self.agent_id.clone(),
+                session_id: self.id.clone(),
+                result: CompactCancelResult {
+                    cancel_claimed: claimed,
+                    target,
+                },
+            };
             Self::retain_control(&mut state, Receipt::CompactCancel(receipt.clone()));
             Ok(receipt)
         })
@@ -668,12 +703,25 @@ impl SessionController {
         let mut work = state.compaction.take().expect("checked work");
         work.activity.cancellation_requested |=
             work.cancellation.is_cancelled() && !work.committing();
+        if let CompactionBinding::Manual {
+            operation_id,
+            receipt_index,
+            ..
+        } = binding
+        {
+            state.finished_manual_compactions.insert(
+                (operation_id.clone(), *receipt_index),
+                FinishedManualCompaction {
+                    outcome: result.clone(),
+                    cancellation_requested: work.activity.cancellation_requested,
+                },
+            );
+        }
         work.activity.state = CompactionState::Finished { result };
         work.completion.send_replace(Some(completion));
         state.last_compaction = Some(work.activity.clone());
         Self::finish_memory_close(state);
         self.publish(state);
-        Self::update_compact_receipt(state, binding, &work.activity);
     }
     /// Runtime's terminal callback runs before join, even when its prompt
     /// future was dropped. Fence it before touching the accepted raw cursor.

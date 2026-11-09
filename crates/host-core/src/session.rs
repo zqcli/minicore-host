@@ -269,6 +269,8 @@ struct SessionState {
     compaction: Option<compaction::CompactionWork>,
     compaction_task: Option<tokio::task::JoinHandle<()>>,
     last_compaction: Option<CompactionActivity>,
+    finished_manual_compactions:
+        BTreeMap<(OperationId, usize), compaction::FinishedManualCompaction>,
     // Accepted content in original order, not model context or save confirmation.
     // None until loaded; retained on unload and released with the Session body.
     readable_history: Option<Vec<HistoryItemData>>,
@@ -372,6 +374,7 @@ impl SessionController {
             compaction: None,
             compaction_task: None,
             last_compaction: None,
+            finished_manual_compactions: BTreeMap::new(),
             readable_history,
             output: BTreeMap::new(),
             closed_published: false,
@@ -484,7 +487,6 @@ impl SessionController {
             .runner_revision
             .checked_add(1)
             .expect("runner revision exhausted");
-        Self::refresh_compact_receipt(state);
         let snapshot = Self::make_snapshot(
             state,
             &self.host_id,

@@ -108,15 +108,20 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
     )
     .unwrap();
     let operation = OperationId::new().unwrap();
-    host.session_compact(
-        &caller,
-        &target,
-        CompactRequest {
-            operation_id: operation.clone(),
-        },
-    )
-    .unwrap();
+    let formed = host
+        .session_compact(
+            &caller,
+            &target,
+            CompactRequest {
+                operation_id: operation.clone(),
+            },
+        )
+        .unwrap();
     let utility = server.request().await;
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::Compact(formed.clone())
+    );
     assert!(
         utility["messages"][0]["content"]
             .as_str()
@@ -153,8 +158,9 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
     assert_eq!(host.history(&caller, &target).unwrap(), raw);
     assert_eq!(binds.load(Ordering::SeqCst), 2);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
-    assert!(
-        matches!(host.receipt_get(&caller,&operation).unwrap(),Receipt::Compact(value) if value.result.state.finished())
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::Compact(formed.clone())
     );
     let cancel = host
         .session_compact_cancel(
@@ -162,11 +168,18 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
             &target,
             CompactCancelRequest {
                 operation_id: OperationId::new().unwrap(),
-                target_operation_id: operation,
+                target_operation_id: operation.clone(),
             },
         )
         .unwrap();
     assert!(!cancel.result.cancel_claimed);
+    assert_eq!(cancel.result.target.state, activity.state);
+    assert!(!cancel.result.target.cancellation_requested);
+    assert!(cancel.result.target.controller_revision > formed.result.controller_revision);
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::Compact(formed)
+    );
     host.session_resume(
         &caller,
         &target,
@@ -177,6 +190,10 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
     .unwrap();
     let next = server.request().await;
     settled(&host, &caller, &target, 3).await;
+    assert_eq!(
+        host.receipt_get(&caller, &cancel.operation_id).unwrap(),
+        Receipt::CompactCancel(cancel)
+    );
     let messages = next["messages"].as_array().unwrap();
     assert_eq!(messages[0]["content"], "FRAMEWORK A");
     assert_eq!(messages[1]["content"], "ROLE A");

@@ -255,6 +255,7 @@ impl SessionController {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             state.reclaimed = true;
             state.controls.clear();
+            state.finished_manual_compactions.clear();
             let retired = (
                 std::mem::take(&mut state.output),
                 std::mem::take(&mut state.history),

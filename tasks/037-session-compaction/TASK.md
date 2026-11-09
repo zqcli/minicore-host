@@ -113,3 +113,32 @@ commits into clean dev, not this worktree's full ancestry. No transport, Runtime
 engine, local-tools, registry, workspace-backend or TUI source was changed.
 Independent review, transport adapter verification and clean-dev integration
 remain with the coordinator. No live provider credentials or TUI were tested.
+
+## Independent review corrections
+
+The review of fixed `6893969` found two P2 contract defects despite the passing
+aggregate gate: later progress rewrote the original compact control receipt,
+and cancel receipt validation accepted a new cancellation claim after commit.
+These are in-scope SPEC chapter 6 corrections, not a new operation framework.
+
+First correction: original CompactReceipt and CompactCancelReceipt values are
+immutable. Current work remains in CompactionWork; only a completed manual
+outcome and cancellation flag are retained at the existing operation/receipt
+slot for a late targeted cancellation. Those facts are cleared with Session
+controls, do not extend the Session lifetime, and cannot redirect an old target
+to newer work. Public state continues to report the actual latest activity.
+
+Focused verification passed after this correction:
+
+```sh
+cargo test -p minicore-host-core --lib compaction --locked --offline
+cargo test -p minicore-host-resources --test task023 compaction --locked --offline
+```
+
+All 15 core compaction cases and 3 selected resource cases passed. The existing
+queue/pause/stale-target case now checks both original receipts stay unchanged
+across cancellation and a later completed compaction. A new reused-operation-ID
+case preserves ambiguity without cancelling later work. The real local HTTP
+case compares public receipt_get with the original return during and after
+utility execution, while late cancel reads the real completed outcome.
+The protocol correction and the unchanged independent public probes are next.
