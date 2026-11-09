@@ -91,3 +91,32 @@ business assertion was removed. After rustfmt, `cargo test -p minicore-host-tran
 The first formatting check caught only formatting in the new assertion and was
 corrected before this focused run. A new whole-workspace gate is still required
 at the final combined checkpoint.
+
+## Context and real-binary acceptance composition
+
+The five independently reviewed context commits through `8257f3a` are integrated
+at `1c84db2`; canonical context transport `955f07e` plus docs are integrated at
+`2c78839`. Context adds actual committed/bound configuration, retained history
+usage and save/compaction facts without implicit loading. Review's two reproduced
+P2 findings are fixed: public automatic compaction uses continuous response_index,
+and accepted complete/partial/terminal history and original save registration are
+published atomically. Source review passed 666 unique cases and 4 doctests, plus
+original and additional exact-journal concurrency probes.
+
+Real binary ordinary-tool acceptance source `f74d793` and docs `be8633f` are
+integrated through `f7ee4a1f8650ab2fb0aced250ea43e89932b1b93`. Independent scoped review
+passed all 17 app cases, 40 repeated permanent tool cases and 30 repeated additional
+binary controls. Those controls cover unselected-write rejection, accepted tools
+surviving stdio EOF, and exact binary/UTF-8 suffix plus restart history. This is
+real binary/Runtime/HTTP-fixture verification, not live remote provider or TUI.
+
+The context route had only adjacent import conflicts; both WorkspaceSnapshot and
+SessionContextSnapshot were retained with no handler logic edits. The combined
+full gate at `f7ee4a1` stopped during Clippy compilation: its newly imported private
+context fixture still called the older seven-argument Session constructor. The
+already-reviewed production-tools branch adds a `reopened` argument for edit
+coverage. This fixture creates its record immediately before construction, so the
+integration fix passes `false`; it does not change production behavior or weaken
+an assertion. The failed log is
+`/workspace/shared/minicore-host-validation/executable-context-process-f7ee4a1-full.log`.
+A fresh complete gate will be run after this explicit fixture correction.

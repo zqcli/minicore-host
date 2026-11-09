@@ -192,6 +192,7 @@ fn fixture() -> Fixture {
         access,
         Arc::new(Resources(model.clone())),
         Arc::new(AtomicBool::new(true)),
+        false, // This fixture has just created the durable record.
     );
     // Fixture construction only, before publication and before any execution.
     Arc::get_mut(&mut session).unwrap().backend = backend.clone();
