@@ -3,7 +3,10 @@
 #[path = "../../host-provider/tests/support/mod.rs"]
 #[allow(dead_code)]
 mod support;
-use minicore_host_core::{BoundResources, Host, ResourceFuture, ResourceResolver};
+use minicore_host_core::{
+    BoundResources, CallerContext, ConnectionHandle, Host, ResourceFuture, ResourceResolver,
+    TurnResult,
+};
 use minicore_host_protocol::*;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_runtime::{
@@ -63,43 +66,8 @@ async fn host_two_turns_reach_real_http_and_keep_role_and_history_exact() {
         Reply::sse(answer("second actual fixture response")),
     ])
     .await;
-    let descriptor = ModelDescriptor::new(
-        "fixture/chat".parse().unwrap(),
-        128_000,
-        BTreeSet::from([RuntimeReasoning::Auto]),
-        true,
-    )
-    .unwrap();
-    let provider = Arc::new(
-        OpenAiChatModel::new(
-            OpenAiChatConfig::new(&server.endpoint, "fixture-model", descriptor),
-            SecretApiKey::new("fixture-not-a-real-secret").unwrap(),
-        )
-        .unwrap(),
-    );
-    let host = Host::memory(Arc::new(ConfiguredResources { model: provider })).unwrap();
-    let connection = host.connect().unwrap();
+    let (host, connection, target) = http_host(&server.endpoint, "Be precise");
     let caller = connection.caller();
-    let mut config = AgentConfig::default();
-    config.session_defaults.model = "fixture/chat".parse().unwrap();
-    config.role.instructions = "Be precise".into();
-    let created = host
-        .create_agent(
-            &caller,
-            AgentCreate {
-                operation_id: OperationId::new().unwrap(),
-                name: "HTTP fixture".into(),
-                mode: StorageMode::Memory,
-                config,
-                default_session: None,
-                initial_message: None,
-            },
-        )
-        .unwrap();
-    let target = SessionRef {
-        agent_id: created.agent_id.unwrap(),
-        session_id: created.session_id.unwrap(),
-    };
     for (index, text) in ["first task", "follow-up task"].into_iter().enumerate() {
         let mut states = host.session_states(&caller, &target).unwrap();
         let accepted = host
@@ -151,4 +119,158 @@ async fn host_two_turns_reach_real_http_and_keep_role_and_history_exact() {
     assert_eq!(messages.len(), 4);
     assert_eq!(messages[1]["content"], "first task");
     assert_eq!(messages[3]["content"], "follow-up task");
+}
+
+fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, SessionRef) {
+    let descriptor = ModelDescriptor::new(
+        "fixture/chat".parse().unwrap(),
+        128_000,
+        BTreeSet::from([RuntimeReasoning::Auto]),
+        true,
+    )
+    .unwrap();
+    let provider = Arc::new(
+        OpenAiChatModel::new(
+            OpenAiChatConfig::new(endpoint, "fixture-model", descriptor),
+            SecretApiKey::new("fixture-not-a-real-secret").unwrap(),
+        )
+        .unwrap(),
+    );
+    let host = Host::memory(Arc::new(ConfiguredResources { model: provider })).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut config = AgentConfig::default();
+    config.session_defaults.model = "fixture/chat".parse().unwrap();
+    config.role.instructions = role.into();
+    let created = host
+        .create_agent(
+            &caller,
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "HTTP fixture".into(),
+                mode: StorageMode::Memory,
+                config,
+                default_session: None,
+                initial_message: None,
+            },
+        )
+        .unwrap();
+    let target = SessionRef {
+        agent_id: created.agent_id.unwrap(),
+        session_id: created.session_id.unwrap(),
+    };
+    (host, connection, target)
+}
+
+fn message(text: &str) -> MessageInput {
+    MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode: MessageMode::FollowUp,
+        text: text.to_owned(),
+        in_reply_to: None,
+    }
+}
+
+async fn send_turn(
+    host: &Host,
+    caller: &CallerContext,
+    target: &SessionRef,
+    text: &str,
+    index: usize,
+) -> TurnResult {
+    let mut states = host.session_states(caller, target).unwrap();
+    let receipt = host
+        .send(caller, SendMessage::new(message(text), target.clone()))
+        .unwrap();
+    assert_eq!(receipt.result.delivery, Delivery::Accepted);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Some(turn) = host.turns(caller, target).unwrap().get(index)
+                && turn.state == TurnState::Finished
+            {
+                return host.turn_result(caller, target, &turn.id).unwrap();
+            }
+            states.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap()
+}
+
+fn payload_reply(body: String) -> Reply {
+    Reply::Full {
+        status: 200,
+        content_type: "text/event-stream",
+        headers: String::new(),
+        body,
+        fragment: 4093,
+    }
+}
+
+#[tokio::test]
+async fn host_preserves_large_input_role_response_and_next_turn_history() {
+    let role = "Role 世界\n".repeat(30_000);
+    let input = "请求 🐈\n".repeat(30_000);
+    let output = "回复 世界🐈\n".repeat(30_000);
+    assert!(role.len() > 262_144 && input.len() > 262_144 && output.len() > 262_144);
+    let server = Fixture::start(vec![
+        payload_reply(answer(&output)),
+        Reply::sse(answer("follow-up complete")),
+    ])
+    .await;
+    let (host, connection, target) = http_host(&server.endpoint, &role);
+    let caller = connection.caller();
+    let empty = host
+        .send(&caller, SendMessage::new(message(""), target.clone()))
+        .unwrap_err();
+    assert_eq!(empty.kind(), FaultKind::SessionInputInvalid);
+    assert_eq!(server.request_count(), 0);
+    let first = send_turn(&host, &caller, &target, &input, 0).await;
+    assert_eq!(first.info.outcome, Some(TurnOutcome::Completed));
+    assert!(first.partials.is_empty());
+    assert_eq!(first.history.len(), 2);
+    assert!(matches!(&first.history[0], HistoryItem::User(user) if user.input.as_text() == input));
+    assert!(
+        matches!(&first.history[1], HistoryItem::Assistant(assistant) if matches!(&assistant.content[0], AssistantPart::Text(text) if text.as_ref() == output))
+    );
+    let second = send_turn(&host, &caller, &target, "follow-up", 1).await;
+    assert_eq!(second.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(host.history(&caller, &target).unwrap().len(), 4);
+    let requests = server.finish().await;
+    assert_eq!(requests.len(), 2);
+    for request in &requests {
+        assert_eq!(
+            request.body["messages"][0]["content"],
+            format!("Host framework rules\n{role}")
+        );
+        assert_eq!(request.body["messages"][1]["content"], input);
+    }
+    assert_eq!(requests[1].body["messages"][2]["content"], output);
+    assert_eq!(requests[1].body["messages"][3]["content"], "follow-up");
+}
+
+#[tokio::test]
+async fn host_keeps_large_http_partial_without_fabricating_history_or_completion() {
+    let partial = "unfinished 世界🐈\n".repeat(25_000);
+    assert!(partial.len() > 262_144);
+    let body = format!(
+        "data: {}\n\n",
+        json!({"choices":[{"index":0,"delta":{"content":partial},"finish_reason":null}]})
+    );
+    let server = Fixture::start(vec![payload_reply(body)]).await;
+    let (host, connection, target) = http_host(&server.endpoint, "Keep partials exact");
+    let caller = connection.caller();
+    let result = send_turn(&host, &caller, &target, "partial response", 0).await;
+    assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));
+    assert!(result.info.fault.is_some());
+    assert_eq!(result.info.requests, 1);
+    assert_eq!(result.history.len(), 1);
+    assert!(matches!(&result.history[0], HistoryItem::User(_)));
+    assert_eq!(result.partials.len(), 1);
+    assert_eq!(result.partials[0].response_index, 0);
+    assert!(
+        matches!(&result.partials[0].partial.content[0], AssistantPart::Text(text) if text.as_ref() == partial)
+    );
+    assert_eq!(host.history(&caller, &target).unwrap().len(), 1);
+    assert_eq!(server.finish().await.len(), 1);
 }

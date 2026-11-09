@@ -744,7 +744,7 @@ async fn usage_reported_before_truncation_remains_authoritative_partial_usage() 
 }
 
 #[tokio::test]
-async fn text_larger_than_one_runtime_event_is_split_on_unicode_boundaries() {
+async fn unicode_text_above_the_former_event_limit_is_preserved() {
     let text = "🐈".repeat(20_000);
     let fixture = Fixture::start(vec![Reply::Full {
         status: 200,
@@ -1271,4 +1271,354 @@ async fn turn_deadline_during_real_sse_retry_wait_cancels_without_another_reques
         LoopOutcome::Cancelled(CancelReason::Deadline)
     );
     assert_eq!(fixture.finish().await.len(), 1);
+}
+
+fn payload_sse(body: String) -> Reply {
+    Reply::Full {
+        status: 200,
+        content_type: "text/event-stream",
+        headers: String::new(),
+        body,
+        // Exercise network fragmentation independently of provider delta size.
+        fragment: 4093,
+    }
+}
+
+fn echo_fixture(calls: Arc<Mutex<Vec<ToolInvocation>>>) -> ToolSet {
+    let mut builder = ToolSet::builder();
+    builder.register(Echo {
+        spec: ToolSpec::new(
+            "echo".parse().unwrap(),
+            "Echo fixture",
+            json!({"type":"object"}),
+        )
+        .unwrap(),
+        calls,
+    });
+    builder.build().unwrap()
+}
+
+#[tokio::test]
+async fn large_text_and_reasoning_deltas_reach_runtime_without_adapter_splitting() {
+    let text = "猫🐈".repeat(40_000);
+    let reasoning = "思考\t🦉".repeat(40_000);
+    assert!(text.len() > 262_144 && reasoning.len() > 262_144);
+    let body = frame(json!({"reasoning_content":reasoning}), None)
+        + &frame(json!({"content":text}), None)
+        + &frame(json!({}), Some("stop"))
+        + "data: [DONE]\n\n";
+    let fixture = Fixture::start(vec![payload_sse(body.clone()), payload_sse(body)]).await;
+    let model = provider(&fixture.endpoint);
+    let mut stream = model
+        .start(request(), context(CancellationToken::new()))
+        .await
+        .unwrap();
+    let mut text_deltas = Vec::new();
+    let mut reasoning_deltas = Vec::new();
+    while let Some(event) = stream.next().await {
+        match event.unwrap() {
+            ModelEvent::TextDelta { delta } => text_deltas.push(delta.into_string()),
+            ModelEvent::ReasoningDelta { delta } => reasoning_deltas.push(delta.into_string()),
+            _ => {}
+        }
+    }
+    assert_eq!(text_deltas, [text.clone()]);
+    assert_eq!(reasoning_deltas, [reasoning.clone()]);
+
+    let report = finish(start(model, ToolSet::default())).await;
+    assert_eq!(report.outcome, LoopOutcome::Completed);
+    assert!(report.partial.is_none());
+    let content = &assistant(&report, 0).content;
+    assert_eq!(content.len(), 2);
+    assert!(
+        matches!(&content[0], AssistantPart::Reasoning(value) if value.text() == Some(reasoning.as_str()))
+    );
+    assert!(matches!(&content[1], AssistantPart::Text(value) if value.as_ref() == text));
+    assert_eq!(fixture.finish().await.len(), 2);
+}
+
+#[tokio::test]
+async fn large_tool_arguments_and_results_execute_once_and_replay_exactly() {
+    let value = "工具 🐈\n".repeat(30_000);
+    let arguments = json!({"value":value,"wide":vec![0; 5_000]}).to_string();
+    assert!(arguments.len() > 262_144);
+    let mut split = arguments.len() / 2;
+    while !arguments.is_char_boundary(split) {
+        split -= 1;
+    }
+    let first = frame(
+        json!({"tool_calls":[{"index":0,"id":"large-original-id","type":"function","function":{"name":"echo","arguments":&arguments[..split]}}]}),
+        None,
+    ) + &frame(
+        json!({"tool_calls":[{"index":0,"function":{"arguments":&arguments[split..]}}]}),
+        None,
+    ) + &frame(json!({}), Some("tool_calls"))
+        + "data: [DONE]\n\n";
+    let fixture = Fixture::start(vec![
+        payload_sse(first),
+        Reply::sse(final_text("large tool completed")),
+    ])
+    .await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let report = finish(start(
+        provider(&fixture.endpoint),
+        echo_fixture(calls.clone()),
+    ))
+    .await;
+    assert_eq!(report.outcome, LoopOutcome::Completed);
+    assert_eq!(report.requests, 2);
+    assert_eq!(report.tool_rounds, 1);
+    let invocations = calls.lock().unwrap().clone();
+    assert_eq!(invocations.len(), 1);
+    assert_eq!(invocations[0].arguments["value"], value);
+    assert_eq!(
+        invocations[0].arguments["wide"].as_array().unwrap().len(),
+        5_000
+    );
+    let expected_output = format!("echo:{}", json!(value));
+    assert!(expected_output.len() > 262_144);
+    let results: Vec<_> = report
+        .appended
+        .iter()
+        .filter_map(|item| match item {
+            HistoryItem::ToolResult(result) => Some(result),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].call_id.as_str(), "large-original-id");
+    assert_eq!(results[0].output.content().as_str(), expected_output);
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 2);
+    let messages = requests[1].body["messages"].as_array().unwrap();
+    let previous = messages
+        .iter()
+        .find(|message| message["role"] == "assistant")
+        .unwrap();
+    assert_eq!(previous["tool_calls"][0]["id"], "large-original-id");
+    assert_eq!(
+        previous["tool_calls"][0]["function"]["arguments"],
+        arguments
+    );
+    let tool_result = messages
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .unwrap();
+    assert_eq!(tool_result["tool_call_id"], "large-original-id");
+    assert_eq!(tool_result["content"], expected_output);
+}
+
+#[tokio::test]
+async fn invalid_large_or_deep_tool_arguments_remain_exact_nonexecutable_partials() {
+    let large_incomplete = format!("{{\"value\":\"{}", "未完🐈".repeat(40_000));
+    assert!(large_incomplete.len() > 262_144);
+    let too_deep = format!("{{\"value\":{}0{}}}", "[".repeat(127), "]".repeat(127));
+    for arguments in [large_incomplete, too_deep, "[]".to_owned()] {
+        let body = frame(
+            json!({"tool_calls":[{"index":0,"id":"invalid-arguments-id","type":"function","function":{"name":"echo","arguments":arguments}}]}),
+            None,
+        ) + &frame(json!({}), Some("tool_calls"))
+            + "data: [DONE]\n\n";
+        let fixture = Fixture::start(vec![payload_sse(body)]).await;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let report = finish(start(
+            provider(&fixture.endpoint),
+            echo_fixture(calls.clone()),
+        ))
+        .await;
+        assert_eq!(
+            failure(&report).kind(),
+            ModelErrorKind::InvalidProviderResponse
+        );
+        assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
+        assert!(calls.lock().unwrap().is_empty());
+        assert!(
+            !report
+                .appended
+                .iter()
+                .any(|item| matches!(item, HistoryItem::Assistant(_) | HistoryItem::ToolResult(_)))
+        );
+        let partial = report.partial.as_ref().unwrap();
+        assert_eq!(partial.incomplete_tool_calls.len(), 1);
+        assert_eq!(
+            partial.incomplete_tool_calls[0].tool_call_id.as_str(),
+            "invalid-arguments-id"
+        );
+        assert_eq!(partial.incomplete_tool_calls[0].arguments_text, arguments);
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn large_incomplete_tool_header_payload_keeps_raw_provider_fragments() {
+    let arguments = format!("{{\"value\":\"{}", "raw 🐈".repeat(40_000));
+    assert!(arguments.len() > 262_144);
+    let body = frame(
+        json!({"tool_calls":[{"index":0,"id":"","type":"function","function":{"name":"echo","arguments":arguments}}]}),
+        None,
+    );
+    let fixture = Fixture::start(vec![payload_sse(body)]).await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let report = finish(start(
+        provider(&fixture.endpoint),
+        echo_fixture(calls.clone()),
+    ))
+    .await;
+    assert_eq!(
+        failure(&report).kind(),
+        ModelErrorKind::InvalidProviderResponse
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(
+        !report
+            .appended
+            .iter()
+            .any(|item| matches!(item, HistoryItem::Assistant(_) | HistoryItem::ToolResult(_)))
+    );
+    let partial = report.partial.as_ref().unwrap();
+    assert!(partial.content.is_empty());
+    assert!(partial.incomplete_tool_calls.is_empty());
+    let headers = &partial.provider_replay.as_ref().unwrap().payload()["incomplete_tool_headers"];
+    assert_eq!(headers[0]["id_fragment"], "");
+    assert_eq!(headers[0]["name_fragment"], "echo");
+    assert_eq!(headers[0]["arguments_fragment"], arguments);
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn tool_json_above_the_old_nesting_limit_retains_parser_stack_safety() {
+    let arguments = format!("{{\"value\":{}0{}}}", "[".repeat(64), "]".repeat(64));
+    let fixture = Fixture::start(vec![
+        payload_sse(
+            frame(
+                json!({"tool_calls":[{"index":0,"id":"nested-call","type":"function","function":{"name":"echo","arguments":arguments}}]}),
+                None,
+            ) + &frame(json!({}), Some("tool_calls")) + "data: [DONE]\n\n",
+        ),
+        Reply::sse(final_text("nested tool completed")),
+    ])
+    .await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let report = finish(start(
+        provider(&fixture.endpoint),
+        echo_fixture(calls.clone()),
+    ))
+    .await;
+    assert_eq!(report.outcome, LoopOutcome::Completed);
+    assert_eq!(calls.lock().unwrap().len(), 1);
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1].body["messages"][2]["tool_calls"][0]["function"]["arguments"],
+        arguments
+    );
+}
+
+#[tokio::test]
+async fn large_http_error_bodies_keep_structured_classification_and_retry_headers() {
+    let private_message = "private-provider-body-🐈".repeat(15_000);
+    for (status, code, expected_kind, attempts) in [
+        (429, "rate_limit_exceeded", ModelErrorKind::RateLimited, 2),
+        (
+            503,
+            "overloaded_error",
+            ModelErrorKind::ProviderUnavailable,
+            2,
+        ),
+        (429, "insufficient_quota", ModelErrorKind::QuotaExceeded, 1),
+        (429, "future_error", ModelErrorKind::ProviderUnavailable, 1),
+    ] {
+        let body = json!({"error":{"code":code,"message":private_message}}).to_string();
+        assert!(body.len() > 262_144);
+        let fixture = Fixture::start(vec![
+            Reply::Full {
+                status,
+                content_type: "application/json",
+                headers: "Retry-After-ms: 80\r\n".to_owned(),
+                body,
+                fragment: 4093,
+            },
+            Reply::sse(final_text("after recognized rejection")),
+        ])
+        .await;
+        let (model, mut rejections) = observe_provider(&fixture.endpoint);
+        let report = finish(start(model, ToolSet::default())).await;
+        let error = rejection(&mut rejections).await;
+        assert_eq!(error.kind(), expected_kind);
+        assert!(
+            !serde_json::to_string(&error)
+                .unwrap()
+                .contains("private-provider-body")
+        );
+        let requests = fixture.finish().await;
+        assert_eq!(requests.len(), attempts);
+        if attempts == 2 {
+            assert_eq!(report.outcome, LoopOutcome::Completed);
+            assert_eq!(error.delivery(), DeliveryState::NotStarted);
+            assert!(matches!(error.retry_hint(), RetryHint::Retryable { .. }));
+            assert!(
+                requests[1]
+                    .received_at
+                    .duration_since(requests[0].received_at)
+                    >= Duration::from_millis(80)
+            );
+        } else {
+            assert_eq!(failure(&report).kind(), expected_kind);
+            assert_eq!(*error.retry_hint(), RetryHint::Never);
+            assert_eq!(
+                error.delivery(),
+                if code == "future_error" {
+                    DeliveryState::Unknown
+                } else {
+                    DeliveryState::NotStarted
+                }
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn large_http_errors_do_not_relax_retry_wait_limits_or_parse_invalid_json() {
+    let padding = "body-only-diagnostic-🐈".repeat(15_000);
+    let valid = json!({"error":{"code":"rate_limit_exceeded","message":padding}}).to_string();
+    let invalid = format!("{{\"error\":{{\"code\":\"rate_limit_exceeded\",\"message\":\"{padding}");
+    for (body, valid) in [(valid, true), (invalid, false)] {
+        assert!(body.len() > 262_144);
+        let fixture = Fixture::start(vec![
+            Reply::Full {
+                status: 429,
+                content_type: "application/json",
+                headers: "Retry-After: 60\r\n".to_owned(),
+                body,
+                fragment: 4093,
+            },
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let mut options = LoopOptions::default_checked().unwrap();
+        options.model_timeout = Duration::from_secs(120);
+        options.model_retry_base_delay = Duration::from_millis(1);
+        let report = finish(start_with_options(
+            provider(&fixture.endpoint),
+            ToolSet::default(),
+            options,
+        ))
+        .await;
+        let error = failure(&report);
+        if valid {
+            assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+            assert!(
+                matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(30))
+            );
+        } else {
+            assert_eq!(error.delivery(), DeliveryState::Unknown);
+            assert_eq!(*error.retry_hint(), RetryHint::Never);
+        }
+        assert!(
+            !serde_json::to_string(&error)
+                .unwrap()
+                .contains("body-only-diagnostic")
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
 }
