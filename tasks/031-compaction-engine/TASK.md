@@ -1,8 +1,9 @@
 # Implement model-backed compaction engine
 
-Status: calculation module implemented; 21 focused tests and strict crate Clippy
-passed. Full workspace gate and independent review are pending. Manual/automatic
-Session compaction is not yet wired or claimed operational.
+Status: calculation module implemented; corrected full workspace gate passed
+at `f5c43f5e7aa8648a6a6a2345b89047479feb4496`. Independent review and owner
+integration remain separate. Manual/automatic Session compaction is not yet wired
+or claimed operational.
 
 ## Fixed inputs and ownership
 
@@ -66,7 +67,7 @@ cargo test -p minicore-host-compaction --locked --offline
 cargo clippy -p minicore-host-compaction --all-targets --locked --offline -- -D warnings
 ```
 
-All focused checks pass: 19 explicitly named Scripted Model tests and 2 actual
+All focused checks pass: 20 explicitly named Scripted Model tests and 2 actual
 Host provider TCP/HTTP/SSE tests (success/optional usage, cancellation/disconnect).
 The Scripted Models exercise the real Runtime public types and are not represented
 as live-provider or public Session execution. Coverage includes complete/missing/
@@ -82,8 +83,8 @@ uncached input field even when cached-token details were absent. The provider
 correctly retained that category as unknown; the corrected test checks unknown
 input and the actual provider total, with no production workaround.
 
-Remaining: full workspace fmt/Clippy/tests/doctests/rustdoc and exact unique case
-count, then independent review and Session/storage-owner integration. No push.
+Focused and full verification are complete below. Independent review and
+Session/storage-owner integration remain separate. No push.
 
 ## Runtime contract self-review
 
@@ -95,4 +96,36 @@ normalization, validates the resulting nonblank summary, and tests CRLF across
 deltas. It also cancels each individual utility-call child token at successful
 EOF before the next chunk begins, matching the real Model port's attempt lifetime.
 The chunk fixture asserts this sequence. This adds no retry or cleanup service.
-The final corrected full gate is recorded below when complete.
+The final corrected full gate is recorded below.
+
+## Final verified checkpoint
+
+Code commits, after the parent's bootstrap:
+
+- `5c44f09acd23fd628842a1519aebecabd33e25bb`: model-backed calculation module,
+  source/tail evidence, utility validation, Scripted and real HTTP/SSE tests.
+- `f5c43f5e7aa8648a6a6a2345b89047479feb4496`: Runtime text normalization and
+  per-call child-token lifetime correction, plus explicit owner-protected suffix.
+
+Executed against the corrected code, with the same independent target:
+
+```sh
+./scripts/check.sh
+cargo test --workspace --all-targets --locked -- --list
+cargo metadata --locked --offline --format-version 1
+sha256sum SPEC.md
+```
+
+Passed whitespace and formatting, strict all-target workspace Clippy, **516
+unique target/test cases**, **3 workspace doctests**, and strict workspace rustdoc.
+This includes 22 compaction cases. Nested storage subprocess output is not counted
+again. Metadata confirms one Runtime `0.10.0` at the exact requested revision,
+without an override. SPEC SHA-256 remains
+`f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+
+Local reproducibility evidence is in the separate
+`minicore-host-compaction-engine-validation` directory: `full-gate.log` (initial
+checkpoint), `final-gate.log` (corrected checkpoint), `test-list.txt`, and
+`metadata.json`. No live provider, credentials, TUI, public Session compaction or
+durable compaction integration was exercised or claimed. The parent owns the
+shared PROJECT.md integration update and independent review coordination.
