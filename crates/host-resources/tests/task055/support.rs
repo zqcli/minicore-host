@@ -325,14 +325,13 @@ pub(super) async fn compacted(host: &Host, caller: &CallerContext, target: &Sess
                 .unwrap()
                 .data
                 .compaction
+                && let CompactionState::Finished { result } = activity.state
             {
-                if let CompactionState::Finished { result } = activity.state {
-                    assert!(
-                        matches!(result, CompactionOutcome::Compacted { .. }),
-                        "{result:?}"
-                    );
-                    return;
-                }
+                assert!(
+                    matches!(result, CompactionOutcome::Compacted { .. }),
+                    "{result:?}"
+                );
+                return;
             }
             tokio::task::yield_now().await;
         }

@@ -207,7 +207,7 @@ async fn task055_failed_history_replacement_does_not_publish_new_input_metadata(
         .state
         .lock()
         .unwrap()
-        .replace_history(&[entry.clone()])
+        .replace_history(std::slice::from_ref(&entry))
         .unwrap();
     let original = RequestHistory::new(&owner.state.lock().unwrap(), 1, &[]).unwrap();
     let invalid = vec![
@@ -269,7 +269,11 @@ async fn task055_native_legacy_rows_are_not_assigned_adjacent_known_input_facts(
 fn task055_unbound_or_misprojected_input_is_rejected_without_guessing() {
     let item = HistoryItem::User(user("input"));
     let mut metadata = input_provenance::InputProvenance::default();
-    assert!(metadata.append_unhanded(0, &[item.clone()], None).is_err());
+    assert!(
+        metadata
+            .append_unhanded(0, std::slice::from_ref(&item), None)
+            .is_err()
+    );
     let entry = input("input", MessageSource::User, None);
     metadata.record(0, &entry);
     for messages in [
@@ -278,7 +282,7 @@ fn task055_unbound_or_misprojected_input_is_rejected_without_guessing() {
         vec![ModelMessage::user("different").unwrap()],
     ] {
         assert!(matches!(
-            metadata.project(&[item.clone()], PreparedPrompt { messages }),
+            metadata.project(std::slice::from_ref(&item), PreparedPrompt { messages }),
             Err(PromptError::InvalidHistory)
         ));
     }
