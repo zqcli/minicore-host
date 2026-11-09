@@ -223,7 +223,7 @@ async fn host_preserves_large_input_role_response_and_next_turn_history() {
     let empty = host
         .send(&caller, SendMessage::new(message(""), target.clone()))
         .unwrap_err();
-    assert_eq!(empty.kind(), FaultKind::SessionInputInvalid);
+    assert_eq!(empty.kind(), Some(FaultKind::SessionInputInvalid));
     assert_eq!(server.request_count(), 0);
     let first = send_turn(&host, &caller, &target, &input, 0).await;
     assert_eq!(first.info.outcome, Some(TurnOutcome::Completed));
