@@ -1,0 +1,20 @@
+Source-only concrete-page adaptation checks after independent Task073 SPEC decision.
+No Host/build/benchmark or historical raw-data verification.
+checked_at_utc=2026-11-09T23:07:52Z
+production_base=f0900a7083f9f6ddddbe978cd6ba55f4b1405c50
+original_recovery_commit=93ef5adc89353ae5e7b64e679da33a5bae8b4c95
+75366c5b12f45aa82cfc0c849980085e57a9b4dade5e75e1e1d7625e4cb570fe  scripts/task058_perf.py
+447ff75bf8a43bc99b9e6eab8deadac804fa8b5655ee7597e71048c09a3724a1  scripts/task058_rss_test.py
+19ba3e056059a8308bfc0bf0986402de85d288b99769cb74285e488023ac85d2  scripts/task058_summarize.py
+4b8d30524ede01124f89a9ef661b5de5cc00c28de87cf759842b258eabba8bfa  scripts/task059_projection_test.py
+...............
+----------------------------------------------------------------------
+Ran 15 tests in 0.001s
+
+OK
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.000s
+
+OK
+Current concrete-page tests passed; Chapter 9 identity, body and result negative checks retained.
