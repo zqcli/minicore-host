@@ -9,8 +9,16 @@ impl Host {
         caller: &CallerContext,
         request: HostShutdownRequest,
     ) -> Result<HostShutdownReceipt, Fault> {
+        self.shutdown_owned(Some(caller), request)
+    }
+
+    pub(super) fn shutdown_owned(
+        self: &Arc<Self>,
+        caller: Option<&CallerContext>,
+        request: HostShutdownRequest,
+    ) -> Result<HostShutdownReceipt, Fault> {
         let executor = tokio::runtime::Handle::try_current().ok();
-        let (children, receipt) = self.access.accept(caller, || {
+        let accept = || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle == HostLifecycle::Starting {
                 return Err(Fault::new(
@@ -71,7 +79,11 @@ impl Host {
                 ),
                 receipt,
             ))
-        })?;
+        };
+        let (children, receipt) = match caller {
+            Some(caller) => self.access.accept(caller, accept)?,
+            None => self.access.accept_internal_owned(accept)?,
+        };
         let stopping = matches!(children.0, HostLifecycle::Stopping | HostLifecycle::Stopped);
         if children.0 != HostLifecycle::Stopped {
             for child in children.1 {
@@ -80,6 +92,7 @@ impl Host {
         }
         self.publish_host_state_owned();
         self.changed.notify_waiters();
+        self.process_changed.notify_waiters();
         Ok(receipt)
     }
 
@@ -116,7 +129,10 @@ impl Host {
             }
             {
                 let mut state = self.state.lock().expect("Host mutex poisoned");
-                state.shutdown_fault = fault.clone();
+                if state.shutdown_fault != fault {
+                    state.shutdown_fault = fault.clone();
+                    self.process_changed.notify_waiters();
+                }
                 if lifecycle == HostLifecycle::Draining
                     && drained
                     && fault.is_none()
@@ -127,6 +143,7 @@ impl Host {
                     self.access
                         .set_host_lifecycle_owned(HostLifecycle::Stopping);
                     self.changed.notify_waiters();
+                    self.process_changed.notify_waiters();
                     drop(state);
                     self.publish_host_state_owned();
                     continue;
@@ -151,6 +168,8 @@ impl Host {
                         FaultKind::HostInternalUnexpected,
                         "memory retirement owner did not join cleanly",
                     ));
+                    self.publish_host_state_owned();
+                    self.process_changed.notify_waiters();
                     return;
                 }
                 let mut failure = None;
@@ -165,6 +184,7 @@ impl Host {
                         .lock()
                         .expect("Host mutex poisoned")
                         .shutdown_fault = Some(error);
+                    self.process_changed.notify_waiters();
                 } else {
                     self.remove_retired_agents_owned();
                     // Every actual writer and child resource is now retired.
@@ -183,6 +203,7 @@ impl Host {
                     self.access.set_host_lifecycle_owned(HostLifecycle::Stopped);
                     state.shutdown_task.take();
                     self.changed.notify_waiters();
+                    self.process_changed.notify_waiters();
                     drop(state);
                     self.publish_host_state_owned();
                     return;

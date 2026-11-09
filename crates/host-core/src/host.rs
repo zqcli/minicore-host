@@ -15,6 +15,8 @@ mod metadata;
 mod network;
 mod observation;
 mod persistent;
+mod process;
+pub use process::{HostProcessControl, HostProcessSnapshot};
 mod retirement;
 mod shutdown;
 mod tool_edits;
@@ -32,6 +34,7 @@ pub struct Host {
     state: Mutex<HostState>,
     store: Mutex<Option<HostStore>>,
     changed: Arc<tokio::sync::Notify>,
+    process_changed: tokio::sync::Notify,
     pub(crate) configuration: Arc<ConfigurationOwner>,
 }
 struct HostState {
@@ -85,6 +88,7 @@ impl Host {
             resources: Mutex::new(Some(resources)),
             store: Mutex::new(store),
             changed: Arc::new(tokio::sync::Notify::new()),
+            process_changed: tokio::sync::Notify::new(),
             configuration,
             state: Mutex::new(HostState {
                 lifecycle,
