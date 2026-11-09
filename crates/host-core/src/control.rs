@@ -45,6 +45,11 @@ impl CallerContext {
             .expect("external observation context")
             .number
     }
+    pub(crate) fn read_revocation(&self) -> Option<tokio::sync::watch::Receiver<bool>> {
+        self.identity
+            .as_ref()
+            .map(|identity| identity.validity.subscribe())
+    }
     pub(crate) fn revocation(&self) -> tokio::sync::watch::Receiver<bool> {
         self.identity
             .as_ref()

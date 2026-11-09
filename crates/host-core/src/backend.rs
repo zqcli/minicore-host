@@ -1,4 +1,4 @@
-use crate::session::{HistoryBackend, LoadFuture, SaveFuture};
+use crate::session::{HistoryBackend, HistoryReadFuture, LoadFuture, SaveFuture};
 use minicore_host_protocol::{Fault, FaultDetails, FaultKind, HistoryLoadDetails, StorageMode};
 use minicore_host_storage::{HistoryEntry, SaveRange, SessionJournal, SessionStore};
 use std::{
@@ -19,6 +19,8 @@ struct JournalState {
     pending: Option<PendingAppend>,
     #[cfg(test)]
     failure: Option<TestAppendFault>,
+    #[cfg(test)]
+    read_gate: Option<Arc<TestReadGate>>,
 }
 enum PendingAppend {
     /// No journal range has been accepted yet. Opening/encoding failure cannot
@@ -101,6 +103,8 @@ impl JournalHistory {
                 pending: None,
                 #[cfg(test)]
                 failure: None,
+                #[cfg(test)]
+                read_gate: None,
             })),
         }
     }
@@ -138,6 +142,41 @@ impl HistoryBackend for JournalHistory {
                     .iter()
                     .map(|record| record.entry.clone())
                     .collect())
+            })
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::SessionHistoryLoadFailed,
+                    "history reader did not return a result",
+                )
+            })?
+        })
+    }
+    fn read_cold(&self) -> HistoryReadFuture<'_> {
+        let state = Arc::clone(&self.state);
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let current = state.lock().expect("journal mutex poisoned");
+                let store = current.store()?;
+                if current.journal.is_some() || current.pending.is_some() {
+                    // The existing owner must publish its actual retained data.
+                    // loaded_records is only an opening baseline, never a cache.
+                    return Ok(None);
+                }
+                // Keep the short-lived reader under the same disk-only guard as
+                // load/save/release. Neither Session nor access state is locked.
+                #[cfg(test)]
+                if let Some(gate) = &current.read_gate {
+                    gate.block();
+                }
+                let history = store.read_history().map_err(load_fault)?;
+                Ok(Some(
+                    history
+                        .records
+                        .into_iter()
+                        .map(|record| record.entry)
+                        .collect(),
+                ))
             })
             .await
             .map_err(|_| {
@@ -253,6 +292,9 @@ pub(crate) enum TestAppendFault {
 }
 #[cfg(test)]
 impl JournalHistory {
+    pub(crate) fn gate_cold_read(&self, gate: Arc<TestReadGate>) {
+        self.state.lock().unwrap().read_gate = Some(gate);
+    }
     pub(crate) fn inject_next_append_fault(&self, failure: TestAppendFault) {
         self.state.lock().unwrap().failure = Some(failure);
     }
@@ -297,3 +339,9 @@ impl JournalState {
         })())
     }
 }
+
+#[cfg(test)]
+#[path = "tests/task052_backend_gate.rs"]
+mod task052;
+#[cfg(test)]
+pub(crate) use task052::TestReadGate;

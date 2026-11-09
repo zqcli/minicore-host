@@ -88,30 +88,68 @@ impl SessionController {
         if let Some(page) = retained {
             return Ok(page);
         }
-        let store = self
-            .store
-            .lock()
-            .expect("Session store mutex poisoned")
-            .clone()
-            .ok_or_else(|| {
-                Fault::new(
+        let revoked = async {
+            if let Some(mut validity) = caller.read_revocation() {
+                if *validity.borrow() {
+                    let _ = validity.changed().await;
+                }
+            } else {
+                std::future::pending::<()>().await;
+            }
+        };
+        tokio::pin!(revoked);
+        let cold = tokio::select! {
+            result = AssertUnwindSafe(async { self.backend.read_cold().await }).catch_unwind() => {
+                result.unwrap_or_else(|_| Err(Fault::new(
                     FaultKind::SessionHistoryLoadFailed,
-                    "history source has not been loaded and is not readable",
-                )
+                    "history reader failed unexpectedly",
+                )))
+            }
+            _ = &mut revoked => return Err(history_reader_revoked()),
+        };
+        let content = cold.map(|entries| {
+            entries.map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(HistoryItemData::from_entry)
+                    .collect::<Vec<_>>()
+            })
+        });
+        loop {
+            // Register before checking publication, including when load completed
+            // while the disk read was returning. No notification can be lost.
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            let page = self.access.read(caller, || {
+                self.ensure_visible()?;
+                let state = self.state.lock().expect("Session mutex poisoned");
+                if let Some(history) = &state.readable_history {
+                    // The owner may already have accepted newer, unconfirmed
+                    // records. Never replace them with a cold opening snapshot.
+                    return self.history_page(history, start, request.limit).map(Some);
+                }
+                Self::available(&state)?;
+                match &content {
+                    Ok(Some(history)) => self.history_page(history, start, request.limit).map(Some),
+                    Ok(None) if state.preparing => Ok(None),
+                    Ok(None) => Err(state.block_reason.clone().unwrap_or_else(|| {
+                        Fault::new(
+                            FaultKind::SessionHistoryLoadFailed,
+                            "the history owner has no readable retained content",
+                        )
+                    })),
+                    Err(fault) => Err(fault.clone()),
+                }
             })?;
-        let history = crate::persistence::disk(FaultKind::SessionHistoryLoadFailed, move || {
-            store.read_history()
-        })
-        .await?;
-        let content = history
-            .records
-            .iter()
-            .filter_map(|record| HistoryItemData::from_entry(&record.entry))
-            .collect::<Vec<_>>();
-        self.access.read(caller, || {
-            self.ensure_visible()?;
-            self.history_page(&content, start, request.limit)
-        })
+            if let Some(page) = page {
+                return Ok(page);
+            }
+            tokio::select! {
+                _ = changed => {}
+                _ = &mut revoked => return Err(history_reader_revoked()),
+            }
+        }
     }
     fn history_page(
         &self,
@@ -162,6 +200,13 @@ impl SessionController {
         }
         Ok(index)
     }
+}
+
+fn history_reader_revoked() -> Fault {
+    Fault::new(
+        FaultKind::HostAccessInvalid,
+        "history reader connection is no longer valid",
+    )
 }
 
 #[cfg(test)]

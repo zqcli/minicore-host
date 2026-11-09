@@ -18,4 +18,9 @@ Deterministic gates cover load winning before publication, read winning under th
 
 ## Results
 
-Pending implementation and coordinator bootstrap.
+- Coordinator bootstrap: `f32013ea2c935beeb12a3b7d8d16267b92e6905b` (trait/export and successful driver load publication).
+- Deterministic red regression: `c4c98a2471354089076a7051518195c9fd8272e6`. With the original content-read implementation, the test fails with `SESSION_HISTORY_LOAD_FAILED: history already has an active writer`. Evidence: `/workspace/shared/minicore-host-cold-history-artifacts/baseline-red.log` and `baseline-red-test.rs`.
+- Implementation now coordinates cold reads with the existing disk mutex and waits for actual Session publication. The optional `CallerContext::read_revocation` accessor was separately approved by the coordinator; it creates no new channel/state and does not change access decisions.
+- Eighteen focused task052 cases pass, including production Host and Runtime with a named scripted model. See `final-focused-18.log` in the evidence directory. The expanded test fixture initially omitted forwarding `reconcile`; that fixture-only failure is preserved in `fixture-reconcile-forwarding-failure.log` and was corrected by forwarding the existing original-save method. No production retry behavior changed.
+- Whitespace and workspace rustfmt checks pass. Full lint/test/doc gates are pending below.
+- Agent reference `f36a87366d8e2fe0a1c8216463887902e471c739` was inspected at `src/store/history.rs::scan_history_page`. Its catalog/cache/scan-limit machinery is not imported: this Host already has the strict storage parser and one Session disk owner. TUI reference remains `3beeb1d8a525e58ce6352e05061f242c5580e248`, unchanged and not tested here.
