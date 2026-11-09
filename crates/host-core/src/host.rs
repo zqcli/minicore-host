@@ -1,4 +1,5 @@
 use crate::agent::AgentOwner;
+use crate::configuration::{ConfigurationOwner, HostConfig, PreparedHostConfiguration};
 use crate::control::{CallerContext, ConnectionHandle, ConnectionRegistry};
 use crate::session::{ResourceResolver, SessionController, SessionSubscription};
 use crate::types::*;
@@ -7,6 +8,7 @@ use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
 
 mod collaboration;
+mod configuration;
 mod controls;
 mod create;
 mod metadata;
@@ -29,7 +31,7 @@ pub struct Host {
     state: Mutex<HostState>,
     store: Mutex<Option<HostStore>>,
     changed: Arc<tokio::sync::Notify>,
-    settings: Option<HostRecord<HostSettings>>,
+    pub(crate) configuration: Arc<ConfigurationOwner>,
 }
 struct HostState {
     lifecycle: HostLifecycle,
@@ -49,22 +51,42 @@ struct HostState {
 }
 impl Host {
     pub fn memory(resources: Arc<dyn ResourceResolver>) -> Result<Arc<Self>, Fault> {
+        Self::memory_configured(PreparedHostConfiguration::new(
+            HostConfig::default(),
+            resources,
+            Vec::new(),
+            None,
+        )?)
+    }
+    pub fn memory_configured(candidate: PreparedHostConfiguration) -> Result<Arc<Self>, Fault> {
         let id = HostId::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
+        Self::construct(id, 0, candidate, None, HostLifecycle::Running)
+    }
+    fn construct(
+        id: HostId,
+        revision: ConfigRevision,
+        candidate: PreparedHostConfiguration,
+        store: Option<HostStore>,
+        lifecycle: HostLifecycle,
+    ) -> Result<Arc<Self>, Fault> {
         let incarnation = HostIncarnation::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
         let access = ConnectionRegistry::new(id.clone(), incarnation.clone());
+        let (configuration, key) = ConfigurationOwner::new(candidate, revision);
+        access.publish_network(None, key, || Ok(()))?;
+        let resources: Arc<dyn ResourceResolver> = configuration.clone();
         let owner = Arc::new_cyclic(|weak| Self {
             self_weak: weak.clone(),
             id,
             incarnation,
             access,
             resources: Mutex::new(Some(resources)),
-            store: Mutex::new(None),
+            store: Mutex::new(store),
             changed: Arc::new(tokio::sync::Notify::new()),
-            settings: None,
+            configuration,
             state: Mutex::new(HostState {
-                lifecycle: HostLifecycle::Running,
+                lifecycle,
                 shutdown_strategy: None,
                 shutdown_fault: None,
                 shutdown_task: None,

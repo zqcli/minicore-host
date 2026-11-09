@@ -101,9 +101,10 @@ impl Host {
                 )
             };
             let stopping = lifecycle == HostLifecycle::Stopping;
-            let mut drained = creating == 0;
-            let mut quiescent = creating == 0;
-            let mut fault = creation_fault;
+            let (configuration_saving, configuration_fault) = self.configuration.status();
+            let mut drained = creating == 0 && !configuration_saving;
+            let mut quiescent = creating == 0 && !configuration_saving;
+            let mut fault = creation_fault.or(configuration_fault);
             for child in &children {
                 child.begin_host_shutdown_owned(stopping);
                 let status = child.shutdown_status_owned();
@@ -168,6 +169,7 @@ impl Host {
                     self.remove_retired_agents_owned();
                     // Every actual writer and child resource is now retired.
                     // Retaining this public Host handle must not retain the lock.
+                    self.configuration.retire();
                     drop(self.store.lock().expect("Host store mutex poisoned").take());
                     drop(
                         self.resources

@@ -65,6 +65,8 @@ fault_registry! {
     HostObservationInvalid = 1501, "HOST_OBSERVATION_INVALID", [Host], None, false;
     HostSubscriptionNotFound = 1502, "HOST_SUBSCRIPTION_NOT_FOUND", [Host, HostLookup], None, false;
     HostObservationResyncRequired = 1503, "HOST_OBSERVATION_RESYNC_REQUIRED", [Host], None, false;
+    HostConfigInvalid = 1601, "HOST_CONFIG_INVALID", [Host], None, false;
+    HostConfigConflict = 1602, "HOST_CONFIG_CONFLICT", [Host], None, false;
     HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host], None, false;
     AgentConfigInvalid = 2101, "AGENT_CONFIG_INVALID", [Agent, AgentConfig], None, false;
     AgentConfigConflict = 2102, "AGENT_CONFIG_CONFLICT", [Agent, AgentConfig], None, false;

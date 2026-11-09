@@ -109,8 +109,12 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
     let root = DataRoot::acquire(path).unwrap();
     let host_id = HostId::new().unwrap();
     let host = root.host(host_id.clone());
-    host.save_host(&HostRecord::new(host_id.clone(), settings("saved name"), 0))
-        .unwrap();
+    host.save_host(&HostRecord::new(
+        host_id.clone(),
+        HostConfig::from(settings("saved name")),
+        0,
+    ))
+    .unwrap();
     let agent_id = AgentId::new().unwrap();
     let agent = host.agent(agent_id.clone(), StorageMode::Persistent);
     agent

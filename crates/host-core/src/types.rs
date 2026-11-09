@@ -140,23 +140,11 @@ pub struct CancelResult {
     pub cleared: Vec<MessageId>,
 }
 
-/// Only the identity metadata supported by this stage. This is deliberately not
-/// a substitute for provider, tool, network, credential, or logging settings.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+/// Name-only convenience for embedding construction. Persistent storage always
+/// uses the complete HostConfig shape, never a second settings record format.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HostSettings {
     pub name: String,
-}
-impl HostSettings {
-    pub(crate) fn validate(&self) -> Result<(), Fault> {
-        if self.name.trim().is_empty() {
-            return Err(Fault::new(
-                FaultKind::HostStorageUnavailable,
-                "Host name must not be blank",
-            ));
-        }
-        Ok(())
-    }
 }
 
 /// A discovery failure remains associated with its actual direct child. It is

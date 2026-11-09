@@ -4,66 +4,70 @@ use minicore_host_storage::DataRoot;
 use std::path::Path;
 
 impl Host {
-    /// Acquire the real directory before reading or constructing any executable
-    /// owner. A saved Host always uses its saved settings, not the supplied defaults.
-    /// Runtime resources are explicitly assembled by the embedding application.
+    /// Embedding convenience. It uses the same complete HostConfig record as
+    /// the production constructor; no legacy JSON shape is read or migrated.
     pub async fn open_persistent(
         path: impl AsRef<Path>,
         initial_settings: HostSettings,
         resources: Arc<dyn ResourceResolver>,
     ) -> Result<Arc<Self>, Fault> {
+        Self::open_configured(path, initial_settings.into(), move |config| async move {
+            PreparedHostConfiguration::new(config, resources, Vec::new(), None)
+        })
+        .await
+    }
+
+    /// Read the single saved configuration before preparing private resources.
+    /// The preparation closure runs outside locks, without any executable owner
+    /// or connection. Saved values win over initial defaults on reopen.
+    pub async fn open_configured<F, Fut>(
+        path: impl AsRef<Path>,
+        initial: HostConfig,
+        prepare: F,
+    ) -> Result<Arc<Self>, Fault>
+    where
+        F: FnOnce(HostConfig) -> Fut,
+        Fut: std::future::Future<Output = Result<PreparedHostConfiguration, Fault>>,
+    {
         let path = path.as_ref().to_path_buf();
-        let (store, settings) = disk(FaultKind::HostStorageUnavailable, move || {
+        let (store, record, fresh) = disk(FaultKind::HostStorageUnavailable, move || {
             let root = DataRoot::acquire(path)?;
-            let record = match root.load_host::<HostSettings>()? {
-                Some(record) => record,
+            let (record, fresh) = match root.load_host::<HostConfig>()? {
+                Some(record) => (record, false),
                 None => {
-                    initial_settings.validate().map_err(|_| {
-                        minicore_host_storage::StorageError::InvalidObject {
-                            reason: "Host name must not be blank".into(),
-                        }
-                    })?;
                     let id = HostId::new().map_err(|error| {
                         minicore_host_storage::StorageError::InvalidObject {
                             reason: error.to_string(),
                         }
                     })?;
-                    let record = HostRecord::new(id.clone(), initial_settings, 0);
-                    root.host(id).save_host(&record)?;
-                    record
+                    (HostRecord::new(id, initial, 0), true)
                 }
             };
-            Ok((root.host(record.id.clone()), record))
+            Ok((root.host(record.id.clone()), record, fresh))
         })
         .await?;
-        settings.data.config.validate()?;
-        let incarnation = HostIncarnation::new()
-            .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
-        let access = ConnectionRegistry::new(settings.id.clone(), incarnation.clone());
-        let owner = Arc::new_cyclic(|weak| Self {
-            self_weak: weak.clone(),
-            id: settings.id.clone(),
-            incarnation,
-            access,
-            resources: Mutex::new(Some(resources)),
-            store: Mutex::new(Some(store.clone())),
-            changed: Arc::new(tokio::sync::Notify::new()),
-            settings: Some(settings),
-            state: Mutex::new(HostState {
-                lifecycle: HostLifecycle::Starting,
-                shutdown_strategy: None,
-                shutdown_fault: None,
-                shutdown_task: None,
-                creating: 0,
-                retirement_watch: None,
-                retirement_epoch: 0,
-                agents: BTreeMap::new(),
-                creations: BTreeMap::new(),
-                controls: BTreeMap::new(),
-                load_failures: BTreeMap::new(),
-                create_tasks: BTreeMap::new(),
-            }),
-        });
+        record.data.config.validate()?;
+        let candidate = prepare(record.data.config.clone()).await?;
+        if candidate.config != record.data.config {
+            return Err(crate::configuration::invalid(
+                "resource preparation changed saved configuration values",
+            ));
+        }
+        if fresh {
+            let store = store.clone();
+            let record = record.clone();
+            disk(FaultKind::HostStorageUnavailable, move || {
+                store.save_host(&record)
+            })
+            .await?;
+        }
+        let owner = Self::construct(
+            record.id,
+            record.data.config_revision,
+            candidate,
+            Some(store.clone()),
+            HostLifecycle::Starting,
+        )?;
         let ids = disk(FaultKind::HostStorageUnavailable, move || {
             store.list_agents()
         })
@@ -94,16 +98,14 @@ impl Host {
             }
         }
         owner.state.lock().expect("Host mutex poisoned").lifecycle = HostLifecycle::Running;
-        owner.access.attach_host(&owner);
         Ok(owner)
     }
-
+    /// Name-only embedding convenience, derived from the same committed config.
     pub fn settings(&self, caller: &CallerContext) -> Result<Option<HostSettings>, Fault> {
         self.access.read(caller, || {
-            Ok(self
-                .settings
-                .as_ref()
-                .map(|record| record.data.config.clone()))
+            Ok(self.store().map(|_| HostSettings {
+                name: self.configuration.snapshot().config.name.clone(),
+            }))
         })
     }
     pub fn agent_load_failures(

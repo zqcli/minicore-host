@@ -78,3 +78,7 @@ it is not part of the previously published Runtime pin or a claim that this
 candidate is remotely reproducible. It also prevents unpublished Session
 preparation from appearing as a registered child. Transport observation routing,
 public interaction answers and all broader remaining product work remain open.
+
+## Topic work: production resources and configuration (task 023)
+
+The independent `feat/host-resource-configuration` topic adds real provider/tool/workspace composition, a single HostConfig persistence shape, immutable Turn bindings, credential-free resource queries and Host-owned accepted reload publication. It adds 12 focused tests and reaches 438 uniquely listed workspace tests plus 3 doctests on its fixed `57687b2` baseline. It does not yet complete transport reload/receipt routes, CLI startup, ordinary filesystem tools, compaction or the full first version. Enabled compaction is explicitly rejected rather than ignored. The known intermittent transport-close BrokenPipe remains reported even where a later complete gate passes. Exact scope, commands, failures and next-owner APIs are in `tasks/023-host-resources/TASK.md`; integration/review is separate from this topic checkpoint.

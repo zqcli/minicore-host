@@ -7,8 +7,14 @@
 mod agent;
 mod backend;
 mod collaboration;
+mod configuration;
 mod control;
 pub use collaboration::*;
+pub use configuration::{
+    HostConfig, HostConfigSnapshot, HostReloadResult, LogLevel, LogOutput, LogSettings,
+    ModelDescription, NetworkSettings, OpenAiModelSettings, PreparedHostConfiguration,
+    RestartField,
+};
 mod host;
 mod persistence;
 mod prompt_history;

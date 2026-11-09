@@ -6,7 +6,7 @@ This crate is an in-process foundation, not the complete v4.93 canonical service
 
 ## Persistent initialization
 
-`Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. `HostSettings` currently contains only identity/display metadata (`name`), not provider, tool, access, logging or network configuration. The embedding application still supplies `ResourceResolver` explicitly.
+`Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. The name-only `HostSettings` is an embedding construction convenience, converted to the single complete `HostConfig` disk shape. Production composition uses `Host::open_configured` and the `minicore-host-resources` builder. Config queries, immutable resource catalogs, and accepted reload publication belong to Host; raw keys and execution handles are never stored in the record.
 
 The Host reads direct Agents. Each Agent reads its own metadata and initializes its direct Session metadata independently. History remains unloaded until the Session's load/resume/execution path validates it. Stored execution handles, queues, pauses, Load IDs, active Turns and tool processes are never reconstructed. Closed Sessions remain closed.
 
