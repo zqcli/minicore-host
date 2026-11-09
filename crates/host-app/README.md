@@ -108,6 +108,13 @@ Use externally managed stderr for rotation. Initialization failures are safe
 static summaries; credentials, config bodies, paths, prompts and panic payloads
 are not printed.
 
+Before opening a configured output file, the application resolves its normal
+filesystem path and rejects `host.json` and the Host-owned `agents` storage
+subtree. This protects metadata and Session history from diagnostic append.
+A dedicated directory such as `data-root/logs` is allowed; create it explicitly.
+This startup check is not a filesystem sandbox or protection against arbitrary
+external hardlinks and concurrent path replacement.
+
 Process events cover actual startup, shutdown requests/state, stopped cleanup,
 stdio disconnect, transport failure and owner shutdown faults. These are not
 complete Host/Agent/Session/Turn instrumentation. Logging health is not yet wired

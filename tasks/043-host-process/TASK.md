@@ -102,3 +102,38 @@ Initial app gates: `cargo test -p minicore-host --all-targets --locked` (11 test
 and `cargo clippy -p minicore-host --all-targets --locked -- -D warnings` passed.
 Only Linux execution is verified. No external model, remote-device or TUI
 acceptance is claimed. Ordinary tools await the coordinated production binding.
+
+
+## Fixed application checkpoint and storage-path correction
+
+At fixed source `4e85b03be73c921d93edb3f3351da04967d0715e`, all of these passed:
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`
+- `cargo test --workspace --doc --locked`: 4 doctests.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`
+- `cargo test --workspace --all-targets --locked -- --list`: 656 unique cases.
+- Clean-tree and unchanged SPEC SHA-256 checks.
+
+The diagnostics increment `af0f88e` separately passed independent review: 19
+cases, 1 doctest, strict lint/docs/fmt and external process/alias/FIFO probes.
+That review did not cover the application or process capability.
+
+A subsequent small app-only startup check resolves the actual root and log
+path, rejecting HostStore's fixed `host.json` metadata and `agents` storage
+subtree before output opens. It permits an explicitly created `root/logs`
+directory. Existing ordinary symlinks are resolved; a dangling/otherwise
+unresolvable output link fails without fallback. It does not scan external
+hardlinks or attempt to protect against concurrent malicious path replacement.
+No diagnostics backend, storage ownership, configuration schema or new path
+policy framework was introduced.
+
+Two real executable regressions preserve the exact pre-start Host metadata and
+Session history bytes for direct/aliased conflicting targets and confirm a
+separate log directory inside the root works. The initial build exposed one
+missed call-site argument and was corrected before testing. All 13 app cases and
+strict all-target Clippy then passed. Temporarily removing only the path check
+makes the original regression fail because the bad process incorrectly starts;
+restoring it returns the same test to green. The deliberate failing run is
+retained separately, not included as a passing gate.

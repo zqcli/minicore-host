@@ -2,6 +2,7 @@ use minicore_host_core::{LogLevel, LogOutput, LogSettings};
 use minicore_host_diagnostics::{Context, EventData, EventSpec, Guard, Options, Output, Scope};
 use minicore_host_protocol::Fault;
 use std::{
+    path::Path,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -13,7 +14,8 @@ pub struct Diagnostics {
     guard: Guard,
 }
 impl Diagnostics {
-    pub fn install(settings: LogSettings) -> Result<Self, &'static str> {
+    pub fn install(data_root: &Path, settings: LogSettings) -> Result<Self, &'static str> {
+        validate_output(data_root, &settings.output)?;
         let output = match settings.output {
             LogOutput::Stderr => Output::Stderr,
             LogOutput::File { path } => Output::File(path.into()),
@@ -40,6 +42,35 @@ impl Diagnostics {
         // This bounds diagnostics only, never business draining or persistence.
         let _ = guard.shutdown(Duration::from_secs(1));
     }
+}
+
+fn validate_output(data_root: &Path, output: &LogOutput) -> Result<(), &'static str> {
+    let LogOutput::File { path } = output else {
+        return Ok(());
+    };
+    let root = std::fs::canonicalize(data_root).map_err(|_| "cannot resolve Host data root")?;
+    let path = Path::new(path);
+    let resolved = match std::fs::symlink_metadata(path) {
+        Ok(_) => std::fs::canonicalize(path).map_err(|_| "cannot resolve diagnostic output")?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let parent = path
+                .parent()
+                .ok_or("cannot resolve diagnostic output parent")?;
+            let name = path
+                .file_name()
+                .ok_or("cannot resolve diagnostic output file")?;
+            std::fs::canonicalize(parent)
+                .map_err(|_| "cannot resolve diagnostic output parent")?
+                .join(name)
+        }
+        Err(_) => return Err("cannot inspect diagnostic output"),
+    };
+    // HostStore owns host.json and the agents subtree. A separate logs
+    // directory remains valid; diagnostics must never append to those records.
+    if resolved == root.join("host.json") || resolved.starts_with(root.join("agents")) {
+        return Err("diagnostic output conflicts with Host business storage");
+    }
+    Ok(())
 }
 
 const fn event(

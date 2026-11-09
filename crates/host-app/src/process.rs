@@ -26,7 +26,8 @@ pub async fn run(
             *diagnostics = Some(
                 tokio::task::spawn_blocking({
                     let settings = config.logging.clone();
-                    move || Diagnostics::install(settings)
+                    let data_root = options.data_root.clone();
+                    move || Diagnostics::install(&data_root, settings)
                 })
                 .await
                 .map_err(|_| "diagnostic initialization worker failed")??,

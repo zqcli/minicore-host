@@ -511,3 +511,110 @@ async fn broken_stdio_frame_does_not_shutdown_the_host_or_disable_the_wss_listen
             .any(|event| event["event"] == "host.stopped")
     );
 }
+
+fn saved_log_output(root: &std::path::Path, output: &std::path::Path) -> Vec<u8> {
+    let path = root.join("host.json");
+    let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    record["data"]["config"]["logging"]["output"] = json!({"kind":"file","path":output});
+    let bytes = serde_json::to_vec(&record).unwrap();
+    std::fs::write(path, &bytes).unwrap();
+    bytes
+}
+
+#[tokio::test]
+async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_history() {
+    let mut http = HttpFixture::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    let path = dir.path().join("config.json");
+    write_config(&path, &config(Some(http.endpoint.clone()), false));
+    let mut child = Process::start(&root, Some(&path), true, None);
+    child.rpc("initialize", json!({})).await;
+    let created = child.rpc("agent.create", agent_request()).await;
+    let address = target(&created);
+    child
+        .rpc(
+            "message.send",
+            message(&address, "preserve this original history"),
+        )
+        .await;
+    http.request().await;
+    let turns = child.rpc("turn.list", json!({"target":address})).await;
+    http.finish_response();
+    child
+        .rpc(
+            "turn.wait",
+            json!({"target":address,"turn_id":turns[0]["id"]}),
+        )
+        .await;
+    child.send("host.shutdown", shutdown("graceful"));
+    assert!(child.finish().await.status.success());
+    let history = root
+        .join("agents")
+        .join(address["agent_id"].as_str().unwrap())
+        .join("sessions")
+        .join(address["session_id"].as_str().unwrap())
+        .join("history.jsonl");
+    let history_before = std::fs::read(&history).unwrap();
+    assert!(!history_before.is_empty());
+    let alias = dir.path().join("metadata-log-alias");
+    std::os::unix::fs::symlink(root.join("host.json"), &alias).unwrap();
+    for destination in [root.join("host.json"), history.clone(), alias] {
+        let metadata_before = saved_log_output(&root, &destination);
+        let output = Process::start(&root, None, true, None).finish().await;
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+        output.safe_diagnostics();
+        assert_eq!(
+            std::fs::read(root.join("host.json")).unwrap(),
+            metadata_before
+        );
+        assert_eq!(std::fs::read(&history).unwrap(), history_before);
+        assert!(
+            output
+                .stderr
+                .join("\n")
+                .contains("conflicts with Host business storage")
+        );
+        assert!(
+            !output
+                .stderr
+                .join("\n")
+                .contains(destination.to_str().unwrap())
+        );
+    }
+}
+
+#[tokio::test]
+async fn dedicated_log_directory_inside_data_root_is_valid() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("root");
+    let path = dir.path().join("config.json");
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    let log = root.join("logs/host.jsonl");
+    let mut settings = config(None, false);
+    settings.logging.output = LogOutput::File {
+        path: log.to_str().unwrap().into(),
+    };
+    write_config(&path, &settings);
+    let mut child = Process::start(&root, Some(&path), true, None);
+    child.rpc("initialize", json!({})).await;
+    child.send("host.shutdown", shutdown("graceful"));
+    let output = child.finish().await;
+    assert!(output.status.success());
+    output.protocol_only();
+    assert!(output.stderr.is_empty());
+    let records: Vec<Value> = std::fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(
+        records
+            .iter()
+            .any(|record| record["event"] == "host.stopped")
+    );
+    let metadata: Value =
+        serde_json::from_slice(&std::fs::read(root.join("host.json")).unwrap()).unwrap();
+    assert!(metadata["id"].is_string());
+}
