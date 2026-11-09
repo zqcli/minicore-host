@@ -7,6 +7,7 @@
 //! safe. Fixtures in this crate exercise real transport, not a live provider.
 
 mod config;
+mod diagnostics;
 mod error;
 mod request;
 mod sse;
@@ -23,6 +24,7 @@ use minicore_runtime::model::{
 };
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderValue};
 use tokio::time::Instant as TokioInstant;
+use tracing::Instrument;
 
 /// Immutable, shareable OpenAI-compatible Chat Completions client.
 ///
@@ -83,6 +85,7 @@ impl OpenAiChatModel {
         &self,
         request: ModelRequest,
         context: ModelCallContext,
+        diagnostic: &mut diagnostics::Request,
     ) -> Result<ModelStream, ModelError> {
         if context.cancellation.is_cancelled() {
             return Err(error::local(ModelErrorKind::Cancelled));
@@ -107,6 +110,7 @@ impl OpenAiChatModel {
             _ = tokio::time::sleep_until(deadline) => return Err(error::unknown(ModelErrorKind::Timeout)),
             response = self.client.execute(http_request) => response.map_err(error::send)?,
         };
+        diagnostic.response(response.status().as_u16());
         if !response.status().is_success() {
             return Err(error::http(response, &context, deadline).await);
         }
@@ -143,6 +147,20 @@ impl Model for OpenAiChatModel {
         request: ModelRequest,
         context: ModelCallContext,
     ) -> ModelStartFuture<'a> {
-        Box::pin(self.start_request(request, context))
+        Box::pin(async move {
+            let mut diagnostic = diagnostics::Request::start(&context);
+            let span = diagnostic.span();
+            let result = self
+                .start_request(request, context, &mut diagnostic)
+                .instrument(span)
+                .await;
+            match result {
+                Ok(stream) => Ok(diagnostic.observe(stream)),
+                Err(error) => {
+                    diagnostic.failed(&error);
+                    Err(error)
+                }
+            }
+        })
     }
 }
