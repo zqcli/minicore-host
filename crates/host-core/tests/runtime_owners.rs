@@ -244,6 +244,34 @@ async fn wait_state(
     .expect("owner did not publish the expected state")
 }
 
+async fn wait_reclaimed(host: &Host, caller: &CallerContext, target: &SessionRef) {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            match host.session_state(caller, target) {
+                Ok(snapshot) => {
+                    if snapshot.data.lifecycle == SessionLifecycle::Closed {
+                        assert!(
+                            !snapshot.data.preparing
+                                && snapshot.data.active_turn_id.is_none()
+                                && !snapshot.data.saving
+                        );
+                    }
+                }
+                Err(fault) => {
+                    assert!(matches!(
+                        fault.kind(),
+                        FaultKind::AgentSessionNotFound | FaultKind::HostAgentNotFound
+                    ));
+                    return;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("closed memory Session was not reclaimed");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn initial_batch_uses_two_independent_queues_once() {
     let (host, connection, target, mut seen) = setup(vec![final_round("one"), final_round("two")]);
@@ -584,11 +612,26 @@ async fn close_clears_default_and_unload_preserves_memory_history() {
     send(&host, &caller, &target, MessageMode::FollowUp, "two");
     assert_eq!(user_texts(&next_request(&mut seen).await), ["one", "two"]);
     settled(&host, &caller, &target, 2).await;
-    host.close_session(&caller, &target).unwrap();
     let agent_ref = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
         agent_id: target.agent_id.clone(),
     };
+    // Keep another child open so the default check does not depend on retaining
+    // an otherwise empty memory Agent. Closing never selects this child instead.
+    let remaining = host
+        .create_session(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: agent_ref.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .unwrap();
+    host.close_session(&caller, &target).unwrap();
+    wait_reclaimed(&host, &caller, &target).await;
     assert!(
         host.agent_info(&caller, &agent_ref)
             .unwrap()
@@ -606,7 +649,20 @@ async fn close_clears_default_and_unload_preserves_memory_history() {
     );
     assert_eq!(
         host.resume(&caller, &target).unwrap_err().kind(),
-        FaultKind::SessionLifecycleClosed
+        FaultKind::AgentSessionNotFound
+    );
+    assert_eq!(
+        host.session_state(
+            &caller,
+            &SessionRef {
+                agent_id: target.agent_id,
+                session_id: remaining.session_id.unwrap(),
+            }
+        )
+        .unwrap()
+        .data
+        .lifecycle,
+        SessionLifecycle::Open
     );
 }
 
@@ -688,18 +744,12 @@ async fn review_close_during_preparation_must_finish_after_resolution() {
     started_rx.recv().await.unwrap();
     assert!(host.session_state(&caller, &target).unwrap().data.preparing);
     host.close_session(&caller, &target).unwrap();
+    let closing = host.session_state(&caller, &target).unwrap().data;
+    assert_eq!(closing.lifecycle, SessionLifecycle::Closing);
+    assert!(closing.preparing);
     gate.add_permits(1);
     resolved_rx.recv().await.unwrap();
-    let state = wait_state(&host, &caller, &target, |state| {
-        state.lifecycle == SessionLifecycle::Closed
-    })
-    .await;
-    assert!(!state.preparing && state.active_turn_id.is_none() && !state.saving);
-    assert_eq!(
-        state.lifecycle,
-        SessionLifecycle::Closed,
-        "closed session must finish when preparation settles"
-    );
+    wait_reclaimed(&host, &caller, &target).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -896,10 +946,7 @@ async fn review_preparation_panic_must_be_reported_and_close_settle() {
         "owner panic is not observable in authoritative state"
     );
     host.close_session(&caller, &target).unwrap();
-    wait_state(&host, &caller, &target, |state| {
-        state.lifecycle == SessionLifecycle::Closed
-    })
-    .await;
+    wait_reclaimed(&host, &caller, &target).await;
 }
 
 #[test]
@@ -965,7 +1012,7 @@ fn review_memory_default_close_orders_remain_authoritative() {
         host.set_default_session(&caller, &agent, Some(set_first.session_id))
             .unwrap_err()
             .kind(),
-        FaultKind::AgentDefaultSessionUnavailable
+        FaultKind::AgentSessionNotFound
     );
 
     host.set_default_session(&caller, &agent, Some(first.session_id.clone()))
@@ -976,7 +1023,7 @@ fn review_memory_default_close_orders_remain_authoritative() {
         host.set_default_session(&caller, &agent, Some(close_first.session_id))
             .unwrap_err()
             .kind(),
-        FaultKind::AgentDefaultSessionUnavailable
+        FaultKind::AgentSessionNotFound
     );
     assert_eq!(
         host.agent_info(&caller, &agent).unwrap().default_session_id,
@@ -1027,10 +1074,10 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
         let expected = if set_result.is_ok() {
             None
         } else {
-            assert_eq!(
+            assert!(matches!(
                 set_result.unwrap_err().kind(),
-                FaultKind::AgentDefaultSessionUnavailable
-            );
+                FaultKind::AgentDefaultSessionUnavailable | FaultKind::AgentSessionNotFound
+            ));
             Some(first.session_id)
         };
         assert_eq!(
@@ -1038,8 +1085,8 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
             expected
         );
         assert_eq!(
-            host.session_state(&caller, &target).unwrap().data.lifecycle,
-            SessionLifecycle::Closed
+            host.session_state(&caller, &target).unwrap_err().kind(),
+            FaultKind::AgentSessionNotFound
         );
     }
 }
