@@ -672,7 +672,7 @@ impl SessionController {
             if body.non_utf8 && request.end > body.text().len() as u64 {
                 return Err(Fault::new(
                     FaultKind::SessionOutputRangeInvalid,
-                    "tool channel contains non-UTF-8 bytes; only its observed UTF-8 prefix is text-readable, consult the native ToolResult for byte output",
+                    "tool channel contains non-UTF-8 bytes; only its observed UTF-8 prefix is text-readable",
                 ));
             }
             read_range(body.text(), request)
