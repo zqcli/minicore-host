@@ -77,10 +77,6 @@ async fn generate_inner(
     if model.descriptor() != &plan.descriptor {
         return Err(CompactionError::ModelChanged);
     }
-    // Cancellation reaches the actual Model port on cancellation, deadline,
-    // error or an abandoned calculation. This never cancels the parent token.
-    let cancellation = context.cancellation.child_token();
-    let _cancel_on_drop = cancellation.clone().drop_guard();
     let mut position = 0;
     let mut previous: Option<SummaryHistory> = None;
     while position < plan.groups.len() {
@@ -126,7 +122,7 @@ async fn generate_inner(
             ModelCallContext::new(
                 context.loop_id,
                 request_index,
-                cancellation.clone(),
+                context.cancellation.clone(),
                 context.deadline,
             ),
             &mut observation,
@@ -177,7 +173,7 @@ fn utility_request(
     let user = format!(
         "Aim for approximately {} tokens if the facts permit; this is a soft goal.\n\
          Historical data follows as JSON:\n{data}",
-        plan.summary_target
+        plan.summary_target.max(1)
     );
     ModelRequest::new(
         vec![
@@ -207,6 +203,14 @@ async fn call_model(
     context: ModelCallContext,
     observation: &mut UtilityUsage,
 ) -> Result<ModelResponse, CompactionError> {
+    // Each actual call owns a separate child, cancelled on every exit,
+    // including successful EOF before another chunk starts. The parent token
+    // is never cancelled by this calculation.
+    let context = ModelCallContext {
+        cancellation: context.cancellation.child_token(),
+        ..context
+    };
+    let _cancel_on_drop = context.cancellation.clone().drop_guard();
     check_active(&context)?;
     let deadline = tokio::time::Instant::from_std(context.deadline);
     let mut stream = tokio::select! {
@@ -232,9 +236,8 @@ async fn call_model(
             if !finished || text.trim().is_empty() {
                 return Err(CompactionError::InvalidResponse);
             }
-            // Unlike ModelResponse's text normalization, the summary must be
-            // legal before acceptance; do not turn malformed output into success.
-            ModelMessage::system(text.clone()).map_err(|_| CompactionError::InvalidResponse)?;
+            // Runtime's public response constructor owns raw model-text
+            // normalization, including CRLF split across delta boundaries.
             let response = ModelResponse::new_with_provider_replay(
                 vec![AssistantPart::Text(text.into())],
                 ModelFinishReason::Stop,
@@ -242,6 +245,13 @@ async fn call_model(
                 replay,
             )
             .map_err(|_| CompactionError::InvalidResponse)?;
+            let Some(AssistantPart::Text(text)) = response.parts().first() else {
+                return Err(CompactionError::InvalidResponse);
+            };
+            if text.trim().is_empty() {
+                return Err(CompactionError::InvalidResponse);
+            }
+            ModelMessage::system(text.to_string()).map_err(|_| CompactionError::InvalidResponse)?;
             observation.completed = true;
             return Ok(response);
         };
@@ -252,15 +262,7 @@ async fn call_model(
         match event {
             ModelEvent::TextDelta { delta } => text.push_str(delta.as_str()),
             // Reasoning is not the final summary, nor is it billed from bytes.
-            ModelEvent::ReasoningDelta { delta } => {
-                if delta
-                    .as_str()
-                    .chars()
-                    .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
-                {
-                    return Err(CompactionError::InvalidResponse);
-                }
-            }
+            ModelEvent::ReasoningDelta { .. } => {}
             ModelEvent::ToolCallStart { .. }
             | ModelEvent::ToolCallArgumentsDelta { .. }
             | ModelEvent::ToolCallEnd { .. } => return Err(CompactionError::UnexpectedToolCall),

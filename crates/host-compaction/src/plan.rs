@@ -107,7 +107,9 @@ impl CompactionCandidate {
 /// projection; this module does not rewrite the normal prompt policy.
 ///
 /// `preserve_from` protects that item and every following item. At an automatic
-/// boundary this must include the active user inputs the owner needs verbatim.
+/// boundary this protects the newly appended inputs not yet handed to the
+/// Session owner. It is not the public Turn's starting position: older accepted
+/// inputs and completed exchanges within a long Turn may be summarized too.
 /// An index inside an exchange rounds toward older history. For manual use,
 /// pass the history length. At least the final exchange/item is always kept.
 /// `None` means there is no eligible older prefix, not that history was changed.

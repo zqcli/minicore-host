@@ -48,8 +48,10 @@ cannot safely express durable replacement by simple append. That narrow storage
 integration need was reported; this module does not unilaterally change it.
 
 This first calculation layer only compacts a prefix. It does not fold disjoint
-inside-Turn groups if all earlier input must remain protected, or force success
-when source cannot be reduced. These limitations are explicit, not silent
+groups inside a caller-protected suffix or force success when source cannot be
+reduced. Automatic callers protect newly appended inputs not yet handed to the
+Session owner, not the whole public Turn. Older accepted inputs and completed
+exchanges within a long Turn remain eligible. These limitations are explicit, not silent
 history truncation or claimed manual/automatic acceptance.
 
 ## Verification so far
@@ -82,3 +84,15 @@ input and the actual provider total, with no production workaround.
 
 Remaining: full workspace fmt/Clippy/tests/doctests/rustdoc and exact unique case
 count, then independent review and Session/storage-owner integration. No push.
+
+## Runtime contract self-review
+
+The first complete workspace gate passed at implementation checkpoint
+`5c44f09acd23fd628842a1519aebecabd33e25bb`. Subsequent self-review found that
+raw ModelEvent text may legally contain CRLF/control characters: Runtime's
+ModelResponse constructor owns normalization. The correction uses that existing
+normalization, validates the resulting nonblank summary, and tests CRLF across
+deltas. It also cancels each individual utility-call child token at successful
+EOF before the next chunk begins, matching the real Model port's attempt lifetime.
+The chunk fixture asserts this sequence. This adds no retry or cleanup service.
+The final corrected full gate is recorded below when complete.

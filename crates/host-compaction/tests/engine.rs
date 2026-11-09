@@ -65,7 +65,15 @@ impl Model for ScriptedModel {
         context: ModelCallContext,
     ) -> ModelStartFuture<'a> {
         self.requests.lock().unwrap().push(request);
-        self.contexts.lock().unwrap().push(context);
+        let mut contexts = self.contexts.lock().unwrap();
+        assert!(
+            contexts
+                .iter()
+                .all(|prior| prior.cancellation.is_cancelled()),
+            "each prior utility call must be cancelled before the next begins"
+        );
+        contexts.push(context);
+        drop(contexts);
         let reached = self.reached.clone();
         let script = self.script.clone();
         Box::pin(async move {
@@ -574,12 +582,7 @@ async fn only_complete_valid_nonempty_stop_text_becomes_a_summary() {
         vec![Ok(ModelEvent::text_delta("partial"))],
         vec![Ok(ModelEvent::text_delta(" \n\t")), stop()],
         vec![Ok(ModelEvent::reasoning_delta("reasoning only")), stop()],
-        vec![Ok(ModelEvent::text_delta("illegal\0control")), stop()],
-        vec![
-            Ok(ModelEvent::reasoning_delta("illegal\0reasoning")),
-            Ok(ModelEvent::text_delta("valid text")),
-            stop(),
-        ],
+        vec![Ok(ModelEvent::text_delta("\0\x01")), stop()],
         vec![Ok(ModelEvent::text_delta("text")), stop(), stop()],
         vec![
             Ok(ModelEvent::text_delta("text")),
@@ -865,4 +868,27 @@ async fn estimate_is_available_when_the_history_has_no_compactable_prefix() {
         .unwrap()
         .is_none()
     );
+}
+
+#[tokio::test]
+async fn raw_model_text_uses_runtime_normalization_across_delta_boundaries() {
+    let model = ScriptedModel::new(
+        1000,
+        Script::Events(vec![
+            Ok(ModelEvent::text_delta("first\r")),
+            Ok(ModelEvent::reasoning_delta("reasoning\0not summary")),
+            Ok(ModelEvent::text_delta("\nsecond\0line\rthird")),
+            Ok(ModelEvent::Finish {
+                reason: ModelFinishReason::Stop,
+            }),
+        ]),
+    );
+    let candidate = generate(&plan(&model).await, &model, context())
+        .await
+        .unwrap();
+    assert_eq!(
+        candidate.summary.content.as_str(),
+        "first\nsecond line\nthird"
+    );
+    assert!(candidate.utility_usage[0].completed);
 }

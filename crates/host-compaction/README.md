@@ -16,14 +16,19 @@ control/input queue, retry service or durable operation state.
 2. Use `estimate_context` to inspect estimated input and the configured soft
    trigger/target. `prepare` selects an older prefix, retaining at least the last
    whole exchange and the caller's protected suffix. An automatic boundary must
-   protect active user inputs; manual callers can pass the history length.
+   protect newly appended inputs not yet handed to the Session owner; this
+   is not a permanent fence at the public Turn's first input. Older accepted
+   inputs and completed exchanges within a long Turn remain eligible. Manual
+   callers can pass the history length.
    `None` means no eligible prefix. It neither changes history nor claims that
    context now fits the model.
 3. Await `generate` outside owner locks with the bound `Model` and a real Runtime
    `ModelCallContext`. The supplied token and deadline reach each actual utility
-   call. Cancel/error/drop cancels the child token, not the caller's token. A
+   call. Each call's child token is cancelled at EOF/error/cancel/drop before
+   another chunk starts; the caller's token is not cancelled. A
    successful model response must finish with Stop and EOF and contain valid,
-   nonblank summary text. Tool output, partial, length-limited, malformed and
+   nonblank summary text after Runtime's standard raw-text normalization.
+   Tool output, partial, length-limited, malformed and
    empty summaries never become candidates.
 4. At the Session's ordinary write boundary, check the original work/configuration,
    cancellation and candidate source revision/content. `matches` checks only
@@ -65,8 +70,9 @@ public Model port.
 
 ## Deliberate first-stage boundaries
 
-This is a prefix compactor. It does not fold disjoint groups inside a protected
-current Turn, so an all-protected history can have no eligible work. Extremely
+This is a prefix compactor. It does not fold disjoint groups inside a caller's
+protected suffix, so an all-protected history can have no eligible work. The
+caller should protect unaccepted inputs, not every item of an active public Turn. Extremely
 large indivisible input or a nonreducing summary yields no replacement, rather
 than deleting source data to force success. Model errors retain their original
 Runtime details. The Session owner decides how to report them.
