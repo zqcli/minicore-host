@@ -3,24 +3,29 @@ use crate::control::{CallerContext, ConnectionHandle, ConnectionRegistry};
 use crate::session::{ResourceResolver, SessionController, SessionSubscription};
 use crate::types::*;
 use minicore_host_protocol::*;
+use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
+
+mod persistent;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-/// In-process Host entry point. This foundation exposes real memory owners and
-/// Runtime execution, plus a separate durable backend; transport and persistent
-/// entity startup are tracked as unfinished rather than silently emulated.
+/// In-process entry point. Persistent initialization and memory construction
+/// share the same direct owners, input queues and Runtime execution path.
 pub struct Host {
     id: HostId,
     incarnation: HostIncarnation,
     access: Arc<ConnectionRegistry>,
     resources: Arc<dyn ResourceResolver>,
     state: Mutex<HostState>,
+    store: Option<HostStore>,
+    settings: Option<HostRecord<HostSettings>>,
 }
 struct HostState {
     lifecycle: HostLifecycle,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
     creations: BTreeMap<OperationId, AgentCreateReceipt>,
+    load_failures: BTreeMap<AgentId, Fault>,
 }
 impl Host {
     pub fn memory(resources: Arc<dyn ResourceResolver>) -> Result<Arc<Self>, Fault> {
@@ -34,10 +39,13 @@ impl Host {
             incarnation,
             access,
             resources,
+            store: None,
+            settings: None,
             state: Mutex::new(HostState {
                 lifecycle: HostLifecycle::Running,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
+                load_failures: BTreeMap::new(),
             }),
         }))
     }
@@ -58,20 +66,19 @@ impl Host {
     }
     fn agent(&self, caller: &CallerContext, id: &AgentId) -> Result<Arc<AgentOwner>, Fault> {
         self.access.read(caller, || {
-            self.state
-                .lock()
-                .expect("Host mutex poisoned")
-                .agents
-                .get(id)
-                .cloned()
-                .ok_or_else(|| {
-                    Fault::new(
-                        FaultKind::HostAgentNotFound,
-                        "Agent is not registered in this Host",
-                    )
-                })
+            let state = self.state.lock().expect("Host mutex poisoned");
+            if let Some(fault) = state.load_failures.get(id) {
+                return Err(fault.clone());
+            }
+            state.agents.get(id).cloned().ok_or_else(|| {
+                Fault::new(
+                    FaultKind::HostAgentNotFound,
+                    "Agent is not registered in this Host",
+                )
+            })
         })
     }
+
     fn session(
         &self,
         caller: &CallerContext,

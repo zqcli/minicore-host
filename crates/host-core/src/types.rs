@@ -1,6 +1,6 @@
 use minicore_host_protocol::*;
 use minicore_runtime::{HistoryItem, model::ModelPartial};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HostInfo {
@@ -126,4 +126,36 @@ pub enum CancelStatus {
 pub struct CancelResult {
     pub status: CancelStatus,
     pub cleared: Vec<MessageId>,
+}
+
+/// Only the identity metadata supported by this stage. This is deliberately not
+/// a substitute for provider, tool, network, credential, or logging settings.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostSettings {
+    pub name: String,
+}
+impl HostSettings {
+    pub(crate) fn validate(&self) -> Result<(), Fault> {
+        if self.name.trim().is_empty() {
+            return Err(Fault::new(
+                FaultKind::HostStorageUnavailable,
+                "Host name must not be blank",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// A discovery failure remains associated with its actual direct child. It is
+/// not converted to an empty object and does not prevent healthy siblings loading.
+#[derive(Clone, Debug, Serialize)]
+pub struct AgentLoadFailure {
+    pub agent_id: AgentId,
+    pub fault: Fault,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct SessionLoadFailure {
+    pub session_id: SessionId,
+    pub fault: Fault,
 }

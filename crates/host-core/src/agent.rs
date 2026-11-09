@@ -1,6 +1,9 @@
 use crate::control::{CallerContext, ConnectionRegistry};
 use crate::session::{HistoryBackend, MemoryHistory, ResourceResolver, SessionController};
-use crate::types::AgentInfo;
+use crate::types::{AgentInfo, SessionLoadFailure};
+use minicore_host_storage::{AgentRecord, AgentStore};
+
+mod persistent;
 use minicore_host_protocol::*;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -16,10 +19,12 @@ pub(crate) struct AgentOwner {
     resources: Arc<dyn ResourceResolver>,
     state: Mutex<AgentState>,
     enabled: Arc<AtomicBool>,
+    store: Option<AgentStore>,
 }
 struct AgentState {
     info: AgentInfo,
     sessions: BTreeMap<SessionId, Arc<SessionController>>,
+    load_failures: BTreeMap<SessionId, Fault>,
 }
 impl AgentOwner {
     pub(crate) fn new(
@@ -38,6 +43,7 @@ impl AgentOwner {
             access,
             resources,
             enabled: Arc::new(AtomicBool::new(true)),
+            store: None,
             state: Mutex::new(AgentState {
                 info: AgentInfo {
                     id,
@@ -50,6 +56,7 @@ impl AgentOwner {
                     default_session_id: None,
                 },
                 sessions: BTreeMap::new(),
+                load_failures: BTreeMap::new(),
             }),
         })
     }
@@ -64,19 +71,18 @@ impl AgentOwner {
         })
     }
     pub(crate) fn session(&self, id: &SessionId) -> Result<Arc<SessionController>, Fault> {
-        self.state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .sessions
-            .get(id)
-            .cloned()
-            .ok_or_else(|| {
-                Fault::new(
-                    FaultKind::AgentSessionNotFound,
-                    "Session does not belong to this Agent",
-                )
-            })
+        let state = self.state.lock().expect("Agent mutex poisoned");
+        if let Some(fault) = state.load_failures.get(id) {
+            return Err(fault.clone());
+        }
+        state.sessions.get(id).cloned().ok_or_else(|| {
+            Fault::new(
+                FaultKind::AgentSessionNotFound,
+                "Session does not belong to this Agent",
+            )
+        })
     }
+
     pub(crate) fn default_session(&self) -> Result<Arc<SessionController>, Fault> {
         let state = self.state.lock().expect("Agent mutex poisoned");
         let id = state.info.default_session_id.as_ref().ok_or_else(|| {
@@ -125,6 +131,12 @@ impl AgentOwner {
         options: SessionOptions,
         make_default: bool,
     ) -> Result<Arc<SessionController>, Fault> {
+        if self.store.is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent Agent creation requires the asynchronous owner entry",
+            ));
+        }
         // Snapshot only direct-owner values, then release this lock before child
         // construction. Publication rechecks the actual lifecycle boundary.
         let config = {
@@ -175,6 +187,12 @@ impl AgentOwner {
         caller: &CallerContext,
         session: Option<SessionId>,
     ) -> Result<(), Fault> {
+        if self.store.is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent default updates require the asynchronous owner entry",
+            ));
+        }
         let child = session.as_ref().map(|id| self.session(id)).transpose()?;
         self.access.accept(caller, || {
             if child.as_ref().is_some_and(|child| !child.is_open_owned()) {
@@ -209,6 +227,12 @@ impl AgentOwner {
         expected_revision: u64,
         patch: &AgentConfigPatch,
     ) -> Result<AgentInfo, Fault> {
+        if self.store.is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent configuration updates require the asynchronous owner entry",
+            ));
+        }
         let original = self.info(caller)?;
         if original.config_revision != expected_revision {
             return Err(Fault::new(

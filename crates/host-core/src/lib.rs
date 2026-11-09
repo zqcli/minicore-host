@@ -8,6 +8,7 @@ mod agent;
 mod backend;
 mod control;
 mod host;
+mod persistence;
 mod session;
 mod types;
 

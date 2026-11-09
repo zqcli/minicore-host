@@ -2,7 +2,9 @@ use crate::control::{CallerContext, ConnectionRegistry};
 use crate::types::*;
 use futures_util::FutureExt;
 use minicore_host_protocol::*;
-use minicore_host_storage::HistoryEntry;
+use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
+
+mod persistent;
 use minicore_runtime::{
     AgentLoop, BoundedText, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory,
     LoopId, LoopInputs, LoopOptions, LoopOutcome, LoopReport, LoopRequest, UserInput,
@@ -150,6 +152,8 @@ pub(crate) struct SessionController {
     resources: Arc<dyn ResourceResolver>,
     backend: Arc<dyn HistoryBackend>,
     state: Mutex<SessionState>,
+    store: Option<SessionStore>,
+    provenance: Option<SessionRecord>,
     changed: Notify,
     snapshots: watch::Sender<SessionSnapshot>,
 }
@@ -212,6 +216,8 @@ impl SessionController {
             access,
             resources,
             backend,
+            store: None,
+            provenance: None,
             state: Mutex::new(state),
             changed: Notify::new(),
             snapshots,
@@ -349,14 +355,17 @@ impl SessionController {
     }
     pub(crate) fn history(&self, caller: &CallerContext) -> Result<Vec<HistoryItem>, Fault> {
         self.access.read(caller, || {
-            Ok(self
-                .state
-                .lock()
-                .expect("Session mutex poisoned")
-                .history
-                .clone())
+            let state = self.state.lock().expect("Session mutex poisoned");
+            if !state.history_loaded {
+                return Err(Fault::new(
+                    FaultKind::SessionHistoryLoadFailed,
+                    "history has not yet been loaded and validated",
+                ));
+            }
+            Ok(state.history.clone())
         })
     }
+
     pub(crate) fn send(
         self: &Arc<Self>,
         caller: &CallerContext,
@@ -620,6 +629,12 @@ impl SessionController {
         Ok(result)
     }
     pub(crate) fn close(&self, caller: &CallerContext) -> Result<(), Fault> {
+        if self.store.is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent close requires the asynchronous owner entry",
+            ));
+        }
         let handle = self.access.accept(caller, || self.close_owned())?;
         if let Some(handle) = handle {
             handle.shutdown();
