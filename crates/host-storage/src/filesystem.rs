@@ -45,6 +45,8 @@ impl Directory {
                 return Err(io_error("lock data root", &canonical, e));
             }
         }
+        #[cfg(test)]
+        crate::lease_tests::after_lock(&file);
         // Existence is not a durability proof, including after a previous failed
         // acquisition. Confirm every ancestor entry needed to locate this root.
         for parent in canonical.ancestors().skip(1) {

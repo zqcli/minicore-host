@@ -220,3 +220,5 @@ fn directory_replacement_during_sync_cannot_be_confirmed() {
 }
 
 mod compaction;
+
+mod lease;

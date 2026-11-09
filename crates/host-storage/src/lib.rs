@@ -44,3 +44,6 @@ pub use records::*;
 /// # }
 /// ```
 pub const STORAGE_SCHEMA_VERSION: u32 = SCHEMA_VERSION;
+
+#[cfg(test)]
+mod lease_tests;

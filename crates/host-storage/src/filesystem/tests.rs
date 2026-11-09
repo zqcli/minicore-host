@@ -302,3 +302,5 @@ fn failed_metadata_sync_releases_the_gate_but_does_not_confirm_readable_data() {
     assert_eq!(root.read_metadata("object.json").unwrap(), b"new");
     assert!(!traced(&root.path));
 }
+
+mod lease;

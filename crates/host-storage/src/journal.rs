@@ -543,6 +543,8 @@ impl SessionStore {
                 ));
             }
         }
+        #[cfg(test)]
+        crate::lease_tests::after_lock(&file);
         let before = FileStamp::read(&file, &dir.path)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes).map_err(|e| {
@@ -558,7 +560,11 @@ impl SessionStore {
 
 pub(crate) fn lock_history(file: &File, directory: &Path) -> Result<(), StorageError> {
     match file.try_lock() {
-        Ok(()) => Ok(()),
+        Ok(()) => {
+            #[cfg(test)]
+            crate::lease_tests::after_lock(file);
+            Ok(())
+        }
         Err(std::fs::TryLockError::WouldBlock) => Err(StorageError::HistoryInUse),
         Err(std::fs::TryLockError::Error(e)) => Err(crate::error::io_error(
             "lock history writer",
