@@ -14,5 +14,3 @@ serde_json = "=1.0.154"
 [lints.rust]
 unsafe_code = "forbid"
 
-# Temporary standalone workspace; the integration owner removes this section.
-[workspace]

@@ -1,3 +1,6 @@
 /target/
 /.cargo/config.local.toml
 *.log
+
+/.cargo/config.toml
+/vendor/minicore-runtime

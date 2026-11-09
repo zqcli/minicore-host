@@ -1,0 +1,26 @@
+[package]
+name = "minicore-host-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.90"
+description = "Direct-owner Host, Agent, and Session controllers for MiniCore"
+
+[dependencies]
+minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
+minicore-host-storage = { path = "../host-storage", version = "0.1.0" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3fd5ecda1fb7c717ab0a39218d90268b4d97909c", version = "0.9.2" }
+serde = { version = "=1.0.229", features = ["derive", "rc"] }
+serde_json = "=1.0.154"
+thiserror = "=2.0.21"
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
+futures-util = "=0.3.34"
+
+[dev-dependencies]
+tempfile = "=3.27.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+await_holding_lock = "deny"
