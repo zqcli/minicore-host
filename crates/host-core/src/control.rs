@@ -173,7 +173,12 @@ impl ConnectionRegistry {
     }
     pub(crate) fn connect(self: &Arc<Self>) -> Result<ConnectionHandle, Fault> {
         let mut state = self.state.lock().expect("connection mutex poisoned");
-        self.register(&mut state, false)
+        let connection = self.register(&mut state, false)?;
+        drop(state);
+        if connection.initial.can_operate {
+            self.publish_control_change();
+        }
+        Ok(connection)
     }
     pub(crate) fn connect_network(
         self: &Arc<Self>,
@@ -190,7 +195,12 @@ impl ConnectionRegistry {
                 "network authentication failed",
             ));
         }
-        self.register(&mut state, true)
+        let connection = self.register(&mut state, true)?;
+        drop(state);
+        if connection.initial.can_operate {
+            self.publish_control_change();
+        }
+        Ok(connection)
     }
     pub(crate) fn require_network_enabled(&self) -> Result<(), Fault> {
         let state = self.state.lock().expect("connection mutex poisoned");
@@ -245,7 +255,16 @@ impl ConnectionRegistry {
                     .expect("control revision exhausted");
             }
         }
+        drop(state);
+        if changed {
+            self.publish_control_change();
+        }
         Ok(result)
+    }
+    fn publish_control_change(&self) {
+        if let Some(host) = self.host.get().and_then(Weak::upgrade) {
+            host.publish_host_state_owned();
+        }
     }
     fn register(
         self: &Arc<Self>,
@@ -304,12 +323,17 @@ impl ConnectionRegistry {
         identity.validity.send_replace(false);
         self.observation.close_connection(identity.number);
         state.connections.remove(&identity.number);
-        if state.operator == Some(identity.number) {
+        let released_operator = state.operator == Some(identity.number);
+        if released_operator {
             state.operator = None;
             state.revision = state
                 .revision
                 .checked_add(1)
                 .expect("control revision exhausted");
+        }
+        drop(state);
+        if released_operator {
+            self.publish_control_change();
         }
     }
     fn check(

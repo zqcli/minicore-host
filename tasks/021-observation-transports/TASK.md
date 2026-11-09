@@ -89,3 +89,23 @@ reclassified as success.
 - Independent review and parent integration, then the parent's verified remote
   Runtime retry pin and full gate on that final source. No network publication,
   live-provider behavior, production CLI or TUI changes are included here.
+
+## Control-change follow-up
+
+Stage 1 source commit: `5b17dc85c41218ff04f41d586263fcae7eea7e28`.
+The control notification patch uses the private Weak Host attachment from DSH
+source `6536da608f7e97a72a02221695112bf74fb33193` as a prerequisite. Parent
+integration should take only this task's control-change commit, not replay DSH.
+
+Connection register/close and key publication now publish the actual current
+`host.state` after releasing the registry mutex. Network revocation still closes
+only original network scopes. Surviving local/read-only connections are not
+promoted; only a new registration can acquire the vacant right. No Host state
+lock is held across child calls or transport I/O.
+
+Validation with the same explicit local Runtime patch: formatting passed;
+`cargo clippy -p minicore-host-core -p minicore-host-transport --all-targets
+--locked --offline -- -D warnings` and the matching all-targets tests passed.
+The new real loopback TLS test covers current key invalidation, local observer
+survival, occupied/unoccupied revisions, read-only rejection, fresh authority,
+ordinary disconnect, and completion of previously accepted Runtime work.
