@@ -840,7 +840,7 @@ async fn terminal_save_continuation_preserves_completed_claim_despite_force() {
             .await
             .is_err()
     );
-    fixture.session.continue_history_owned().unwrap();
+    fixture.session.continue_saves_owned().unwrap();
     until(&fixture, |state| state.completed.len() == 1).await;
     assert_single_terminal(&fixture, TurnOutcome::Completed, 0);
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
@@ -1008,7 +1008,7 @@ async fn force_keeps_cancelled_partial_and_original_save_through_continuation() 
     assert_eq!(original.outcome, Some(TurnOutcome::Cancelled));
     assert!(original.fault.is_none());
     assert!(!fixture.session.shutdown_status_owned().quiescent);
-    fixture.session.continue_history_owned().unwrap();
+    fixture.session.continue_saves_owned().unwrap();
     until(&fixture, |state| state.completed.len() == 1).await;
     assert_single_terminal(&fixture, TurnOutcome::Cancelled, 1);
     assert_eq!(backend.appends.load(Ordering::SeqCst), 3);

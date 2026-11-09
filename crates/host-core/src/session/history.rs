@@ -287,7 +287,6 @@ impl SessionController {
                 work.running = false;
                 work.fault = Some(fault.clone());
                 state.block_reason = Some(fault.clone());
-                state.resume_after_saves = None;
                 Err(fault)
             }
         };
@@ -407,10 +406,6 @@ impl SessionController {
         self.ensure_executor()?;
         let mut state = self.state.lock().expect("Session mutex poisoned");
         self.start_save_continuations(&mut state, false)
-    }
-    // Compatibility for the lifecycle sibling until its call site is integrated.
-    pub(crate) fn continue_history_owned(self: &Arc<Self>) -> Result<(), Fault> {
-        self.continue_saves_owned()
     }
     pub(super) fn start_save_continuations(
         self: &Arc<Self>,

@@ -293,7 +293,6 @@ impl SessionController {
                     let work = state.record_work.as_mut().expect("original save retained");
                     work.running = false;
                     work.fault = Some(fault.clone());
-                    state.resume_after_saves = None;
                     self.publish(&mut state);
                     Err(fault)
                 }

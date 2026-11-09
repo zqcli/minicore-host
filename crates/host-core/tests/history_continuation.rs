@@ -423,7 +423,11 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
     );
     std::fs::remove_file(&history).unwrap();
     std::fs::rename(history.with_extension("original"), &history).unwrap();
-    host.pause(&caller, &target).unwrap();
+    host.send(
+        &caller,
+        SendMessage::new(input("a separately queued follow-up"), target.clone()),
+    )
+    .unwrap();
     // The first explicit request confirms history, while still-broken metadata
     // remains its own original fault/version. Neither success stands in for both.
     host.resume(&caller, &target).unwrap();
@@ -449,8 +453,14 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         host.session_state(&caller, &target)
             .unwrap()
             .data
-            .scheduling,
-        Scheduling::Paused
+            .next_turn
+            .len(),
+        1
+    );
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "failed companion metadata must not resume queued business"
     );
     let confirmed_history = std::fs::read(&history).unwrap();
     std::fs::remove_dir(&metadata).unwrap();
@@ -466,8 +476,19 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         role
     );
     assert_eq!(std::fs::read(&history).unwrap(), confirmed_history);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(host.turns(&caller, &target).unwrap().len(), 1);
+    entered.acquire().await.unwrap().forget();
+    let later = host
+        .turns(&caller, &target)
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_ne!(later.id, failed.id);
+    assert_eq!(later.config_revision, original.config_revision + 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    release.add_permits(1);
+    host.wait_turn(&caller, &target, &later.id).await.unwrap();
+    assert_eq!(host.turns(&caller, &target).unwrap().len(), 2);
 }
 
 #[tokio::test]

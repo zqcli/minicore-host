@@ -397,6 +397,7 @@ impl SessionController {
             && !state.failure_paused
             && state.agent_enabled.load(Ordering::SeqCst)
             && state.block_reason.is_none()
+            && state.resume_after_saves.is_none()
     }
     pub(crate) fn is_open_owned(&self) -> bool {
         let state = self.state.lock().expect("Session mutex poisoned");
