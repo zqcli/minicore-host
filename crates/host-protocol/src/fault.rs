@@ -62,6 +62,9 @@ fault_registry! {
     HostReceiptAmbiguous = 1203, "HOST_RECEIPT_AMBIGUOUS", [Host, HostLookup], None, false;
     HostLifecycleUnavailable = 1301, "HOST_LIFECYCLE_UNAVAILABLE", [Host], None, false;
     HostMethodUnavailable = 1401, "HOST_METHOD_UNAVAILABLE", [Host], None, false;
+    HostObservationInvalid = 1501, "HOST_OBSERVATION_INVALID", [Host], None, false;
+    HostSubscriptionNotFound = 1502, "HOST_SUBSCRIPTION_NOT_FOUND", [Host, HostLookup], None, false;
+    HostObservationResyncRequired = 1503, "HOST_OBSERVATION_RESYNC_REQUIRED", [Host], None, false;
     HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host], None, false;
     AgentConfigInvalid = 2101, "AGENT_CONFIG_INVALID", [Agent, AgentConfig], None, false;
     AgentConfigConflict = 2102, "AGENT_CONFIG_CONFLICT", [Agent, AgentConfig], None, false;
@@ -83,6 +86,10 @@ fault_registry! {
     SessionConfigInvalid = 3401, "SESSION_CONFIG_INVALID", [Session, SessionConfig], None, false;
     SessionConfigConflict = 3402, "SESSION_CONFIG_CONFLICT", [Session, SessionConfig], None, false;
     SessionResourceMissing = 3403, "SESSION_RESOURCE_MISSING", [Session, SessionConfig], None, false;
+    SessionOutputNotFound = 3501, "SESSION_OUTPUT_NOT_FOUND", [Session, SessionLookup], None, false;
+    SessionOutputRangeInvalid = 3502, "SESSION_OUTPUT_RANGE_INVALID", [Session], None, false;
+    SessionHistoryCursorInvalid = 3503, "SESSION_HISTORY_CURSOR_INVALID", [Session, SessionHistory], None, false;
+    SessionToolCallNotFound = 3504, "SESSION_TOOLCALL_NOT_FOUND", [Session, SessionLookup], None, false;
     SessionInternalUnexpected = 3999, "SESSION_INTERNAL_UNEXPECTED", [Session], None, false;
     TurnModelUpstreamRateLimited = 4201, "TURN_MODEL_UPSTREAM_RATE_LIMITED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
     TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
@@ -128,13 +135,30 @@ pub enum FaultDetails {
     HistoryWrite(HistoryWriteDetails),
     HistoryLoad(HistoryLoadDetails),
     Upstream(UpstreamDetails),
+    /// Opaque data from an unrecognized leaf. It is retained for the client, not
+    /// interpreted as a registered schema or accepted by known leaf builders.
+    Unrecognized(serde_json::Value),
 }
 
-/// Closed public business-fault contract. The numeric code is derived from the
-/// registry on serialization and checked on input; callers cannot mismatch it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum FaultIdentity {
+    Registered(FaultKind),
+    // Keep the common registered Fault small. Unknown definitions are received
+    // from a peer, never synthesized by an owner as a fallback classification.
+    Unrecognized(Box<UnrecognizedIdentity>),
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct UnrecognizedIdentity {
+    type_name: String,
+    code: u16,
+}
+
+/// Public business fault. Owners construct registered leaves; clients also
+/// retain newer unknown leaves without dropping receipts or inventing a known
+/// class. Registered type/code/details combinations remain strictly checked.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Fault {
-    kind: FaultKind,
+    identity: FaultIdentity,
     message: String,
     diagnostic_id: Option<String>,
     details: Option<FaultDetails>,
@@ -144,18 +168,35 @@ impl Fault {
     /// The owner supplies a safe human-readable summary, not a raw error body.
     pub fn new(kind: FaultKind, message: impl Into<String>) -> Self {
         Self {
-            kind,
+            identity: FaultIdentity::Registered(kind),
             message: message.into(),
             diagnostic_id: None,
             details: None,
             retry_after_ms: None,
         }
     }
-    pub const fn kind(&self) -> FaultKind {
-        self.kind
+    /// A known registry leaf, or None when this client does not recognize the
+    /// received type. Unknown names never acquire classes from their spelling.
+    pub const fn kind(&self) -> Option<FaultKind> {
+        match &self.identity {
+            FaultIdentity::Registered(kind) => Some(*kind),
+            FaultIdentity::Unrecognized(_) => None,
+        }
     }
-    pub const fn code(&self) -> u16 {
-        self.kind.code()
+    pub fn type_name(&self) -> &str {
+        match &self.identity {
+            FaultIdentity::Registered(kind) => kind.type_name(),
+            FaultIdentity::Unrecognized(identity) => &identity.type_name,
+        }
+    }
+    pub fn code(&self) -> u16 {
+        match &self.identity {
+            FaultIdentity::Registered(kind) => kind.code(),
+            FaultIdentity::Unrecognized(identity) => identity.code,
+        }
+    }
+    pub fn is_a(&self, class: FaultClass) -> bool {
+        self.kind().is_some_and(|kind| kind.is_a(class))
     }
     pub fn message(&self) -> &str {
         &self.message
@@ -185,7 +226,19 @@ impl Fault {
         Ok(self)
     }
     pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.retry_after_ms.is_some() && !self.kind.allows_retry_after_ms() {
+        let Some(kind) = self.kind() else {
+            if self
+                .details
+                .as_ref()
+                .is_some_and(|details| !matches!(details, FaultDetails::Unrecognized(_)))
+            {
+                return Err(invalid(
+                    "unrecognized faults cannot claim registered details",
+                ));
+            }
+            return Ok(());
+        };
+        if self.retry_after_ms.is_some() && !kind.allows_retry_after_ms() {
             return Err(invalid(
                 "retry_after_ms is only registered for temporary upstream faults",
             ));
@@ -193,16 +246,16 @@ impl Fault {
         match &self.details {
             None => {}
             Some(FaultDetails::HistoryWrite(_))
-                if self.kind.details_schema() == FaultDetailsSchema::HistoryWrite => {}
+                if kind.details_schema() == FaultDetailsSchema::HistoryWrite => {}
             Some(FaultDetails::HistoryLoad(location))
-                if self.kind.details_schema() == FaultDetailsSchema::HistoryLoad =>
+                if kind.details_schema() == FaultDetailsSchema::HistoryLoad =>
             {
                 if location.line == Some(0) {
                     return Err(invalid("history location line is one-based"));
                 }
             }
             Some(FaultDetails::Upstream(_))
-                if self.kind.details_schema() == FaultDetailsSchema::Upstream => {}
+                if kind.details_schema() == FaultDetailsSchema::Upstream => {}
             Some(_) => return Err(invalid("details do not match the registered fault type")),
         }
         Ok(())
@@ -213,7 +266,7 @@ impl fmt::Display for Fault {
         write!(
             f,
             "{} ({}): {}",
-            self.kind.type_name(),
+            self.type_name(),
             self.code(),
             self.message
         )
@@ -228,7 +281,7 @@ impl Serialize for Fault {
                 + usize::from(self.details.is_some())
                 + usize::from(self.retry_after_ms.is_some()),
         )?;
-        state.serialize_field("type", &self.kind)?;
+        state.serialize_field("type", self.type_name())?;
         state.serialize_field("code", &self.code())?;
         state.serialize_field("message", &self.message)?;
         if let Some(value) = &self.diagnostic_id {
@@ -247,7 +300,7 @@ impl Serialize for Fault {
 #[serde(deny_unknown_fields)]
 struct FaultWire {
     #[serde(rename = "type")]
-    kind: FaultKind,
+    type_name: String,
     code: u16,
     message: String,
     #[serde(default, deserialize_with = "crate::present")]
@@ -260,7 +313,29 @@ struct FaultWire {
 impl<'de> Deserialize<'de> for Fault {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let wire = FaultWire::deserialize(d)?;
-        if wire.code != wire.kind.code() {
+        let kind = FAULT_KINDS
+            .iter()
+            .copied()
+            .find(|kind| kind.type_name() == wire.type_name);
+        let Some(kind) = kind else {
+            if wire.type_name.is_empty() || FAULT_KINDS.iter().any(|kind| kind.code() == wire.code)
+            {
+                return Err(serde::de::Error::custom(
+                    "fault type/code registry mismatch",
+                ));
+            }
+            return Ok(Self {
+                identity: FaultIdentity::Unrecognized(Box::new(UnrecognizedIdentity {
+                    type_name: wire.type_name,
+                    code: wire.code,
+                })),
+                message: wire.message,
+                diagnostic_id: wire.diagnostic_id,
+                details: wire.details.map(FaultDetails::Unrecognized),
+                retry_after_ms: wire.retry_after_ms,
+            });
+        };
+        if wire.code != kind.code() {
             return Err(serde::de::Error::custom(
                 "fault type/code registry mismatch",
             ));
@@ -268,7 +343,7 @@ impl<'de> Deserialize<'de> for Fault {
         let details = wire
             .details
             .map(|value| {
-                match wire.kind.details_schema() {
+                match kind.details_schema() {
                     FaultDetailsSchema::HistoryWrite => {
                         serde_json::from_value(value).map(FaultDetails::HistoryWrite)
                     }
@@ -288,7 +363,7 @@ impl<'de> Deserialize<'de> for Fault {
             })
             .transpose()?;
         let fault = Self {
-            kind: wire.kind,
+            identity: FaultIdentity::Registered(kind),
             message: wire.message,
             diagnostic_id: wire.diagnostic_id,
             details,

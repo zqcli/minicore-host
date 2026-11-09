@@ -68,3 +68,12 @@ progress during synchronous creation validation. Their separate fixes are not
 in this checkpoint. This WSS gate is not independent full-product approval, a
 production process/config loader, completed `host.reload`, or TUI/live-model
 validation.
+## Independent review follow-ups
+
+The existing typed/stdio review found that unrecognized Fault leaves were
+rejected as malformed responses, including faults nested in accepted receipts.
+The owner approved a first-version API correction: `Fault::kind()` returns
+`Option<FaultKind>`, while `type_name()`, `code()`, message and opaque details
+retain unknown wire facts. Registered mappings and detail schemas stay strict.
+The API change and required mechanical callers are separate adjacent commits;
+whole-workspace checks require both. Three new protocol regressions pass.
