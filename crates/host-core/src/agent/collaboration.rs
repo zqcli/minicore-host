@@ -16,10 +16,28 @@ impl AgentOwner {
             )
         })?;
         self.access.accept_internal_owned(|| {
-            child.begin_close_owned(operation)?;
+            let first = {
+                let mut state = self.state.lock().expect("Agent mutex poisoned");
+                if state.deleting_sessions.contains(id) {
+                    // Existing scope cleanup waits for the already accepted
+                    // delete's normal close; it must not start a second worker.
+                    return Ok(());
+                }
+                state.close_running.insert(id.clone())
+            };
+            if let Err(error) = child.begin_close_owned(operation) {
+                if first {
+                    self.state
+                        .lock()
+                        .expect("Agent mutex poisoned")
+                        .close_running
+                        .remove(id);
+                }
+                return Err(error);
+            }
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.closing.insert(id.clone());
-            if state.close_running.insert(id.clone()) {
+            if first {
                 let owner = Arc::clone(self);
                 let target = Arc::clone(&child);
                 let id = id.clone();
@@ -60,13 +78,14 @@ impl AgentOwner {
             let changed = self.changed.notified();
             tokio::pin!(changed);
             changed.as_mut().enable();
-            if !self
-                .state
-                .lock()
-                .expect("Agent mutex poisoned")
-                .close_running
-                .contains(id)
-            {
+            let pending = {
+                let state = self.state.lock().expect("Agent mutex poisoned");
+                state.close_running.contains(id) || state.deleting_sessions.contains(id)
+            };
+            if !pending {
+                if let Some(error) = child.delete_close_failure_owned() {
+                    return Err(error);
+                }
                 return child.join_close_owned().await;
             }
             changed.await;

@@ -288,7 +288,7 @@ async fn default_closed_deletion_preserves_another_session_and_immutable_parent_
             Err(e) => panic!("{e:?}"),
         }
     };
-    assert_eq!(receipt.result.lifecycle, SessionLifecycle::Closed);
+    assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closed);
     deleted(&host, &caller, &session).await;
     assert_eq!(
         host.receipt_get(&caller, &operation).unwrap(),
@@ -536,4 +536,182 @@ async fn ordinary_close_and_stop_keep_files_until_explicit_deletion() {
             .contains("ordinary retained history")
     );
     assert!(path(dir.path(), &target).join("session.json").exists());
+}
+
+#[tokio::test]
+async fn failed_delete_retains_real_error_and_releases_locator_at_controlled_shutdown() {
+    let (dir, host, connection) = fixture().await;
+    let caller = connection.caller();
+    let (_, target, _) = create(&host, &caller, StorageMode::Persistent).await;
+    let artifact = path(dir.path(), &target).join("separate-artifact");
+    std::fs::write(&artifact, b"keep").unwrap();
+    let receipt = host.session_delete(&caller, &target, delete(true)).unwrap();
+    until(|| {
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .deletion
+            .is_some_and(|d| matches!(d.data, DataDeletion::Failed { .. }))
+    })
+    .await;
+    assert_eq!(
+        host.session_state(&caller, &target).unwrap().data.lifecycle,
+        SessionLifecycle::Closed
+    );
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionDelete(receipt)
+    );
+    host.shutdown(
+        &caller,
+        HostShutdownRequest {
+            operation_id: OperationId::new().unwrap(),
+            strategy: HostShutdownStrategy::Force,
+        },
+    )
+    .unwrap();
+    until(|| host.info(&caller).unwrap().lifecycle == HostLifecycle::Stopped).await;
+    assert_eq!(std::fs::read(&artifact).unwrap(), b"keep");
+    let (resources, _) = resources();
+    let reopened = Host::open_persistent(
+        dir.path(),
+        settings("reopen after failed delete"),
+        resources,
+    )
+    .await
+    .unwrap();
+    let next = reopened.connect().unwrap();
+    assert_eq!(
+        reopened
+            .session_state(&next.caller(), &target)
+            .unwrap()
+            .data
+            .lifecycle,
+        SessionLifecycle::Closed
+    );
+}
+
+struct PendingPreparation {
+    inner: Arc<dyn ResourceResolver>,
+    entered: tokio::sync::Semaphore,
+    release: tokio::sync::Semaphore,
+}
+impl ResourceResolver for PendingPreparation {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        self.inner.validate(config)
+    }
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
+        Box::pin(async move {
+            self.entered.add_permits(1);
+            self.release.acquire().await.unwrap().forget();
+            self.inner.resolve(config).await
+        })
+    }
+}
+#[tokio::test]
+async fn deletion_cancels_unfinished_preparation_without_starting_runtime_or_reopening_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let (inner, seen) = resources();
+    let resources = Arc::new(PendingPreparation {
+        inner,
+        entered: tokio::sync::Semaphore::new(0),
+        release: tokio::sync::Semaphore::new(0),
+    });
+    let host = Host::open_persistent(
+        dir.path(),
+        settings("pending preparation"),
+        resources.clone(),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let (_, target, _) = create(&host, &caller, StorageMode::Persistent).await;
+    host.send(
+        &caller,
+        SendMessage::new(input("accepted before delete"), target.clone()),
+    )
+    .unwrap();
+    resources.entered.acquire().await.unwrap().forget();
+    assert!(host.session_state(&caller, &target).unwrap().data.preparing);
+    host.session_delete(&caller, &target, delete(true)).unwrap();
+    deleted(&host, &caller, &target).await;
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(resources.release.available_permits(), 0);
+    assert!(!path(dir.path(), &target).exists());
+}
+
+#[tokio::test]
+async fn accepted_metadata_saves_settle_before_delete_and_agent_admission_rejects_own_save() {
+    let (dir, host, connection) = fixture().await;
+    let caller = connection.caller();
+    let (agent, target, _) = create(&host, &caller, StorageMode::Persistent).await;
+    let default = host
+        .agent_set_default_session(
+            &caller,
+            &agent,
+            AgentSetDefaultSessionRequest {
+                operation_id: OperationId::new().unwrap(),
+                session_id: None,
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        default.result,
+        AgentSetDefaultSessionResult::Saving { .. }
+    ));
+    assert_eq!(
+        host.agent_delete(
+            &caller,
+            &agent,
+            cascade(vec![target.session_id.clone()], true)
+        )
+        .unwrap_err()
+        .kind(),
+        Some(FaultKind::AgentDeleteInvalid)
+    );
+    until(|| !host.agent_info(&caller, &agent).unwrap().metadata_saving).await;
+    let artifact = path(dir.path(), &target).join("independent");
+    std::fs::write(&artifact, b"keep").unwrap();
+    let update = host
+        .session_update(
+            &caller,
+            &target,
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    title: NullablePatch::Set("accepted before close".into()),
+                    config: Default::default(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(update.result, MetadataUpdateResult::Saving { .. }));
+    let receipt = host.session_delete(&caller, &target, delete(true)).unwrap();
+    until(|| {
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .deletion
+            .is_some_and(|d| matches!(d.data, DataDeletion::Failed { .. }))
+    })
+    .await;
+    let saved: SessionRecord = serde_json::from_slice(
+        &std::fs::read(path(dir.path(), &target).join("session.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved.data.title.as_deref(), Some("accepted before close"));
+    assert!(saved.data.closed.is_some());
+    assert_eq!(saved.data.config_revision, 1);
+    assert_eq!(std::fs::read(&artifact).unwrap(), b"keep");
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionDelete(receipt)
+    );
+    assert_eq!(
+        host.receipt_get(&caller, &update.operation_id).unwrap(),
+        Receipt::SessionUpdate(update)
+    );
 }

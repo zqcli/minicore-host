@@ -7,6 +7,9 @@ impl AgentOwner {
     pub(crate) async fn reap_closed_sessions_owned(&self) {
         let children = {
             let state = self.state.lock().expect("Agent mutex poisoned");
+            if state.deleting {
+                return;
+            }
             state
                 .closing
                 .iter()

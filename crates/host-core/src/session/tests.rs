@@ -1575,3 +1575,5 @@ async fn terminal_claim_cancel_precedes_real_runtime_panic_report() {
 }
 
 mod compaction;
+
+mod deletion;

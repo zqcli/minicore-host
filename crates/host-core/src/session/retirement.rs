@@ -20,6 +20,12 @@ impl SessionController {
             changed.as_mut().enable();
             {
                 let state = self.state.lock().expect("Session mutex poisoned");
+                if state.deleting {
+                    return Err(Fault::new(
+                        FaultKind::SessionLifecycleClosing,
+                        "Session deletion fenced unfinished Turn preparation",
+                    ));
+                }
                 if state.host_stopping || !self.access.execution_allowed_owned() {
                     return Err(Fault::new(
                         FaultKind::HostLifecycleUnavailable,
@@ -146,6 +152,15 @@ impl SessionController {
     /// shortcut. The direct Agent calls it only after its accepted shutdown fence.
     pub(crate) async fn release_host_resources_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.release_resources(false).await?;
+        // A failed explicit delete can retain only its actual storage locator
+        // after execution/history resources were already released. Controlled
+        // Host retirement must release that locator too, without deleting data.
+        drop(
+            self.store
+                .lock()
+                .expect("Session store mutex poisoned")
+                .take(),
+        );
         self.scope_root_closed_owned();
         Ok(())
     }

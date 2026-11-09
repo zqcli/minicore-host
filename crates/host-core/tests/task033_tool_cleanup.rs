@@ -929,3 +929,199 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
         text
     );
 }
+
+// Task 051 reuses this real process fixture rather than substituting a cleanup
+// acknowledgement for an actual child wait.
+#[tokio::test]
+async fn task051_delete_acceptance_and_disconnect_wait_for_actual_tool_cleanup() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let resources = resources(
+        files.path().into(),
+        vec![Round::tool()],
+        CleanupResult::Clean,
+    );
+    let host = Host::open_persistent(
+        data.path(),
+        HostSettings {
+            name: "deletion cleanup fixture".into(),
+        },
+        resources.clone(),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    let bundle = bundle(&resources, 0).await;
+    invoked(&bundle).await;
+    let receipt = host
+        .session_delete(
+            &caller,
+            &target,
+            SessionDeleteRequest {
+                operation_id: OperationId::new().unwrap(),
+                close: true,
+            },
+        )
+        .unwrap();
+    assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closing);
+    until(|| (bundle.finish_calls.load(Ordering::SeqCst) == 1).then_some(())).await;
+    let dir = data
+        .path()
+        .join("agents")
+        .join(target.agent_id.as_str())
+        .join("sessions")
+        .join(target.session_id.as_str());
+    assert!(dir.join("history.jsonl").exists());
+    assert_eq!(bundle.waited.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .deletion
+            .unwrap()
+            .data,
+        DataDeletion::Pending {}
+    );
+    assert!(
+        host.send(
+            &caller,
+            SendMessage::new(
+                MessageInput {
+                    message_id: MessageId::new().unwrap(),
+                    mode: MessageMode::FollowUp,
+                    text: "late".into(),
+                    in_reply_to: None
+                },
+                target.clone()
+            )
+        )
+        .is_err()
+    );
+    assert!(
+        host.session_delete(
+            &caller,
+            &target,
+            SessionDeleteRequest {
+                operation_id: OperationId::new().unwrap(),
+                close: true
+            }
+        )
+        .is_err()
+    );
+    connection.close();
+    let reader = host.connect().unwrap();
+    let caller = reader.caller();
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionDelete(receipt.clone())
+    );
+    host.shutdown(
+        &caller,
+        HostShutdownRequest {
+            operation_id: OperationId::new().unwrap(),
+            strategy: HostShutdownStrategy::Force,
+        },
+    )
+    .unwrap();
+    assert_ne!(
+        host.info(&caller).unwrap().lifecycle,
+        HostLifecycle::Stopped
+    );
+    bundle.release.add_permits(1);
+    until(|| (bundle.waited.load(Ordering::SeqCst) == 1 && !dir.exists()).then_some(())).await;
+    until(|| (host.info(&caller).unwrap().lifecycle == HostLifecycle::Stopped).then_some(())).await;
+    assert_eq!(
+        std::fs::read(&bundle.paths.lock().unwrap()[0]).unwrap(),
+        b"actual child exit"
+    );
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionDelete(receipt)
+    );
+}
+
+#[tokio::test]
+async fn task051_failed_required_save_retains_source_and_does_not_skip_actual_worker_cleanup() {
+    let data = tempfile::tempdir().unwrap();
+    let files = tempfile::tempdir().unwrap();
+    let resources = resources(
+        files.path().into(),
+        vec![Round::tool()],
+        CleanupResult::Clean,
+    );
+    let host = Host::open_persistent(
+        data.path(),
+        HostSettings {
+            name: "deletion save fixture".into(),
+        },
+        resources.clone(),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    let bundle = bundle(&resources, 0).await;
+    invoked(&bundle).await;
+    let dir = data
+        .path()
+        .join("agents")
+        .join(target.agent_id.as_str())
+        .join("sessions")
+        .join(target.session_id.as_str());
+    let path = dir.join("history.jsonl");
+    let original = dir.join("history.original");
+    std::fs::rename(&path, &original).unwrap();
+    std::fs::write(&path, b"").unwrap();
+    let receipt = host
+        .session_delete(
+            &caller,
+            &target,
+            SessionDeleteRequest {
+                operation_id: OperationId::new().unwrap(),
+                close: true,
+            },
+        )
+        .unwrap();
+    until(|| {
+        host.session_state(&caller, &target)
+            .ok()
+            .and_then(|s| s.data.deletion)
+            .filter(|d| matches!(d.data, DataDeletion::Failed { .. }))
+    })
+    .await;
+    assert!(dir.join("session.json").exists());
+    assert!(original.exists());
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionDelete(receipt.clone())
+    );
+    until(|| (bundle.finish_calls.load(Ordering::SeqCst) == 1).then_some(())).await;
+    bundle.release.add_permits(1);
+    until(|| (bundle.waited.load(Ordering::SeqCst) == 1).then_some(())).await;
+    assert!(dir.exists());
+    // Restore only this test's renamed file, then explicitly reconcile the
+    // original save. Deletion itself did not retry, recreate or remove it.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(&original, &path).unwrap();
+    host.session_resume(
+        &caller,
+        &target,
+        SessionControlRequest {
+            operation_id: OperationId::new().unwrap(),
+        },
+    )
+    .unwrap();
+    until(|| {
+        host.session_state(&caller, &target)
+            .ok()
+            .filter(|s| !s.data.saving && s.data.active_turn_id.is_none())
+    })
+    .await;
+    assert_eq!(bundle.finish_calls.load(Ordering::SeqCst), 1);
+    assert!(dir.join("history.jsonl").exists());
+}

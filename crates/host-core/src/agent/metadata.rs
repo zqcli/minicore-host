@@ -314,6 +314,12 @@ impl AgentOwner {
         let (child, first, receipt) = self.access.accept_execution(caller, || {
             let (child, first) = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
+                if state.deleting {
+                    return Err(Fault::new(
+                        FaultKind::AgentLifecycleUnavailable,
+                        "Agent deletion has fenced new external close requests",
+                    ));
+                }
                 if state.deleting_sessions.contains(id) {
                     return Err(Fault::new(
                         FaultKind::SessionBusy,

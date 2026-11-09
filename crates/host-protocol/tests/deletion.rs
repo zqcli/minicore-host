@@ -63,7 +63,7 @@ fn failed_and_memory_deletion_are_distinct_from_physical_success() {
         agent_id: AgentId::new().unwrap(),
         session_id: SessionId::new().unwrap(),
         result: SessionDeleteAccepted {
-            lifecycle: SessionLifecycle::Closing,
+            lifecycle: SessionCloseLifecycle::Closing,
             close: true,
         },
     });
@@ -71,4 +71,23 @@ fn failed_and_memory_deletion_are_distinct_from_physical_success() {
         serde_json::from_value::<Receipt>(serde_json::to_value(&receipt).unwrap()).unwrap(),
         receipt
     );
+}
+
+#[test]
+fn deletion_acceptance_cannot_claim_open_or_unrequested_closing() {
+    for value in [
+        json!({"lifecycle":"open","close":true}),
+        json!({"lifecycle":"closing","close":false}),
+    ] {
+        assert!(serde_json::from_value::<SessionDeleteAccepted>(value).is_err());
+    }
+    assert!(
+        serde_json::to_value(SessionDeleteAccepted {
+            lifecycle: SessionCloseLifecycle::Closing,
+            close: false
+        })
+        .is_err()
+    );
+    let id = SessionId::new().unwrap();
+    assert!(serde_json::from_value::<AgentDeleteAccepted>(json!({"lifecycle":"retiring","scope":{"kind":"sessions","session_ids":[id,id],"close":true}})).is_err());
 }

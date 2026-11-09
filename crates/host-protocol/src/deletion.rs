@@ -93,22 +93,31 @@ pub struct SessionDeletionState {
     pub close: bool,
     pub data: DataDeletion,
 }
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionDeleteAccepted {
-    pub lifecycle: SessionLifecycle,
-    pub close: bool,
+validated_dto!(SessionDeleteAccepted, SessionDeleteAcceptedWire, "SessionDeleteAcceptedWire" {
+    lifecycle: SessionCloseLifecycle,
+    close: bool,
+});
+impl SessionDeleteAccepted {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if !self.close && self.lifecycle != SessionCloseLifecycle::Closed {
+            return Err(invalid("deletion without close requires closed acceptance"));
+        }
+        Ok(())
+    }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentDeleteLifecycle {
     Retiring,
 }
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentDeleteAccepted {
-    pub lifecycle: AgentDeleteLifecycle,
-    pub scope: AgentDeleteScope,
+validated_dto!(AgentDeleteAccepted, AgentDeleteAcceptedWire, "AgentDeleteAcceptedWire" {
+    lifecycle: AgentDeleteLifecycle,
+    scope: AgentDeleteScope,
+});
+impl AgentDeleteAccepted {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.scope.validate()
+    }
 }
 macro_rules! deletion_receipt {
     ($name:ident, $kind:ident, $variant:ident, $wire:literal, $result:ty $(, $field:ident: $ty:ty)*) => {

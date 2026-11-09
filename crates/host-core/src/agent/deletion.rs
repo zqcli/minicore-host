@@ -243,25 +243,58 @@ impl AgentOwner {
             .expect("accepted deletion")
             .sessions = initial;
         for child in children {
-            // Each child has its own admission boundary, even in a cascade.
-            let result = match child.claim_delete_owned(close) {
-                Ok(_) => {
-                    self.state
-                        .lock()
-                        .expect("Agent mutex poisoned")
-                        .deleting_sessions
-                        .insert(child.id.clone());
-                    let data = self
-                        .delete_session_work(child, close)
-                        .await
-                        .unwrap_or_else(|error| DataDeletion::Failed { error });
-                    child.deletion_result_owned(data)
+            // Existing scope-close work remains with its actual owner. Reserve
+            // the next child under the same Agent boundary before calling it.
+            loop {
+                let changed = self.changed.notified();
+                tokio::pin!(changed);
+                changed.as_mut().enable();
+                let reserved = {
+                    let mut state = self.state.lock().expect("Agent mutex poisoned");
+                    if state.close_running.contains(&child.id) {
+                        false
+                    } else {
+                        state.deleting_sessions.insert(child.id.clone());
+                        true
+                    }
+                };
+                if reserved {
+                    break;
                 }
-                Err(error) => SessionDeleteResult {
-                    data: DataDeletion::Failed { error },
-                    ..child.unattempted_deletion_owned()
-                },
-            };
+                changed.await;
+            }
+            // Each child has its own admission boundary, even in a cascade.
+            let result =
+                match child.claim_delete_owned(close) {
+                    Ok(_) => {
+                        let current = child.unattempted_deletion_owned();
+                        {
+                            let mut state = self.state.lock().expect("Agent mutex poisoned");
+                            let progress = state.info.deletion.as_mut().expect("accepted deletion");
+                            let entry = progress
+                                .sessions
+                                .iter_mut()
+                                .find(|entry| entry.session_id == child.id)
+                                .expect("explicit child");
+                            entry.result = SessionDeleteResult {
+                                data: DataDeletion::Pending {},
+                                ..current
+                            };
+                        }
+                        self.changed.notify_waiters();
+                        let data = self
+                            .delete_session_work(child, close)
+                            .await
+                            .unwrap_or_else(|error| DataDeletion::Failed { error });
+                        child.deletion_result_owned(data)
+                    }
+                    Err(error) => child.reclaimed_deletion_fact_owned().unwrap_or_else(|| {
+                        SessionDeleteResult {
+                            data: DataDeletion::Failed { error },
+                            ..child.unattempted_deletion_owned()
+                        }
+                    }),
+                };
             if result.data.removed() {
                 self.remove_retired_session_owned(child);
             }

@@ -34,7 +34,10 @@ impl SessionController {
         }
         self.publish(&mut state);
         Ok(SessionDeleteAccepted {
-            lifecycle: state.lifecycle,
+            lifecycle: match state.lifecycle {
+                SessionLifecycle::Closed => SessionCloseLifecycle::Closed,
+                _ => SessionCloseLifecycle::Closing,
+            },
             close,
         })
     }
@@ -114,6 +117,12 @@ impl SessionController {
                 return Err(error);
             }
         }
+        drop(
+            self.store
+                .lock()
+                .expect("Session store mutex poisoned")
+                .take(),
+        );
         self.scope_root_closed_owned();
         self.reclaim_bodies();
         Ok(match mode {
@@ -132,6 +141,23 @@ impl SessionController {
             lifecycle: state.lifecycle,
             data,
         }
+    }
+    pub(crate) fn delete_close_failure_owned(&self) -> Option<Fault> {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        if state.lifecycle == SessionLifecycle::Closed {
+            return None;
+        }
+        match state.deletion.as_ref().map(|deletion| &deletion.data) {
+            Some(DataDeletion::Failed { error }) => Some(error.clone()),
+            _ => None,
+        }
+    }
+    pub(crate) fn reclaimed_deletion_fact_owned(&self) -> Option<SessionDeleteResult> {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        (state.reclaimed && state.info.mode == StorageMode::Memory).then_some(SessionDeleteResult {
+            lifecycle: state.lifecycle,
+            data: DataDeletion::Reclaimed {},
+        })
     }
     pub(crate) fn unattempted_deletion_owned(&self) -> SessionDeleteResult {
         let state = self.state.lock().expect("Session mutex poisoned");
