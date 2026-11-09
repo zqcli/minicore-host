@@ -44,7 +44,7 @@ Build environment: `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspac
 - `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core -p minicore-host-tools -p minicore-host-transport --no-deps --locked`: **passed**. The same packages' `cargo test ... --doc --locked`: **1 transport doctest passed**, zero doctests in core/tools. Log `/tmp/task071-final-focused.log`.
 - Final `cargo test -p minicore-host-core -p minicore-host-tools -p minicore-host-transport --all-targets --locked`: **478 passed, 0 failed**, across 59 test binaries. Log `/tmp/task071-affected-tests-final.log`.
 - Earlier affected-crate run: untouched `task054_query_contracts::raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_loops` failed at its server teardown (`task054_query_contracts.rs:503`, BrokenPipe). It passed both a standalone rerun and the final full affected-crate run. No fix to that fixture is claimed; task 070 owns its investigation. Logs `/tmp/task071-affected-tests.log`, `/tmp/task071-query-rerun.log`.
-- `cargo test --workspace --all-targets --locked -- --list`: **still running when this ledger was committed**. Exact source-branch inventory will be recorded separately when complete; compiling/listing does not execute the full workspace suite. Log `/tmp/task071-workspace-list.log`.
+- `cargo test --workspace --all-targets --locked -- --list`: **passed**, listing **840 unique test cases across 96 test binaries** on the frozen source branch. Counted `(suite, test name)` identities match the listed summaries, with no duplicate identities. This is a complete compile/inventory check, not execution of the full workspace suite. Log `/tmp/task071-workspace-list.log`.
 
 ## Integration handoff and limits
 
