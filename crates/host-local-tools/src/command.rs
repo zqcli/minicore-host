@@ -25,19 +25,24 @@ pub(crate) async fn run(
     id: ToolCallId,
     input: BashInput,
     context: ToolContext,
-) -> Result<ToolExecutionOutcome, ToolError> {
+) -> crate::scope::OwnedOutcome {
     if input.command.is_empty() || input.command.contains('\0') || input.timeout_seconds == Some(0)
     {
-        return Err(ToolError::InvalidInvocation);
+        return crate::scope::OwnedOutcome::settled(Err(ToolError::InvalidInvocation));
     }
     #[cfg(unix)]
     {
-        unix::run(binding, id, input, context).await
+        let mut cleanup_confirmed = true;
+        let result = unix::run(binding, id, input, context, &mut cleanup_confirmed).await;
+        crate::scope::OwnedOutcome {
+            result,
+            cleanup_confirmed,
+        }
     }
     #[cfg(not(unix))]
     {
         let _ = (binding, id, input, context);
-        crate::files::unsupported_command()
+        crate::scope::OwnedOutcome::settled(crate::files::unsupported_command())
     }
 }
 
@@ -124,6 +129,7 @@ mod unix {
         id: ToolCallId,
         input: BashInput,
         context: ToolContext,
+        cleanup_confirmed: &mut bool,
     ) -> Result<ToolExecutionOutcome, ToolError> {
         let deadline = match input.timeout_seconds {
             Some(seconds) => Instant::now()
@@ -151,6 +157,7 @@ mod unix {
             Ok(child) => child,
             Err(error) => return business_error("process_start", error.to_string()),
         };
+        *cleanup_confirmed = false;
         let pid = child.id().expect("spawned child has a process ID");
         let mut stdout = child.stdout.take().expect("configured stdout pipe");
         let mut stderr = child.stderr.take().expect("configured stderr pipe");
@@ -189,11 +196,13 @@ mod unix {
         }
         // Stop descendants even after a natural leader exit. Requesting a kill
         // is not a completed wait; the direct child is always actually joined.
+        let mut group_stopped = true;
         if let Err(error) = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL)
             && error != Errno::ESRCH
         {
             errors.push(format!("process-group stop failed: {error}"));
             handling_failed = true;
+            group_stopped = false;
         }
         if waited.is_none() {
             if let Err(error) = child.start_kill() {
@@ -232,12 +241,14 @@ mod unix {
         if handling_failed && status == CommandStatus::Exited {
             status = CommandStatus::Failed;
         }
+        *cleanup_confirmed = exit.is_some() && group_stopped && out.closed && err.closed;
         let result = CommandResult {
             status,
             pid,
             exit_code: exit.as_ref().and_then(|exit| exit.code()),
             signal: exit.as_ref().and_then(|exit| exit.signal()),
             process_waited: exit.is_some(),
+            cleanup_confirmed: *cleanup_confirmed,
             stdout: out.result(),
             stderr: err.result(),
             file_changes: CommandFileChanges::Unknown,

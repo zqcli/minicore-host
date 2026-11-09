@@ -86,12 +86,13 @@ impl Tool for LocalTool {
             let binding = Arc::clone(&self.binding);
             let id = invocation.tool_call_id().clone();
             let completion = self.scope.start(id.clone(), async move {
-                match action {
+                let result = match action {
                     Action::Read(input) => files::read(binding, input, context).await,
                     Action::Edit(input) => files::edit(binding, id, input, context).await,
                     Action::Write(input) => files::write(binding, id, input, context).await,
-                    Action::Bash(input) => command::run(binding, id, input, context).await,
-                }
+                    Action::Bash(input) => return command::run(binding, id, input, context).await,
+                };
+                scope::OwnedOutcome::settled(result)
             })?;
             completion.await.map_err(|_| ToolError::Internal)?
         })

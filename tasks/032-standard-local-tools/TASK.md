@@ -69,3 +69,21 @@ claimed. Directory creation is not an atomic directory transaction. Bash inherit
 the Host process environment and is an execution capability, not an OS sandbox.
 One second is a post-stop pipe cleanup allowance, not a content quota; incomplete
 output is never presented as a clean EOF. Full stdout/stderr remains in the result.
+
+## Cleanup settlement follow-up
+
+Implementation commit: `43ed31618689c721c47eb4bf589ea3b9dff7d7ff`.
+The first workspace pass listed 517 cases (494 baseline + 23 new). During integration
+review, the core owner correctly required an explicit distinction between an
+internal recording fault after completed cleanup and an unconfirmed execution.
+
+`LocalToolCompletion.cleanup_confirmed` and `CommandResult.cleanup_confirmed` now
+carry that distinction. A normal blocking file worker is joined even when its
+record callback fails. A command is confirmed only after its real child wait,
+nonfailed group stop, and completed owned-pipe cleanup. A panicked worker or failed
+wait cannot manufacture confirmation. The core adapter must keep finalization
+blocked for false, but can retain a diagnostic and finish for true.
+
+Three additional scope regressions cover explicit worker panic (false), a joined
+record error (true), and a dropped waiter retaining a real file worker with one
+result. The focused suite now passes 26 cases and strict Clippy.

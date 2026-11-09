@@ -14,6 +14,11 @@ including cancellation and deadlines. Runtime 0.10.0 drops port futures when
 stopped; these tools retain actual workers and cleanup independently. `finish`
 closes admission and joins them. Dropping a finish waiter does not cancel cleanup.
 Do not declare the Turn finished merely because Runtime joined or kill was sent.
+Each completion separates its tool error from `cleanup_confirmed`: a record sink
+failure after actual child/worker join is confirmed cleanup with an internal
+error, while a worker panic, failed child wait, group-stop failure, or unfinished
+pipe cleanup is unconfirmed. The integrating owner must keep unconfirmed work
+blocked in finalization rather than treating a returned diagnostic as proof of exit.
 
 The recording sink is a short, nonblocking owner callback, not an observer or an
 external store call. Its owner supplies Session/Turn/Load identity, validates

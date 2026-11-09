@@ -291,6 +291,7 @@ async fn failed_owner_record_is_internal_and_does_not_undo_or_retry_write() {
     let finished = tools.finish().await;
     assert_eq!(finished.len(), 1);
     assert_eq!(finished[0].error, Some(ToolError::Internal));
+    assert!(finished[0].cleanup_confirmed);
     assert_eq!(
         invoke(
             &tools,

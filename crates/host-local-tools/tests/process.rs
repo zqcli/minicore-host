@@ -63,6 +63,7 @@ async fn runtime_nonzero_exit_preserves_complete_stdout_stderr_and_side_effects_
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0, "shell-42");
     assert!(commands[0].1.process_waited);
+    assert!(commands[0].1.cleanup_confirmed);
     gone(commands[0].1.pid);
     let chunks = records.chunks.lock().unwrap();
     for channel in [OutputChannel::Stdout, OutputChannel::Stderr] {
@@ -149,10 +150,12 @@ async fn runtime_cancel_drops_port_but_finish_waits_for_real_pid_and_cleanup() {
     assert!(started.elapsed() < Duration::from_secs(3));
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].error, Some(ToolError::Cancelled));
+    assert!(done[0].cleanup_confirmed);
     let commands = records.commands.lock().unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].1.status, CommandStatus::Cancelled);
     assert!(commands[0].1.process_waited);
+    assert!(commands[0].1.cleanup_confirmed);
     gone(commands[0].1.pid);
     assert_eq!(fs::read(root.path().join("effects")).unwrap(), b"once");
 }
@@ -175,6 +178,7 @@ async fn runtime_deadline_joins_subprocess_and_never_repeats_side_effects() {
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].1.status, CommandStatus::TimedOut);
     assert!(commands[0].1.process_waited);
+    assert!(commands[0].1.cleanup_confirmed);
     gone(commands[0].1.pid);
     assert_eq!(fs::read(root.path().join("effects")).unwrap(), b"once");
 }
@@ -260,6 +264,7 @@ async fn owner_output_fault_is_internal_and_stops_and_joins_process() {
     assert_eq!(invoke(&tools,"bash",json!({"command":"echo $$ > leader.pid; printf once >> effects; printf trigger; exec sleep 30"})).await,Err(ToolError::Internal));
     let done = tools.finish().await;
     assert_eq!(done[0].error, Some(ToolError::Internal));
+    assert!(done[0].cleanup_confirmed);
     let pid = fs::read_to_string(root.path().join("leader.pid"))
         .unwrap()
         .trim()
