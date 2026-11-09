@@ -62,8 +62,20 @@ struct Resources {
     prepare_gate: Option<Arc<Semaphore>>,
     fail: AtomicBool,
     plan: Option<Arc<FileDelegationPlan>>,
+    claim_gate: Mutex<Option<(mpsc::UnboundedSender<()>, Arc<std::sync::Barrier>)>>,
 }
 impl ResourceResolver for Resources {
+    fn bind_tool_output(
+        &self,
+        execution: &ExecutionConfig,
+        _: ToolOutputBinding,
+    ) -> ExecutionConfig {
+        if let Some((entered, gate)) = self.claim_gate.lock().unwrap().take() {
+            entered.send(()).unwrap();
+            gate.wait();
+        }
+        execution.clone()
+    }
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
         Ok(())
     }
@@ -120,6 +132,7 @@ impl ResourceResolver for Resources {
     }
 }
 struct Fixture {
+    resources: Arc<Resources>,
     host: Arc<Host>,
     connection: ConnectionHandle,
     events: Vec<Events>,
@@ -155,16 +168,18 @@ fn setup_tool(
         rounds: Mutex::new(streams),
         starts,
     });
-    let host = Host::memory(Arc::new(Resources {
+    let resources = Arc::new(Resources {
         model,
         bindings,
         prepare_gate,
         fail: AtomicBool::new(fail),
         plan,
-    }))
-    .unwrap();
+        claim_gate: Mutex::new(None),
+    });
+    let host = Host::memory(resources.clone()).unwrap();
     let connection = host.connect().unwrap();
     Fixture {
+        resources,
         host,
         connection,
         events,
@@ -788,4 +803,169 @@ async fn dropping_scope_close_wait_does_not_drop_actual_owner_cleanup() {
         }
     }
     assert!(hooks.sealed.load(Ordering::SeqCst));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn cancellation_after_real_turn_binding_before_first_model_hands_off_cancelled_result() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let gate = Arc::new(std::sync::Barrier::new(2));
+    *f.resources.claim_gate.lock().unwrap() = Some((entered, gate.clone()));
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task.clone()).unwrap();
+    recv(&mut entering).await;
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &child, &task.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Bound { .. }
+    ));
+    f.host
+        .cancel_session(&f.connection.caller(), &child, false)
+        .unwrap();
+    gate.wait();
+    let completion = recv(&mut results).await;
+    assert_eq!(completion.results.len(), 1);
+    assert_eq!(
+        completion.results[0].info.outcome,
+        Some(TurnOutcome::Cancelled)
+    );
+    assert_eq!(completion.results[0].info.requests, 0);
+    assert_eq!(completion.inputs[0].message_ids, vec![task.message_id]);
+    let receipt = permit.notify(input(MessageMode::Steer)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+struct GatedSink {
+    entered: mpsc::UnboundedSender<()>,
+    gate: Arc<std::sync::Barrier>,
+    result: mpsc::UnboundedSender<DelegationCompletion>,
+}
+impl DelegationSink for GatedSink {
+    fn handoff(&self, result: DelegationCompletion) -> Result<(), Fault> {
+        self.entered.send(()).unwrap();
+        self.gate.wait();
+        self.result.send(result).unwrap();
+        Ok(())
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn memory_closed_cannot_publish_while_sink_transfer_is_still_running() {
+    let mut f = setup(2, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let gate = Arc::new(std::sync::Barrier::new(2));
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(
+            relation.clone(),
+            Arc::new(GatedSink {
+                entered,
+                gate: gate.clone(),
+                result: sink,
+            }),
+        )
+        .unwrap();
+    cap.send_delegated(&relation, task).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    complete(&f.events[1], "ready for transfer");
+    recv(&mut entering).await;
+    let receipt = f
+        .host
+        .session_close(
+            &f.connection.caller(),
+            &child,
+            SessionCloseRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closing);
+    assert_eq!(
+        f.host
+            .session_state(&f.connection.caller(), &child)
+            .unwrap()
+            .data
+            .lifecycle,
+        SessionLifecycle::Closing
+    );
+    gate.wait();
+    recv(&mut results).await;
+    let receipt = permit.notify(input(MessageMode::Steer)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn preparation_failure_cannot_finish_root_while_scope_cleanup_is_gated() {
+    let preparation = Arc::new(Semaphore::new(1));
+    let mut f = setup(1, Some(preparation.clone()), false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let hooks = Arc::new(Hooks {
+        sealed: AtomicBool::new(false),
+        gate: Some(gate.clone()),
+        entered: Some(entered),
+        closed: AtomicBool::new(false),
+    });
+    let permit = cap.prepare_scope(hooks).unwrap();
+    complete(&f.events[0], "root first turn");
+    finished(&f, &parent, &cap.source().turn.turn_id).await;
+    f.resources.fail.store(true, Ordering::SeqCst);
+    send(&f, &parent);
+    recv(&mut f.bindings).await;
+    let close = tokio::spawn(async move { permit.close_root(OperationId::new().unwrap()).await });
+    recv(&mut entering).await;
+    preparation.add_permits(1);
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &parent)
+        .unwrap();
+    while states.snapshot().unwrap().data.preparing {
+        states.changed().await.unwrap();
+    }
+    assert_eq!(
+        states.snapshot().unwrap().data.lifecycle,
+        SessionLifecycle::Closing
+    );
+    assert!(!close.is_finished());
+    gate.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(10), close)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }

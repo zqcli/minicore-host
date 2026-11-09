@@ -401,20 +401,15 @@ impl SessionController {
         };
         self.observe_finished(&mut state, &result.info);
         state.completion_order.push(turn_id.clone());
-        Self::record_delegated_result(&mut state, &result, active.consumed_inputs);
-        state.completed.insert(turn_id.clone(), result);
-        if state.lifecycle == SessionLifecycle::Closing
-            && state.info.mode == StorageMode::Memory
-            && !state.scope_cleanup_pending
-            && !state
-                .delegation
-                .as_ref()
-                .is_some_and(|slot| slot.needs_handoff())
-        {
-            state.lifecycle = SessionLifecycle::Closed;
-            state.residency = Residency::Unloaded;
-            state.load_id = None;
+        let mut inputs = active.consumed_inputs;
+        for id in active.bound_inputs {
+            if !inputs.contains(&id) {
+                inputs.push(id);
+            }
         }
+        Self::record_delegated_result(&mut state, &result, inputs);
+        state.completed.insert(turn_id.clone(), result);
+        Self::finish_memory_close(&mut state);
         self.publish(&mut state);
         drop(state);
         self.handoff_delegation_owned();

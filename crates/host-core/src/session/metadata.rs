@@ -88,11 +88,7 @@ impl SessionController {
                             state.resume_after_load = None;
                             state.residency = Residency::Unloaded;
                             state.load_id = None;
-                            if state.info.mode == StorageMode::Memory
-                                && state.lifecycle == SessionLifecycle::Closing
-                            {
-                                state.lifecycle = SessionLifecycle::Closed;
-                            }
+                            Self::finish_memory_close(&mut state);
                         }
                     }
                     Err(fault) => {

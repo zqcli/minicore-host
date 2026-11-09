@@ -100,6 +100,9 @@ impl SessionController {
                         let resume_scheduling =
                             self.access.execution_allowed_owned() && !state.host_stopping;
                         self.start_save_continuations(&mut state, resume_scheduling)?;
+                    } else if self.resume_scope_cleanup(&mut state) {
+                        // Explicitly continue the registered cleanup only, even
+                        // during force shutdown. This never restarts business work.
                     } else {
                         self.access.ensure_execution_owned()?;
                         Self::open(&state)?;
@@ -308,20 +311,7 @@ impl SessionController {
                 }
                 active.handle.clone()
             });
-            if state.info.mode == StorageMode::Memory
-                && state.active.is_none()
-                && !state.preparing
-                && !state.saving
-                && !state.scope_cleanup_pending
-                && !state
-                    .delegation
-                    .as_ref()
-                    .is_some_and(|slot| slot.needs_handoff())
-            {
-                state.lifecycle = SessionLifecycle::Closed;
-                state.residency = Residency::Unloaded;
-                state.load_id = None;
-            }
+            Self::finish_memory_close(&mut state);
             self.publish(&mut state);
             handle
         };

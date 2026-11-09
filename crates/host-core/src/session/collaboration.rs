@@ -7,6 +7,7 @@ pub(super) struct DelegationSlot {
     sink: Arc<dyn DelegationSink>,
     accepted: BTreeSet<MessageId>,
     consumed: bool,
+    bound_task: Option<TurnId>,
     handed_off: bool,
     results: Vec<TurnResult>,
     inputs: Vec<DelegationInputRange>,
@@ -121,6 +122,7 @@ impl SessionController {
             sink,
             accepted: BTreeSet::new(),
             consumed: false,
+            bound_task: None,
             handed_off: false,
             results: Vec::new(),
             inputs: Vec::new(),
@@ -265,7 +267,7 @@ impl SessionController {
         consumed_inputs: Vec<MessageId>,
     ) {
         if let Some(slot) = state.delegation.as_mut()
-            && slot.consumed
+            && slot.bound_task.is_some()
             && !slot.handed_off
         {
             slot.inputs.push(DelegationInputRange {
@@ -292,7 +294,7 @@ impl SessionController {
                 return;
             }
             let Some(slot) = state.delegation.as_mut().filter(|slot| {
-                (slot.consumed
+                (slot.bound_task.is_some()
                     || slot
                         .discarded
                         .contains(&slot.relation.registration.task_message_id))
@@ -329,15 +331,7 @@ impl SessionController {
             }
             Err(fault) => state.close_fault = Some(fault),
         }
-        if state.lifecycle == SessionLifecycle::Closing
-            && state.info.mode == StorageMode::Memory
-            && !state.scope_cleanup_pending
-            && state.close_fault.is_none()
-        {
-            state.lifecycle = SessionLifecycle::Closed;
-            state.residency = Residency::Unloaded;
-            state.load_id = None;
-        }
+        Self::finish_memory_close(&mut state);
         self.publish(&mut state);
     }
     pub(crate) fn record_delegation_owned(
@@ -399,6 +393,11 @@ impl SessionController {
     }
 }
 impl DelegationSlot {
+    pub(super) fn record_bound(&mut self, id: &MessageId, turn: &TurnId) {
+        if id == &self.relation.registration.task_message_id {
+            self.bound_task = Some(turn.clone());
+        }
+    }
     pub(super) fn record_discarded(&mut self, id: &MessageId) {
         if self.accepted.contains(id) {
             self.discarded.push(id.clone());
@@ -408,7 +407,7 @@ impl DelegationSlot {
         self.relation.scope.sealed.load(Ordering::SeqCst)
     }
     pub(super) fn needs_handoff(&self) -> bool {
-        (self.consumed
+        (self.bound_task.is_some()
             || self
                 .discarded
                 .contains(&self.relation.registration.task_message_id))
@@ -465,18 +464,7 @@ impl SessionController {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
                 state.scope_cleanup_pending = false;
                 state.close_fault = result.err();
-                if state.lifecycle == SessionLifecycle::Closing
-                    && state.info.mode == StorageMode::Memory
-                    && state.active.is_none()
-                    && !state.preparing
-                    && !state.saving
-                    && !state.handoff_pending
-                    && state.close_fault.is_none()
-                {
-                    state.lifecycle = SessionLifecycle::Closed;
-                    state.residency = Residency::Unloaded;
-                    state.load_id = None;
-                }
+                Self::finish_memory_close(&mut state);
                 owner.publish(&mut state);
             }
             owner.scope_root_closed_owned();
@@ -548,6 +536,56 @@ impl SessionController {
     }
     pub(crate) fn signal_collaboration_owned(&self) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+    }
+}
+
+impl SessionController {
+    pub(super) fn finish_memory_close(state: &mut SessionState) {
+        if state.lifecycle == SessionLifecycle::Closing
+            && state.info.mode == StorageMode::Memory
+            && state.active.is_none()
+            && !state.preparing
+            && !state.saving
+            && state.history_work.is_none()
+            && state.record_work.is_none()
+            && !state.handoff_pending
+            && !state.scope_cleanup_pending
+            && state.close_fault.is_none()
+            && !state
+                .delegation
+                .as_ref()
+                .is_some_and(DelegationSlot::needs_handoff)
+            && state
+                .root_scope
+                .as_ref()
+                .is_none_or(|scope| scope.pending.load(Ordering::SeqCst) == 0)
+        {
+            state.lifecycle = SessionLifecycle::Closed;
+            state.residency = Residency::Unloaded;
+            state.load_id = None;
+        }
+    }
+}
+
+impl SessionController {
+    pub(crate) fn retired_owned(&self) -> bool {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        state.released || state.reclaimed
+    }
+    pub(super) fn resume_scope_cleanup(&self, state: &mut SessionState) -> bool {
+        if state.close_fault.is_some()
+            && !state.scope_cleanup_pending
+            && state.scope_task.is_some()
+            && state.root_scope.as_ref().is_some_and(|scope| {
+                scope.sealed.load(Ordering::SeqCst) && scope.cleanup.get().is_none()
+            })
+        {
+            self.start_scope_cleanup_locked(state, true);
+            true
+        } else {
+            false
+        }
     }
 }

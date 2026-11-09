@@ -163,6 +163,7 @@ struct ActiveTurn {
     handle: Option<LoopHandle>,
     accepted: usize,
     consumed_inputs: Vec<MessageId>,
+    bound_inputs: Vec<MessageId>,
     response_base: u64,
     bound_pending: VecDeque<QueuedInput>,
     start_history: usize,
@@ -970,18 +971,7 @@ impl SessionController {
                     || state.active.is_some()
                     || (state.next_step.is_empty() && state.next_turn.is_empty())
                 {
-                    if state.lifecycle == SessionLifecycle::Closing
-                        && state.info.mode == StorageMode::Memory
-                        && state.active.is_none()
-                        && !state.preparing
-                        && !state.saving
-                        && !state.scope_cleanup_pending
-                    {
-                        state.lifecycle = SessionLifecycle::Closed;
-                        state.residency = Residency::Unloaded;
-                        state.load_id = None;
-                        self.publish(&mut state);
-                    }
+                    Self::finish_memory_close(&mut state);
                     state.driver_running = false;
                     self.publish(&mut state);
                     return;
@@ -1074,11 +1064,7 @@ impl SessionController {
                     }
                     state.block_reason = Some(fault);
                     state.driver_running = false;
-                    if state.lifecycle == SessionLifecycle::Closing
-                        && state.info.mode == StorageMode::Memory
-                    {
-                        state.lifecycle = SessionLifecycle::Closed;
-                    }
+                    Self::finish_memory_close(&mut state);
                     self.publish(&mut state);
                     return;
                 }
@@ -1133,6 +1119,10 @@ impl SessionController {
                     handle: None,
                     accepted: 0,
                     consumed_inputs: Vec::new(),
+                    bound_inputs: batch
+                        .iter()
+                        .map(|input| input.message.message_id.clone())
+                        .collect(),
                     response_base: 0,
                     bound_pending: VecDeque::new(),
                     start_history,
@@ -1416,6 +1406,11 @@ fn mark_message(state: &mut SessionState, input: &QueuedInput, binding: MessageB
         {
             slot.record_discarded(&input.message.message_id);
         }
+        if let MessageBinding::Bound { turn_id } = &binding
+            && let Some(slot) = state.delegation.as_mut()
+        {
+            slot.record_bound(&input.message.message_id, turn_id);
+        }
         record.binding = binding;
     }
 }
@@ -1444,6 +1439,15 @@ fn take_batch(state: &mut SessionState, new_turn: bool, turn_id: &TurnId) -> Vec
                 turn_id: turn_id.clone(),
             },
         );
+    }
+    if let Some(active) = state
+        .active
+        .as_mut()
+        .filter(|active| &active.info.id == turn_id)
+    {
+        active
+            .bound_inputs
+            .extend(batch.iter().map(|input| input.message.message_id.clone()));
     }
     batch
 }

@@ -33,3 +33,12 @@
 - Rebase the later scoped-observation retry/interaction commits after preserving this independent checkpoint.
 - Add same-revision atomic metadata/config updates and persisted Session title.
 - Expand force/draining, preserved inbox/partial persistence, intermediate-parent release, and actual adapter integration tests. Run final workspace lint/tests/docs and report the exact `--list` unique count; focused counts are not workspace totals.
+
+## Close and cancellation review corrections
+
+- Preceding checkpoint: `6536da608f7e97a72a02221695112bf74fb33193`.
+- Real task qualification includes its actual Session Turn binding, including cancellation before the first Runtime model request. Input ranges retain real consumed order and any actually bound but unconsumed cancellation tail; queued unrelated work still cannot qualify an old Turn.
+- All memory Closed transitions use one gate for pending result transfer, scope cleanup, required saves and close faults. A blocking sink or failing resource preparation cannot publish Closed early.
+- Public and internal close workers now share the actual memory-retirement tail. An internal close is Agent-owned before any wait; cancelling the permit wait does not discard accepted work.
+- Original weak target retirement makes cleanup an actual completed no-op rather than a false NotFound. Scope/close OnceCells cache only success. Explicit `session.resume` may continue only an already registered failed scope cleanup even during Host stopping; it never schedules new business work or retries automatically.
+- Focused delegation suite: 13/13 passed. Core all-target suite passed; core Clippy with `-D warnings` passed, using the same fixed local cd59b6e Runtime patch. Unique core suite increased from 134 to 137 cases; a final workspace `--list` is still pending.

@@ -293,6 +293,14 @@ impl ScopePermit {
         root.seal_scope_owned(&self.state)
     }
     pub async fn close_root(&self, operation: OperationId) -> Result<(), Fault> {
+        if self
+            .state
+            .root
+            .upgrade()
+            .is_none_or(|root| root.retired_owned())
+        {
+            return Ok(());
+        }
         self.seal()?;
         let access = self.state.access.upgrade().ok_or_else(scope_closed)?;
         let host = access.host_owned()?;
@@ -376,8 +384,12 @@ impl DelegationPermit {
             .close
             .get_or_try_init(|| async {
                 let child = self.state.child.upgrade();
-                if let Some(child) = &child {
-                    child.wait_handoff_owned().await;
+                let Some(child) = child else {
+                    return Ok(());
+                };
+                child.wait_handoff_owned().await;
+                if child.retired_owned() {
+                    return Ok(());
                 }
                 self.state
                     .access

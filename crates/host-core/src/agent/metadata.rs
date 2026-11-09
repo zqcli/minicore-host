@@ -326,7 +326,13 @@ impl AgentOwner {
         let task = runtime.spawn(async move {
             let result = async {
                 owner.clear_default_before_close(&id).await?;
-                child.finish_close_owned().await
+                child.finish_close_owned().await?;
+                child.join_close_owned().await?;
+                if child.storage_mode() == StorageMode::Memory {
+                    child.retire_closed_owned().await?;
+                    owner.remove_retired_session_owned(&child);
+                }
+                Ok::<_, Fault>(())
             }
             .await;
             {
