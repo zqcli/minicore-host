@@ -86,8 +86,10 @@ pub struct CommandResult {
     pub signal: Option<i32>,
     /// True only when the actual direct child wait returned its exit status.
     pub process_waited: bool,
-    /// The direct child was waited, group stop did not fail, and no owned pipe
-    /// reader remains unfinished. Escaped process groups are not a sandboxed scope.
+    /// The real wrapper wait finished, the original process group was observed
+    /// gone, and no owned pipe reader remains unfinished. A successful signal
+    /// request or pipe EOF alone cannot confirm cleanup. Escaped groups are
+    /// outside the controlled scope.
     pub cleanup_confirmed: bool,
     pub stdout: CommandStream,
     pub stderr: CommandStream,

@@ -33,7 +33,8 @@ pub struct LocalToolCompletion {
     pub tool_call_id: ToolCallId,
     pub error: Option<ToolError>,
     /// Actual owned work was joined. False on a worker panic or an unconfirmed
-    /// child wait/pipe cleanup; callers must not publish finished in that case.
+    /// child wait, process-group end, or pipe cleanup; callers must not publish
+    /// finished in that case.
     pub cleanup_confirmed: bool,
 }
 

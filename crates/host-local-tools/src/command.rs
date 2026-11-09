@@ -58,6 +58,7 @@ mod unix {
         sys::signal::{Signal, killpg},
         unistd::Pid,
     };
+    use process_wrap::tokio::{KillOnDrop, ProcessGroup, TokioCommandWrap};
     use std::{
         io,
         os::unix::process::ExitStatusExt,
@@ -150,17 +151,19 @@ mod unix {
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .process_group(0)
-            .kill_on_drop(true);
+            .stderr(Stdio::piped());
+        // Adapted from minicore-agent's command owner: the wrapper owns the
+        // real group wait. KillOnDrop is a backstop, never completion evidence.
+        let mut command = TokioCommandWrap::from(command);
+        command.wrap(ProcessGroup::leader()).wrap(KillOnDrop);
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => return business_error("process_start", error.to_string()),
         };
         *cleanup_confirmed = false;
         let pid = child.id().expect("spawned child has a process ID");
-        let mut stdout = child.stdout.take().expect("configured stdout pipe");
-        let mut stderr = child.stderr.take().expect("configured stderr pipe");
+        let mut stdout = child.stdout().take().expect("configured stdout pipe");
+        let mut stderr = child.stderr().take().expect("configured stderr pipe");
         let mut out = Stream::new(OutputChannel::Stdout);
         let mut err = Stream::new(OutputChannel::Stderr);
         let mut out_buffer = [0; 16 * 1024];
@@ -181,7 +184,7 @@ mod unix {
                     status = CommandStatus::TimedOut;
                     break;
                 }
-                result = child.wait() => { waited = Some(result); break; }
+                result = child.inner_mut().wait() => { waited = Some(result); break; }
                 read = stdout.read(&mut out_buffer), if !out.closed => {
                     if out.accept(read, &out_buffer, binding.sink.as_ref(), &id, &mut record_failed, &mut errors) {
                         handling_failed = true; status = CommandStatus::Failed; break;
@@ -194,54 +197,72 @@ mod unix {
                 }
             }
         }
-        // Stop descendants even after a natural leader exit. Requesting a kill
-        // is not a completed wait; the direct child is always actually joined.
-        let mut group_stopped = true;
+        // Stop descendants even after a natural leader exit and pipe EOF.
+        // A successful signal request is not evidence that the group is gone.
         if let Err(error) = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL)
             && error != Errno::ESRCH
         {
             errors.push(format!("process-group stop failed: {error}"));
             handling_failed = true;
-            group_stopped = false;
         }
-        if waited.is_none() {
-            if let Err(error) = child.start_kill() {
-                errors.push(format!("direct-child stop failed: {error}"));
-                handling_failed = true;
-            }
-            waited = Some(child.wait().await);
+        if waited.is_none()
+            && let Err(error) = child.inner_mut().start_kill()
+        {
+            errors.push(format!("direct-child stop failed: {error}"));
+            handling_failed = true;
         }
-        let exit = match waited.expect("a real wait was attempted") {
-            Ok(exit) => Some(exit),
-            Err(error) => {
-                errors.push(format!("direct-child wait failed: {error}"));
-                handling_failed = true;
-                None
+        // Perform one full wrapper wait, never drop it partway through. Its
+        // direct-child wait and group-child reap run alongside both drains.
+        // No reader task is detached. An escaped descendant can hold a pipe;
+        // that bounded observation ends incomplete, not with a fabricated EOF.
+        let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        let drains = async {
+            while !out.closed || !err.closed {
+                tokio::select! {
+                    biased;
+                    _ = tokio::time::sleep_until(cleanup_deadline) => {
+                        errors.push("output pipe did not reach EOF after process-group cleanup".to_owned());
+                        handling_failed = true;
+                        break;
+                    }
+                    read = stdout.read(&mut out_buffer), if !out.closed => {
+                        handling_failed |= out.accept(read, &out_buffer, binding.sink.as_ref(), &id, &mut record_failed, &mut errors);
+                    }
+                    read = stderr.read(&mut err_buffer), if !err.closed => {
+                        handling_failed |= err.accept(read, &err_buffer, binding.sink.as_ref(), &id, &mut record_failed, &mut errors);
+                    }
+                }
             }
         };
-        // No reader task is detached. Drain actual buffered output and EOF;
-        // an escaped descendant may hold a pipe, so mark that stream incomplete.
-        let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
-        while !out.closed || !err.closed {
-            tokio::select! {
-                biased;
-                _ = tokio::time::sleep_until(cleanup_deadline) => {
-                    errors.push("output pipe did not reach EOF after process-group cleanup".to_owned());
-                    handling_failed = true;
-                    break;
-                }
-                read = stdout.read(&mut out_buffer), if !out.closed => {
-                    handling_failed |= out.accept(read, &out_buffer, binding.sink.as_ref(), &id, &mut record_failed, &mut errors);
-                }
-                read = stderr.read(&mut err_buffer), if !err.closed => {
-                    handling_failed |= err.accept(read, &err_buffer, binding.sink.as_ref(), &id, &mut record_failed, &mut errors);
-                }
+        let (reaped, ()) = tokio::join!(Box::into_pin(child.wait()), drains);
+        let wrapper_waited = reaped.is_ok();
+        let exit = match reaped {
+            Ok(exit) => Some(exit),
+            Err(error) => {
+                errors.push(format!("process-group wait failed: {error}"));
+                handling_failed = true;
+                waited.and_then(Result::ok)
             }
-        }
+        };
+        // The wrapper can reap only children of this process. A remaining
+        // group member need not be our child, so ECHILD is not scope evidence.
+        let group_gone = match confirmed_group_gone(pid).await {
+            Ok(true) => true,
+            Ok(false) => {
+                errors.push("process group still exists after cleanup observation".to_owned());
+                handling_failed = true;
+                false
+            }
+            Err(error) => {
+                errors.push(format!("process-group end could not be confirmed: {error}"));
+                handling_failed = true;
+                false
+            }
+        };
         if handling_failed && status == CommandStatus::Exited {
             status = CommandStatus::Failed;
         }
-        *cleanup_confirmed = exit.is_some() && group_stopped && out.closed && err.closed;
+        *cleanup_confirmed = wrapper_waited && group_gone && out.closed && err.closed;
         let result = CommandResult {
             status,
             pid,
@@ -267,6 +288,27 @@ mod unix {
             CommandStatus::TimedOut => Err(ToolError::TimedOut),
             CommandStatus::Failed => Err(ToolError::Internal),
             CommandStatus::Exited => completed(result),
+        }
+    }
+
+    /// Adapted from minicore-agent's scope observation. ESRCH is the only
+    /// affirmative group-end evidence; a present or unobservable group stays
+    /// unconfirmed even when its leader exited and both pipes reached EOF.
+    async fn confirmed_group_gone(pid: u32) -> Result<bool, Errno> {
+        for _ in 0..10 {
+            if probe_group(pid)? {
+                return Ok(true);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        probe_group(pid)
+    }
+
+    fn probe_group(pid: u32) -> Result<bool, Errno> {
+        match killpg(Pid::from_raw(pid as i32), None) {
+            Ok(()) => Ok(false),
+            Err(Errno::ESRCH) => Ok(true),
+            Err(error) => Err(error),
         }
     }
 }

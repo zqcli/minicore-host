@@ -6,7 +6,11 @@ use minicore_runtime::{
     LoopOptions, LoopOutcome, ToolCallId,
     tools::{ToolError, ToolInvocation},
 };
-use nix::{errno::Errno, sys::signal::kill, unistd::Pid};
+use nix::{
+    errno::Errno,
+    sys::signal::{kill, killpg},
+    unistd::Pid,
+};
 use serde_json::json;
 use std::{
     fs,
@@ -296,4 +300,73 @@ async fn cancelled_before_start_has_no_process_or_file_effect() {
     assert!(!root.path().join("should-not-exist").exists());
     assert!(records.commands.lock().unwrap().is_empty());
     assert!(tools.finish().await.is_empty());
+}
+
+/// Adapted from minicore-agent command tests: pipe EOF alone says nothing about
+/// a background process that redirected both of its output descriptors.
+#[tokio::test]
+async fn redirected_background_members_end_before_turn_finish() {
+    let (root, tools, records) = fixture().await;
+    let output = invoke(&tools, "bash", json!({"command":
+        "for i in {1..12}; do sleep 30 >/dev/null 2>&1 & printf '%s\\n' $! >> children; done; printf done"
+    })).await.unwrap();
+    let done = tools.finish().await;
+    assert_eq!(output["status"], "exited");
+    assert!(done[0].cleanup_confirmed);
+    let commands = records.commands.lock().unwrap();
+    let command = &commands[0].1;
+    assert!(command.process_waited && command.cleanup_confirmed);
+    assert!(command.stdout.complete && command.stderr.complete);
+    assert_eq!(command.stdout.output.as_bytes(), b"done");
+    assert_eq!(
+        killpg(Pid::from_raw(command.pid as i32), None),
+        Err(Errno::ESRCH),
+        "confirmed cleanup must observe the original group gone, not merely signal it"
+    );
+    for pid in fs::read_to_string(root.path().join("children"))
+        .unwrap()
+        .lines()
+    {
+        gone(pid.parse().unwrap());
+    }
+}
+
+/// Adapted from minicore-agent's leader-and-group-member reap regression, with
+/// the Host's public Turn finish barrier rather than the old Loop owner join.
+#[tokio::test]
+async fn cancellation_joins_leader_and_background_member_before_turn_finish() {
+    let (root, tools, records) = fixture().await;
+    let tool = tools.tool("bash").unwrap();
+    let context = context();
+    let cancellation = context.cancellation.clone();
+    let caller = tokio::spawn(async move {
+        tool.execute(ToolInvocation::new(
+            "group-cancel".parse().unwrap(), "bash".parse().unwrap(),
+            json!({"command":"sleep 30 >/dev/null 2>&1 & echo $! > child.pid; echo $$ > leader.pid; printf once > ready; wait"})
+        ).unwrap(), context).await
+    });
+    wait_file(&root.path().join("ready")).await;
+    cancellation.cancel();
+    assert_eq!(caller.await.unwrap().unwrap_err(), ToolError::Cancelled);
+    let done = tools.finish().await;
+    assert!(done[0].cleanup_confirmed);
+    let commands = records.commands.lock().unwrap();
+    let command = &commands[0].1;
+    assert_eq!(command.status, CommandStatus::Cancelled);
+    assert!(command.process_waited && command.cleanup_confirmed);
+    assert!(command.stdout.complete && command.stderr.complete);
+    assert_eq!(
+        killpg(Pid::from_raw(command.pid as i32), None),
+        Err(Errno::ESRCH)
+    );
+    for name in ["leader.pid", "child.pid"] {
+        gone(
+            fs::read_to_string(root.path().join(name))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap(),
+        );
+    }
+    assert_eq!(fs::read(root.path().join("ready")).unwrap(), b"once");
 }
