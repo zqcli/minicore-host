@@ -117,3 +117,29 @@ On the source checkpoint following `30c588c`, the following commands actually pa
 The shell additionally sets `TMPDIR=/workspace/shared/minicore-host-tmp` after the shared `/tmp` filesystem became crowded by independent review build targets. Reviewers removed only their own disposable build artifacts; all reports and source fixtures remain. Log: `minicore-host-validation/published-runtime-pin.log`; source metadata: `minicore-host-validation/metadata-published-runtime.json`.
 
 Two independently reproduced follow-up defects are now fixed in topic worktrees and pending main-worktree integration: metadata read/atomic-rename coordination, and closing an unrelated non-default Session while an Agent metadata candidate has failed. Their final gate and independent counterexample results will be recorded separately. Full version completion, Host publication and external review remain pending.
+
+## Metadata concurrency and close-isolation checkpoint
+
+The final source fixes were integrated as separate commits:
+
+- `f1ec37e8bc04da6f11a2c834173737fd74337c99`: pin the verified published Runtime revision and remove the local dependency prerequisite.
+- `a088b00591820a07503e767b8d7c0ba27894ee81`: coordinate only matching metadata-file snapshots and atomic publication, preserving unrelated file progress and unchanged owner/path/link safety checks. The index is held only to acquire/retire file gates, never for I/O or waiting on those gates. Parent/default typed validation does not hold a child file gate.
+- `d73b161e8d84d77a19aecd92125d11063192be05`: closing a Session depends only on current or pending default references to that Session. An unrelated failed Agent metadata candidate remains retained but does not block healthy nondefault closure.
+
+At exact Host `d73b161e8d84d77a19aecd92125d11063192be05`, `./scripts/check.sh` passed 190 unit/integration tests (core 60, protocol 47, provider 27, storage 56), 2 doctests, formatting, Clippy warnings denied, rustdoc warnings denied and diff check. Log: `minicore-host-validation/metadata-close-integrated.log`. The storage contributor also repeated the reproduced parent/child metadata stress test ten times: 10,240 saves plus concurrent reads/reopens passed. This is a regression stress check, not a performance or capacity claim.
+
+Clean-source verification used these actual commands:
+
+```sh
+git clone --no-local --no-hardlinks --single-branch --branch dev /workspace/shared/minicore-host /workspace/shared/minicore-host-clean-check-d73b161
+cd /workspace/shared/minicore-host-clean-check-d73b161
+git rev-parse HEAD
+test ! -e .cargo/config.toml
+test ! -e vendor/minicore-runtime
+cargo metadata --locked --format-version 1
+./scripts/check.sh
+git status --short
+git diff --exit-code
+```
+
+The clean clone had an empty build target and no local Runtime patch. It used the same workspace Cargo download cache; the verified dependency source remained GitHub revision `18a6ac9b82d003330cd870275efca793cdcc9a96`. The entire 190-test/2-doctest gate passed again and the checkout remained clean. Logs: `minicore-host-validation/clean-source-gate-d73b161.log` and `clean-source-metadata-d73b161.json`. This checks a fresh local clone of unpublished Host commits, not a GitHub Host clone or remotely executed Host CI. The spec hash remains unchanged. TUI/live external provider validation, full v4.93 completion, Host publication and external review remain pending.
