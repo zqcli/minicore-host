@@ -138,6 +138,11 @@ impl Host {
             Arc::clone(&self.access),
             Arc::clone(&self.resources),
         );
+        let agent = agent.hold_root(
+            self.store
+                .as_ref()
+                .map(|store| Arc::new(store.clone()) as Arc<dyn Send + Sync>),
+        );
         // Acceptance publishes the Agent. Following creation is an owned
         // workflow and is not re-authorized against a possibly closed caller.
         self.access.accept(caller, || {

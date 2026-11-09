@@ -174,6 +174,11 @@ impl Host {
                     Arc::clone(&self.resources),
                 )
             };
+            let agent = agent.hold_root(
+                self.store
+                    .as_ref()
+                    .map(|store| Arc::new(store.clone()) as Arc<dyn Send + Sync>),
+            );
             agent.begin_initial_creation();
             {
                 let mut state = self.state.lock().expect("Host mutex poisoned");

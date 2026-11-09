@@ -22,6 +22,7 @@ pub(crate) struct AgentOwner {
     enabled: Arc<AtomicBool>,
     store: Option<AgentStore>,
     changed: tokio::sync::Notify,
+    root_lease: Option<Arc<dyn Send + Sync>>,
 }
 struct AgentState {
     info: AgentInfo,
@@ -51,6 +52,7 @@ impl AgentOwner {
             resources,
             enabled: Arc::new(AtomicBool::new(true)),
             store: None,
+            root_lease: None,
             changed: tokio::sync::Notify::new(),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
@@ -72,6 +74,12 @@ impl AgentOwner {
                 stop_task: None,
             }),
         })
+    }
+    pub(crate) fn hold_root(mut self: Arc<Self>, lease: Option<Arc<dyn Send + Sync>>) -> Arc<Self> {
+        Arc::get_mut(&mut self)
+            .expect("unpublished Agent")
+            .root_lease = lease;
+        self
     }
     pub(crate) fn info(&self, caller: &CallerContext) -> Result<AgentInfo, Fault> {
         self.access.read(caller, || {
@@ -182,6 +190,7 @@ impl AgentOwner {
             Vec::new(),
             Arc::clone(&self.enabled),
         );
+        let session = session.hold_root(self.root_lease.clone());
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         if state.info.lifecycle != AgentLifecycle::Active {
             return Err(Fault::new(

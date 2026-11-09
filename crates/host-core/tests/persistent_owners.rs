@@ -656,3 +656,92 @@ async fn default_session_real_file_failure_keeps_published_agent_receipt() {
             .exists()
     );
 }
+
+struct ReviewGateModel {
+    descriptor: ModelDescriptor,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Semaphore>,
+    finished: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Model for ReviewGateModel {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        Box::pin(async move {
+            self.entered.notify_one();
+            self.release.acquire().await.unwrap().forget();
+            self.finished
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(Box::pin(stream::iter([
+                Ok(ModelEvent::text_delta("gate fixture finished").unwrap()),
+                Ok(ModelEvent::Finish {
+                    reason: ModelFinishReason::Stop,
+                }),
+            ])) as ModelStream)
+        })
+    }
+}
+#[tokio::test]
+async fn review_root_guard_outlives_active_memory_session() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let directory = tempfile::tempdir().unwrap();
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let finished = Arc::new(AtomicBool::new(false));
+    let resources: Arc<dyn ResourceResolver> = Arc::new(Resources {
+        model: Arc::new(ReviewGateModel {
+            descriptor: ModelDescriptor::new(
+                "test/model".parse().unwrap(),
+                128_000,
+                BTreeSet::from([RuntimeReasoning::Auto]),
+                true,
+            )
+            .unwrap(),
+            entered: entered.clone(),
+            release: release.clone(),
+            finished: finished.clone(),
+        }),
+    });
+    let host = Host::open_persistent(directory.path(), settings("first"), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let receipt = host
+        .create_agent(
+            &connection.caller(),
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "memory".into(),
+                mode: StorageMode::Memory,
+                config: config(),
+                default_session: None,
+                initial_message: Some(input("keep working")),
+            },
+        )
+        .unwrap();
+    assert!(receipt.session_id.is_some());
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    assert!(!finished.load(Ordering::SeqCst));
+    drop(connection);
+    drop(host);
+    let second = Host::open_persistent(directory.path(), settings("second"), resources).await;
+    eprintln!(
+        "second Host opened with old memory model still running: {}",
+        second.is_ok()
+    );
+    release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !finished.load(Ordering::SeqCst) {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        second.is_err(),
+        "root ownership ended before accepted memory execution ended"
+    );
+}

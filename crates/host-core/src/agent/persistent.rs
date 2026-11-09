@@ -63,6 +63,7 @@ impl AgentOwner {
         access: Arc<ConnectionRegistry>,
         resources: Arc<dyn ResourceResolver>,
     ) -> Arc<Self> {
+        let root_lease: Arc<dyn Send + Sync> = Arc::new(store.clone());
         Arc::new(Self {
             id: record.id.clone(),
             host_id: record.host_id.clone(),
@@ -71,6 +72,7 @@ impl AgentOwner {
             resources,
             enabled: Arc::new(AtomicBool::new(true)),
             store: Some(store),
+            root_lease: Some(root_lease),
             changed: tokio::sync::Notify::new(),
             state: Mutex::new(AgentState {
                 info: AgentInfo {

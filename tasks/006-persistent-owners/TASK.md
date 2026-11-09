@@ -29,3 +29,10 @@ Commands: `cargo fmt --all`, `cargo test -p minicore-host-core --test persistent
 - Tests cover actual file failure after Agent publication, real partial initial-message rejection, restart without memory objects/old Turn state, and waiter abort plus connection revocation while accepted work continues through real Runtime/persisted output.
 
 Commands: `cargo fmt --all`; `cargo test -p minicore-host-core --offline` (28 passed: 4 unit, 8 persistent owners, 15 memory owners, 1 real HTTP integration); `cargo clippy -p minicore-host-core --all-targets --offline -- -D warnings` (passed).
+
+
+## Root lease review correction
+
+Independent review reproduced an early directory lease release: memory descendants of a persistent Host retained execution but not the root guard. All descendants now retain a type-erased storage lease, without holding Arc<Host> or acquiring cross-owner business authority. A gated real Runtime regression verifies that dropping Host/connection cannot reopen its directory while the accepted memory execution remains active.
+
+Verified the isolated root-lease commit tree: `cargo fmt --all`, full core tests (29 passed) and core all-target Clippy with warnings denied all passed. This verification excludes still-uncommitted metadata/lifecycle work.
