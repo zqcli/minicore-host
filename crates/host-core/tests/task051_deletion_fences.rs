@@ -438,3 +438,90 @@ async fn agent_delete_acceptance_expires_every_owned_turn_capability_synchronous
         Receipt::AgentDelete(receipt)
     );
 }
+
+async fn unbound_memory_deletion_disposes_input(delete_agent: bool) {
+    let mut f = Fixture::new().await;
+    let parent = f.agent(StorageMode::Persistent).await;
+    let child = f.agent(StorageMode::Memory).await;
+    f.send(&parent, input(MessageMode::FollowUp));
+    let cap = recv(&mut f.bindings).await.capability();
+    let _parent_model = recv(&mut f.calls).await;
+    cap.prepare_scope(Arc::new(TestNoopScopeHooks)).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let task_id = task.message_id.clone();
+    let relation = registration(&cap, &child, &task);
+    let (sink, mut completions) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task).unwrap();
+    // No yield: the child's actual driver is queued before the delete worker,
+    // but has not bound the accepted task. It must see normal close disposition.
+    if delete_agent {
+        f.host
+            .agent_delete(
+                &f.connection.caller(),
+                &AgentRef {
+                    host_id: cap.source().host_id.clone(),
+                    agent_id: child.agent_id.clone(),
+                },
+                AgentDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    scope: AgentDeleteScope::Sessions {
+                        session_ids: vec![child.session_id.clone()],
+                        close: true,
+                    },
+                },
+            )
+            .unwrap();
+    } else {
+        f.host
+            .session_delete(
+                &f.connection.caller(),
+                &child,
+                SessionDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    close: true,
+                },
+            )
+            .unwrap();
+    }
+    let completion = tokio::time::timeout(Duration::from_secs(2), completions.recv()).await;
+    assert!(
+        completion.is_ok(),
+        "no discarded-input handoff; retained source: {:?}",
+        f.host.session_state(&f.connection.caller(), &child)
+    );
+    let completion = completion.unwrap().expect("actual handoff");
+    assert_eq!(completion.discarded_inputs, vec![task_id]);
+    assert!(completion.results.is_empty());
+    assert!(completion.inputs.is_empty());
+    assert!(
+        f.bindings.try_recv().is_err(),
+        "unbound task must not start Runtime"
+    );
+    let notice = permit.notify(input(MessageMode::FollowUp)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(notice))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while f.host.session_info(&f.connection.caller(), &child).is_ok() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("discarded input must not strand deletion in Pending");
+    assert!(completions.try_recv().is_err(), "handoff must occur once");
+    f.stop().await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_delete_disposes_unbound_memory_delegation_before_closed() {
+    unbound_memory_deletion_disposes_input(false).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn agent_delete_disposes_unbound_memory_delegation_before_closed() {
+    unbound_memory_deletion_disposes_input(true).await;
+}
