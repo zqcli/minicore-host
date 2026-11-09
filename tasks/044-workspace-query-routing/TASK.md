@@ -179,3 +179,34 @@ combined gate and independent rereview remain required.
   `BrokenPipe` outcome for the deliberate-disconnect case. Ordinary completed
   query teardown remains strict. No production behavior or reviewer assertion
   was changed. A fresh final-source gate and repetitions follow.
+
+## Final combined producer validation
+
+- Source-binding fix: `30569c6cff17616b7ccc61a82838e6bc43a13e18`.
+- Tool-cleanup fixes consumed unchanged before this validation: `c6e171d` and
+  `58408d5`; producer documentation `320af7c`.
+- Final fixed code/test checkpoint, including the deliberate-disconnect fixture
+  correction: `4f91fd14645d09703cc325e79f08948054c97753`.
+- `./scripts/check.sh`: **PASS**, including whitespace, formatting, strict
+  all-target Clippy, all workspace targets, **4 doctests**, and strict rustdoc.
+  Log: `/workspace/shared/workspace-routing-final-gate-4f91fd1.log`.
+- `cargo test --workspace --all-targets --locked -- --list`: **684 unique
+  target/test pairs = 114 unit + 570 integration**, excluding additional
+  subprocess output. Log:
+  `/workspace/shared/workspace-routing-final-inventory-4f91fd1.log`.
+- Repeated `cargo test -p minicore-host-transport --test workspace_queries
+  --test workspace_sources --test workspace_tool_changes --test workspace_wait
+  --locked` ten times: **90/90 canonical case executions passed**.
+- Recompiled the original reviewer source, with its original assertions and
+  SHA unchanged, against the final production dependencies. Ran its two probes
+  in every repetition: **20/20 passed**. These external probes are not added to
+  the canonical 684 inventory. Log:
+  `/workspace/shared/workspace-routing-final-repeat-4f91fd1.log`.
+- Exact original probe SHA, Cargo artifact selection and rustc argv are in
+  `/workspace/shared/workspace-routing-source-fix-artifacts/`. The final probe
+  compiler command is `probe-compiler-command-final.json`; the fixture-only
+  final correction leaves those production dependency paths unchanged.
+- No source/lock/spec change followed these checks; only this validation record
+  is appended. The worktree is returned for independent fixed-source rereview
+  and parent integration. No remote push, main merge, TUI change, live-provider
+  claim or separately launched process claim is made by this workspace task.
