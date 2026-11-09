@@ -70,3 +70,28 @@ Fixed source commits: `e869010` (`fix(workspace): distinguish damaged repositori
 - One complete `./scripts/check.sh` rerun then passed, exit 0: whitespace, full formatting, strict workspace Clippy, all-target tests, 2 workspace doctests, and strict rustdoc. Log: `/workspace/shared/minicore-host-workspace-review-rerun.log`. No further retries were performed.
 - `cargo test --workspace --all-targets --locked -- --list` independently confirmed **270 unique tests: 42 lib + 228 integration**. This worktree has the original 240-test baseline plus 30 module tests; it does not include the parent's later core tests. The list is retained at `/workspace/shared/minicore-host-workspace-review-list.log`. Filter/discovery subprocess fixtures and the storage child-process output are not counted again.
 - No dependency, Runtime, Session integration, public Fault registry, storage, TUI, recovery mechanism, main branch or remote changes were made by these fixes. Independent re-review remains pending; a `followup_task` attempt to the existing reviewer was rejected with `agent thread limit reached`, so the parent will trigger it after this worker releases its slot.
+
+## Fixed review and integrated validation
+
+- Topic `e869010` -> dev `34cb959`; `453bbf4` -> `d154377`; validation
+  notes `837595d` -> `775235a`. Task-note integration preserved both the earlier
+  parent checkpoint and new follow-up evidence.
+- Independent review of fixed source `453bbf4` passed all 30 module tests, fmt,
+  strict Clippy and rustdoc in a separate archive and fresh target. Real probes
+  confirm both original findings are fixed for stable configuration/attributes.
+- Independent gated probes also demonstrate a remaining preflight/status race
+  when the current worktree's attributes or shared Git configuration changes
+  concurrently. Another worktree's private attributes do not cross into the
+  selected worktree. This is an explicit first-version local-use limit, not a
+  repaired condition or an absolute no-execution guarantee. No cross-process
+  locking, snapshot framework or extra incomplete protection layer was added.
+- At fixed dev `775235a9e9f7031ba654b6b83ddc73ecf9a5da6a`,
+  `./scripts/check.sh` passed all gates and 3 doctests.
+  `cargo test --workspace --all-targets --locked -- --list` independently counted
+  **299 unique tests**. Logs are `workspace-fixes-integrated-775235a.log` and
+  `workspace-fixes-test-list-775235a.txt` in the local validation directory.
+- The earlier one-off storage `HistoryInUse` failure remains recorded above.
+  The producer's single-test rerun, one full rerun and this separate integrated
+  gate passed; these passes do not establish the failure's root cause.
+- Scoped workspace review does not approve canonical Session routing, write-tool
+  integration, TUI/live providers or the overall first-version release.

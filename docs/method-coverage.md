@@ -84,5 +84,7 @@ Workspace backend integration `b0fdbfb` passes the complete 275-test/2-doctest g
 At fixed typed/stdio checkpoint `8079970`, the entire gate passes 290 unique
 unit/integration tests and 3 doctests. The count is verified by `--list`. Scoped
 adapter review remains open. Workspace review identified real external-filter
-execution and damaged-repository classification defects; fixes are under
-validation and do not become cleared merely because the existing tests pass.
+execution and damaged-repository classification defects; the fixes are integrated at `775235a` and independently verified under stable
+Git configuration/attributes. Uncoordinated concurrent changes remain a declared
+first-version limit. The integrated full gate passes 299 unique tests and 3
+doctests, not complete canonical method acceptance.
