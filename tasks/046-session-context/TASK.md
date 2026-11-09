@@ -21,7 +21,7 @@
 
 ## Permanent regressions
 
-Ten integration cases use the actual public Host entry point, real Runtime, real temporary history and explicitly named scripted models:
+The original ten integration cases use the actual public Host entry point, real Runtime, real temporary history and explicitly named scripted models:
 
 1. Real empty context, separate queued inputs, read-only access and no query-triggered preparation/execution.
 2. Actual complete-response usage, absent fields, a later unknown response and genuine reported zero.
@@ -50,7 +50,7 @@ Minimal reproduction: seed valid persistent history, open a fresh Host without l
 
 ## Integration and remaining work
 
-The transport owner has the frozen Host method and DTO, including nullable history. This topic deliberately does not add the canonical RPC route or typed client method. The integration owner maintains PROJECT.md and performs independent review/integration. This task does not claim every catalog operation or the full product is complete.
+The transport owner implemented the canonical route/client and typed/OS-pipe/TLS-WSS/cold-null tests separately in `955f07e051a576fdf6f0711bb6193e8a86b58507`. That transport commit is not part of this topic checkout or its inventory. The integration owner maintains PROJECT.md and performs independent review/integration. This task does not claim every catalog operation or the full product is complete.
 
 ## Exact functional source and final verification
 
@@ -98,3 +98,14 @@ Permanent regressions added for this correction:
 - A Session test gates each actual real-journal append for complete input, incomplete partial response and terminal record. At each gate it verifies accepted position, readable/partial/terminal facts, pending/running save, correct persistence and still-unwritten disk range. The final file contains exactly the original input/partial/failed-terminal sequence once, preserving business failure separately from successful persistence.
 
 All four original independent reviewer probes were appended unchanged, run, then removed from the working test file. All passed, including 256 real same-Turn continuations with **77,945 concurrent context samples and no inconsistent snapshot**. The original reviewer probe and both original red logs were checked unchanged with SHA-256. Artifacts: `review-fix-original-probes.log`, `review-original-evidence.sha256`, and `review-fix-acceptance-old-source-red.log` in `/workspace/shared/minicore-host-session-context-artifacts/`. The permanent focused acceptance tests, all core all-target tests, formatting, whitespace and core all-target strict Clippy passed before this correction commit. Fixed-source full-gate/inventory results follow separately; the independent history.read lock risk and other owners' storage/diagnostics work remain outside this correction.
+
+
+## Fixed-source verification after both review corrections
+
+- First correction: `01e5946d8bd5655d717e0a1a81110089fe2875f8` (`fix(core): map compaction to public response identity`). Second correction and final functional source: `2d54ee249c8e68bf8533a2e89f1b548d6e8540a3` (`fix(core): register saves with accepted history`). Both follow the original implementation and its report-only `96b98e8a502601e01b3981be0c0fd9e6ba2b39d7` checkpoint. The following commands ran with a clean worktree at `2d54ee2`, before this report-only commit.
+- `./scripts/check.sh` passed on the first fixed-source run: whitespace, rustfmt, workspace all-target strict Clippy, all workspace unit/integration tests, four doctests and strict rustdoc. No failed full gate was retried to obtain green. Log: `/workspace/shared/minicore-host-session-context-artifacts/2d54ee2-full-gate.log`; exit status: `2d54ee2-full-gate.exit`.
+- `cargo test --workspace --all-targets --locked -- --list`: **666 listed, 666 unique target/test-name cases**, across 67 targets containing tests. This includes the four new permanent review regressions, but not the four temporarily appended independent probes or the separately owned transport additions. Inventory: `2d54ee2-test-list.log`; summary: `2d54ee2-verification-summary.json` in the same artifact directory.
+- After the full gate, all 13 public Host context tests, both original gated context owner tests and the new gated partial/terminal owner test passed again. Commands: `cargo test -p minicore-host-core --test session_context --locked`; `cargo test -p minicore-host-core --lib --locked session::context::tests`; `cargo test -p minicore-host-core --lib --locked partial_and_terminal_acceptance_register_original_saves_before_gated_io`. Log: `2d54ee2-focused.log`.
+- The pre-commit core all-target run also passed all 240 cases across 13 test targets. Its log remains `review-fix-all-core.log`. The original probes' unchanged source/evidence check is recorded in `review-original-evidence.sha256`; the original red evidence has not been overwritten by green output.
+- `cargo metadata --format-version 1 --locked` still resolves Runtime `0.10.0` to `69faf9196991524b5549499d6208a1eaf567bf56`, with no lock regeneration, upgrades or path patches. Metadata: `2d54ee2-metadata.json`. SPEC and Cargo.lock hashes remain exactly those recorded above. TUI reference remains `3beeb1d8a525e58ce6352e05061f242c5580e248`, and minicore-agent reference remains `f36a87366d8e2fe0a1c8216463887902e471c739`; neither reference tree was changed.
+- This green run does not claim to fix independent storage/diagnostics lease risks or the separately reproduced history.read/load contention. Independent review of these two corrections and integration with the canonical route remain with the integration owner. No push, main merge, TUI work or external paid-provider call occurred.
