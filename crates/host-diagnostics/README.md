@@ -46,6 +46,7 @@ scalar data do not make an arbitrary supplied string safe.
 diagnostic ID. It does not copy the Fault message/details or infer a different
 fault from scope. Optional fields are omitted; unknown durations, counts,
 completion, and persistence facts are not filled with zero or invented values.
+Sources compute durations from a monotonic clock, not by subtracting UTC timestamps.
 
 `Context` reuses protocol ID types and owns the snapshot, never the entities.
 `context.instrument(future)` enters it on each poll. Spawned futures must

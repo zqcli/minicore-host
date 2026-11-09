@@ -5,8 +5,8 @@
 Implement the SPEC v4.93 chapter 12 process pipeline in `crates/host-diagnostics`:
 application-owned setup, structured JSONL, early filtering, owned async identity,
 single writer, minimal observed health, and bounded shutdown. Implementation and
-focused tests are complete; independent review and final integrated workspace
-gates remain pending. No remote action is authorized by this task.
+focused and full-workspace tests are complete; independent review and the later
+parent integration gate remain pending. No remote action is authorized by this task.
 
 This stage does not claim business event coverage, HostConfig application wiring,
 `host.info` integration, executable lifecycle, or live provider/TUI validation.
@@ -25,7 +25,13 @@ change, emergency channel, or cross-process logging service is added.
   `69faf9196991524b5549499d6208a1eaf567bf56`. TUI unchanged.
 - Parent-owned dependency bootstrap `cb719eda2f8c1c09bdecc63de2822c68eead41be`
   was cherry-picked as `20fa9a6`; shared manifest and lock updates are exclusively
-  that bootstrap. This worker owns only crate contents and this task record.
+  that bootstrap and the parent feature cleanup below. This worker owns only
+  crate contents and this task record.
+- Implementation: `7d40a4e6d1a0a24eff44011cc2d37fd7aa05b32f`.
+- Parent minimal-feature follow-up `6d4c4838bf31c5ea3a81b71f33e5ee38b946a336`
+  was cherry-picked as `1bab7471714c488b06fbc72bc2560c2cbee4b8c6`. Tracing now
+  enables only std, and unused tracing-attributes was removed from the lock.
+  No existing locked dependency version/checksum or Runtime revision changed.
 
 ## Design and dependency decision
 
@@ -36,7 +42,7 @@ protocol IDs and the existing Fault pair/diagnostic ID without its body/details.
 `Context::instrument` retains owned snapshots per poll. Explicit child context
 replaces the parent chain instead of accidentally inheriting a finished Turn.
 
-Exact direct dependencies are tracing 0.1.44, tracing-subscriber 0.3.23 (only
+Exact direct dependencies are tracing 0.1.44 (only std), tracing-subscriber 0.3.23 (only
 registry/std), time 0.3.55 (formatting), serde 1.0.229, serde_json 1.0.154, and the
 existing host-protocol crate. Tests use tempfile 3.27.0 and tokio 1.54.0. No
 additional backend dependency was added.
@@ -66,7 +72,29 @@ Additional coverage includes every shared identity field, unrecognized Fault
 detail exclusion, all five levels, and append-only output. `cargo fmt --all --
 --check` and `git diff --check` pass. `cargo test -p minicore-host-diagnostics
 --all-targets --locked -- --list` lists exactly 15 unique cases. Full workspace
-tests are running; final results and commits will be recorded before handoff.
+tests passed, followed by the exact final gates below.
+
+### Final fixed-code gates
+
+The initial workspace all-targets test run passed at implementation
+`7d40a4e6d1a0a24eff44011cc2d37fd7aa05b32f`, before the parent dependency cleanup.
+After applying that cleanup, these gates all passed at final code/dependency SHA
+`1bab7471714c488b06fbc72bc2560c2cbee4b8c6`:
+
+- `cargo fmt --all -- --check`
+- `cargo test --workspace --all-targets --locked`
+- `cargo test --workspace --all-targets --locked -- --list`: **521 unique cases**,
+  including 15 diagnostics cases. Nested subprocess execution output is not
+  counted again.
+- `cargo test -p minicore-host-diagnostics --doc --locked`: **1 doctest**.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`
+- `git diff --check`
+
+The next commit only records these results and clarifies monotonic duration
+measurement in the README; no tested code or dependency changes occur in it.
+All changes stay local on `feat/shared-diagnostics`; there was no push, publish,
+Runtime modification, or TUI modification.
 
 ## Honest limits and next steps
 
