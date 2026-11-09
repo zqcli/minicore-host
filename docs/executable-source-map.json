@@ -108,8 +108,36 @@
     {
       "source": "fa2b13034894dbc4963b42baec0f1fe18b3a0bf8",
       "integrated": "78d1fe24d46ce355409e0899dd7b96e957a558f8"
+    },
+    {
+      "source": "69385be0f6406c612954c9e211344e1dc8367ecf",
+      "integrated": "42fc7bd50312ef7d3277018d4056819c5ec75963"
+    },
+    {
+      "source": "24b2b7a3c64d70579c2dcaece3db9d9349334490",
+      "integrated": "501ae36f80da5eb74e1bbb71af947a8c21f70d03"
+    },
+    {
+      "source": "85239964bd8323d90e0c0cf1da78ff439d6ba1b0",
+      "integrated": "e25ac38a8c7b57ffc09448f1c1b65c14d971a548"
+    },
+    {
+      "source": "ee00bea8fca3aa6e4ed0bfd1d25716bace12fb10",
+      "integrated": "10ca8b72ea7038385be02d56a9140b9acbc68cc1"
+    },
+    {
+      "source": "c4d3cbe14f0c88011057e57cd1b05d9f515de165",
+      "integrated": "6dde2586233a748dbe08bf0ba4371311da4cea93"
+    },
+    {
+      "source": "570b886fcd4c4315e155d3f244576a681320fa7e",
+      "integrated": "0435c7ff9f5c94ce6d7bc58abe2dac120d444b11"
+    },
+    {
+      "source": "cef0c189e7972d5607d61e0303d8ee7e8ed1c0ff",
+      "integrated": "f98af861d1bf618c99b8c28688ee1fb5122dacd5"
     }
   ],
-  "head": "78d1fe24d46ce355409e0899dd7b96e957a558f8",
-  "status": "Local composition; aggregate blocked on independently reproduced storage/diagnostics lease release failures. Not published."
+  "head": "f98af861d1bf618c99b8c28688ee1fb5122dacd5",
+  "status": "Local composition; known storage and diagnostics lease corrections remain separate. Not published."
 }
