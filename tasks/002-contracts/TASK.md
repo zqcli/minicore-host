@@ -1,6 +1,6 @@
 # Implement Public Contracts
 
-Status: active. Scope: `crates/host-protocol/**` and this task file only.
+Status: completed for the assigned protocol-foundation scope. Root workspace integration belongs to the parent task. Scope: `crates/host-protocol/**` and this task file only.
 
 Baseline: SPEC v4.93, SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3` verified unchanged.
 
@@ -24,7 +24,7 @@ cargo clippy --manifest-path crates/host-protocol/Cargo.toml --all-targets -- -D
 
 Tests: 1 internal uniform-encoding test and 13 integration tests passed. Clippy initially found a derivable Default implementation; fixed before the milestone commit and rerun. No remote writes or provider/TUI claims.
 
-## Next
+## Subsequent milestones (completed below)
 
 Strict text requests and typed receipts, connection/control facts, exact 52-method catalog with explicit staged availability, additional positive and negative wire tests.
 
@@ -45,3 +45,33 @@ Strict text requests and typed receipts, connection/control facts, exact 52-meth
 - Typed MessageClient/MessageService templates separate request, trusted owner context and waiting options.
 - Configuration serialization validates direct Rust candidates; strict provenance rejects user/Agent-source contradictions, including tagged-unit serde edge cases.
 - 39 total tests and clippy passed. First-version endpoints, transports, live Runtime and TUI are not claimed by contract-only coverage.
+
+
+## Milestone 4: RPC mapping and final verification
+
+- Milestone 3 commit: `dfc62eeab02692cfaa1228b8bcfa1a37a286cb84`.
+- Final implementation commit: `323975774e22b14a5fc46806ca376b17ee3bd020`.
+- MessageSendRpcRequest and RpcResponse enforce the same local business values, separate transport IDs and business IDs, require JSON-RPC 2.0, keep business Fault codes separate from protocol codes, and reject simultaneous result/error. Accepted plus start_error remains a normal result.
+- Fault registry now also owns allowed details schemas and retry-hint eligibility. Explicit null is rejected for absent-only optional fault fields; snapshot no-block and unidentified protocol-error IDs have explicit null encoding.
+- Crate README documents integer encoding, exact configuration fields, resource validation, caller/control separation, staging and remaining adapter work. Unknown future Fault preservation in clients remains an adapter responsibility; strict service Fault types do not accept arbitrary unknown leaves.
+- A temporary build error in the new required-nullable helper was fixed by fully qualifying Deserialize; final tests/lint/docs were rerun after that fix. No runtime workaround or failing check is hidden.
+
+Final validation on the final source with Rust 1.90.0:
+
+```sh
+export RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/cargo PATH=/workspace/shared/cargo/bin:$PATH
+cargo fmt --manifest-path crates/host-protocol/Cargo.toml -- --check
+cargo test --manifest-path crates/host-protocol/Cargo.toml
+cargo clippy --manifest-path crates/host-protocol/Cargo.toml --all-targets -- -D warnings
+RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path crates/host-protocol/Cargo.toml --no-deps
+git diff --check
+sha256sum SPEC.md
+```
+
+Outcomes: 47 tests passed (1 internal, 15 foundation, 12 message/creation, 14 control/catalog, 5 RPC); zero failures; Clippy with denied warnings passed; rustdoc with denied warnings passed; formatting and diff checks passed. SPEC hash remains the unchanged baseline. No provider credentials or live calls were used. No remote push occurred.
+
+## Integration and remaining scope
+
+Cherry-pick the four implementation commits in order: `a87e35978c20d8b7fa2339345bf7ee77f75bce8c`, `83f9a575a75ce11870a86d6ce4f016cbb53b8f66`, `dfc62eeab02692cfaa1228b8bcfa1a37a286cb84`, `323975774e22b14a5fc46806ca376b17ee3bd020`, followed by this task-log commit. Parent removes the temporary crate `[workspace]`, integrates exact dependencies into the committed root lock, and reruns complete workspace checks. Root manifests, PROJECT.md and other crates were not edited here.
+
+The contract catalog does not implement all 52 services. Session compact result phases, auxiliary query payloads, typed receipts for not-yet-integrated controls, event/read synchronization, trusted CallerContext registration, real client wait ownership and unknown-leaf preservation, WSS/stdio handlers and TUI acceptance remain with their implementation stages. These foundation tests do not certify those behaviors. Independent review is still required by the repository workflow.
