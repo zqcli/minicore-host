@@ -10,6 +10,15 @@ impl Host {
         self.agent(caller, &target.agent_id)?
             .update_control(caller, request)
     }
+    pub fn session_update(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: SessionUpdateRequest,
+    ) -> Result<SessionUpdateReceipt, Fault> {
+        self.session(caller, target)?
+            .update_control(caller, request)
+    }
     pub fn agent_set_default_session(
         &self,
         caller: &CallerContext,

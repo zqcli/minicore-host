@@ -1,6 +1,23 @@
 use super::*;
 
 impl Host {
+    pub fn input_list(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+    ) -> Result<InputList, Fault> {
+        self.session(caller, target)?.input_list(caller)
+    }
+    pub fn input_remove(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: InputRemoveRequest,
+    ) -> Result<InputRemoveReceipt, Fault> {
+        self.session(caller, target)?
+            .remove_control(caller, request)
+    }
+
     pub(super) fn operation_id() -> Result<OperationId, Fault> {
         OperationId::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))

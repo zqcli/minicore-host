@@ -825,54 +825,6 @@ impl SessionController {
         self.wake();
         Ok(updated)
     }
-    pub(crate) fn remove(
-        &self,
-        caller: &CallerContext,
-        message_id: &MessageId,
-    ) -> Result<(), Fault> {
-        let result = self.access.accept(caller, || {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            Self::available(&state)?;
-            let position = state
-                .next_step
-                .iter()
-                .position(|input| &input.message.message_id == message_id)
-                .map(|index| (InputQueue::NextStep, index))
-                .or_else(|| {
-                    state
-                        .next_turn
-                        .iter()
-                        .position(|input| &input.message.message_id == message_id)
-                        .map(|index| (InputQueue::NextTurn, index))
-                });
-            let Some((queue, index)) = position else {
-                let bound = state.messages.iter().any(|input| {
-                    &input.input.message_id == message_id
-                        && matches!(input.binding, MessageBinding::Bound { .. })
-                });
-                return Err(Fault::new(
-                    if bound {
-                        FaultKind::SessionInputAlreadyBound
-                    } else {
-                        FaultKind::SessionInputNotFound
-                    },
-                    "input is not an unbound queue entry",
-                ));
-            };
-            let removed = match queue {
-                InputQueue::NextStep => state.next_step.remove(index),
-                InputQueue::NextTurn => state.next_turn.remove(index),
-            }
-            .expect("located input");
-            mark_message(&mut state, &removed, MessageBinding::Removed);
-            self.publish(&mut state);
-            Ok(())
-        });
-        if result.is_ok() {
-            self.handoff_delegation_owned();
-        }
-        result
-    }
     pub(crate) async fn wait_input_owned(
         &self,
         capability: &crate::TurnCapability,

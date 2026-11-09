@@ -1,6 +1,118 @@
 use super::*;
 
 impl SessionController {
+    pub(crate) fn remove(
+        &self,
+        caller: &CallerContext,
+        message_id: &MessageId,
+    ) -> Result<(), Fault> {
+        let operation_id = OperationId::new()
+            .map_err(|error| Fault::new(FaultKind::SessionInternalUnexpected, error.to_string()))?;
+        self.remove_control(
+            caller,
+            InputRemoveRequest {
+                operation_id,
+                message_id: message_id.clone(),
+                expected_controller_revision: None,
+            },
+        )
+        .map(|_| ())
+    }
+    pub(crate) fn input_list(&self, caller: &CallerContext) -> Result<InputList, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let entry = |queued: &QueuedInput| QueuedInputRecord {
+                input: queued.message.clone(),
+                source: queued.source.clone(),
+                queue: queued.queue,
+                order: queued.order,
+            };
+            Ok(InputList {
+                host_id: self.host_id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                agent_id: self.agent_id.clone(),
+                session_id: self.id.clone(),
+                controller_revision: state.controller_revision,
+                next_step: state.next_step.iter().map(entry).collect(),
+                next_turn: state.next_turn.iter().map(entry).collect(),
+            })
+        })
+    }
+    pub(crate) fn remove_control(
+        &self,
+        caller: &CallerContext,
+        request: InputRemoveRequest,
+    ) -> Result<InputRemoveReceipt, Fault> {
+        let message_id = &request.message_id;
+        let result = self.access.accept(caller, || {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            Self::available(&state)?;
+            let position = state
+                .next_step
+                .iter()
+                .position(|input| &input.message.message_id == message_id)
+                .map(|index| (InputQueue::NextStep, index))
+                .or_else(|| {
+                    state
+                        .next_turn
+                        .iter()
+                        .position(|input| &input.message.message_id == message_id)
+                        .map(|index| (InputQueue::NextTurn, index))
+                });
+            let Some((queue, index)) = position else {
+                let bound = state.messages.iter().any(|input| {
+                    &input.input.message_id == message_id
+                        && matches!(input.binding, MessageBinding::Bound { .. })
+                });
+                return Err(Fault::new(
+                    if bound {
+                        FaultKind::SessionInputAlreadyBound
+                    } else {
+                        FaultKind::SessionInputNotFound
+                    },
+                    "input is not an unbound queue entry",
+                ));
+            };
+            if request
+                .expected_controller_revision
+                .is_some_and(|expected| expected != state.controller_revision)
+            {
+                return Err(Fault::new(
+                    FaultKind::SessionInputInvalid,
+                    "input removal Controller revision changed",
+                ));
+            }
+            let removed = match queue {
+                InputQueue::NextStep => state.next_step.remove(index),
+                InputQueue::NextTurn => state.next_turn.remove(index),
+            }
+            .expect("located input");
+            mark_message(&mut state, &removed, MessageBinding::Removed);
+            self.publish(&mut state);
+            let receipt = InputRemoveReceipt {
+                kind: InputRemoveKind::InputRemove,
+                host_id: self.host_id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                operation_id: request.operation_id,
+                agent_id: self.agent_id.clone(),
+                session_id: self.id.clone(),
+                message_id: request.message_id.clone(),
+                result: InputRemoveResult {
+                    queue,
+                    order: removed.order,
+                    controller_revision: state.controller_revision,
+                },
+            };
+            Self::retain_control(&mut state, Receipt::InputRemove(receipt.clone()));
+            Ok(receipt)
+        });
+        if result.is_ok() {
+            self.handoff_delegation_owned();
+        }
+        result
+    }
+
     /// The same projection supplies state snapshots and receipts. The caller
     /// holds this Session's state lock, so these are formation-time facts.
     pub(super) fn control_facts(state: &SessionState) -> SessionControlFacts {

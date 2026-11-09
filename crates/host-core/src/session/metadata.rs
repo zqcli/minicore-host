@@ -140,45 +140,12 @@ impl SessionController {
                 "Session configuration revision changed",
             ));
         }
-        let candidate = original
+        let config = original
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.resources_owned()?.validate(&candidate)?;
-        self.ensure_executor()?;
-        let (sender, receiver) = oneshot::channel();
-        self.access.accept_execution(caller, || {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            Self::open(&state)?;
-            if state.info.config_revision != expected_revision {
-                return Err(Fault::new(
-                    FaultKind::SessionConfigConflict,
-                    "Session configuration revision changed",
-                ));
-            }
-            if state.record_work.is_some() {
-                return Err(Fault::new(
-                    FaultKind::SessionBusy,
-                    "Session has a pending metadata save",
-                ));
-            }
-            let mut record = self.record(&state);
-            record.data.config_revision = expected_revision.checked_add(1).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "configuration revision exhausted",
-                )
-            })?;
-            record.data.effective_config = candidate;
-            self.spawn_record_save(&mut state, record, sender);
-            Ok(())
-        })?;
-        receiver.await.map_err(|_| {
-            Fault::new(
-                FaultKind::SessionInternalUnexpected,
-                "metadata owner ended without a result",
-            )
-        })?
+        self.update_candidate_async(caller, expected_revision, config, original.title)
+            .await
     }
     pub(super) fn record_continuation_candidate(
         state: &SessionState,
@@ -392,14 +359,18 @@ impl SessionController {
 }
 
 impl SessionController {
-    pub(crate) async fn update_candidate_async(
+    fn accept_update_candidate<T>(
         self: &Arc<Self>,
         caller: &CallerContext,
         expected: u64,
         config: SessionConfig,
         title: Option<String>,
-    ) -> Result<SessionInfo, Fault> {
-        if title.as_ref().is_some_and(|title| title.trim().is_empty()) {
+        accepted: impl FnOnce(&mut SessionState) -> T,
+    ) -> Result<(T, oneshot::Receiver<Result<SessionInfo, Fault>>), Fault> {
+        if title
+            .as_ref()
+            .is_some_and(|title| title.trim().is_empty() || title.contains('\0'))
+        {
             return Err(Fault::new(
                 FaultKind::SessionConfigInvalid,
                 "Session title must not be blank",
@@ -411,7 +382,7 @@ impl SessionController {
         self.resources_owned()?.validate(&config)?;
         self.ensure_executor()?;
         let (sender, receiver) = oneshot::channel();
-        let memory = self.access.accept_execution(caller, || {
+        let result = self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             if state.info.config_revision != expected {
@@ -449,25 +420,88 @@ impl SessionController {
                     state.block_reason = None;
                 }
                 self.publish(&mut state);
-                Ok(Some(state.info.clone()))
+                let _ = sender.send(Ok(state.info.clone()));
             } else {
                 let mut record = self.record(&state);
                 record.data.effective_config = config;
                 record.data.title = title;
                 record.data.config_revision = revision;
                 self.spawn_record_save(&mut state, record, sender);
-                Ok(None)
             }
+            Ok(accepted(&mut state))
         })?;
-        if let Some(info) = memory {
-            self.wake();
-            return Ok(info);
-        }
+        self.wake();
+        Ok((result, receiver))
+    }
+    pub(crate) async fn update_candidate_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected: u64,
+        config: SessionConfig,
+        title: Option<String>,
+    ) -> Result<SessionInfo, Fault> {
+        let (_, receiver) =
+            self.accept_update_candidate(caller, expected, config, title, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::SessionInternalUnexpected,
                 "metadata owner ended without a result",
             )
         })?
+    }
+    pub(crate) fn update_control(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: SessionUpdateRequest,
+    ) -> Result<SessionUpdateReceipt, Fault> {
+        request
+            .changes
+            .validate()
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
+        let original = self.info(caller)?;
+        if original.config_revision != request.expected_config_revision {
+            return Err(Fault::new(
+                FaultKind::SessionConfigConflict,
+                "Session configuration revision changed",
+            ));
+        }
+        let config = original
+            .config
+            .apply_patch(&request.changes.config)
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
+        let title = match request.changes.title {
+            NullablePatch::Unchanged => original.title,
+            NullablePatch::Set(title) => Some(title),
+            NullablePatch::Clear => None,
+        };
+        let (receipt, _) = self.accept_update_candidate(
+            caller,
+            request.expected_config_revision,
+            config,
+            title,
+            |state| {
+                let result = if state.record_work.is_some() {
+                    MetadataUpdateResult::Saving {
+                        config_revision: state.info.config_revision,
+                    }
+                } else {
+                    MetadataUpdateResult::Committed {
+                        config_revision: state.info.config_revision,
+                    }
+                };
+                let receipt = SessionUpdateReceipt {
+                    kind: SessionUpdateKind::SessionUpdate,
+                    host_id: self.host_id.clone(),
+                    host_incarnation: self.incarnation.clone(),
+                    agent_id: self.agent_id.clone(),
+                    session_id: self.id.clone(),
+                    operation_id: request.operation_id,
+                    result,
+                };
+                Self::retain_control(state, Receipt::SessionUpdate(receipt.clone()));
+                receipt
+            },
+        )?;
+        Ok(receipt)
     }
 }
