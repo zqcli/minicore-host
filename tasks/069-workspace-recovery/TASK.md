@@ -1,5 +1,30 @@
 # Recover the development workspace
 
+## Latest verified backup and review
+
+The later three five-commit batches were verified as source/remote pairs:
+`613a4d0` / `87d373cb4ea93fb72d89e6bd66bb6300c5c5af2b`,
+`f0900a7` / `d7465edad484c6f476472f814db923c6b39dd467`, and
+`521c9ea` / `5461122ea0b7b2d94ba4d9d10f9f02115b77d4fe`.
+The final tree is `69cdb5dfb5ffc52168643385828298acae794a3b`, with all 320
+published commit objects preserved. The cumulative map now contains 37 recovery
+entries. Remote main is unchanged and no force update occurred.
+
+Automatic CI on 87d373c and d7465ed reproduced the task054 BrokenPipe; those
+sources preceded the test-only correction. The final 5461122 CI was still
+running when checked. Its corresponding local 521c9ea gate is the successful
+fresh result below; neither observation is substituted for the other.
+
+Owner discovery has independently passed 486 affected cases, one doctest and
+seven extra probes repeated twenty times. [Task 073](../073-owner-discovery-review/TASK.md)
+records the scoped approval. Later shared logging-health integration at
+`aac7bfdc47500b7d8bc265c05fd369145d178740` passed both actual app and
+transport health cases in the integrated tree; full diagnostic review remains
+separate. The recovered performance scripts and twenty pure Python cases are
+now included, but no new benchmark has run. A fresh scope audit confirmed the
+SPEC 2266 production tool-policy wiring gap; it is being implemented without
+adding a new approval protocol or platform.
+
 ## Successful reconstructed composition gate
 
 Fixed source `521c9ea9f61fde0aaab31805d668505dff852316` now passes
@@ -25,8 +50,8 @@ actual Linux target succeeds and selects the sole published Runtime pin
 69faf919. No lockfile or dependency version changed, and no cross-platform build
 is claimed. The manifest preserves this non-gate failure explicitly.
 
-Owner-discovery independent review and complete business diagnostics remain in
-progress. New performance measurements, live-provider checks, TUI work and the
+Complete business diagnostics and production tool-approval wiring remain in
+progress. Owner discovery subsequently received the scoped approval above. New performance measurements, live-provider checks, TUI work and the
 requested external final review are not covered by this green composition.
 
 ## Current reconstructed checkpoint and backup

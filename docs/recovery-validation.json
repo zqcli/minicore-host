@@ -45,10 +45,20 @@
       "repeated_suites": 50,
       "cases_per_suite": 6,
       "production_changes": false
+    },
+    {
+      "scope": "owner discovery, summaries and live work projection",
+      "head": "f0900a7083f9f6ddddbe978cd6ba55f4b1405c50",
+      "result": "approved",
+      "affected_cases": 486,
+      "doctests": 1,
+      "additional_unique_probes": 7,
+      "probe_repetitions": 20,
+      "full_workspace_execution_claimed": false
     }
   ],
   "not_complete": [
-    "Independent owner discovery review is still running.",
+    "SPEC-required production tool approval configuration/binding is being implemented separately.",
     "Core and transport business diagnostic emission is not complete.",
     "New fixed-source performance measurements have not run.",
     "External final project review, live-provider checks and TUI integration are not claimed."
