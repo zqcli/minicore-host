@@ -44,11 +44,16 @@ impl Host {
             id: settings.id.clone(),
             incarnation,
             access,
-            resources,
-            store: Some(store.clone()),
+            resources: Mutex::new(Some(resources)),
+            store: Mutex::new(Some(store.clone())),
+            changed: Arc::new(tokio::sync::Notify::new()),
             settings: Some(settings),
             state: Mutex::new(HostState {
                 lifecycle: HostLifecycle::Starting,
+                shutdown_strategy: None,
+                shutdown_fault: None,
+                shutdown_task: None,
+                creating: 0,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
@@ -61,7 +66,7 @@ impl Host {
         .await?;
         for id in ids {
             let store = owner
-                .store
+                .store()
                 .as_ref()
                 .expect("persistent Host")
                 .agent(id.clone(), StorageMode::Persistent);
@@ -70,7 +75,8 @@ impl Host {
                 owner.id.clone(),
                 owner.incarnation.clone(),
                 Arc::clone(&owner.access),
-                Arc::clone(&owner.resources),
+                owner.resources_owned()?,
+                Arc::clone(&owner.changed),
             )
             .await;
             let mut state = owner.state.lock().expect("Host mutex poisoned");

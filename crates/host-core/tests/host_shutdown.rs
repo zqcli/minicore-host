@@ -1,0 +1,763 @@
+//! Acceptance checks: production Host/Journal/Runtime with a
+//! deterministic in-process model fixture; no live provider or TUI coverage.
+use futures_util::{StreamExt, stream};
+use minicore_host_core::*;
+use minicore_host_protocol::*;
+use minicore_host_storage::{HistoryEntry, HistoryRecord};
+use minicore_runtime::{
+    ExecutionConfig, LoopOptions,
+    model::{
+        Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
+        ModelStartFuture, ModelStream, ReasoningPreference,
+    },
+    prompt::DefaultPromptProvider,
+    tools::ToolSet,
+};
+use std::{
+    collections::BTreeSet,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
+use tokio::sync::Semaphore;
+
+struct ModelFixture {
+    descriptor: ModelDescriptor,
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+    calls: Arc<AtomicUsize>,
+    partial: bool,
+}
+impl Model for ModelFixture {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let partial = self.partial;
+        let entered = self.entered.clone();
+        if !partial {
+            entered.add_permits(1);
+        }
+        let release = self.release.clone();
+        Box::pin(async move {
+            let tail = stream::once(async move {
+                if partial {
+                    entered.add_permits(1);
+                }
+                release.acquire_owned().await.unwrap().forget();
+                stream::iter([
+                    Ok(ModelEvent::text_delta("actual audited result").unwrap()),
+                    Ok(ModelEvent::Finish {
+                        reason: ModelFinishReason::Stop,
+                    }),
+                ])
+            })
+            .flatten();
+            let initial = if partial {
+                vec![Ok(
+                    ModelEvent::text_delta("real partial before force").unwrap()
+                )]
+            } else {
+                Vec::new()
+            };
+            Ok(Box::pin(stream::iter(initial).chain(tail)) as ModelStream)
+        })
+    }
+}
+struct Resources {
+    model: Arc<ModelFixture>,
+}
+impl ResourceResolver for Resources {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        config
+            .validate()
+            .map_err(|e| Fault::new(FaultKind::SessionConfigInvalid, e.to_string()))
+    }
+    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+        Box::pin(async move {
+            Ok(BoundResources {
+                execution: ExecutionConfig::new(
+                    self.model.clone(),
+                    ReasoningPreference::Auto,
+                    ToolSet::default(),
+                    None,
+                    Arc::new(DefaultPromptProvider::new(None)),
+                )
+                .unwrap(),
+                options: LoopOptions::default_checked().unwrap(),
+            })
+        })
+    }
+}
+fn resources() -> (
+    Arc<dyn ResourceResolver>,
+    Arc<Semaphore>,
+    Arc<Semaphore>,
+    Arc<AtomicUsize>,
+) {
+    resources_with_partial(false)
+}
+fn resources_with_partial(
+    partial: bool,
+) -> (
+    Arc<dyn ResourceResolver>,
+    Arc<Semaphore>,
+    Arc<Semaphore>,
+    Arc<AtomicUsize>,
+) {
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let model = Arc::new(ModelFixture {
+        descriptor: ModelDescriptor::new(
+            "audit/model".parse().unwrap(),
+            128_000,
+            BTreeSet::from([ReasoningPreference::Auto]),
+            true,
+        )
+        .unwrap(),
+        entered: entered.clone(),
+        release: release.clone(),
+        calls: calls.clone(),
+        partial,
+    });
+    (Arc::new(Resources { model }), entered, release, calls)
+}
+fn settings() -> HostSettings {
+    HostSettings {
+        name: "independent shutdown audit".into(),
+    }
+}
+fn request(mode: StorageMode) -> AgentCreate {
+    let mut config = AgentConfig::default();
+    config.session_defaults.model = "audit/model".parse().unwrap();
+    AgentCreate {
+        operation_id: OperationId::new().unwrap(),
+        name: "audit Agent".into(),
+        mode,
+        config,
+        default_session: None,
+        initial_message: None,
+    }
+}
+fn input(text: &str) -> MessageInput {
+    MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode: MessageMode::FollowUp,
+        text: text.into(),
+        in_reply_to: None,
+    }
+}
+async fn until<T>(mut f: impl FnMut() -> Option<T>) -> T {
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if let Some(value) = f() {
+                return value;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("deterministic acceptance condition did not settle")
+}
+async fn create(host: &Arc<Host>, caller: &CallerContext, mode: StorageMode) -> SessionRef {
+    let result = host
+        .create_agent_async(caller, request(mode))
+        .await
+        .unwrap();
+    assert!(result.result.steps.agent.succeeded());
+    assert!(result.result.steps.session.succeeded());
+    SessionRef {
+        agent_id: result.agent_id.unwrap(),
+        session_id: result.session_id.unwrap(),
+    }
+}
+
+fn shutdown(
+    host: &Arc<Host>,
+    caller: &CallerContext,
+    strategy: HostShutdownStrategy,
+) -> HostShutdownReceipt {
+    let request = HostShutdownRequest {
+        operation_id: OperationId::new().unwrap(),
+        strategy,
+    };
+    let receipt = host.shutdown(caller, request.clone()).unwrap();
+    assert_eq!(receipt.operation_id, request.operation_id);
+    receipt.result.validate().unwrap();
+    receipt
+}
+async fn stopped(host: &Host, caller: &CallerContext) {
+    until(|| (host.info(caller).unwrap().lifecycle == HostLifecycle::Stopped).then_some(())).await
+}
+fn history_path(dir: &std::path::Path, target: &SessionRef) -> std::path::PathBuf {
+    dir.join("agents")
+        .join(target.agent_id.to_string())
+        .join("sessions")
+        .join(target.session_id.to_string())
+        .join("history.jsonl")
+}
+
+#[tokio::test]
+async fn shutdown_graceful_pause_force_upgrade_release_and_no_persistent_close() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, _, _, calls) = resources();
+    let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    let observer = host.session_states(&caller, &target).unwrap();
+    host.pause(&caller, &target).unwrap();
+    let queued = input("accepted but never consumed");
+    host.send(&caller, SendMessage::new(queued.clone(), target.clone()))
+        .unwrap();
+    let first = shutdown(&host, &caller, HostShutdownStrategy::Graceful);
+    assert_eq!(first.result.strategy, HostShutdownStrategy::Graceful);
+    assert_eq!(first.result.lifecycle, HostLifecycle::Draining);
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        host.info(&caller).unwrap().lifecycle,
+        HostLifecycle::Draining
+    );
+    let state = host.session_state(&caller, &target).unwrap();
+    assert_eq!(state.data.scheduling, Scheduling::Paused);
+    assert_eq!(state.data.next_turn.len(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    let mut forged_reply = input("not an established reply association");
+    forged_reply.in_reply_to = Some(queued.message_id);
+    assert!(
+        host.send(&caller, SendMessage::new(forged_reply, target.clone()))
+            .is_err()
+    );
+    assert!(
+        host.create_agent_async(&caller, request(StorageMode::Memory))
+            .await
+            .is_err()
+    );
+    let force = shutdown(&host, &caller, HostShutdownStrategy::Force);
+    assert_eq!(force.result.strategy, HostShutdownStrategy::Force);
+    assert_ne!(force.result.lifecycle, HostLifecycle::Draining);
+    let later = shutdown(&host, &caller, HostShutdownStrategy::Graceful);
+    assert_eq!(later.result.strategy, HostShutdownStrategy::Force);
+    stopped(&host, &caller).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    // Neither a live public Host nor an observer is a necessary root owner.
+    let reopened = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    let new_connection = reopened.connect().unwrap();
+    let new_caller = new_connection.caller();
+    assert_eq!(
+        reopened
+            .session_state(&new_caller, &target)
+            .unwrap()
+            .data
+            .lifecycle,
+        SessionLifecycle::Open
+    );
+    assert!(
+        reopened
+            .session_state(&new_caller, &target)
+            .unwrap()
+            .data
+            .next_turn
+            .is_empty()
+    );
+    assert!(
+        std::fs::read(history_path(dir.path(), &target))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(host.resume(&caller, &target).is_err());
+    assert!(
+        host.close_session(&caller, &target).is_err(),
+        "old stopped owner must not create a new close write"
+    );
+    assert!(host.load_session(&caller, &target).is_err());
+    assert!(
+        host.send(
+            &caller,
+            SendMessage::new(input("old owner cannot write"), target.clone())
+        )
+        .is_err()
+    );
+    assert!(
+        host.create_agent_async(&caller, request(StorageMode::Persistent))
+            .await
+            .is_err()
+    );
+    drop(observer);
+}
+
+#[tokio::test]
+async fn shutdown_force_failed_history_holds_root_until_original_save_continues() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, entered, release, calls) = resources();
+    let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    host.send(
+        &caller,
+        SendMessage::new(input("preserve original range"), target.clone()),
+    )
+    .unwrap();
+    entered.acquire().await.unwrap().forget();
+    let path = history_path(dir.path(), &target);
+    let saved = path.with_extension("audit-original");
+    std::fs::rename(&path, &saved).unwrap();
+    std::fs::write(&path, b"").unwrap();
+    release.add_permits(1);
+    let failed = until(|| {
+        host.turns(&caller, &target)
+            .unwrap()
+            .last()
+            .filter(|t| {
+                t.state == TurnState::Finalizing && t.persistence == PersistenceState::Failed
+            })
+            .cloned()
+    })
+    .await;
+    let receipt = shutdown(&host, &caller, HostShutdownStrategy::Force);
+    assert_eq!(receipt.result.lifecycle, HostLifecycle::Stopping);
+    for _ in 0..100 {
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(
+        host.info(&caller).unwrap().lifecycle,
+        HostLifecycle::Stopping
+    );
+    assert!(
+        Host::open_persistent(dir.path(), settings(), resources.clone())
+            .await
+            .is_err()
+    );
+    std::fs::remove_file(&path).unwrap();
+    std::fs::rename(saved, &path).unwrap();
+    host.resume(&caller, &target)
+        .expect("resume of original save must remain reachable while stopping");
+    stopped(&host, &caller).await;
+    let records: Vec<HistoryRecord> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let final_outcomes = records
+        .iter()
+        .filter_map(|r| match &r.entry {
+            HistoryEntry::TurnFinished { outcome, .. } => Some(*outcome),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(final_outcomes, vec![failed.outcome.unwrap()]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let reopened = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    let new_connection = reopened.connect().unwrap();
+    assert_eq!(
+        reopened
+            .session_state(&new_connection.caller(), &target)
+            .unwrap()
+            .data
+            .lifecycle,
+        SessionLifecycle::Open
+    );
+}
+
+#[tokio::test]
+async fn shutdown_force_cancels_runtime_and_does_not_stop_another_host() {
+    let (resources_a, entered_a, _release_a, calls_a) = resources();
+    let (resources_b, entered_b, release_b, calls_b) = resources();
+    let host_a = Host::memory(resources_a).unwrap();
+    let host_b = Host::memory(resources_b).unwrap();
+    let connection_a = host_a.connect().unwrap();
+    let connection_b = host_b.connect().unwrap();
+    let caller_a = connection_a.caller();
+    let caller_b = connection_b.caller();
+    let target_a = create(&host_a, &caller_a, StorageMode::Memory).await;
+    let target_b = create(&host_b, &caller_b, StorageMode::Memory).await;
+    host_a
+        .send(
+            &caller_a,
+            SendMessage::new(input("cancel A"), target_a.clone()),
+        )
+        .unwrap();
+    host_b
+        .send(
+            &caller_b,
+            SendMessage::new(input("complete B"), target_b.clone()),
+        )
+        .unwrap();
+    entered_a.acquire().await.unwrap().forget();
+    entered_b.acquire().await.unwrap().forget();
+    let turn_a = host_a
+        .turns(&caller_a, &target_a)
+        .unwrap()
+        .last()
+        .unwrap()
+        .id
+        .clone();
+    let mut abandoned_wait = Box::pin(host_a.wait_turn(&caller_a, &target_a, &turn_a));
+    tokio::select! {
+        result = &mut abandoned_wait => panic!("unexpected early result: {result:?}"),
+        _ = tokio::task::yield_now() => {}
+    }
+    shutdown(&host_a, &caller_a, HostShutdownStrategy::Force);
+    stopped(&host_a, &caller_a).await;
+    assert_eq!(calls_a.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        host_b.info(&caller_b).unwrap().lifecycle,
+        HostLifecycle::Running
+    );
+    release_b.add_permits(1);
+    let turn_b = until(|| {
+        host_b
+            .turns(&caller_b, &target_b)
+            .unwrap()
+            .last()
+            .filter(|t| t.state == TurnState::Finished)
+            .cloned()
+    })
+    .await;
+    assert_eq!(turn_b.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(calls_b.load(Ordering::SeqCst), 1);
+    drop(abandoned_wait);
+}
+
+#[test]
+fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_message() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (resources, _, _, calls) = resources();
+        let host = Host::open_persistent(dir.path(), settings(), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        entered_rx.await.unwrap();
+        let mut request = request(StorageMode::Persistent);
+        request.initial_message = Some(input("must not start after force"));
+        let operation = request.operation_id.clone();
+        let worker = {
+            let host = host.clone();
+            let caller = caller.clone();
+            tokio::spawn(async move { host.create_agent_async(&caller, request).await })
+        };
+        until(|| {
+            (!host
+                .creation_receipts(&caller, &operation)
+                .unwrap()
+                .is_empty())
+            .then_some(())
+        })
+        .await;
+        let receipt = shutdown(&host, &caller, HostShutdownStrategy::Force);
+        assert_eq!(receipt.result.lifecycle, HostLifecycle::Stopping);
+        for _ in 0..100 {
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            host.info(&caller).unwrap().lifecycle,
+            HostLifecycle::Stopping
+        );
+        release_tx.send(()).unwrap();
+        blocker.await.unwrap();
+        let creation = worker.await.unwrap().unwrap();
+        assert!(!creation.result.steps.message.as_ref().unwrap().succeeded());
+        stopped(&host, &caller).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_ok());
+    });
+}
+
+#[tokio::test]
+async fn shutdown_force_saves_real_partial_and_releases_root_with_abandoned_wait_alive() {
+    let dir = tempfile::tempdir().unwrap();
+    let (resources, entered, _release, calls) = resources_with_partial(true);
+    let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Persistent).await;
+    let observer = host.session_states(&caller, &target).unwrap();
+    host.send(
+        &caller,
+        SendMessage::new(input("retain actual partial"), target.clone()),
+    )
+    .unwrap();
+    // Signal is emitted from the stream's next poll after yielding text_delta,
+    // so Runtime has already incorporated the actual partial before shutdown.
+    entered.acquire().await.unwrap().forget();
+    let turn = host
+        .turns(&caller, &target)
+        .unwrap()
+        .last()
+        .unwrap()
+        .id
+        .clone();
+    let mut abandoned_wait = Box::pin(host.wait_turn(&caller, &target, &turn));
+    tokio::select! {
+        result = &mut abandoned_wait => panic!("unexpected early result: {result:?}"),
+        _ = tokio::task::yield_now() => {}
+    }
+    shutdown(&host, &caller, HostShutdownStrategy::Force);
+    stopped(&host, &caller).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let path = history_path(dir.path(), &target);
+    let text = std::fs::read_to_string(&path).unwrap();
+    let records: Vec<HistoryRecord> = text
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(text.contains("real partial before force"));
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| matches!(r.entry, HistoryEntry::Partial { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|r| matches!(
+                r.entry,
+                HistoryEntry::TurnFinished {
+                    outcome: TurnOutcome::Cancelled,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    assert!(!records.iter().any(|r| matches!(
+        r.entry,
+        HistoryEntry::Runtime {
+            item: minicore_runtime::HistoryItem::Assistant(_),
+            ..
+        }
+    )));
+    let reopened = Host::open_persistent(dir.path(), settings(), resources)
+        .await
+        .unwrap();
+    assert!(reopened.connect().is_ok());
+    // Wait/observer remain intentionally alive through actual lock reacquisition.
+    drop(abandoned_wait);
+    drop(observer);
+}
+
+struct DroppingResources {
+    inner: Arc<dyn ResourceResolver>,
+    dropped: Arc<AtomicUsize>,
+}
+impl Drop for DroppingResources {
+    fn drop(&mut self) {
+        self.dropped.fetch_add(1, Ordering::SeqCst);
+    }
+}
+impl ResourceResolver for DroppingResources {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        self.inner.validate(config)
+    }
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
+        self.inner.resolve(config)
+    }
+}
+#[tokio::test]
+async fn shutdown_stopped_host_drops_owned_resource_graph_without_public_handle_drop() {
+    let (resources, _, _, _) = resources();
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let host = Host::memory(Arc::new(DroppingResources {
+        inner: resources,
+        dropped: dropped.clone(),
+    }))
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let _target = create(&host, &caller, StorageMode::Memory).await;
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+    shutdown(&host, &caller, HostShutdownStrategy::Graceful);
+    stopped(&host, &caller).await;
+    assert_eq!(
+        dropped.load(Ordering::SeqCst),
+        1,
+        "public Host handle still owns execution resource graph after cleanup"
+    );
+}
+
+#[tokio::test]
+async fn graceful_drains_accepted_turns_without_accepting_new_root_work() {
+    let (resources, entered, release, calls) = resources();
+    let host = Host::memory(resources).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Memory).await;
+    host.send(
+        &caller,
+        SendMessage::new(input("first accepted turn"), target.clone()),
+    )
+    .unwrap();
+    entered.acquire().await.unwrap().forget();
+    host.send(
+        &caller,
+        SendMessage::new(input("already accepted follow-up"), target.clone()),
+    )
+    .unwrap();
+    shutdown(&host, &caller, HostShutdownStrategy::Graceful);
+    assert!(
+        host.send(
+            &caller,
+            SendMessage::new(input("late root input"), target.clone())
+        )
+        .is_err()
+    );
+    release.add_permits(1);
+    entered.acquire().await.unwrap().forget();
+    assert_eq!(
+        host.info(&caller).unwrap().lifecycle,
+        HostLifecycle::Draining
+    );
+    release.add_permits(1);
+    stopped(&host, &caller).await;
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(
+        host.info(&caller).unwrap().shutdown_strategy,
+        Some(HostShutdownStrategy::Graceful)
+    );
+}
+
+#[tokio::test]
+async fn shutdown_rechecks_operator_and_reports_current_facts_for_old_requests() {
+    let (resources, _, _, _) = resources();
+    let host = Host::memory(resources).unwrap();
+    let operator = host.connect().unwrap();
+    let reader = host.connect().unwrap();
+    let caller = operator.caller();
+    let target = create(&host, &caller, StorageMode::Memory).await;
+    host.pause(&caller, &target).unwrap();
+    let old = HostShutdownRequest {
+        operation_id: OperationId::new().unwrap(),
+        strategy: HostShutdownStrategy::Graceful,
+    };
+    assert_eq!(
+        host.shutdown(&reader.caller(), old.clone())
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessReadOnly
+    );
+    let accepted = host.shutdown(&caller, old.clone()).unwrap();
+    assert_eq!(accepted.operation_id, old.operation_id);
+    let forced = shutdown(&host, &caller, HostShutdownStrategy::Force);
+    assert_ne!(forced.operation_id, accepted.operation_id);
+    let repeated = host.shutdown(&caller, old.clone()).unwrap();
+    assert_eq!(repeated.operation_id, old.operation_id);
+    assert_eq!(repeated.result.strategy, HostShutdownStrategy::Force);
+    // Empty explicit pause does not itself keep graceful or force alive.
+    stopped(&host, &caller).await;
+    operator.close();
+    assert_eq!(
+        host.shutdown(&caller, old.clone()).unwrap_err().kind(),
+        FaultKind::HostAccessInvalid
+    );
+    let replacement = host.connect().unwrap();
+    let latest = host.shutdown(&replacement.caller(), old).unwrap();
+    assert_eq!(latest.result.lifecycle, HostLifecycle::Stopped);
+    assert_eq!(latest.result.strategy, HostShutdownStrategy::Force);
+}
+
+#[test]
+fn force_keeps_owned_save_and_directory_after_callers_and_host_handle_drop() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let (resources, entered, release_model, calls) = resources();
+        let host = Host::open_persistent(dir.path(), settings(), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let target = create(&host, &caller, StorageMode::Persistent).await;
+        host.send(
+            &caller,
+            SendMessage::new(input("saved even when caller leaves"), target.clone()),
+        )
+        .unwrap();
+        entered.acquire().await.unwrap().forget();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        entered_rx.await.unwrap();
+        release_model.add_permits(1);
+        until(|| {
+            host.session_state(&caller, &target)
+                .ok()
+                .filter(|snapshot| snapshot.data.saving)
+        })
+        .await;
+        let receipt = shutdown(&host, &caller, HostShutdownStrategy::Force);
+        assert_eq!(receipt.result.lifecycle, HostLifecycle::Stopping);
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_err());
+        let owner = Arc::downgrade(&host);
+        drop(connection);
+        drop(host);
+        assert!(
+            owner.upgrade().is_some(),
+            "accepted shutdown must retain its owner"
+        );
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_err());
+        release_tx.send(()).unwrap();
+        blocker.await.unwrap();
+        until(|| minicore_host_storage::DataRoot::acquire(dir.path()).ok()).await;
+        until(|| owner.upgrade().is_none().then_some(())).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        let records: Vec<HistoryRecord> =
+            std::fs::read_to_string(history_path(dir.path(), &target))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| matches!(record.entry, HistoryEntry::TurnFinished { .. }))
+                .count(),
+            1
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| matches!(record.entry, HistoryEntry::Input { .. }))
+                .count(),
+            1
+        );
+    });
+}

@@ -1,0 +1,159 @@
+use super::*;
+
+pub(crate) struct AgentShutdownStatus {
+    pub(crate) drained: bool,
+    pub(crate) quiescent: bool,
+    pub(crate) fault: Option<Fault>,
+}
+
+/// A failed creation save does not establish that its original range was never
+/// written. Until this stage has a creation reconciliation owner, retain that
+/// fault and the directory rather than claiming clean shutdown.
+pub(crate) fn creation_save_fault(step: &CreateStep) -> Option<Fault> {
+    match step {
+        CreateStep::Failed { error }
+            if matches!(
+                error.kind(),
+                FaultKind::HostStorageUnavailable | FaultKind::SessionHistoryWriteFailed
+            ) =>
+        {
+            Some(error.clone())
+        }
+        _ => None,
+    }
+}
+
+impl AgentOwner {
+    pub(crate) fn begin_host_shutdown_owned(&self, force: bool) {
+        let children = {
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
+            let phase = if force { 2 } else { 1 };
+            if state.host_shutdown_phase >= phase {
+                return;
+            }
+            state.host_shutdown_phase = phase;
+            if force {
+                self.enabled.store(false, Ordering::SeqCst);
+                if !matches!(
+                    state.info.lifecycle,
+                    AgentLifecycle::Retiring | AgentLifecycle::Retired
+                ) {
+                    state.info.lifecycle = AgentLifecycle::Stopping;
+                }
+            }
+            state.sessions.values().cloned().collect::<Vec<_>>()
+        };
+        for child in children {
+            child.begin_host_shutdown_owned(force);
+        }
+        self.changed.notify_waiters();
+    }
+
+    pub(crate) fn shutdown_status_owned(&self) -> AgentShutdownStatus {
+        let (children, settled, fault) = {
+            let state = self.state.lock().expect("Agent mutex poisoned");
+            let fault = state.info.metadata_fault.clone().or_else(|| {
+                state
+                    .creations
+                    .values()
+                    .find_map(|receipt| creation_save_fault(&receipt.result.steps.session))
+            });
+            (
+                state.sessions.values().cloned().collect::<Vec<_>>(),
+                state.creating == 0
+                    && state.creation_committed
+                    && state.record_work.is_none()
+                    && state.close_running.is_empty(),
+                fault,
+            )
+        };
+        let mut result = AgentShutdownStatus {
+            drained: settled,
+            quiescent: settled,
+            fault,
+        };
+        for child in children {
+            let status: crate::session::SessionShutdownStatus = child.shutdown_status_owned();
+            result.drained &= status.drained;
+            result.quiescent &= status.quiescent;
+            if result.fault.is_none() {
+                result.fault = status.fault;
+            }
+        }
+        result.drained &= result.fault.is_none();
+        result.quiescent &= result.fault.is_none();
+        result
+    }
+
+    /// Host owns the shutdown decision; Agent retires only its direct children
+    /// and its own storage handles. Persistent business lifecycle is preserved.
+    pub(crate) async fn release_host_resources_owned(self: &Arc<Self>) -> Result<(), Fault> {
+        let status = self.shutdown_status_owned();
+        if !status.quiescent {
+            return Err(status.fault.unwrap_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionBusy,
+                    "Agent still owns required shutdown work",
+                )
+            }));
+        }
+        let children = {
+            let state = self.state.lock().expect("Agent mutex poisoned");
+            if state.resources_released {
+                return Ok(());
+            }
+            state.sessions.values().cloned().collect::<Vec<_>>()
+        };
+        for child in children {
+            child.release_host_resources_owned().await?;
+        }
+        // No new business may enter after the Host fence. Reconciliation only
+        // accepts a retained original range, and there are none at this boundary.
+        let tasks = {
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
+            let mut tasks = std::mem::take(&mut state.create_tasks)
+                .into_values()
+                .collect::<Vec<_>>();
+            tasks.extend(std::mem::take(&mut state.close_tasks).into_values());
+            tasks.extend(state.record_task.take());
+            tasks.extend(state.stop_task.take());
+            tasks
+        };
+        for task in tasks {
+            task.await.map_err(|_| {
+                Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "Agent shutdown task did not join cleanly",
+                )
+            })?;
+        }
+        drop(
+            self.store
+                .lock()
+                .expect("Agent store mutex poisoned")
+                .take(),
+        );
+        drop(
+            self.root_lease
+                .lock()
+                .expect("Agent lease mutex poisoned")
+                .take(),
+        );
+        drop(
+            self.resources
+                .lock()
+                .expect("Agent resources mutex poisoned")
+                .take(),
+        );
+        let mut state = self.state.lock().expect("Agent mutex poisoned");
+        state.resources_released = true;
+        if !matches!(
+            state.info.lifecycle,
+            AgentLifecycle::Retiring | AgentLifecycle::Retired
+        ) {
+            state.info.lifecycle = AgentLifecycle::Stopped;
+        }
+        self.changed.notify_waiters();
+        Ok(())
+    }
+}

@@ -8,10 +8,12 @@ impl AgentOwner {
         incarnation: HostIncarnation,
         access: Arc<ConnectionRegistry>,
         resources: Arc<dyn ResourceResolver>,
+        changed: Arc<tokio::sync::Notify>,
     ) -> Result<Arc<Self>, Fault> {
         let source = store.clone();
         let record = disk(FaultKind::AgentConfigInvalid, move || source.load_record()).await?;
-        let owner = Self::from_record(record, store.clone(), incarnation, access, resources);
+        let owner = Self::from_record(record, store.clone(), incarnation, access, resources)
+            .with_change_signal(changed);
         let source = store.clone();
         let ids = disk(FaultKind::HostStorageUnavailable, move || {
             source.list_sessions()
@@ -34,7 +36,7 @@ impl AgentOwner {
                         host_id.clone(),
                         owner.incarnation.clone(),
                         Arc::clone(&owner.access),
-                        Arc::clone(&owner.resources),
+                        owner.resources_owned()?,
                         Arc::clone(&owner.enabled),
                     )
                     .notify_parent_on_change(Arc::clone(&owner.changed));
@@ -71,10 +73,10 @@ impl AgentOwner {
             host_id: record.host_id.clone(),
             incarnation,
             access,
-            resources,
+            resources: Mutex::new(Some(resources)),
             enabled: Arc::new(AtomicBool::new(true)),
-            store: Some(store),
-            root_lease: Some(root_lease),
+            store: Mutex::new(Some(store)),
+            root_lease: Mutex::new(Some(root_lease)),
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
@@ -94,6 +96,9 @@ impl AgentOwner {
                 creations: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
                 creating: 0,
+                creation_committed: true,
+                resources_released: false,
+                host_shutdown_phase: 0,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,
                 record_base: Some(record_base),

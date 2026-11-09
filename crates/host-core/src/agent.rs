@@ -6,6 +6,7 @@ use minicore_host_storage::{AgentRecord, AgentStore};
 mod create;
 mod metadata;
 mod persistent;
+pub(crate) mod shutdown;
 use minicore_host_protocol::*;
 use std::collections::BTreeMap;
 use std::sync::{
@@ -18,12 +19,12 @@ pub(crate) struct AgentOwner {
     host_id: HostId,
     incarnation: HostIncarnation,
     access: Arc<ConnectionRegistry>,
-    resources: Arc<dyn ResourceResolver>,
+    resources: Mutex<Option<Arc<dyn ResourceResolver>>>,
     state: Mutex<AgentState>,
     enabled: Arc<AtomicBool>,
-    store: Option<AgentStore>,
+    store: Mutex<Option<AgentStore>>,
     changed: Arc<tokio::sync::Notify>,
-    root_lease: Option<Arc<dyn Send + Sync>>,
+    root_lease: Mutex<Option<Arc<dyn Send + Sync>>>,
 }
 struct AgentState {
     info: AgentInfo,
@@ -32,6 +33,9 @@ struct AgentState {
     creations: BTreeMap<SessionId, SessionCreateReceipt>,
     create_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     creating: usize,
+    creation_committed: bool,
+    resources_released: bool,
+    host_shutdown_phase: u8,
     executor: Option<tokio::runtime::Handle>,
     stop_task: Option<tokio::task::JoinHandle<()>>,
     record_base: Option<AgentRecord>,
@@ -56,10 +60,10 @@ impl AgentOwner {
             host_id: host_id.clone(),
             incarnation,
             access,
-            resources,
+            resources: Mutex::new(Some(resources)),
             enabled: Arc::new(AtomicBool::new(true)),
-            store: None,
-            root_lease: None,
+            store: Mutex::new(None),
+            root_lease: Mutex::new(None),
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
@@ -79,6 +83,9 @@ impl AgentOwner {
                 creations: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
                 creating: 0,
+                creation_committed: false,
+                resources_released: false,
+                host_shutdown_phase: 0,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,
                 record_base: None,
@@ -90,10 +97,39 @@ impl AgentOwner {
             }),
         })
     }
-    pub(crate) fn hold_root(mut self: Arc<Self>, lease: Option<Arc<dyn Send + Sync>>) -> Arc<Self> {
-        Arc::get_mut(&mut self)
-            .expect("unpublished Agent")
-            .root_lease = lease;
+    fn resources_owned(&self) -> Result<Arc<dyn ResourceResolver>, Fault> {
+        self.resources
+            .lock()
+            .expect("Agent resources mutex poisoned")
+            .clone()
+            .ok_or_else(|| {
+                Fault::new(
+                    FaultKind::HostLifecycleUnavailable,
+                    "Host execution resources were retired",
+                )
+            })
+    }
+    fn store(&self) -> Option<AgentStore> {
+        self.store
+            .lock()
+            .expect("Agent store mutex poisoned")
+            .clone()
+    }
+    fn root_lease(&self) -> Option<Arc<dyn Send + Sync>> {
+        self.root_lease
+            .lock()
+            .expect("Agent lease mutex poisoned")
+            .clone()
+    }
+    pub(crate) fn hold_root(self: Arc<Self>, lease: Option<Arc<dyn Send + Sync>>) -> Arc<Self> {
+        *self.root_lease.lock().expect("Agent lease mutex poisoned") = lease;
+        self
+    }
+    pub(crate) fn with_change_signal(
+        mut self: Arc<Self>,
+        changed: Arc<tokio::sync::Notify>,
+    ) -> Arc<Self> {
+        Arc::get_mut(&mut self).expect("unpublished Agent").changed = changed;
         self
     }
     pub(crate) fn info(&self, caller: &CallerContext) -> Result<AgentInfo, Fault> {
@@ -157,7 +193,7 @@ impl AgentOwner {
     ) -> Result<Arc<SessionController>, Fault> {
         let id = SessionId::new()
             .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()))?;
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             self.create_session_owned(id, options, make_default)
         })
     }
@@ -167,7 +203,8 @@ impl AgentOwner {
         options: SessionOptions,
         make_default: bool,
     ) -> Result<Arc<SessionController>, Fault> {
-        if self.store.is_some() {
+        self.access.ensure_execution_owned()?;
+        if self.store().is_some() {
             return Err(Fault::new(
                 FaultKind::HostMethodUnavailable,
                 "persistent Agent creation requires the asynchronous owner entry",
@@ -177,7 +214,9 @@ impl AgentOwner {
         // construction. Publication rechecks the actual lifecycle boundary.
         let (config, source_revision) = {
             let state = self.state.lock().expect("Agent mutex poisoned");
-            if state.info.lifecycle != AgentLifecycle::Active {
+            if state.info.lifecycle != AgentLifecycle::Active
+                && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
+            {
                 return Err(Fault::new(
                     FaultKind::AgentLifecycleUnavailable,
                     "Agent is not accepting Session creation",
@@ -197,7 +236,7 @@ impl AgentOwner {
                 state.info.config_revision,
             )
         };
-        self.resources.validate(&config)?;
+        self.resources_owned()?.validate(&config)?;
         let backend: Arc<dyn HistoryBackend> = Arc::new(MemoryHistory);
         let session = SessionController::new(
             id.clone(),
@@ -206,17 +245,20 @@ impl AgentOwner {
             self.incarnation.clone(),
             config,
             Arc::clone(&self.access),
-            Arc::clone(&self.resources),
+            self.resources_owned()?,
             backend,
             Vec::new(),
             Arc::clone(&self.enabled),
         );
         let session = session
-            .hold_root(self.root_lease.clone())
+            .hold_root(self.root_lease())
             .notify_parent_on_change(Arc::clone(&self.changed));
         session.set_source_revision(source_revision);
         let mut state = self.state.lock().expect("Agent mutex poisoned");
-        if state.info.lifecycle != AgentLifecycle::Active {
+        self.access.ensure_execution_owned()?;
+        if state.info.lifecycle != AgentLifecycle::Active
+            && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
+        {
             return Err(Fault::new(
                 FaultKind::AgentLifecycleUnavailable,
                 "Agent stopped before Session publication",
@@ -233,7 +275,7 @@ impl AgentOwner {
         caller: &CallerContext,
         session: Option<SessionId>,
     ) -> Result<(), Fault> {
-        if self.store.is_some() {
+        if self.store().is_some() {
             return Err(Fault::new(
                 FaultKind::HostMethodUnavailable,
                 "persistent default updates require the asynchronous owner entry",
@@ -246,7 +288,7 @@ impl AgentOwner {
                 "default Session must be open",
             ));
         }
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if session
@@ -283,7 +325,7 @@ impl AgentOwner {
         expected_revision: u64,
         patch: &AgentConfigPatch,
     ) -> Result<AgentInfo, Fault> {
-        if self.store.is_some() {
+        if self.store().is_some() {
             return Err(Fault::new(
                 FaultKind::HostMethodUnavailable,
                 "persistent configuration updates require the asynchronous owner entry",
@@ -300,11 +342,11 @@ impl AgentOwner {
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        self.resources.validate(
+        self.resources_owned()?.validate(
             &SessionConfig::from_agent(&config, &SessionOverrides::default())
                 .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
         )?;
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if state.info.config_revision != expected_revision {
@@ -329,6 +371,9 @@ impl AgentOwner {
         enabled: bool,
     ) -> Result<(), Fault> {
         let children = self.access.accept(caller, || {
+            if enabled {
+                self.access.ensure_execution_owned()?;
+            }
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             if enabled
                 && !matches!(

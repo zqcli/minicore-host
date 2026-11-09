@@ -65,7 +65,7 @@ impl AgentOwner {
         expected: u64,
         patch: &AgentConfigPatch,
     ) -> Result<AgentInfo, Fault> {
-        if self.store.is_none() {
+        if self.store().is_none() {
             return self.update(caller, expected, patch);
         }
         let original = self.info(caller)?;
@@ -79,13 +79,13 @@ impl AgentOwner {
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        self.resources.validate(
+        self.resources_owned()?.validate(
             &SessionConfig::from_agent(&candidate, &SessionOverrides::default())
                 .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
         )?;
         let persistent_default = self.persisted_default(&original.default_session_id)?;
         let (sender, receiver) = oneshot::channel();
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if state.info.config_revision != expected
@@ -120,7 +120,7 @@ impl AgentOwner {
         caller: &CallerContext,
         target: Option<SessionId>,
     ) -> Result<(), Fault> {
-        if self.store.is_none() {
+        if self.store().is_none() {
             return self.set_default(caller, target);
         }
         let child = target.as_ref().map(|id| self.session(id)).transpose()?;
@@ -134,7 +134,7 @@ impl AgentOwner {
             .filter(|child| child.storage_mode() == StorageMode::Persistent)
             .map(|child| child.id.clone());
         let (sender, receiver) = oneshot::channel();
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if target.as_ref().is_some_and(|id| state.closing.contains(id)) {
@@ -202,7 +202,7 @@ impl AgentOwner {
         candidate: AgentRecord,
         runtime_default: Option<SessionId>,
     ) -> Result<AgentInfo, Fault> {
-        let store = self.store.clone().expect("persistent Agent");
+        let store = self.store().expect("persistent Agent");
         let saved = candidate.clone();
         let baseline = self
             .state
@@ -282,8 +282,8 @@ impl AgentOwner {
         id: &SessionId,
     ) -> Result<(), Fault> {
         let child = self.session(id)?;
-        if self.store.is_none() {
-            self.access.accept(caller, || {
+        if self.store().is_none() {
+            self.access.accept_execution(caller, || {
                 self.state
                     .lock()
                     .expect("Agent mutex poisoned")
@@ -301,7 +301,7 @@ impl AgentOwner {
                 "close requires a live Tokio runtime",
             )
         })?;
-        let first = self.access.accept(caller, || {
+        let first = self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.closing.insert(id.clone());
             Ok(state.close_running.insert(id.clone()))

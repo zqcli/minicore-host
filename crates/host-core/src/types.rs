@@ -7,6 +7,8 @@ pub struct HostInfo {
     pub host_id: HostId,
     pub host_incarnation: HostIncarnation,
     pub lifecycle: HostLifecycle,
+    pub shutdown_strategy: Option<HostShutdownStrategy>,
+    pub shutdown_fault: Option<Fault>,
     pub control: ControlStateData,
 }
 

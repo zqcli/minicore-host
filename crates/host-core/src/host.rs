@@ -9,6 +9,7 @@ use minicore_runtime::HistoryItem;
 mod create;
 mod metadata;
 mod persistent;
+mod shutdown;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -18,13 +19,18 @@ pub struct Host {
     id: HostId,
     incarnation: HostIncarnation,
     access: Arc<ConnectionRegistry>,
-    resources: Arc<dyn ResourceResolver>,
+    resources: Mutex<Option<Arc<dyn ResourceResolver>>>,
     state: Mutex<HostState>,
-    store: Option<HostStore>,
+    store: Mutex<Option<HostStore>>,
+    changed: Arc<tokio::sync::Notify>,
     settings: Option<HostRecord<HostSettings>>,
 }
 struct HostState {
     lifecycle: HostLifecycle,
+    shutdown_strategy: Option<HostShutdownStrategy>,
+    shutdown_fault: Option<Fault>,
+    shutdown_task: Option<tokio::task::JoinHandle<()>>,
+    creating: usize,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
     // The generated object identity distinguishes accepted invocations. The
     // caller's operation_id is correlation data, never an idempotency key.
@@ -43,17 +49,40 @@ impl Host {
             id,
             incarnation,
             access,
-            resources,
-            store: None,
+            resources: Mutex::new(Some(resources)),
+            store: Mutex::new(None),
+            changed: Arc::new(tokio::sync::Notify::new()),
             settings: None,
             state: Mutex::new(HostState {
                 lifecycle: HostLifecycle::Running,
+                shutdown_strategy: None,
+                shutdown_fault: None,
+                shutdown_task: None,
+                creating: 0,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
             }),
         }))
+    }
+    fn resources_owned(&self) -> Result<Arc<dyn ResourceResolver>, Fault> {
+        self.resources
+            .lock()
+            .expect("Host resources mutex poisoned")
+            .clone()
+            .ok_or_else(|| {
+                Fault::new(
+                    FaultKind::HostLifecycleUnavailable,
+                    "Host execution resources were retired",
+                )
+            })
+    }
+    fn store(&self) -> Option<HostStore> {
+        self.store
+            .lock()
+            .expect("Host store mutex poisoned")
+            .clone()
     }
     /// The embedding process is trusted. A network adapter must authenticate
     /// before it can invoke an equivalent trusted initialization path.
@@ -62,11 +91,13 @@ impl Host {
     }
     pub fn info(&self, caller: &CallerContext) -> Result<HostInfo, Fault> {
         let control = self.access.snapshot(caller)?;
-        let lifecycle = self.state.lock().expect("Host mutex poisoned").lifecycle;
+        let state = self.state.lock().expect("Host mutex poisoned");
         Ok(HostInfo {
             host_id: self.id.clone(),
             host_incarnation: self.incarnation.clone(),
-            lifecycle,
+            lifecycle: state.lifecycle,
+            shutdown_strategy: state.shutdown_strategy,
+            shutdown_fault: state.shutdown_fault.clone(),
             control,
         })
     }
@@ -118,7 +149,7 @@ impl Host {
                 "persistent entity startup is not implemented in this foundation entry point",
             ));
         }
-        self.resources.validate(
+        self.resources_owned()?.validate(
             &SessionConfig::from_agent(
                 &request.config,
                 &request
@@ -139,16 +170,13 @@ impl Host {
             request.name,
             request.config,
             Arc::clone(&self.access),
-            Arc::clone(&self.resources),
+            self.resources_owned()?,
         );
-        let agent = agent.hold_root(
-            self.store
-                .as_ref()
-                .map(|store| Arc::new(store.clone()) as Arc<dyn Send + Sync>),
-        );
+        let agent = agent.with_change_signal(Arc::clone(&self.changed));
+        agent.begin_initial_creation();
         // Acceptance publishes the Agent. Following creation is an owned
         // workflow and is not re-authorized against a possibly closed caller.
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle != HostLifecycle::Running {
                 return Err(Fault::new(
@@ -156,9 +184,14 @@ impl Host {
                     "Host is not accepting new Agents",
                 ));
             }
+            state.creating += 1;
             state.agents.insert(id.clone(), Arc::clone(&agent));
             Ok(())
         })?;
+        let agent = agent.hold_root(
+            self.store()
+                .map(|store| Arc::new(store) as Arc<dyn Send + Sync>),
+        );
         let session_id = SessionId::new()
             .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()));
         let session = session_id.and_then(|id| {
@@ -205,6 +238,7 @@ impl Host {
                 (Some(id), result)
             }
         };
+        agent.finish_initial_creation();
         let receipt = AgentCreateReceipt {
             kind: AgentCreateKind::AgentCreate,
             host_id: self.id.clone(),
@@ -215,11 +249,10 @@ impl Host {
             message_id,
             result,
         };
-        self.state
-            .lock()
-            .expect("Host mutex poisoned")
-            .creations
-            .insert(id, receipt.clone());
+        let mut state = self.state.lock().expect("Host mutex poisoned");
+        state.creations.insert(id, receipt.clone());
+        state.creating -= 1;
+        self.changed.notify_waiters();
         Ok(receipt)
     }
     pub fn receipt(
@@ -298,6 +331,16 @@ impl Host {
             .as_ref()
             .map(|message| message.message_id.clone());
         let (session_id, result) = match agent.create_session(caller, options, false) {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    FaultKind::HostLifecycleUnavailable
+                        | FaultKind::HostAccessInvalid
+                        | FaultKind::HostAccessReadOnly
+                ) =>
+            {
+                return Err(error);
+            }
             Err(error) => (
                 None,
                 SessionCreateResult::without_delivery(SessionCreateSteps {
@@ -412,7 +455,13 @@ impl Host {
         self.session(caller, target)?.pause(caller)
     }
     pub fn resume(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        self.session(caller, target)?.resume(caller)
+        let session = self.session(caller, target)?;
+        if !self.access.execution_allowed_owned() {
+            return self
+                .access
+                .accept(caller, || session.continue_history_owned());
+        }
+        session.resume(caller)
     }
     pub fn unload(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
         self.session(caller, target)?.unload(caller)
@@ -518,6 +567,15 @@ impl Host {
         target: &SessionRef,
         id: &TurnId,
     ) -> Result<TurnResult, Fault> {
-        self.session(caller, target)?.wait_turn(caller, id).await
+        // The observation token contains only a Weak owner and a bounded state
+        // snapshot. An abandoned wait cannot retain Session bodies or runners.
+        let mut states = self.session_states(caller, target)?;
+        loop {
+            let turn = self.turn_info(caller, target, id)?;
+            if turn.state == TurnState::Finished {
+                return self.turn_result(caller, target, id);
+            }
+            states.changed().await?;
+        }
     }
 }

@@ -16,13 +16,13 @@ impl Host {
         request
             .validate()
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        if request.mode == StorageMode::Persistent && self.store.is_none() {
+        if request.mode == StorageMode::Persistent && self.store().is_none() {
             return Err(Fault::new(
                 FaultKind::HostStorageUnavailable,
                 "persistent Agents require a persistent Host data root",
             ));
         }
-        self.resources.validate(
+        self.resources_owned()?.validate(
             &SessionConfig::from_agent(&request.config, &SessionOverrides::default())
                 .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
         )?;
@@ -56,7 +56,7 @@ impl Host {
             }),
         };
         let (sender, receiver) = oneshot::channel();
-        self.access.accept(caller, || {
+        self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle != HostLifecycle::Running {
                 return Err(Fault::new(
@@ -65,6 +65,7 @@ impl Host {
                 ));
             }
             state.creations.insert(id.clone(), initial);
+            state.creating += 1;
             let owner = Arc::clone(self);
             let task_id = id.clone();
             let task = runtime.spawn(async move {
@@ -87,12 +88,12 @@ impl Host {
                     .expect("Host mutex poisoned")
                     .creations
                     .insert(task_id.clone(), receipt.clone());
-                owner
-                    .state
-                    .lock()
-                    .expect("Host mutex poisoned")
-                    .create_tasks
-                    .remove(&task_id);
+                {
+                    let mut state = owner.state.lock().expect("Host mutex poisoned");
+                    state.create_tasks.remove(&task_id);
+                    state.creating -= 1;
+                }
+                owner.changed.notify_waiters();
                 // Returning the final receipt also retires this owned creation
                 // task. Its temporary root lease must not race an immediate
                 // drop/reopen by a caller that has awaited the result.
@@ -140,9 +141,10 @@ impl Host {
     ) -> AgentCreateReceipt {
         let operation = request.operation_id.clone();
         let created = async {
+            self.access.ensure_execution_owned()?;
             let agent = if request.mode == StorageMode::Persistent {
                 let store = self
-                    .store
+                    .store()
                     .as_ref()
                     .expect("checked persistent Host")
                     .agent(id.clone(), request.mode);
@@ -168,7 +170,7 @@ impl Host {
                     store,
                     self.incarnation.clone(),
                     Arc::clone(&self.access),
-                    Arc::clone(&self.resources),
+                    self.resources_owned()?,
                 )
             } else {
                 AgentOwner::new(
@@ -178,14 +180,16 @@ impl Host {
                     request.name.clone(),
                     request.config.clone(),
                     Arc::clone(&self.access),
-                    Arc::clone(&self.resources),
+                    self.resources_owned()?,
                 )
             };
-            let agent = agent.hold_root(
-                self.store
-                    .as_ref()
-                    .map(|store| Arc::new(store.clone()) as Arc<dyn Send + Sync>),
-            );
+            let agent = agent
+                .with_change_signal(Arc::clone(&self.changed))
+                .hold_root(
+                    self.store()
+                        .as_ref()
+                        .map(|store| Arc::new(store.clone()) as Arc<dyn Send + Sync>),
+                );
             agent.begin_initial_creation();
             {
                 let mut state = self.state.lock().expect("Host mutex poisoned");
@@ -194,6 +198,9 @@ impl Host {
                 receipt.agent_id = Some(id.clone());
                 receipt.result.steps.agent = CreateStep::Succeeded;
                 receipt.result.steps.session = CreateStep::Running;
+            }
+            if !self.access.execution_allowed_owned() {
+                agent.begin_host_shutdown_owned(true);
             }
             let result = agent
                 .create_session_async_owned(

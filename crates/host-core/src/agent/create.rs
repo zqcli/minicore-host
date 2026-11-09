@@ -13,14 +13,15 @@ struct PreparedSession {
 }
 impl AgentOwner {
     pub(crate) fn begin_initial_creation(&self) {
-        self.state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .info
-            .lifecycle = AgentLifecycle::Creating;
+        let mut state = self.state.lock().expect("Agent mutex poisoned");
+        state.creation_committed = false;
+        if state.info.lifecycle == AgentLifecycle::Active {
+            state.info.lifecycle = AgentLifecycle::Creating;
+        }
     }
     pub(crate) fn finish_initial_creation(&self) {
         let mut state = self.state.lock().expect("Agent mutex poisoned");
+        state.creation_committed = true;
         if state.info.lifecycle == AgentLifecycle::Creating {
             state.info.lifecycle = AgentLifecycle::Active;
         }
@@ -72,7 +73,7 @@ impl AgentOwner {
             mode: request.mode,
             overrides: request.overrides,
         };
-        let receiver = self.access.accept(caller, || {
+        let receiver = self.access.accept_business(caller, || {
             self.accept_session_creation(
                 request.operation_id,
                 options,
@@ -109,6 +110,7 @@ impl AgentOwner {
         message: Option<MessageInput>,
         make_default: bool,
     ) -> Result<oneshot::Receiver<SessionCreateReceipt>, Fault> {
+        self.access.ensure_execution_owned()?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
             Fault::new(
                 FaultKind::AgentLifecycleUnavailable,
@@ -209,10 +211,12 @@ impl AgentOwner {
         message: Option<MessageInput>,
         make_default: bool,
     ) -> Result<(), Fault> {
-        self.resources.validate(&prepared.config)?;
+        self.access.ensure_execution_owned()?;
+        self.resources_owned()?.validate(&prepared.config)?;
+        self.access.ensure_execution_owned()?;
         let session = if prepared.mode == StorageMode::Persistent {
             let store = self
-                .store
+                .store()
                 .as_ref()
                 .ok_or_else(|| {
                     Fault::new(
@@ -248,7 +252,7 @@ impl AgentOwner {
                 self.host_id.clone(),
                 self.incarnation.clone(),
                 Arc::clone(&self.access),
-                Arc::clone(&self.resources),
+                self.resources_owned()?,
                 Arc::clone(&self.enabled),
             )
         } else {
@@ -259,20 +263,23 @@ impl AgentOwner {
                 self.incarnation.clone(),
                 prepared.config,
                 Arc::clone(&self.access),
-                Arc::clone(&self.resources),
+                self.resources_owned()?,
                 Arc::new(MemoryHistory),
                 Vec::new(),
                 Arc::clone(&self.enabled),
             )
         };
         let session = session
-            .hold_root(self.root_lease.clone())
+            .hold_root(self.root_lease())
             .notify_parent_on_change(Arc::clone(&self.changed));
         session.set_source_revision(prepared.agent_revision);
+        if !self.access.execution_allowed_owned() {
+            session.begin_host_shutdown_owned(true);
+        }
         // Default publication is ordered after Session files, and before exposing
         // the default Session. A failed phase retains actual disk artifacts; it
         // does not publish a usable reference or invent a rollback.
-        if make_default && let Some(store) = &self.store {
+        if make_default && let Some(store) = self.store() {
             let info = self
                 .state
                 .lock()
