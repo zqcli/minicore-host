@@ -415,10 +415,28 @@ async fn rpc_protocol_errors_and_notifications_do_not_dispatch_messages() {
         peer.request(json!(1), "unknown.method", json!({})).await["error"]["code"],
         -32601
     );
+    // A newly routed method now validates its actual required parameters.
     assert_eq!(
-        peer.request(json!(2), "agent.start", json!({})).await["error"]["data"]["type"],
-        "HOST_METHOD_UNAVAILABLE"
+        peer.request(json!(2), "agent.start", json!({})).await["error"]["code"],
+        -32602
     );
+    // Every genuinely staged catalog entry still has the explicit business
+    // fault. Do not hard-code a placeholder that another topic implements.
+    for (index, method) in PUBLIC_METHODS
+        .iter()
+        .map(|method| method.as_str())
+        .filter(|method| !SUPPORTED_METHODS.contains(method))
+        .enumerate()
+    {
+        let response = peer
+            .request(json!(format!("staged-{index}")), method, json!({}))
+            .await;
+        assert_eq!(response["error"]["data"]["code"], 1401, "{method}");
+        assert_eq!(
+            response["error"]["data"]["type"], "HOST_METHOD_UNAVAILABLE",
+            "{method}"
+        );
+    }
     assert_eq!(
         peer.request(json!(3), "message.send", json!({})).await["error"]["code"],
         -32602
@@ -743,12 +761,9 @@ async fn receipt_lookup_faults_are_not_method_unavailable() {
         .await;
     assert_eq!(ambiguous["error"]["data"]["code"], 1203);
     assert_eq!(ambiguous["error"]["data"]["type"], "HOST_RECEIPT_AMBIGUOUS");
-    let unsupported = peer.request(json!(6), "agent.start", json!({})).await;
-    assert_eq!(unsupported["error"]["data"]["code"], 1401);
-    assert_eq!(
-        unsupported["error"]["data"]["type"],
-        "HOST_METHOD_UNAVAILABLE"
-    );
+    let invalid_control = peer.request(json!(6), "agent.start", json!({})).await;
+    assert_eq!(invalid_control["error"]["code"], -32602);
+    assert!(invalid_control["error"]["data"].is_null());
     drop(peer);
     server.await.unwrap().unwrap();
 }

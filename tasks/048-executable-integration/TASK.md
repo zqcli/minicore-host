@@ -62,3 +62,32 @@ acceptance. Accepted saves retain their prior owner semantics. Its scoped review
 passed; global lease blockers are still open. Context and deletion routes are not
 included. The earlier 610-case run predates these seven commits, so it is not
 claimed as their aggregate validation.
+
+## Reviewed lease corrections and adapter fixture correction
+
+The two lease findings above are now corrected in this local composition. The
+original failures remain historical evidence. Diagnostics source `8fc7db845c642507941c339eb67c83ae6f35a7a6`
+plus its red test/docs and storage source `9dd9f7c251506ceeeb1cabebde56a2f58682ec67`
+plus its red tests/docs were integrated through `ab80412`; documentation clarification
+is `e30c29c0688f303affc85fd20d4b95bbf140d053`. Both corrections passed independent
+review, including original deterministic fork-inherited descriptor failures and
+real delayed save/cleanup ownership. They explicitly release their own final file
+lease only after the required writer work, rather than weakening exclusive access.
+
+The first combined `./scripts/check.sh` at exact `e30c29c` stopped with two failing
+transport adapter assertions. Both still expected `agent.start` to be staged, but
+the reviewed canonical-controls topic now implements it. Empty parameters correctly
+produce JSON-RPC invalid parameters, not HOST_METHOD_UNAVAILABLE. The preserved
+aggregate log is `/workspace/shared/minicore-host-validation/executable-lease-combined-gate.log`.
+It is not a green workspace gate.
+
+The integration correction changes only those fixture expectations: malformed
+`agent.start` returns -32602; every genuinely staged catalog method is checked
+against the current supported-method set for the existing 1401 business fault.
+Receipt missing/ambiguous checks remain. No production route, permission, fault or
+business assertion was removed. After rustfmt, `cargo test -p minicore-host-transport
+--test adapters --locked` passed all 12 cases; log
+`/workspace/shared/minicore-host-validation/executable-staged-method-fixture.log`.
+The first formatting check caught only formatting in the new assertion and was
+corrected before this focused run. A new whole-workspace gate is still required
+at the final combined checkpoint.
