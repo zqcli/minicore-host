@@ -9,6 +9,9 @@
   final tree. Earlier source, targets and evidence were lost when the execution
   environment was replaced. Old green results do not apply to this tree.
 - Runtime remains pinned to `69faf9196991524b5549499d6208a1eaf567bf56`.
+- The inherited TUI reference remains `3beeb1d8a525e58ce6352e05061f242c5580e248`,
+  whose recorded Runtime lock is `b276d9c0a1f3a3c06e32029f831ccd100c9699c7`.
+  It is not this Host's Runtime revision and no TUI integration is claimed.
 - Requested worker configuration: `gpt-6-astra`, `max`; effective runtime
   configuration cannot be independently attested from inside this task.
 - No TUI, dependency, Cargo.lock, SPEC or remote change is part of this task.
@@ -91,5 +94,40 @@ Fresh recovered-tree checks passed:
 - Strict Clippy over all targets in core, local-tools, tools and resources:
   passed (`--locked -- -D warnings`). Log: `clippy.log`.
 
-Full relevant-crate tests/docs are being recorded next. Independent task067 owns
-the separate app process-level authentication/output/history regression.
+Production commit: `0abe2dfdd8e0583724f73e150ed11feb16021042`
+(`fix(tools): exclude published credential environment names`).
+
+## Completed scoped validation
+
+All commands below exited 0 on the recovered task066 production tree. The
+associated files are in `/workspace/shared/task066-recovered-evidence/`.
+
+```sh
+cargo fmt --all -- --check
+cargo clippy -p minicore-host-core -p minicore-host-local-tools -p minicore-host-tools -p minicore-host-resources --all-targets --locked -- -D warnings
+cargo test -p minicore-host-core -p minicore-host-local-tools -p minicore-host-tools -p minicore-host-resources --all-targets --locked
+cargo test -p minicore-host-core -p minicore-host-local-tools -p minicore-host-tools -p minicore-host-resources --doc --locked
+RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core -p minicore-host-local-tools -p minicore-host-tools -p minicore-host-resources --no-deps --locked
+cargo test -p minicore-host-core -p minicore-host-local-tools -p minicore-host-tools -p minicore-host-resources --all-targets --locked -- --list
+./scripts/check-whitespace.sh
+```
+
+- All **417 unique tests** across these four affected crates pass, including the
+  five new tests. The count comes from `test-list.log`, not summed nested probe
+  output. The isolated resource subprocess is one test, not another test case.
+- Doctests pass with zero cases in these crates; strict documentation build
+  passes. Logs: `doctests.log` and `docs.log`.
+- `fmt.log`, `clippy.log`, `relevant-tests.log` and `whitespace.log` record the
+  remaining gates. `git diff --check` also passes.
+- SPEC SHA-256 remains
+  `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+  All manifests and Cargo.lock are unchanged. Dedicated target directory used
+  about 1.3 GiB after validation, with more than 50 GiB disk free.
+
+These are scoped fresh checks, not a reconstructed old green, a full-workspace
+integrated gate, a live provider test, or a TUI/WSS transport test. Task066 checks
+the real access-key owner and HTTP/SSE provider against isolated fixtures.
+Independent task067 owns the separate actual app process-level WSS/provider
+authentication and output/history regression. Independent review and the
+coordinator's recovered-tree integration gate remain separate. No remote was
+written and no claim is made about arbitrary same-user file/process access.
