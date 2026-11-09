@@ -37,12 +37,13 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 - `cargo test --workspace --all-targets --locked -- --list`: 325 listed test cases. Nested storage subprocess output is not added to that count.
 - Gate log: `/workspace/shared/minicore-host-agent-tool-stage2-check.log`; unique list: `/workspace/shared/minicore-host-agent-tool-stage2-list.log`.
 
-## Remaining integration
+## Remaining handoff
 
-- Finish the final published Runtime retry pin, full integrated workspace gates,
-  unique test count and independent review. No remote push is authorized here.
-- Production owner integration is now implemented and verified below; fixture
-  coverage remains identified separately and no live provider/TUI claim is made.
+- Independent review and the coordinator's final combined acceptance remain.
+  No remote push is authorized here. Later changes require their own gate.
+- Production owner integration and published-dependency workspace gates are
+  complete below. Fixtures remain identified separately; no live provider or
+  TUI claim is made.
 
 ## Owner-interface refinements
 
@@ -89,3 +90,51 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
   committed. Final no-patch integration gates remain required.
 - Logs: `/workspace/shared/minicore-host-agent-tool-core-integration.log`,
   `/workspace/shared/minicore-host-agent-tool-close-scope-red.log`.
+
+## Final published-dependency validation
+
+- Production bridge: `895a572`; final tools dependency pin: `643b12d`.
+  Final tested code: `ca0b5de8df30599c446e74066958327a4198d5ed`, including a
+  fifth real owner test for `create(resource=agent, from_agent_id=...)`.
+  That test verifies actual config/Role copying, distinct new identity, task
+  text not becoming Role, and reclamation of both temporary memory owners.
+- Integration prerequisite: coordinator stage `d648531` merged as `c3c5cea`.
+  The only merge conflict was task 020 documentation, resolved by retaining the
+  coordinator's complete record. No production conflict required a change.
+- Runtime is **0.10.0**, exactly
+  `git+https://github.com/zqcli/minicore-runtime?rev=69faf9196991524b5549499d6208a1eaf567bf56#69faf9196991524b5549499d6208a1eaf567bf56`.
+  `cargo metadata --locked --offline --format-version=1` confirms this is the
+  sole Runtime package. No local patch, path override or vendor source remains.
+- Rust 1.90.0 on Linux; the environment above additionally uses
+  `CARGO_BUILD_JOBS=2`. The target directory is exclusive to this worktree.
+- `./scripts/check.sh`: **passed** whitespace, formatting, whole-workspace
+  all-target Clippy with `-D warnings`, all-target tests, **3 doctests**, and
+  rustdoc with `-D warnings` against the fixed final tested code.
+- `cargo test --workspace --all-targets --locked -- --list`: **422 unique test
+  cases**, counted by executable and test name. Nested storage subprocess
+  output is not a second test case.
+- Tools contribute **36** cases: **5 real Host/Runtime integrations**, 1 real
+  Runtime loop over owner-port fixtures, and 30 strict-contract/port-fixture
+  tests. Only scripted model providers are used; no live provider credentials
+  or TUI behavior are exercised.
+- Final logs: `/workspace/shared/minicore-host-agent-tool-final-check.log`,
+  `/workspace/shared/minicore-host-agent-tool-final-list.log`, and
+  `/workspace/shared/minicore-host-agent-tool-final-metadata.json`.
+- SPEC checksum remains the baseline above. No remote push was attempted.
+
+## Coordinator cherry-pick inventory
+
+Only the following independent tools commits need integration, in order;
+exclude this branch's merge commits and replayed core commits:
+
+1. `8145239` (root workspace/lock bootstrap).
+2. `0ed6b2a` (strict actions/config/ports).
+3. `c8a51f0` (root lock fixture dependency bootstrap).
+4. `b9066a5` (Runtime adapter and scopes).
+5. `7ea2d48` (Runtime API alignment and ownership gates).
+6. `443ae7b` (discarded-input facts and explicit cleanup continuation).
+7. `895a572` (production capability bridge and real Host tests).
+8. `643b12d` (tools manifest published Runtime pin).
+9. `ca0b5de` (real Agent creation/ownership integration coverage).
+
+The final documentation commit adds this validation record only.

@@ -38,8 +38,9 @@ wait does not discard cleanup of an already created temporary Session.
 Tests distinguish explicit owner-port fixtures from production owner tests.
 `host_integration.rs` runs actual Host -> Agent -> Session -> Runtime -> agent
 tool paths with only the model scripted: all six actions, independent completion
-after the parent Turn and connection end, binding failure before input claim,
-and scope close from the root's running tool. These are not live-provider or
+after the parent Turn and connection end, explicit source-config Agent creation
+and temporary-owner reclamation, binding failure before input claim, and scope
+close from the root's running tool. These are not live-provider or
 TUI tests. Scope and contract tests separately cover forbidden targets, precise
 config/range shapes, one-notification ownership and explicit cleanup retry.
 
