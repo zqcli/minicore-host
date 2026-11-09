@@ -9,6 +9,7 @@ use minicore_runtime::HistoryItem;
 mod controls;
 mod create;
 mod metadata;
+mod network;
 mod persistent;
 mod retirement;
 mod shutdown;
