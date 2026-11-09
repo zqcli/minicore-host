@@ -101,3 +101,6 @@ pub use observation::*;
 
 mod interaction;
 pub use interaction::*;
+
+mod compaction;
+pub use compaction::*;

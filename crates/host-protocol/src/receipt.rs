@@ -356,6 +356,8 @@ pub enum Receipt {
     TurnCancel(crate::TurnCancelReceipt),
     SessionCancel(crate::SessionCancelReceipt),
     InteractionAnswer(crate::InteractionAnswerReceipt),
+    Compact(crate::CompactReceipt),
+    CompactCancel(crate::CompactCancelReceipt),
 }
 impl Receipt {
     pub fn operation_id(&self) -> &OperationId {
@@ -370,6 +372,8 @@ impl Receipt {
             Self::TurnCancel(receipt) => &receipt.operation_id,
             Self::SessionCancel(receipt) => &receipt.operation_id,
             Self::InteractionAnswer(receipt) => &receipt.operation_id,
+            Self::Compact(receipt) => &receipt.operation_id,
+            Self::CompactCancel(receipt) => &receipt.operation_id,
         }
     }
 }
