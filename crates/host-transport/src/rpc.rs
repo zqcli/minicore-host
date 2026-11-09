@@ -28,6 +28,79 @@ fn request_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<RpcId>, D
     RpcId::deserialize(d).map(Some)
 }
 
+/// A complete transport message, independent of stdio/WSS framing. No buffer
+/// cap is imposed here; each framing adapter enforces only its actual syntax.
+pub(crate) trait FrameReader: Send {
+    fn read(&mut self) -> impl std::future::Future<Output = io::Result<Option<Vec<u8>>>> + Send;
+}
+pub(crate) trait FrameWriter: Send {
+    fn write(&mut self, bytes: Vec<u8>)
+    -> impl std::future::Future<Output = io::Result<()>> + Send;
+    fn close(&mut self) -> impl std::future::Future<Output = io::Result<()>> + Send;
+}
+struct LineReader<R> {
+    reader: BufReader<R>,
+    frame: Vec<u8>,
+}
+impl<R: AsyncRead + Unpin + Send> FrameReader for LineReader<R> {
+    async fn read(&mut self) -> io::Result<Option<Vec<u8>>> {
+        // Keep partial bytes in self so cancellation of a select branch cannot
+        // drop them or start an independent deadline.
+        if self.reader.read_until(b'\n', &mut self.frame).await? == 0 && self.frame.is_empty() {
+            return Ok(None);
+        }
+        if self.frame.last() != Some(&b'\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "unterminated JSON-RPC frame",
+            ));
+        }
+        Ok(Some(std::mem::take(&mut self.frame)))
+    }
+}
+struct LineWriter<W>(W);
+impl<W: AsyncWrite + Unpin + Send> FrameWriter for LineWriter<W> {
+    async fn write(&mut self, mut bytes: Vec<u8>) -> io::Result<()> {
+        bytes.push(b'\n');
+        self.0.write_all(&bytes).await?;
+        self.0.flush().await
+    }
+    async fn close(&mut self) -> io::Result<()> {
+        self.0.shutdown().await
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum Initialization {
+    TrustedLocal,
+    Network,
+}
+impl Initialization {
+    fn connect(self, host: &Host, params: Value) -> Result<ConnectionHandle, Box<RpcError>> {
+        match self {
+            Self::TrustedLocal => {
+                serde_json::from_value::<Empty>(params)
+                    .map_err(|_| protocol_error(-32602, "Invalid initialization parameters"))?;
+                host.connect()
+                    .map_err(|fault| Box::new(RpcError::business(fault)))
+            }
+            Self::Network => {
+                // Deliberately neither Debug nor Serialize. Never return raw
+                // authentication parameters or serde diagnostics in failures.
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Authentication {
+                    access_key: String,
+                }
+                let auth = serde_json::from_value::<Authentication>(params)
+                    .map_err(|_| protocol_error(-32602, "Invalid authentication parameters"))?;
+                host.connect_network(&auth.access_key)
+                    .map_err(|fault| Box::new(RpcError::business(fault)))
+            }
+        }
+    }
+}
+
 /// Serve a channel whose trust was established by its launching/embedding
 /// application. Each UTF-8 JSON object occupies one LF-terminated line. There is
 /// no frame-size quota, batch support, version negotiation or JSON authority.
@@ -43,25 +116,41 @@ where
     R: AsyncRead + Unpin + Send,
     W: AsyncWrite + Unpin + Send,
 {
-    let mut input = BufReader::new(input);
+    serve_frames(
+        host,
+        LineReader {
+            reader: BufReader::new(input),
+            frame: Vec::new(),
+        },
+        LineWriter(output),
+        Initialization::TrustedLocal,
+    )
+    .await
+}
+
+pub(crate) async fn serve_frames(
+    host: Arc<Host>,
+    mut input: impl FrameReader,
+    output: impl FrameWriter,
+    initialization: Initialization,
+) -> io::Result<()> {
     let (outgoing, replies) = mpsc::unbounded_channel();
-    let writer = write_lines(output, replies);
+    let writer = write_frames(output, replies);
     tokio::pin!(writer);
     let mut connection: Option<ConnectionHandle> = None;
     let mut requests = JoinSet::new();
-    let mut frame = Vec::new();
     loop {
+        let revoked = async {
+            match &connection {
+                Some(handle) => handle.closed().await,
+                None => std::future::pending().await,
+            }
+        };
         tokio::select! {
-            // A broken writer ends this actual operating connection.
+            _ = revoked => return Ok(()),
             result = &mut writer => return result,
-            read = input.read_until(b'\n', &mut frame) => {
-                if read? == 0 {
-                    return if frame.is_empty() { Ok(()) } else { Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unterminated JSON-RPC frame")) };
-                }
-                let bytes = std::mem::take(&mut frame);
-                if bytes.last() != Some(&b'\n') {
-                    return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unterminated JSON-RPC frame"));
-                }
+            read = input.read() => {
+                let Some(bytes) = read? else { return Ok(()); };
                 let request: Request = match serde_json::from_slice(&bytes) {
                     Ok(request) => request,
                     Err(error) => {
@@ -80,17 +169,15 @@ where
                 let _ = request.jsonrpc;
                 let Some(id) = request.id else { continue; };
                 if request.method == "initialize" {
-                    if serde_json::from_value::<Empty>(request.params).is_err() {
-                        queue_error(&outgoing, Some(id), protocol_error(-32602, "Invalid initialization parameters"))?;
-                    } else if connection.is_some() {
+                    if connection.is_some() {
                         queue_error(&outgoing, Some(id), protocol_error(-32600, "Connection is already initialized"))?;
                     } else {
-                        match host.connect() {
+                        match initialization.connect(&host, request.params) {
                             Ok(handle) => {
                                 queue_response(&outgoing, &RpcResponse::success(id, handle.initial_info()))?;
                                 connection = Some(handle);
                             }
-                            Err(fault) => queue_error(&outgoing, Some(id), RpcError::business(fault))?,
+                            Err(error) => queue_error(&outgoing, Some(id), *error)?,
                         }
                     }
                     continue;
@@ -134,23 +221,17 @@ fn queue_response<T: Serialize>(
     out: &mpsc::UnboundedSender<Vec<u8>>,
     response: &T,
 ) -> io::Result<()> {
-    out.send(encode_line(response)?)
+    out.send(serde_json::to_vec(response).map_err(io::Error::other)?)
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "JSON-RPC writer closed"))
 }
-fn encode_line<T: Serialize>(value: &T) -> io::Result<Vec<u8>> {
-    let mut bytes = serde_json::to_vec(value).map_err(io::Error::other)?;
-    bytes.push(b'\n');
-    Ok(bytes)
-}
-async fn write_lines<W: AsyncWrite + Unpin>(
-    mut writer: W,
-    mut lines: mpsc::UnboundedReceiver<Vec<u8>>,
+async fn write_frames(
+    mut writer: impl FrameWriter,
+    mut frames: mpsc::UnboundedReceiver<Vec<u8>>,
 ) -> io::Result<()> {
-    while let Some(line) = lines.recv().await {
-        writer.write_all(&line).await?;
-        writer.flush().await?;
+    while let Some(frame) = frames.recv().await {
+        writer.write(frame).await?;
     }
-    writer.shutdown().await
+    writer.close().await
 }
 
 // This is only per-connection response correlation, not business operation
@@ -243,6 +324,18 @@ impl RpcClient {
         R: AsyncRead + Unpin + Send + 'static,
         W: AsyncWrite + Unpin + Send + 'static,
     {
+        Self::start_frames(
+            LineReader {
+                reader: BufReader::new(reader),
+                frame: Vec::new(),
+            },
+            LineWriter(writer),
+        )
+    }
+    pub(crate) fn start_frames(
+        reader: impl FrameReader + 'static,
+        writer: impl FrameWriter + 'static,
+    ) -> Self {
         let (closed, _) = watch::channel(false);
         let pending = Arc::new(Pending {
             state: Mutex::new(PendingState {
@@ -264,7 +357,7 @@ impl RpcClient {
             if *closed.borrow() { return; }
             tokio::select! {
                 _ = closed.changed() => {},
-                result = write_lines(writer, lines) => {
+                result = write_frames(writer, lines) => {
                     write_pending.fail(connection_error(result.err().map_or_else(|| "JSON-RPC writer closed".into(), |error| error.to_string())));
                 }
             }
@@ -279,6 +372,13 @@ impl RpcClient {
     }
     pub(crate) async fn initialize(&self) -> Result<ConnectionInfo, CallError> {
         self.request("initialize", Empty {}).await
+    }
+    pub(crate) async fn authenticate(&self, access_key: &str) -> Result<ConnectionInfo, CallError> {
+        self.request(
+            "initialize",
+            serde_json::json!({ "access_key": access_key }),
+        )
+        .await
     }
     pub(crate) fn initialized(mut self, initial: ConnectionInfo) -> Self {
         self.initial = Some(initial);
@@ -329,7 +429,7 @@ impl RpcClient {
             pending: Arc::clone(&self.pending),
             id,
         };
-        let bytes = encode_line(&WireRequest {
+        let bytes = serde_json::to_vec(&WireRequest {
             jsonrpc: JsonRpcVersion::V2,
             id: RpcId::Integer(id),
             method,
@@ -351,45 +451,39 @@ impl Drop for RpcClient {
         self.close();
     }
 }
-async fn read_responses<R: AsyncRead + Unpin>(reader: R, pending: Arc<Pending>) {
-    let mut reader = BufReader::new(reader);
+async fn read_responses(mut reader: impl FrameReader, pending: Arc<Pending>) {
     let mut closed = pending.closed.subscribe();
     if *closed.borrow() {
         return;
     }
-    let mut frame = Vec::new();
     loop {
         let read = tokio::select! {
             _ = closed.changed() => return,
-            result = reader.read_until(b'\n', &mut frame) => result,
+            result = reader.read() => result,
         };
         match read {
-            Ok(0) => {
+            Ok(None) => {
                 pending.fail(connection_error(
                     "JSON-RPC peer disconnected before a complete response",
                 ));
                 return;
             }
             Err(error) => {
-                pending.fail(connection_error(error.to_string()));
+                let failure = if error.kind() == io::ErrorKind::InvalidData {
+                    protocol(&error.to_string())
+                } else {
+                    connection_error(error.to_string())
+                };
+                pending.fail(failure);
                 return;
             }
-            Ok(_) => {
-                if frame.last() != Some(&b'\n') {
-                    pending.fail(connection_error(
-                        "JSON-RPC peer disconnected during a response",
-                    ));
+            Ok(Some(frame)) => match serde_json::from_slice::<RpcResponse<Value>>(&frame) {
+                Ok(response) => pending.receive(response),
+                Err(_) => {
+                    pending.fail(protocol("malformed JSON-RPC response"));
                     return;
                 }
-                match serde_json::from_slice::<RpcResponse<Value>>(&frame) {
-                    Ok(response) => pending.receive(response),
-                    Err(_) => {
-                        pending.fail(protocol("malformed JSON-RPC response"));
-                        return;
-                    }
-                }
-                frame.clear();
-            }
+            },
         }
     }
 }

@@ -1,10 +1,11 @@
-# Typed and stdio adapters
+# Typed, stdio and authenticated WSS adapters
 
 This crate connects the existing `Host` owners to a typed client and a trusted
-stdio channel. It is an incremental library, not a production Host executable.
+stdio channel or TLS WebSocket connection. It is an incremental library, not a production Host executable.
 The application still constructs the real resource resolver and opens its memory
-or persistent Host. No fixture model, network listener or process configuration
-is installed by the library.
+or persistent Host. No fixture model or process configuration is installed.
+Network listeners and TLS configurations are explicitly supplied by the embedding
+application; network access is disabled until configured on the Host.
 
 ## Typed entry points
 
@@ -15,6 +16,8 @@ is installed by the library.
   no JSON encoding/decoding on this path.
 - `HostClient::stdio(reader, writer, options)` initializes one trusted channel and
   returns the same typed method results through JSON-RPC.
+- `HostClient::wss(url, tls, access_key, options)` establishes authenticated WSS
+  with one deadline covering TCP, verified TLS, WebSocket setup and initialization.
 - `client.session(SessionRef)` bundles only a target address and a shared client.
   It creates no registration ID, authority claim or server-side current Session.
   Different Session contexts can issue concurrent calls on the same connection.
@@ -37,7 +40,7 @@ original transport ID and does not execute another request.
 `serve_stdio(host, reader, writer)` serves generic async IO whose trusted origin
 was established by the embedding application. Real OS pipe pairs and Tokio
 duplex streams are tested. Passing arbitrary unauthenticated network IO does not
-make it trusted; this crate does not provide a WSS authentication layer.
+make it trusted; use `serve_wss` for the authenticated network boundary.
 
 One UTF-8 JSON object occupies one LF-terminated line. Newlines inside JSON text
 are escaped normally. CRLF is also valid JSON whitespace. There is no added frame
@@ -114,7 +117,47 @@ a memory Session may retire the lookup source immediately without invalidating
 the already returned close receipt.
 
 Not implemented here: remaining §8 routes, canonical event subscriptions/output
-streams, WSS/key handling, complete production process/configuration loading,
+streams, complete production process/configuration loading,
 live-provider operation, or TUI changes/validation. The transport tests use real
 Host owners, real Runtime and real OS pipes/duplex IO with explicitly named model
 and delayed-response fixtures. No external provider or TUI result is implied.
+
+## Network authentication and key publication
+
+`serve_wss(host, listener, Arc<tls::ServerConfig>)` serves actual TLS WebSockets.
+It rejects startup unless `Host::configure_network_access(Some(key))` has supplied
+a nonblank key. A missing key never grants anonymous access. This is a trusted
+embedding hook, not a public JSON method. TLS certificates, listeners and client
+trust roots are supplied explicitly; the library never loads credentials or
+disables TLS verification. Plain `ws://` clients are rejected.
+
+A WSS client sends one text JSON-RPC `initialize` request whose parameters are
+exactly `{ "access_key": "..." }`. Even loopback must authenticate. Before that
+request succeeds, no business reads, subscriptions or writes are dispatched.
+Authentication plus registration share the Host connection acceptance boundary.
+Invalid or unfinished initialization occupies no operation right; a reconnected
+client is a new connection and never inherits rights. Configured secret state is
+not serializable and its Debug implementation is redacted. Authentication failure
+messages never include supplied keys or raw authentication input.
+
+The trusted `Host::publish_network_configuration(caller, candidate_key, commit)`
+hook is reserved for the future Host configuration owner. It checks current
+operation rights and commits prepared configuration plus actual key invalidation
+at the same narrow boundary as owner acceptance. The commit closure must only
+check the prepared candidate version and publish state, with no I/O, child calls
+or Host reentry. Candidate preparation/complete validation happens beforehand;
+a candidate with restart-required changes must not call the hook. A failed
+commit or unchanged key preserves existing connections. An actual committed
+change revokes only old network connections immediately, regardless of when
+socket cleanup runs. Trusted local/stdio connections and accepted owner work
+survive. This hook is not a completed `host.reload` implementation.
+
+WSS and stdio use the same request decoder, business dispatch, error/result
+mapping and client correlation. WSS uses one complete text message per request
+or response; fragmented text is not complete until its final continuation frame.
+Binary application messages are rejected. Ping/pong and TLS/RFC framing rules
+remain enabled. Both sides explicitly disable tungstenite frame/message size
+limits and use unbounded application response queues; no application buffer
+quota is added. Transport tests use generated localhost certificates, actual
+TCP/TLS/WebSocket traffic and real Host/Runtime owners with named model fixtures.
+They are not live-provider or CLI/TUI validation.

@@ -1,6 +1,7 @@
 # Task 017: Authenticated WSS transport
 
-Status: In progress. Implements the library access/connection slice of SPEC §§2,
+Status: WSS authentication/library stage validated; follow-up review fixes and
+observation integration remain in progress. Implements the library access/connection slice of SPEC §§2,
 10–11, not Host process/config assembly or production CLI/TUI completion.
 
 ## Scope and ownership
@@ -24,5 +25,18 @@ Status: In progress. Implements the library access/connection slice of SPEC §§
 - `cargo check --workspace --all-targets --locked`: passed after initial production
   implementation against pinned Runtime `18a6ac9` (0.9.2).
 - `cargo test -p minicore-host-core --lib --locked network_tests`: passed, 5 tests.
-- Formatting, full lint/test/doc checks and unique test enumeration are pending.
+- `cargo test -p minicore-host-transport --all-targets --locked`: passed, 32 tests
+  (15 existing, 1 quota configuration test, 12 real loopback tests, 4 TLS wait tests).
+- `cargo clippy -p minicore-host-transport -p minicore-host-core --all-targets --locked -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --locked`: passed, 312 unique tests.
+- `cargo test --workspace --doc --locked`: passed.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`: passed.
+- `cargo test --workspace --all-targets --locked -- --list`: 312 unique test cases;
+  subprocess probe output is not counted again.
+- `cargo fmt --all --check`: passed.
+
+The large-frame regression uses a >16 MiB correlation ID and a real `host.info`
+response, proving bidirectional framing independently from Runtime 0.9.2's text
+limit. A first attempt using >16 MiB business text received the actual old
+Runtime-related `SESSION_INPUT_INVALID` rejection; no WSS quota was involved.
 - Runtime 0.10 migration and shared observation wiring remain separately owned.

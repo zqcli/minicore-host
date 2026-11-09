@@ -36,7 +36,7 @@ struct LocalConnection {
 #[derive(Clone)]
 enum Connection {
     Local(Arc<LocalConnection>),
-    Stdio(Arc<RpcClient>),
+    Rpc(Arc<RpcClient>),
 }
 
 /// Clones share one actual connection and its operation right. Creating a
@@ -67,7 +67,26 @@ impl HostClient {
         let connection = RpcClient::start(reader, writer);
         let initial = deadline.wait(connection.initialize()).await?;
         Ok(Self {
-            connection: Connection::Stdio(Arc::new(connection.initialized(initial))),
+            connection: Connection::Rpc(Arc::new(connection.initialized(initial))),
+        })
+    }
+
+    /// Establish TLS, WebSocket framing, and authenticated initialization using
+    /// one monotonic wait budget. Certificate/name validation uses the supplied
+    /// rustls configuration; credentials are sent only after TLS succeeds.
+    /// No retry or reconnect is automatic, and plain `ws://` is rejected.
+    pub async fn wss(
+        url: &str,
+        tls: Arc<crate::tls::ClientConfig>,
+        access_key: &str,
+        options: CallOptions,
+    ) -> Result<Self, CallError> {
+        let deadline = Deadline::new(options)?;
+        let client = deadline
+            .wait(crate::wss::connect(url, tls, access_key))
+            .await?;
+        Ok(Self {
+            connection: Connection::Rpc(Arc::new(client)),
         })
     }
 
@@ -75,7 +94,7 @@ impl HostClient {
     pub fn initial_info(&self) -> &ConnectionInfo {
         match &self.connection {
             Connection::Local(local) => local.handle.initial_info(),
-            Connection::Stdio(rpc) => rpc.initial_info(),
+            Connection::Rpc(rpc) => rpc.initial_info(),
         }
     }
     /// End this actual connection, including its clones and pending observations.
@@ -83,7 +102,7 @@ impl HostClient {
     pub fn close(&self) {
         match &self.connection {
             Connection::Local(local) => local.handle.close(),
-            Connection::Stdio(rpc) => rpc.close(),
+            Connection::Rpc(rpc) => rpc.close(),
         }
     }
     pub fn session(&self, target: SessionRef) -> SessionClient {
@@ -105,7 +124,7 @@ impl HostClient {
                         .execute(Arc::clone(&local.host), local.handle.caller())
                         .await
                         .map_err(CallError::Business),
-                    Connection::Stdio(rpc) => rpc.call(request).await,
+                    Connection::Rpc(rpc) => rpc.call(request).await,
                 }
             })
             .await

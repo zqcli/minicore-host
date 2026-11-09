@@ -1,8 +1,8 @@
-//! Direct typed clients and newline-delimited JSON-RPC over trusted async IO.
+//! Direct typed clients, trusted stdio RPC, and authenticated TLS WebSockets.
 //!
 //! The embedding application owns Host configuration and establishes the trusted
-//! stdio channel. No listener, fixture model, network authentication, version
-//! negotiation or production process is started by this library. See the crate
+//! stdio channel or supplies a configured WSS listener. No fixture model,
+//! version negotiation or production process is started by this library. See the crate
 //! README for the exact supported method and framing scope.
 //!
 //! ```no_run
@@ -22,7 +22,10 @@ mod client;
 mod deadline;
 mod operations;
 mod rpc;
+mod wss;
 
 pub use client::{HostClient, HostService, SessionClient};
 pub use operations::SUPPORTED_METHODS;
 pub use rpc::serve_stdio;
+pub use tokio_rustls::rustls as tls;
+pub use wss::serve_wss;
