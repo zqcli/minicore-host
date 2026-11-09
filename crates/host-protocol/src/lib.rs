@@ -107,3 +107,6 @@ pub use compaction::*;
 
 mod public_controls;
 pub use public_controls::*;
+
+mod deletion;
+pub use deletion::*;

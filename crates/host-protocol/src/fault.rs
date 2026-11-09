@@ -74,6 +74,8 @@ fault_registry! {
     AgentSessionNotFound = 2202, "AGENT_SESSION_NOT_FOUND", [Agent, AgentLookup], None, false;
     AgentDefaultSessionUnavailable = 2203, "AGENT_DEFAULT_SESSION_UNAVAILABLE", [Agent, AgentLookup], None, false;
     AgentOwnershipMismatch = 2204, "AGENT_OWNERSHIP_MISMATCH", [Agent], None, false;
+    AgentDeleteInvalid = 2301, "AGENT_DELETE_INVALID", [Agent, AgentLifecycle], None, false;
+    AgentDeleteFailed = 2302, "AGENT_DELETE_FAILED", [Agent], None, false;
     AgentInternalUnexpected = 2999, "AGENT_INTERNAL_UNEXPECTED", [Agent], None, false;
     SessionLifecycleClosed = 3101, "SESSION_LIFECYCLE_CLOSED", [Session, SessionLifecycle], None, false;
     SessionLifecycleClosing = 3102, "SESSION_LIFECYCLE_CLOSING", [Session, SessionLifecycle], None, false;
@@ -108,6 +110,8 @@ fault_registry! {
     SessionChangeSourceUnavailable = 3810, "SESSION_CHANGE_SOURCE_UNAVAILABLE", [Session], None, false;
     SessionWorkspaceQueryCancelled = 3811, "SESSION_WORKSPACE_QUERY_CANCELLED", [Session], None, false;
     SessionWorkspaceQueryDeadline = 3812, "SESSION_WORKSPACE_QUERY_DEADLINE", [Session], None, false;
+    SessionDeleteInvalid = 3901, "SESSION_DELETE_INVALID", [Session, SessionLifecycle], None, false;
+    SessionDeleteFailed = 3902, "SESSION_DELETE_FAILED", [Session], None, false;
     SessionInternalUnexpected = 3999, "SESSION_INTERNAL_UNEXPECTED", [Session], None, false;
     TurnModelUpstreamRateLimited = 4201, "TURN_MODEL_UPSTREAM_RATE_LIMITED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
     TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
