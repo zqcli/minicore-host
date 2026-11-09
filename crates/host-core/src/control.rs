@@ -1,8 +1,11 @@
 use minicore_host_protocol::{
-    ConnectionInfo, ControlStateData, Fault, FaultKind, HostId, HostIncarnation,
+    ConnectionInfo, ControlStateData, Fault, FaultKind, HostId, HostIncarnation, HostLifecycle,
 };
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{
+    Arc, Mutex, Weak,
+    atomic::{AtomicBool, AtomicU8, Ordering},
+};
 
 /// Trusted context created by a live access handle. It cannot be deserialized
 /// from business JSON, and retaining it does not keep the connection valid.
@@ -64,12 +67,17 @@ pub(crate) struct ConnectionRegistry {
     host_id: HostId,
     incarnation: HostIncarnation,
     state: Mutex<RegistryState>,
+    // Admission fences, not a second lifecycle owner. Updated only by Host.
+    host_phase: AtomicU8,
+    execution_enabled: Arc<AtomicBool>,
 }
 impl ConnectionRegistry {
     pub(crate) fn new(host_id: HostId, incarnation: HostIncarnation) -> Arc<Self> {
         Arc::new(Self {
             host_id,
             incarnation,
+            host_phase: AtomicU8::new(0),
+            execution_enabled: Arc::new(AtomicBool::new(true)),
             state: Mutex::new(RegistryState {
                 next_number: 0,
                 connections: HashMap::new(),
@@ -175,6 +183,62 @@ impl ConnectionRegistry {
         let state = self.state.lock().expect("connection mutex poisoned");
         self.check(&state, caller, true)?;
         action()
+    }
+    /// Root business admission shares the connection/Host shutdown boundary.
+    pub(crate) fn accept_business<T>(
+        &self,
+        caller: &CallerContext,
+        action: impl FnOnce() -> Result<T, Fault>,
+    ) -> Result<T, Fault> {
+        self.accept(caller, || {
+            self.ensure_business_owned()?;
+            action()
+        })
+    }
+    /// Controls may drain accepted work, but cannot restart stopped execution.
+    pub(crate) fn accept_execution<T>(
+        &self,
+        caller: &CallerContext,
+        action: impl FnOnce() -> Result<T, Fault>,
+    ) -> Result<T, Fault> {
+        self.accept(caller, || {
+            self.ensure_execution_owned()?;
+            action()
+        })
+    }
+    pub(crate) fn ensure_business_owned(&self) -> Result<(), Fault> {
+        if self.host_phase.load(Ordering::SeqCst) != 0 {
+            Err(Fault::new(
+                FaultKind::HostLifecycleUnavailable,
+                "Host no longer accepts new business work",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    pub(crate) fn ensure_execution_owned(&self) -> Result<(), Fault> {
+        if self.execution_allowed_owned() {
+            Ok(())
+        } else {
+            Err(Fault::new(
+                FaultKind::HostLifecycleUnavailable,
+                "Host has stopped business execution",
+            ))
+        }
+    }
+    pub(crate) fn execution_allowed_owned(&self) -> bool {
+        self.execution_enabled.load(Ordering::SeqCst)
+    }
+    // Caller holds the Host boundary (and the registry acceptance boundary for
+    // a client request). Children only consume these lock-free fences.
+    pub(crate) fn set_host_lifecycle_owned(&self, lifecycle: HostLifecycle) {
+        let phase = match lifecycle {
+            HostLifecycle::Running => 0,
+            HostLifecycle::Draining => 1,
+            HostLifecycle::Starting | HostLifecycle::Stopping | HostLifecycle::Stopped => 2,
+        };
+        self.host_phase.store(phase, Ordering::SeqCst);
+        self.execution_enabled.store(phase < 2, Ordering::SeqCst);
     }
     pub(crate) fn read<T>(
         &self,
