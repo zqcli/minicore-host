@@ -10,9 +10,7 @@ use minicore_host_core::{
 };
 use minicore_host_protocol::{Fault, FaultKind, ReasoningPreference, SessionConfig};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_host_tools::{
-    AgentToolFactory, BoundLocalTools, CoreTurnPort, ScopeManager, ToolRegistry,
-};
+use minicore_host_tools::{BoundLocalTools, CoreTurnPort, ScopeManager, ToolRegistry};
 use minicore_host_workspace::Workspace;
 use minicore_runtime::{
     ExecutionConfig, LoopOptions, Text,
@@ -52,7 +50,7 @@ impl HostResourceBuilder {
     }
     pub fn builtins() -> Result<Self, Fault> {
         let mut tools = ToolRegistry::new();
-        tools.register(Arc::new(AgentToolFactory::new(ScopeManager::new())))?;
+        tools.register_agent_tool(ScopeManager::new())?;
         tools.register_local_tools()?;
         Ok(Self::new(Arc::new(tools)))
     }
@@ -225,7 +223,11 @@ impl ProductionResources {
             self.models[&config.model].clone(),
             reasoning(config.reasoning),
             selected,
-            Some(Arc::new(approval::Policy::new(config.execution.approval))),
+            Some(Arc::new(approval::Policy::new(
+                config.execution.approval,
+                self.tools.has_builtin_read(),
+                self.tools.has_builtin_agent(),
+            ))),
             prompt,
         )
         .map_err(|error| session_invalid(error.to_string()))?;

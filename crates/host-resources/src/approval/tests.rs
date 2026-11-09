@@ -47,7 +47,7 @@ async fn ordinary_and_external_tools_follow_the_three_mode_table() {
         ApprovalMode::Auto,
         ApprovalMode::ReadOnly,
     ] {
-        let policy = Policy::new(mode);
+        let policy = Policy::new(mode, true, true);
         for name in ["read", "write", "edit", "bash", "registered_external"] {
             assert_mode_decision(
                 mode,
@@ -134,7 +134,7 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
         ApprovalMode::Auto,
         ApprovalMode::ReadOnly,
     ] {
-        let policy = Policy::new(mode);
+        let policy = Policy::new(mode, true, true);
         for (arguments, read_only) in &actions {
             AgentAction::parse(arguments.clone()).expect("valid production dispatch branch");
             assert_mode_decision(
@@ -156,7 +156,7 @@ async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
         ApprovalMode::Auto,
         ApprovalMode::ReadOnly,
     ] {
-        let policy = Policy::new(mode);
+        let policy = Policy::new(mode, true, true);
         for arguments in [
             json!({"action":"unknown"}),
             json!({"action":"inspect"}),
@@ -180,7 +180,7 @@ async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
 
 #[tokio::test]
 async fn cancellation_and_deadline_are_checked_without_waiting_or_approving() {
-    let policy = Policy::new(ApprovalMode::Auto);
+    let policy = Policy::new(ApprovalMode::Auto, true, true);
     let mut cancelled = request("read", json!({}));
     cancelled.cancellation.cancel();
     cancelled.deadline = Instant::now() - Duration::from_millis(1);
@@ -196,7 +196,7 @@ async fn cancellation_and_deadline_are_checked_without_waiting_or_approving() {
 #[tokio::test]
 async fn approvals_do_not_cache_or_copy_arguments_into_prompts() {
     for _ in 0..2 {
-        let policy = Policy::new(ApprovalMode::Ask);
+        let policy = Policy::new(ApprovalMode::Ask, true, true);
         for _ in 0..2 {
             let decision = policy
                 .decide(request(
@@ -211,6 +211,31 @@ async fn approvals_do_not_cache_or_copy_arguments_into_prompts() {
             assert_eq!(request.prompt.as_str(), "Allow tool `write` for this call?");
             assert_eq!(request.risk, ApprovalRisk::Medium);
             assert!(!format!("{request:?}").contains("secret-fixture-content"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn external_names_cannot_claim_either_builtin_read_only_exemption() {
+    for mode in [
+        ApprovalMode::Ask,
+        ApprovalMode::Auto,
+        ApprovalMode::ReadOnly,
+    ] {
+        let policy = Policy::new(mode, false, false);
+        for (name, arguments) in [
+            ("read", json!({})),
+            ("agent", json!({"action":"wait","timeout_ms":0})),
+            (
+                "agent",
+                json!({"action":"inspect","target":{"kind":"session","agent_id":AgentId::new().unwrap(),"session_id":SessionId::new().unwrap()}}),
+            ),
+        ] {
+            assert_mode_decision(
+                mode,
+                policy.decide(request(name, arguments)).await.unwrap(),
+                false,
+            );
         }
     }
 }

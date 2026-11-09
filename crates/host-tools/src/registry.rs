@@ -36,12 +36,14 @@ pub struct ToolRegistry {
 }
 enum RegisteredTool {
     Factory(Arc<dyn ToolFactory>),
+    BuiltinAgent(AgentToolFactory),
     Local(ToolSpec),
 }
 impl RegisteredTool {
     fn spec(&self) -> &ToolSpec {
         match self {
             Self::Factory(factory) => factory.spec(),
+            Self::BuiltinAgent(factory) => factory.spec(),
             Self::Local(spec) => spec,
         }
     }
@@ -50,15 +52,24 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Register an external factory. A built-in name does not change its source.
     pub fn register(&mut self, factory: Arc<dyn ToolFactory>) -> Result<(), Fault> {
-        let name = factory.spec().name().as_str().to_owned();
+        self.insert(RegisteredTool::Factory(factory))
+    }
+    /// Register the actual compiled agent implementation, retaining that fact
+    /// separately from arbitrary factories with the same public name.
+    pub fn register_agent_tool(&mut self, scopes: Arc<ScopeManager>) -> Result<(), Fault> {
+        self.insert(RegisteredTool::BuiltinAgent(AgentToolFactory::new(scopes)))
+    }
+    fn insert(&mut self, entry: RegisteredTool) -> Result<(), Fault> {
+        let name = entry.spec().name().as_str().to_owned();
         if self.entries.contains_key(&name) {
             return Err(Fault::new(
                 FaultKind::SessionConfigInvalid,
                 format!("tool {name} is already registered"),
             ));
         }
-        self.entries.insert(name, RegisteredTool::Factory(factory));
+        self.entries.insert(name, entry);
         Ok(())
     }
     /// Register the compiled declarations, without enabling them in a Session.
@@ -78,6 +89,17 @@ impl ToolRegistry {
                 .insert(spec.name().as_str().to_owned(), RegisteredTool::Local(spec));
         }
         Ok(())
+    }
+    /// Source facts used by the production resolver's two built-in exemptions.
+    /// These are not inferred from a factory's name or declaration contents.
+    pub fn has_builtin_read(&self) -> bool {
+        matches!(self.entries.get("read"), Some(RegisteredTool::Local(_)))
+    }
+    pub fn has_builtin_agent(&self) -> bool {
+        matches!(
+            self.entries.get("agent"),
+            Some(RegisteredTool::BuiltinAgent(_))
+        )
     }
     pub fn requires_local(&self, selected: &[ToolBinding]) -> bool {
         selected.iter().any(|selection| {
@@ -124,6 +146,7 @@ impl ToolRegistry {
             })?;
             let tool = match entry {
                 RegisteredTool::Factory(factory) => factory.bind(Arc::clone(&port))?,
+                RegisteredTool::BuiltinAgent(factory) => factory.bind(Arc::clone(&port))?,
                 RegisteredTool::Local(_) => local
                     .and_then(|local| local.tool(&selection.name))
                     .ok_or_else(|| {
@@ -147,5 +170,59 @@ impl ToolRegistry {
         builder
             .build()
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    struct ExternalFixture(ToolSpec);
+    impl ToolFactory for ExternalFixture {
+        fn spec(&self) -> &ToolSpec {
+            &self.0
+        }
+        fn bind(&self, _: Arc<dyn TurnPort>) -> Result<Arc<dyn Tool>, Fault> {
+            unreachable!("source inspection does not bind or execute tools")
+        }
+    }
+    fn external(name: &str) -> Arc<dyn ToolFactory> {
+        Arc::new(ExternalFixture(
+            ToolSpec::new(
+                name.parse().unwrap(),
+                "external fixture",
+                json!({"type":"object"}),
+            )
+            .unwrap(),
+        ))
+    }
+
+    #[test]
+    fn builtin_source_facts_come_only_from_the_actual_registration_paths() {
+        let mut external_registry = ToolRegistry::new();
+        external_registry.register(external("read")).unwrap();
+        external_registry.register(external("agent")).unwrap();
+        assert!(!external_registry.has_builtin_read());
+        assert!(!external_registry.has_builtin_agent());
+        assert!(external_registry.register_local_tools().is_err());
+        assert!(
+            external_registry
+                .register_agent_tool(ScopeManager::new())
+                .is_err()
+        );
+        assert!(!external_registry.has_builtin_read());
+        assert!(!external_registry.has_builtin_agent());
+        assert_eq!(external_registry.specs().len(), 2);
+
+        let mut builtins = ToolRegistry::new();
+        builtins.register_local_tools().unwrap();
+        builtins.register_agent_tool(ScopeManager::new()).unwrap();
+        assert!(builtins.has_builtin_read());
+        assert!(builtins.has_builtin_agent());
+        assert!(builtins.register(external("read")).is_err());
+        assert!(builtins.register(external("agent")).is_err());
+        assert!(builtins.has_builtin_read());
+        assert!(builtins.has_builtin_agent());
     }
 }

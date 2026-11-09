@@ -29,6 +29,7 @@ use support::*;
 struct RegisteredExternalFixture {
     spec: ToolSpec,
     executions: Arc<AtomicUsize>,
+    side_effect: std::path::PathBuf,
 }
 impl ToolFactory for RegisteredExternalFixture {
     fn spec(&self) -> &ToolSpec {
@@ -43,6 +44,7 @@ impl Tool for RegisteredExternalFixture {
         &self.spec
     }
     fn execute(&self, _: ToolInvocation, _: ToolContext) -> ToolFuture<'_> {
+        std::fs::write(&self.side_effect, "actual external tool side effect").unwrap();
         self.executions.fetch_add(1, Ordering::AcqRel);
         Box::pin(async {
             Ok(ToolExecutionOutcome::Completed(
@@ -67,36 +69,41 @@ async fn pending(host: &Host, caller: &CallerContext, target: &SessionRef) -> Se
     .expect("actual Runtime approval waiting point")
 }
 
-async fn external_scenario(mode: ApprovalMode, decision: ApprovalAnswer) {
+async fn external_scenario(name: &str, mode: ApprovalMode, decision: ApprovalAnswer) {
+    let directory = tempfile::tempdir().unwrap();
+    let side_effect = directory.path().join("external-effect");
     let executions = Arc::new(AtomicUsize::new(0));
     let mut registry = ToolRegistry::new();
     registry
         .register(Arc::new(RegisteredExternalFixture {
             spec: ToolSpec::new(
-                "registered_external".parse().unwrap(),
+                name.parse().unwrap(),
                 "Registered external test fixture with an execution counter",
-                json!({"type":"object","properties":{},"additionalProperties":false}),
+                json!({"type":"object","additionalProperties":true}),
             )
             .unwrap(),
             executions: executions.clone(),
+            side_effect: side_effect.clone(),
         }))
         .unwrap();
     let builder = HostResourceBuilder::new(Arc::new(registry));
+    let arguments = if name == "agent" {
+        json!({"action":"wait","timeout_ms":0})
+    } else {
+        json!({})
+    };
     let final_gate = Arc::new(tokio::sync::Semaphore::new(0));
     let mut server = Server::start(vec![
-        (
-            tool_answer("external-call", "registered_external", json!({})),
-            None,
-        ),
+        (tool_answer("external-call", name, arguments), None),
         (answer("external call settled"), Some(final_gate.clone())),
     ])
     .await;
     let mut host_config = config(&server.endpoint);
-    host_config.tools = selection(&["registered_external"]);
+    host_config.tools = selection(&[name]);
     let host = Host::memory_configured(prepare(&builder, host_config).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let mut create = request(selection(&["registered_external"]), None);
+    let mut create = request(selection(&[name]), None);
     create.config.session_defaults.execution.approval = mode;
     let receipt = host.create_agent(&caller, create).unwrap();
     let target = SessionRef {
@@ -105,13 +112,14 @@ async fn external_scenario(mode: ApprovalMode, decision: ApprovalAnswer) {
     };
     send(&host, &caller, &target, "call registered fixture");
     let first = server.request().await;
-    assert_eq!(first["tools"][0]["function"]["name"], "registered_external");
+    assert_eq!(first["tools"][0]["function"]["name"], name);
     if mode == ApprovalMode::Ask {
         let snapshot = pending(&host, &caller, &target).await;
         assert_eq!(executions.load(Ordering::Acquire), 0);
         let waiting = &snapshot.data.pending_interactions[0];
         assert_eq!(waiting.tool_call_id.0, "external-call");
-        assert_eq!(waiting.name, "registered_external");
+        assert_eq!(waiting.name, name);
+        assert!(!side_effect.exists());
         assert!(matches!(
             waiting.request,
             InteractionRequestData::Approval { .. }
@@ -176,6 +184,13 @@ async fn external_scenario(mode: ApprovalMode, decision: ApprovalAnswer) {
     let allowed = mode == ApprovalMode::Auto
         || (mode == ApprovalMode::Ask && decision == ApprovalAnswer::AllowOnce);
     assert_eq!(executions.load(Ordering::Acquire), usize::from(allowed));
+    assert_eq!(side_effect.exists(), allowed);
+    if allowed {
+        assert_eq!(
+            std::fs::read(&side_effect).unwrap(),
+            b"actual external tool side effect"
+        );
+    }
     let history = host.history(&caller, &target).unwrap();
     let result = history
         .iter()
@@ -213,17 +228,58 @@ async fn external_scenario(mode: ApprovalMode, decision: ApprovalAnswer) {
 
 #[tokio::test]
 async fn registered_external_ask_preserves_original_identity_and_waits_for_allow_once() {
-    external_scenario(ApprovalMode::Ask, ApprovalAnswer::AllowOnce).await;
+    external_scenario(
+        "registered_external",
+        ApprovalMode::Ask,
+        ApprovalAnswer::AllowOnce,
+    )
+    .await;
 }
 #[tokio::test]
 async fn registered_external_ask_deny_does_not_execute() {
-    external_scenario(ApprovalMode::Ask, ApprovalAnswer::Deny).await;
+    external_scenario(
+        "registered_external",
+        ApprovalMode::Ask,
+        ApprovalAnswer::Deny,
+    )
+    .await;
 }
 #[tokio::test]
 async fn registered_external_read_only_does_not_execute() {
-    external_scenario(ApprovalMode::ReadOnly, ApprovalAnswer::AllowOnce).await;
+    external_scenario(
+        "registered_external",
+        ApprovalMode::ReadOnly,
+        ApprovalAnswer::AllowOnce,
+    )
+    .await;
 }
 #[tokio::test]
 async fn registered_external_explicit_auto_executes() {
-    external_scenario(ApprovalMode::Auto, ApprovalAnswer::AllowOnce).await;
+    external_scenario(
+        "registered_external",
+        ApprovalMode::Auto,
+        ApprovalAnswer::AllowOnce,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn external_factory_named_read_keeps_mutating_semantics_in_every_mode() {
+    for mode in [
+        ApprovalMode::ReadOnly,
+        ApprovalMode::Ask,
+        ApprovalMode::Auto,
+    ] {
+        external_scenario("read", mode, ApprovalAnswer::AllowOnce).await;
+    }
+}
+#[tokio::test]
+async fn external_factory_named_agent_keeps_mutating_semantics_in_every_mode() {
+    for mode in [
+        ApprovalMode::ReadOnly,
+        ApprovalMode::Ask,
+        ApprovalMode::Auto,
+    ] {
+        external_scenario("agent", mode, ApprovalAnswer::AllowOnce).await;
+    }
 }

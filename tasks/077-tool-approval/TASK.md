@@ -46,3 +46,20 @@ With `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shared/cargo
 - Formatting and whitespace checks pass. SPEC and Cargo.lock remain unchanged (lock SHA-256 `1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125`).
 
 Independent task078 review then reproduced an external factory named `read` bypassing Ask/ReadOnly via the name-only read exemption. This is a genuine conflict with conservative external-tool classification, not an OS sandbox claim. The initial passing scoped gate is retained; the issue remains open until the registry provenance correction and its probes pass. The analogous external `agent` name is included in that correction. No full workspace or release acceptance is claimed from this scoped gate.
+
+### External-name provenance correction
+
+The narrow correction retains `ToolRegistry`'s existing Local/Factory source and
+adds only a private `BuiltinAgent(AgentToolFactory)` variant with a dedicated
+`register_agent_tool(scopes)` constructor. Generic factories remain external,
+including those named `read` or `agent`. The resolver copies two source booleans
+into the immutable Turn policy. Only the actual local read implementation and
+actual built-in agent Inspect/Wait branches receive read-only exemptions. There
+is no per-tool permission metadata, sandbox, dynamic trust registry or changed
+AgentAction dispatch contract.
+
+- At source `e7041e7` before the production correction, `cargo test -p minicore-host-resources --test tool_approval external_factory_named --locked --offline` failed both new real-resource probes in their ReadOnly cases: external `read` and external `agent` (with a valid wait action) each executed once instead of zero and wrote the fixture's real side-effect file. This independently reproduces the same class as task078's external-read finding; it does not overwrite task078's original binary/extension evidence.
+- After correction, `cargo test -p minicore-host-resources -p minicore-host-tools -p minicore-host --lib --test tool_approval --locked --offline` passed **24** cases. Both named external probes now verify all three modes against actual execute counts and disk bytes: no execution/file before Ask permission, one execution after AllowOnce, no execution under ReadOnly, and normal execution under Auto. Original normal external-tool and six binary acceptance cases remain green. Source-registration and policy tests also cover external Inspect, duplicate rejection and preservation of actual built-in source facts.
+- This fixes normal registered-tool classification consistency. Trusted Rust factories can still run arbitrary code in their own bind/execute implementations; neither this change nor ReadOnly claims isolation of malicious Rust modules.
+
+The parent coordinates independent re-review, combined gates and publication.

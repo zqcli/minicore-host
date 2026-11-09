@@ -14,6 +14,9 @@ const INVALID_CALL_DENIAL: &str = "tool is not allowed by policy";
 
 pub(crate) struct Policy {
     mode: ApprovalMode,
+    // Registry source facts are copied once with the original Turn binding.
+    builtin_read: bool,
+    builtin_agent: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -23,8 +26,12 @@ enum ToolClass {
 }
 
 impl Policy {
-    pub(crate) fn new(mode: ApprovalMode) -> Self {
-        Self { mode }
+    pub(crate) fn new(mode: ApprovalMode, builtin_read: bool, builtin_agent: bool) -> Self {
+        Self {
+            mode,
+            builtin_read,
+            builtin_agent,
+        }
     }
 
     fn decide_now(&self, request: &ToolPolicyRequest) -> Result<ToolDecision, ToolPolicyError> {
@@ -37,7 +44,7 @@ impl Policy {
         if request.invocation.tool_name() != request.spec.name() {
             return deny(INVALID_CALL_DENIAL);
         }
-        let Some(class) = classify(request) else {
+        let Some(class) = self.classify(request) else {
             return deny(INVALID_CALL_DENIAL);
         };
         match (self.mode, class) {
@@ -54,31 +61,32 @@ impl Policy {
             }
         }
     }
+    fn classify(&self, request: &ToolPolicyRequest) -> Option<ToolClass> {
+        match request.invocation.tool_name().as_str() {
+            "read" if self.builtin_read => Some(ToolClass::ReadOnly),
+            "write" | "edit" | "bash" => Some(ToolClass::Mutating),
+            // Use the same parser and validation as dispatch, not an unchecked
+            // action string that might conceal a mutating or invalid branch.
+            "agent" if self.builtin_agent => {
+                match AgentAction::parse(request.invocation.arguments().clone()).ok()? {
+                    AgentAction::Inspect(_) | AgentAction::Wait(_) => Some(ToolClass::ReadOnly),
+                    AgentAction::Create(_)
+                    | AgentAction::Send(_)
+                    | AgentAction::Update(_)
+                    | AgentAction::Control(_) => Some(ToolClass::Mutating),
+                }
+            }
+            // Runtime resolves a selected registered tool before invoking policy.
+            // External effects are unknown, so treat them conservatively as
+            // mutating rather than silently trusting a read-only declaration.
+            _ => Some(ToolClass::Mutating),
+        }
+    }
 }
 
 impl ToolPolicy for Policy {
     fn decide(&self, request: ToolPolicyRequest) -> ToolPolicyFuture<'_> {
         Box::pin(std::future::ready(self.decide_now(&request)))
-    }
-}
-
-fn classify(request: &ToolPolicyRequest) -> Option<ToolClass> {
-    match request.invocation.tool_name().as_str() {
-        "read" => Some(ToolClass::ReadOnly),
-        "write" | "edit" | "bash" => Some(ToolClass::Mutating),
-        // Use the same parser and validation as dispatch, not an unchecked
-        // action string that might conceal a mutating or invalid branch.
-        "agent" => match AgentAction::parse(request.invocation.arguments().clone()).ok()? {
-            AgentAction::Inspect(_) | AgentAction::Wait(_) => Some(ToolClass::ReadOnly),
-            AgentAction::Create(_)
-            | AgentAction::Send(_)
-            | AgentAction::Update(_)
-            | AgentAction::Control(_) => Some(ToolClass::Mutating),
-        },
-        // Runtime resolves a selected registered tool before invoking policy.
-        // External effects are unknown, so treat them conservatively as
-        // mutating rather than silently trusting a read-only declaration.
-        _ => Some(ToolClass::Mutating),
     }
 }
 
