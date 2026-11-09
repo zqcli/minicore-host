@@ -77,9 +77,52 @@ regression also checks real JSONL output and that child exit cannot unlock the
 next writer's independent lease. The subprocess stdout-isolation test now
 includes an injected release error.
 
-## Status and next steps
+## Final fixed-code verification
 
-Focused checks are green. Run repetitions and the full fixed-code workspace
-gate, then obtain independent review before parent integration.
+Implementation checkpoint: `8fc7db845c642507941c339eb67c83ae6f35a7a6`.
+The final evidence commit changes only this task record.
+
+Environment: `RUSTUP_HOME=/workspace/shared/rustup`,
+`CARGO_HOME=/workspace/shared/cargo`, Cargo bin prepended to `PATH`,
+`TMPDIR=/workspace/shared/minicore-host-tmp`, `CARGO_BUILD_JOBS=2`,
+`CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0`,
+`CARGO_INCREMENTAL=0`, and
+`CARGO_TARGET_DIR=/workspace/shared/minicore-host-diagnostic-lease-release-target`.
+The committed lockfile was retained throughout.
+
+At the implementation checkpoint:
+
+- The original parallel `file_lease` suite passed **500/500** repetitions,
+  including the real process exclusion/reopen and FIFO timeout cases. This is
+  the same suite that failed 26/100 before the fix, with no harness serialization.
+- The deterministic live-child inherited-descriptor regression passed
+  **100/100** repetitions. These are repeated executions, not extra test cases.
+- `./scripts/check.sh` passed in full: historical/uncommitted whitespace,
+  formatting, workspace all-target strict Clippy, workspace all-target tests,
+  workspace doctests, and strict no-deps rustdoc.
+- `cargo test --workspace --all-targets --locked -- --list` listed **652 unique
+  unit/integration cases**. Nested child probe execution is not counted again.
+  Workspace doctests passed **4** cases; diagnostics contributes 21 cases and
+  one doctest to these totals.
+- `git diff --check` passed. SPEC retains its original SHA-256, and no shared
+  manifest, lockfile, Runtime, TUI, or non-diagnostics source changed.
+
+Evidence logs:
+
+- `/workspace/shared/diagnostic-lease-green-repeat.log`
+- `/workspace/shared/diagnostic-lease-full-gate.log` (starts with fixed source SHA)
+- `/workspace/shared/diagnostic-lease-test-list.log`
+
+## Limits and next steps
+
+Implementation and this task's full gate are complete. Independent review and
+parent integration, including a new gate on the combined source, remain pending.
+The parent owns the aggregate PROJECT record. Nothing was pushed.
+
+The inherited-OFD proof/regression is Linux-specific; this run does not claim
+Windows/macOS validation. Unlock failure behavior uses an explicitly injected
+private release error, not a claimed real filesystem failure. Existing tests
+exercise real processes, files, aliases, and FIFO blocking, but do not establish
+live external-provider or TUI integration.
 No storage correction is included. A separately reported storage HistoryInUse
 failure uses a similar primitive but needs its own ownership proof and fix.
