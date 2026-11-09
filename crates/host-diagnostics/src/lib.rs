@@ -34,7 +34,12 @@ mod subscriber;
 pub use backend::{Guard, Health, LoggingState, LoggingStatus, ShutdownOutcome};
 pub use record::{Context, EventData, EventSpec, LogScalar, LogValue, Scope};
 
-use std::{fmt, fs::OpenOptions, io, path::PathBuf};
+use std::{
+    fmt,
+    fs::{File, OpenOptions},
+    io,
+    path::PathBuf,
+};
 use tracing::{Dispatch, Level};
 use tracing_subscriber::prelude::*;
 
@@ -115,13 +120,7 @@ pub fn prepare(options: Options) -> Result<(Dispatch, Guard), InitError> {
                 .append(true)
                 .open(path)
                 .map_err(|error| InitError::OpenOutput(error.kind()))?;
-            writer.try_lock().map_err(|error| {
-                InitError::LockOutput(match error {
-                    std::fs::TryLockError::WouldBlock => io::ErrorKind::WouldBlock,
-                    std::fs::TryLockError::Error(error) => error.kind(),
-                })
-            })?;
-            prepare_writer(options, writer)
+            prepare_file(options, writer)
         }
     }
 }
@@ -133,6 +132,16 @@ pub fn install(options: Options) -> Result<Guard, InitError> {
     tracing::dispatcher::set_global_default(dispatch)
         .map_err(|_| InitError::SubscriberAlreadyInstalled)?;
     Ok(guard)
+}
+
+fn prepare_file(options: Options, writer: File) -> Result<(Dispatch, Guard), InitError> {
+    writer.try_lock().map_err(|error| {
+        InitError::LockOutput(match error {
+            std::fs::TryLockError::WouldBlock => io::ErrorKind::WouldBlock,
+            std::fs::TryLockError::Error(error) => error.kind(),
+        })
+    })?;
+    prepare_writer(options, writer)
 }
 
 fn prepare_writer(
