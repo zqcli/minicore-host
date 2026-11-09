@@ -26,8 +26,14 @@ impl SessionController {
             enabled,
         );
         let mutable = Arc::get_mut(&mut owner).expect("new unpublished Session");
-        mutable.root_lease = Some(Arc::new(store.clone()));
-        mutable.store = Some(store);
+        *mutable
+            .root_lease
+            .get_mut()
+            .expect("Session lease mutex poisoned") = Some(Arc::new(store.clone()));
+        *mutable
+            .store
+            .get_mut()
+            .expect("Session store mutex poisoned") = Some(store);
         mutable.provenance = Some(record.clone());
         let state = mutable.state.get_mut().expect("Session mutex poisoned");
         state.record_base = Some(record.clone());
@@ -61,9 +67,11 @@ impl SessionController {
         self
     }
     pub(crate) fn hold_root(mut self: Arc<Self>, lease: Option<Arc<dyn Send + Sync>>) -> Arc<Self> {
-        Arc::get_mut(&mut self)
+        *Arc::get_mut(&mut self)
             .expect("unpublished Session")
-            .root_lease = lease;
+            .root_lease
+            .get_mut()
+            .expect("Session lease mutex poisoned") = lease;
         self
     }
 }

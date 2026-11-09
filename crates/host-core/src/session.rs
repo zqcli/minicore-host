@@ -4,7 +4,10 @@ use futures_util::FutureExt;
 use minicore_host_protocol::*;
 use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 
+mod history;
 mod metadata;
+mod retirement;
+pub(crate) use retirement::SessionShutdownStatus;
 mod persistent;
 use minicore_runtime::{
     AgentLoop, BoundedText, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory,
@@ -16,7 +19,7 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::sync::{
-    Arc, Mutex,
+    Arc, Mutex, Weak,
     atomic::{AtomicBool, Ordering},
 };
 use tokio::sync::{Notify, watch};
@@ -24,6 +27,7 @@ use tokio::sync::{Notify, watch};
 /// A connection-scoped state subscription. It never exposes a raw watch handle
 /// that could keep receiving private state after that connection is revoked.
 pub struct SessionSubscription {
+    owner: Weak<SessionController>,
     snapshots: watch::Receiver<SessionSnapshot>,
     revocation: watch::Receiver<bool>,
     access: Arc<ConnectionRegistry>,
@@ -31,16 +35,23 @@ pub struct SessionSubscription {
 }
 impl SessionSubscription {
     pub fn snapshot(&self) -> Result<SessionSnapshot, Fault> {
-        self.access
-            .read(&self.caller, || Ok(self.snapshots.borrow().clone()))
+        self.access.read(&self.caller, || {
+            self.owner
+                .upgrade()
+                .ok_or_else(|| {
+                    Fault::new(FaultKind::AgentSessionNotFound, "Session was reclaimed")
+                })?
+                .ensure_visible()?;
+            Ok(self.snapshots.borrow().clone())
+        })
     }
     pub async fn changed(&mut self) -> Result<(), Fault> {
-        self.access.read(&self.caller, || Ok(()))?;
+        self.snapshot()?;
         tokio::select! {
             _ = self.revocation.changed() => Err(Fault::new(FaultKind::HostAccessInvalid, "subscription connection is no longer valid")),
             changed = self.snapshots.changed() => {
                 changed.map_err(|_| Fault::new(FaultKind::SessionLifecycleClosed, "state subscription owner has ended"))?;
-                self.access.read(&self.caller, || Ok(()))
+                self.snapshot().map(|_| ())
             }
         }
     }
@@ -73,6 +84,22 @@ pub trait HistoryBackend: Send + Sync + 'static {
     fn mode(&self) -> StorageMode;
     fn load(&self) -> LoadFuture<'_>;
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
+    /// Explicitly continue only the original retained append. Never reload,
+    /// accept another batch, or infer confirmation from readable bytes.
+    fn reconcile(&self) -> SaveFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryWriteFailed,
+                "this history backend cannot reconcile the original save",
+            ))
+        })
+    }
+    /// Called by a fenced owner after actual workers have returned. Implementors
+    /// retaining external storage handles must release them here, not merely
+    /// publish a persisted acknowledgement.
+    fn release(&self) -> SaveFuture<'_> {
+        Box::pin(async { Ok(PersistenceState::NotApplicable) })
+    }
 }
 pub struct MemoryHistory;
 impl HistoryBackend for MemoryHistory {
@@ -115,6 +142,8 @@ struct ActiveTurn {
     start_history: usize,
     partials: Vec<PartialResult>,
     report: Option<Arc<LoopReport>>,
+    partial_accepted: bool,
+    terminal_accepted: bool,
 }
 struct SessionState {
     info: SessionInfo,
@@ -139,6 +168,13 @@ struct SessionState {
     history_loaded: bool,
     preparing: bool,
     saving: bool,
+    history_work: Option<history::HistorySaveWork>,
+    history_task: Option<tokio::task::JoinHandle<()>>,
+    host_draining: bool,
+    host_stopping: bool,
+    releasing: bool,
+    released: bool,
+    reclaimed: bool,
     block_reason: Option<Fault>,
     executor: Option<tokio::runtime::Handle>,
     driver_running: bool,
@@ -156,11 +192,11 @@ pub(crate) struct SessionController {
     host_id: HostId,
     incarnation: HostIncarnation,
     access: Arc<ConnectionRegistry>,
-    resources: Arc<dyn ResourceResolver>,
+    resources: Mutex<Option<Arc<dyn ResourceResolver>>>,
     backend: Arc<dyn HistoryBackend>,
     state: Mutex<SessionState>,
-    store: Option<SessionStore>,
-    root_lease: Option<Arc<dyn Send + Sync>>,
+    store: Mutex<Option<SessionStore>>,
+    root_lease: Mutex<Option<Arc<dyn Send + Sync>>>,
     // A completion notification carries no parent state or mutation authority.
     parent_changed: Option<Arc<Notify>>,
     provenance: Option<SessionRecord>,
@@ -213,6 +249,13 @@ impl SessionController {
             history_loaded: backend.mode() == StorageMode::Memory,
             preparing: false,
             saving: false,
+            history_work: None,
+            history_task: None,
+            host_draining: false,
+            host_stopping: false,
+            releasing: false,
+            released: false,
+            reclaimed: false,
             block_reason: None,
             executor: tokio::runtime::Handle::try_current().ok(),
             driver_running: false,
@@ -231,10 +274,10 @@ impl SessionController {
             host_id,
             incarnation,
             access,
-            resources,
+            resources: Mutex::new(Some(resources)),
             backend,
-            store: None,
-            root_lease: None,
+            store: Mutex::new(None),
+            root_lease: Mutex::new(None),
             parent_changed: None,
             provenance: None,
             state: Mutex::new(state),
@@ -309,7 +352,23 @@ impl SessionController {
             parent_changed.notify_waiters();
         }
     }
+    fn available(state: &SessionState) -> Result<(), Fault> {
+        if state.reclaimed {
+            return Err(Fault::new(
+                FaultKind::AgentSessionNotFound,
+                "memory Session was reclaimed",
+            ));
+        }
+        if state.releasing || state.released {
+            return Err(Fault::new(
+                FaultKind::HostLifecycleUnavailable,
+                "Session resources were retired",
+            ));
+        }
+        Ok(())
+    }
     fn open(state: &SessionState) -> Result<(), Fault> {
+        Self::available(state)?;
         match state.lifecycle {
             SessionLifecycle::Open => Ok(()),
             SessionLifecycle::Closing => Err(Fault::new(
@@ -322,7 +381,15 @@ impl SessionController {
             )),
         }
     }
-    fn schedulable(state: &SessionState) -> bool {
+    fn schedulable(&self, state: &SessionState) -> bool {
+        if !self.access.execution_allowed_owned()
+            || state.host_stopping
+            || state.releasing
+            || state.released
+            || state.reclaimed
+        {
+            return false;
+        }
         state.lifecycle == SessionLifecycle::Open
             && !state.paused
             && !state.failure_paused
@@ -334,6 +401,7 @@ impl SessionController {
     }
     pub(crate) fn info(&self, caller: &CallerContext) -> Result<SessionInfo, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             Ok(self
                 .state
                 .lock()
@@ -343,15 +411,19 @@ impl SessionController {
         })
     }
     pub(crate) fn snapshot(&self, caller: &CallerContext) -> Result<SessionSnapshot, Fault> {
-        self.access
-            .read(caller, || Ok(self.snapshots.borrow().clone()))
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            Ok(self.snapshots.borrow().clone())
+        })
     }
     pub(crate) fn subscribe_state(
-        &self,
+        self: &Arc<Self>,
         caller: &CallerContext,
     ) -> Result<SessionSubscription, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             Ok(SessionSubscription {
+                owner: Arc::downgrade(self),
                 snapshots: self.snapshots.subscribe(),
                 revocation: caller.revocation(),
                 access: Arc::clone(&self.access),
@@ -365,6 +437,7 @@ impl SessionController {
         id: &MessageId,
     ) -> Result<MessageRecord, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             self.state
                 .lock()
                 .expect("Session mutex poisoned")
@@ -383,6 +456,7 @@ impl SessionController {
     }
     pub(crate) fn history(&self, caller: &CallerContext) -> Result<Vec<HistoryItem>, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             let state = self.state.lock().expect("Session mutex poisoned");
             if !state.history_loaded {
                 return Err(Fault::new(
@@ -400,13 +474,14 @@ impl SessionController {
         message: MessageInput,
     ) -> Result<MessageAccepted, Fault> {
         self.ensure_executor()?;
+        self.access.ensure_execution_owned()?;
         let runtime = UserInput::text(&message.text).map_err(|_| {
             Fault::new(
                 FaultKind::SessionInputInvalid,
                 "input is empty or exceeds the pinned Runtime's structural text limit",
             )
         })?;
-        let receipt = self.access.accept(caller, || {
+        let receipt = self.access.accept_business(caller, || {
             self.accept_message(message, runtime, MessageSource::User)
         })?;
         self.wake();
@@ -418,6 +493,7 @@ impl SessionController {
         message: MessageInput,
     ) -> Result<MessageAccepted, Fault> {
         self.ensure_executor()?;
+        self.access.ensure_execution_owned()?;
         let runtime = UserInput::text(&message.text).map_err(|_| {
             Fault::new(
                 FaultKind::SessionInputInvalid,
@@ -436,6 +512,13 @@ impl SessionController {
     ) -> Result<MessageAccepted, Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         Self::open(&state)?;
+        self.access.ensure_execution_owned()?;
+        if state.host_stopping {
+            return Err(Fault::new(
+                FaultKind::HostLifecycleUnavailable,
+                "Session is stopping",
+            ));
+        }
         if !state.agent_enabled.load(Ordering::SeqCst) {
             return Err(Fault::new(
                 FaultKind::AgentLifecycleUnavailable,
@@ -514,6 +597,19 @@ impl SessionController {
         })
     }
     pub(crate) fn resume(self: &Arc<Self>, caller: &CallerContext) -> Result<(), Fault> {
+        self.ensure_executor()?;
+        let continuing = self.access.accept(caller, || {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.history_work.is_some() {
+                self.start_history_continuation(&mut state, true)?;
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })?;
+        if continuing {
+            return Ok(());
+        }
         let reload = {
             let state = self.state.lock().expect("Session mutex poisoned");
             state.info.mode == StorageMode::Persistent
@@ -526,7 +622,7 @@ impl SessionController {
         if reload {
             return self.load(caller, true);
         }
-        self.access.accept(caller, || {
+        self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             if let Some(fault) = &state.block_reason {
@@ -557,8 +653,8 @@ impl SessionController {
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.resources.validate(&candidate)?;
-        let updated = self.access.accept(caller, || {
+        self.resources_owned()?.validate(&candidate)?;
+        let updated = self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             if state.info.mode == StorageMode::Persistent {
@@ -600,6 +696,7 @@ impl SessionController {
     ) -> Result<(), Fault> {
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            Self::available(&state)?;
             let position = state
                 .next_step
                 .iter()
@@ -644,6 +741,7 @@ impl SessionController {
     ) -> Result<CancelResult, Fault> {
         let (result, handle) = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            Self::available(&state)?;
             let mut handle = None;
             let status = match state.active.as_mut() {
                 Some(active) if target.is_none_or(|id| id == &active.info.id) => {
@@ -676,6 +774,7 @@ impl SessionController {
     }
     pub(super) fn close_owned(&self) -> Result<Option<LoopHandle>, Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        Self::available(&state)?;
         if state.lifecycle == SessionLifecycle::Closed {
             return Ok(None);
         }
@@ -704,6 +803,7 @@ impl SessionController {
     pub(crate) fn unload(&self, caller: &CallerContext) -> Result<(), Fault> {
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            Self::available(&state)?;
             Self::open(&state)?;
             if state.active.is_some()
                 || state.preparing
@@ -732,7 +832,9 @@ impl SessionController {
         state.active.is_none()
             && !state.preparing
             && !state.saving
-            && !state.record_work.as_ref().is_some_and(|work| work.running)
+            && !state.driver_running
+            && state.history_work.is_none()
+            && state.record_work.is_none()
     }
     pub(crate) async fn wait_quiescent_owned(&self) {
         let mut snapshots = self.snapshots.subscribe();
@@ -748,6 +850,9 @@ impl SessionController {
     pub(crate) fn set_agent_enabled(self: &Arc<Self>, enabled: bool) {
         let handle = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.releasing || state.released || state.reclaimed {
+                return;
+            }
             let handle = if !enabled {
                 state.active.as_mut().and_then(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
@@ -772,6 +877,7 @@ impl SessionController {
     }
     pub(crate) fn turn_info(&self, caller: &CallerContext, id: &TurnId) -> Result<TurnInfo, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             let state = self.state.lock().expect("Session mutex poisoned");
             state
                 .active
@@ -789,6 +895,7 @@ impl SessionController {
     }
     pub(crate) fn turns(&self, caller: &CallerContext) -> Result<Vec<TurnInfo>, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             let state = self.state.lock().expect("Session mutex poisoned");
             let mut turns = state
                 .completion_order
@@ -807,6 +914,7 @@ impl SessionController {
         id: &TurnId,
     ) -> Result<TurnResult, Fault> {
         self.access.read(caller, || {
+            self.ensure_visible()?;
             self.state
                 .lock()
                 .expect("Session mutex poisoned")
@@ -861,7 +969,7 @@ impl SessionController {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.driver_running
             || state.preparing
-            || !Self::schedulable(&state)
+            || !self.schedulable(&state)
             || (state.next_step.is_empty() && state.next_turn.is_empty())
         {
             return;
@@ -876,7 +984,11 @@ impl SessionController {
         state.executor = Some(executor.clone());
         state.driver_running = true;
         let owner = Arc::clone(self);
+        let previous = state.driver_task.take();
         state.driver_task = Some(executor.spawn(async move {
+            if let Some(previous) = previous {
+                let _ = previous.await;
+            }
             owner.drive().await;
         }));
     }
@@ -884,7 +996,7 @@ impl SessionController {
         loop {
             let preparation = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
-                if !Self::schedulable(&state)
+                if !self.schedulable(&state)
                     || state.preparing
                     || state.active.is_some()
                     || (state.next_step.is_empty() && state.next_turn.is_empty())
@@ -901,7 +1013,7 @@ impl SessionController {
                         self.publish(&mut state);
                     }
                     state.driver_running = false;
-                    state.driver_task.take();
+                    self.publish(&mut state);
                     return;
                 }
                 state.preparing = true;
@@ -940,16 +1052,15 @@ impl SessionController {
                     }
                 }
             }
-            let resources =
-                AssertUnwindSafe(async { self.resources.resolve(&preparation.0).await })
-                    .catch_unwind()
-                    .await
-                    .unwrap_or_else(|_| {
-                        Err(Fault::new(
-                            FaultKind::SessionInternalUnexpected,
-                            "resource preparation panicked; accepted inputs remain queued",
-                        ))
-                    });
+            let resources = AssertUnwindSafe(self.prepare_resources(&preparation.0))
+                .catch_unwind()
+                .await
+                .unwrap_or_else(|_| {
+                    Err(Fault::new(
+                        FaultKind::SessionInternalUnexpected,
+                        "resource preparation panicked; accepted inputs remain queued",
+                    ))
+                });
             let resources = match resources {
                 Ok(resources) => resources,
                 Err(fault) => {
@@ -960,7 +1071,6 @@ impl SessionController {
                     }
                     state.block_reason = Some(fault);
                     state.driver_running = false;
-                    state.driver_task.take();
                     if state.lifecycle == SessionLifecycle::Closing
                         && state.info.mode == StorageMode::Memory
                     {
@@ -993,7 +1103,7 @@ impl SessionController {
             let batch = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 state.preparing = false;
-                if !Self::schedulable(&state) || state.info.config_revision != preparation.1 {
+                if !self.schedulable(&state) || state.info.config_revision != preparation.1 {
                     self.publish(&mut state);
                     continue;
                 }
@@ -1030,6 +1140,8 @@ impl SessionController {
                     start_history,
                     partials: Vec::new(),
                     report: None,
+                    partial_accepted: false,
+                    terminal_accepted: false,
                 });
                 self.publish(&mut state);
                 batch
@@ -1046,7 +1158,6 @@ impl SessionController {
         }
         state.block_reason = Some(fault);
         state.driver_running = false;
-        state.driver_task.take();
         self.publish(&mut state);
     }
     async fn run_turn(
@@ -1065,7 +1176,10 @@ impl SessionController {
                 else {
                     return;
                 };
-                if active.info.state == TurnState::Cancelling {
+                if active.info.state == TurnState::Cancelling
+                    || state.host_stopping
+                    || !self.access.execution_allowed_owned()
+                {
                     None
                 } else {
                     let history: Arc<[HistoryItem]> = state.history.clone().into();
@@ -1083,6 +1197,7 @@ impl SessionController {
                     options.history = Some(callback);
                     let active = state.active.as_mut().expect("checked active Turn");
                     active.report = None;
+                    active.partial_accepted = false;
                     active.bound_pending.push_back(first.clone());
                     active.bound_pending.extend(batch.drain(..));
                     active.accepted = 0;
@@ -1148,6 +1263,7 @@ impl SessionController {
                 active.info.requests += u64::from(report.requests);
                 active.info.tool_rounds += report.tool_rounds;
                 active.report = Some(Arc::clone(&report));
+                active.handle = None;
             }
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
@@ -1166,18 +1282,24 @@ impl SessionController {
                         _ => None,
                     };
                     active.info.outcome = Some(match report.outcome {
+                        LoopOutcome::Completed if active.info.state == TurnState::Cancelling => {
+                            TurnOutcome::Cancelled
+                        }
                         LoopOutcome::Completed => TurnOutcome::Completed,
                         LoopOutcome::Cancelled(_) => TurnOutcome::Cancelled,
                         _ => TurnOutcome::Failed,
                     });
                     active.info.state = TurnState::Finalizing;
+                    if active.info.outcome == Some(TurnOutcome::Failed) {
+                        state.failure_paused = true;
+                    }
                 }
                 self.publish(&mut state);
                 return;
             }
             let next = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
-                let schedulable = Self::schedulable(&state);
+                let schedulable = self.schedulable(&state);
                 let active = state.active.as_mut().expect("owned active Turn");
                 active.handle = None;
                 active.response_base += u64::from(report.requests);
@@ -1197,9 +1319,11 @@ impl SessionController {
                         }
                         LoopOutcome::Completed => (TurnOutcome::Completed, None),
                         LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
-                        LoopOutcome::Failed(failure) => {
-                            (TurnOutcome::Failed, Some(runtime_fault(failure)))
-                        }
+                        LoopOutcome::Failed(failure) => (
+                            TurnOutcome::Failed,
+                            (failure.kind != minicore_runtime::LoopFailureKind::History)
+                                .then(|| runtime_fault(failure)),
+                        ),
                         _ => (
                             TurnOutcome::Failed,
                             Some(Fault::new(
@@ -1230,240 +1354,6 @@ impl SessionController {
             self.finalize(&turn_id, outcome, fault).await;
             return;
         }
-    }
-    async fn reconcile_report(
-        self: &Arc<Self>,
-        turn_id: &TurnId,
-        report: &LoopReport,
-    ) -> Result<(), Fault> {
-        {
-            let state = self.state.lock().expect("Session mutex poisoned");
-            if let Some(fault) = &state.block_reason
-                && fault.kind() == FaultKind::SessionHistoryWriteFailed
-            {
-                return Err(fault.clone());
-            }
-        }
-        if report.history_failure.is_some() {
-            return Err(Fault::new(
-                FaultKind::SessionHistoryWriteFailed,
-                "Runtime history handoff did not confirm its save boundary",
-            ));
-        }
-        let accepted = {
-            let state = self.state.lock().expect("Session mutex poisoned");
-            let active = state.active.as_ref().expect("owned active Turn");
-            if &active.info.id != turn_id || active.loop_id != Some(report.loop_id) {
-                return Err(Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "late report does not match active execution",
-                ));
-            }
-            active.accepted
-        };
-        if accepted < report.appended.len() {
-            self.accept_history(
-                turn_id,
-                report.loop_id,
-                accepted,
-                &report.appended[accepted..],
-            )
-            .await?;
-        }
-        let mut entries = Vec::new();
-        if let Some(partial) = &report.partial {
-            let response_index = {
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                let active = state.active.as_mut().expect("owned active Turn");
-                let response_index = active.response_base + u64::from(partial.request_index);
-                active.partials.push(PartialResult {
-                    response_index,
-                    partial: partial.clone(),
-                });
-                response_index
-            };
-            entries.push(HistoryEntry::Partial {
-                turn_id: turn_id.clone(),
-                loop_id: report.loop_id,
-                response_index: u32::try_from(response_index).map_err(|_| {
-                    Fault::new(
-                        FaultKind::SessionInternalUnexpected,
-                        "response index exhausted",
-                    )
-                })?,
-                partial: partial.clone(),
-            });
-        }
-        if !entries.is_empty() {
-            self.save(turn_id, entries).await?;
-        }
-        Ok(())
-    }
-    async fn accept_history(
-        &self,
-        turn_id: &TurnId,
-        loop_id: LoopId,
-        offset: usize,
-        items: &[HistoryItem],
-    ) -> Result<(), Fault> {
-        let entries = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let active = state.active.as_mut().ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "history callback has no active Turn",
-                )
-            })?;
-            if &active.info.id != turn_id
-                || active.loop_id != Some(loop_id)
-                || active.accepted != offset
-            {
-                return Err(Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "history callback does not match its original execution range",
-                ));
-            }
-            let mut entries = Vec::new();
-            for item in items {
-                match item {
-                    HistoryItem::User(user) => {
-                        let input = active.bound_pending.pop_front().ok_or_else(|| {
-                            Fault::new(
-                                FaultKind::SessionInternalUnexpected,
-                                "Runtime returned an unbound input",
-                            )
-                        })?;
-                        if input.runtime != user.input {
-                            return Err(Fault::new(
-                                FaultKind::SessionInternalUnexpected,
-                                "Runtime input order differs from bound messages",
-                            ));
-                        }
-                        entries.push(HistoryEntry::Input {
-                            turn_id: turn_id.clone(),
-                            message_id: input.message.message_id,
-                            source: input.source,
-                            mode: input.message.mode,
-                            in_reply_to: input.message.in_reply_to,
-                            user: user.clone(),
-                        });
-                    }
-                    _ => {
-                        let request_index = match item {
-                            HistoryItem::Assistant(value) => value.request_index,
-                            HistoryItem::ToolResult(value) => value.request_index,
-                            _ => 0,
-                        };
-                        let response_index =
-                            u32::try_from(active.response_base + u64::from(request_index))
-                                .map_err(|_| {
-                                    Fault::new(
-                                        FaultKind::SessionInternalUnexpected,
-                                        "response index exhausted",
-                                    )
-                                })?;
-                        entries.push(HistoryEntry::Runtime {
-                            turn_id: turn_id.clone(),
-                            response_index,
-                            item: item.clone(),
-                        });
-                    }
-                }
-            }
-            // Accepted cursor is advanced before I/O and never rolled back on a
-            // save failure. The final report supplements only the unseen suffix.
-            active.accepted += items.len();
-            state.history.extend_from_slice(items);
-            self.publish(&mut state);
-            entries
-        };
-        self.save(turn_id, entries).await
-    }
-    async fn save(&self, turn_id: &TurnId, entries: Vec<HistoryEntry>) -> Result<(), Fault> {
-        {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            state.saving = true;
-            if let Some(active) = state.active.as_mut()
-                && &active.info.id == turn_id
-                && self.backend.mode() == StorageMode::Persistent
-            {
-                active.info.persistence = PersistenceState::Pending;
-            }
-            self.publish(&mut state);
-        }
-        let result = AssertUnwindSafe(async { self.backend.append(entries).await })
-            .catch_unwind()
-            .await
-            .unwrap_or_else(|_| {
-                Err(Fault::new(
-                    FaultKind::SessionHistoryWriteFailed,
-                    "history backend panicked before confirming its save",
-                ))
-            });
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        state.saving = false;
-        if let Some(active) = state
-            .active
-            .as_mut()
-            .filter(|active| &active.info.id == turn_id)
-        {
-            match &result {
-                Ok(persistence) => active.info.persistence = *persistence,
-                Err(fault) => {
-                    active.info.persistence = PersistenceState::Failed;
-                    active.info.persistence_fault = Some(fault.clone());
-                    state.block_reason = Some(fault.clone());
-                }
-            }
-        }
-        self.publish(&mut state);
-        result.map(|_| ())
-    }
-    async fn finalize(&self, turn_id: &TurnId, outcome: TurnOutcome, fault: Option<Fault>) {
-        {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let Some(active) = state
-                .active
-                .as_mut()
-                .filter(|active| &active.info.id == turn_id)
-            else {
-                return;
-            };
-            active.info.state = TurnState::Finalizing;
-            active.info.outcome = Some(outcome);
-            active.info.fault = fault.clone();
-            active.handle = None;
-            if outcome == TurnOutcome::Failed {
-                state.failure_paused = true;
-            }
-            self.publish(&mut state);
-        }
-        let entry = HistoryEntry::TurnFinished {
-            turn_id: turn_id.clone(),
-            outcome,
-            reason: fault.as_ref().map(|fault| fault.message().to_owned()),
-        };
-        if self.save(turn_id, vec![entry]).await.is_err() {
-            return;
-        }
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        let Some(mut active) = state.active.take() else {
-            return;
-        };
-        active.info.state = TurnState::Finished;
-        let result = TurnResult {
-            info: active.info,
-            history: state.history[active.start_history..].to_vec(),
-            partials: active.partials,
-        };
-        state.completion_order.push(turn_id.clone());
-        state.completed.insert(turn_id.clone(), result);
-        if state.lifecycle == SessionLifecycle::Closing && state.info.mode == StorageMode::Memory {
-            state.lifecycle = SessionLifecycle::Closed;
-            state.residency = Residency::Unloaded;
-            state.load_id = None;
-        }
-        self.publish(&mut state);
     }
 }
 
@@ -1522,7 +1412,7 @@ impl LoopInputs for SessionInputs {
             .map(|input| input.runtime)
             .collect::<Vec<_>>();
         let mut state = self.session.state.lock().expect("Session mutex poisoned");
-        if SessionController::schedulable(&state)
+        if self.session.schedulable(&state)
             && state.active.as_ref().is_some_and(|active| {
                 active.info.id == self.turn_id && active.info.state == TurnState::Running
             })

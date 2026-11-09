@@ -26,7 +26,7 @@ impl SessionController {
         self.ensure_executor()?;
         let load_id = LoadId::new()
             .map_err(|error| Fault::new(FaultKind::SessionInternalUnexpected, error.to_string()))?;
-        self.access.accept(caller, || {
+        self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             if state.active.is_some() || state.preparing || state.saving {
@@ -45,7 +45,11 @@ impl SessionController {
             let pause_generation = state.pause_generation;
             let owner = Arc::clone(self);
             let runtime = state.executor.clone().expect("checked runtime");
+            let previous = state.load_task.take();
             state.load_task = Some(runtime.spawn(async move {
+                if let Some(previous) = previous {
+                    let _ = previous.await;
+                }
                 let result = if owner.backend.mode() == StorageMode::Persistent {
                     AssertUnwindSafe(owner.backend.load())
                         .catch_unwind()
@@ -67,7 +71,6 @@ impl SessionController {
                 {
                     let mut state = owner.state.lock().expect("Session mutex poisoned");
                     state.preparing = false;
-                    state.load_task.take();
                     match result {
                         Ok(history) => {
                             state.history = history;
@@ -77,7 +80,10 @@ impl SessionController {
                             }) {
                                 state.block_reason = None;
                             }
-                            if state.lifecycle == SessionLifecycle::Open {
+                            if state.lifecycle == SessionLifecycle::Open
+                                && !state.host_stopping
+                                && owner.access.execution_allowed_owned()
+                            {
                                 state.load_id.get_or_insert(load_id);
                                 state.residency = Residency::Loaded;
                                 if resume && state.pause_generation == pause_generation {
@@ -124,7 +130,7 @@ impl SessionController {
         expected_revision: u64,
         patch: &SessionConfigPatch,
     ) -> Result<SessionInfo, Fault> {
-        if self.store.is_none() {
+        if self.store_owned().is_none() {
             return self.update(caller, expected_revision, patch);
         }
         let original = self.info(caller)?;
@@ -138,10 +144,10 @@ impl SessionController {
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.resources.validate(&candidate)?;
+        self.resources_owned()?.validate(&candidate)?;
         self.ensure_executor()?;
         let (sender, receiver) = oneshot::channel();
-        self.access.accept(caller, || {
+        self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             if state.info.config_revision != expected_revision {
@@ -193,8 +199,12 @@ impl SessionController {
             fault: None,
         });
         let owner = Arc::clone(self);
+        let previous = state.record_task.take();
         state.record_task = Some(state.executor.as_ref().expect("checked runtime").spawn(
             async move {
+                if let Some(previous) = previous {
+                    let _ = previous.await;
+                }
                 let result = owner.save_record(candidate).await;
                 drop(owner);
                 let _ = sender.send(result);
@@ -203,7 +213,7 @@ impl SessionController {
         self.publish(state);
     }
     async fn save_record(self: &Arc<Self>, candidate: SessionRecord) -> Result<SessionInfo, Fault> {
-        let store = self.store.clone().expect("persistent Session");
+        let store = self.store_owned().expect("persistent Session");
         let saved = candidate.clone();
         let baseline = self
             .state
@@ -224,7 +234,6 @@ impl SessionController {
         .await;
         let updated = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
-            state.record_task.take();
             match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
@@ -310,7 +319,7 @@ impl SessionController {
     /// here. The Agent owns the wait; this Session owns its record and conclusion.
     pub(crate) async fn finish_close_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.wait_quiescent_owned().await;
-        if self.store.is_none() {
+        if self.store_owned().is_none() {
             return Ok(());
         }
         let candidate = {
