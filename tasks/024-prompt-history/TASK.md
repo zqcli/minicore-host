@@ -97,9 +97,16 @@ CARGO_BUILD_JOBS=2
 - Targeted task024 suite: 11 tests passed.
 - `cargo fmt --all --check`: passed.
 - `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`: passed.
-- Full workspace/all-targets, unique `--list` count, doctests and strict rustdoc:
-  running at the source checkpoint; final outcomes follow in the validation
-  record commit.
+- Source checkpoint: `e8a3412101aad0f6b0138d0105fb9f926aaa80ad`.
+- `cargo test --workspace --all-targets --locked --offline`: passed.
+- `cargo test --workspace --all-targets --locked --offline -- --list`: **447
+  unique target/test-name cases**, including the 11 task024 cases. Nested
+  subprocess probe output is not an extra test case.
+- `cargo test --workspace --doc --locked --offline`: **3 doctests passed**.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked --offline`:
+  passed.
+- All final gates completed on 2026-11-09 UTC. `git diff --check` and the SPEC
+  hash check passed; manifests, lockfile and TUI are unchanged.
 
 Development-only failures were fixed before the meaningful red run: initial
 fixture code used the wrong MessageSource variant and an ambiguous Vec `as_ref`;
