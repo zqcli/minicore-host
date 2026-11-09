@@ -220,3 +220,25 @@ fn inspect_ranges_and_pages_reuse_authoritative_read_contracts() {
         assert!(AgentAction::parse(input).is_err());
     }
 }
+
+#[test]
+fn execution_schema_exposes_approval_with_the_same_omission_default_as_dispatch() {
+    let spec = agent_tool_spec();
+    let execution = &spec.input_schema()["$defs"]["settings"]["properties"]["execution"];
+    assert_eq!(
+        execution["properties"]["approval"]["enum"],
+        json!(["auto", "ask", "read_only"])
+    );
+    assert_eq!(execution["properties"]["approval"]["default"], "ask");
+    assert!(
+        !execution["required"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("approval"))
+    );
+    for mode in ["auto", "ask", "read_only"] {
+        let mut settings = json!(ExecutionSettings::default());
+        settings["approval"] = json!(mode);
+        AgentAction::parse(json!({"action":"update","resource":"session","target":{"agent_id":id(),"session_id":id()},"changes":{"execution":settings}})).unwrap();
+    }
+}

@@ -57,6 +57,17 @@ pub enum ReasoningPreference {
     Ultra,
 }
 
+/// Execution policy for this Session's tools, frozen with the next public Turn.
+/// An omitted value defaults to `Ask`, including older saved configurations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    Auto,
+    #[default]
+    Ask,
+    ReadOnly,
+}
+
 // A separate wire struct ensures checked deserialization without making the
 // public in-process types inconvenient. Owners must also validate values built
 // directly in Rust, before publishing or persisting a candidate configuration.
@@ -152,6 +163,8 @@ checked_struct!(
     /// Supported execution values only. No application capacities, counts,
     /// entity quotas, input-size caps, or mutable process-global directory.
     ExecutionSettings, ExecutionSettingsWire, "ExecutionSettingsWire" {
+        #[serde(default)]
+        approval: ApprovalMode,
         prompt_timeout_ms: u64,
         model_timeout_ms: u64,
         policy_timeout_ms: u64,
@@ -164,6 +177,7 @@ checked_struct!(
 impl Default for ExecutionSettings {
     fn default() -> Self {
         Self {
+            approval: ApprovalMode::default(),
             prompt_timeout_ms: 30_000,
             model_timeout_ms: 600_000,
             policy_timeout_ms: 30_000,

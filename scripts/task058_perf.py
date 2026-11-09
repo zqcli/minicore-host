@@ -367,7 +367,7 @@ def request_config(workspace):
         "role": {"name": "Fixture", "description": "", "instructions": ""},
         "session_defaults": {"model": MODEL, "reasoning": "auto", "tools": [{"name": "bash"}],
             "workspace": {"path": str(workspace)},
-            "execution": {"prompt_timeout_ms": 30000, "model_timeout_ms": 600000,
+            "execution": {"approval": "auto", "prompt_timeout_ms": 30000, "model_timeout_ms": 600000,
                 "policy_timeout_ms": 30000, "tool_timeout_ms": 1800000,
                 "model_retry_attempts": 1, "model_retry_base_delay_ms": 100,
                 "compaction": {"enabled": False, "trigger_percent": 95, "target_percent": 50}}},

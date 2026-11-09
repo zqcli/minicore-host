@@ -43,7 +43,7 @@ fn schema() -> Value {
     );
     let positive = json!({"type":"integer","minimum":1});
     let execution = object(
-        json!({"prompt_timeout_ms":positive,"model_timeout_ms":{"type":"integer","minimum":1,"maximum":86400000},"policy_timeout_ms":positive,"tool_timeout_ms":positive,"model_retry_attempts":{"type":"integer","minimum":1,"maximum":4},"model_retry_base_delay_ms":{"type":"integer","minimum":1,"maximum":30000},"compaction":compaction}),
+        json!({"approval":{"enum":["auto","ask","read_only"],"default":"ask"},"prompt_timeout_ms":positive,"model_timeout_ms":{"type":"integer","minimum":1,"maximum":86400000},"policy_timeout_ms":positive,"tool_timeout_ms":positive,"model_retry_attempts":{"type":"integer","minimum":1,"maximum":4},"model_retry_base_delay_ms":{"type":"integer","minimum":1,"maximum":30000},"compaction":compaction}),
         &[
             "prompt_timeout_ms",
             "model_timeout_ms",

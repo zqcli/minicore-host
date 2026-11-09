@@ -159,6 +159,8 @@ pub(crate) fn request(tools: Vec<ToolBinding>, workspace: Option<WorkspaceRef>) 
     config.session_defaults.tools = tools;
     config.session_defaults.workspace = workspace;
     config.session_defaults.execution.compaction.enabled = false;
+    // These resource/ordinary-tool fixtures exercise execution, not approval.
+    config.session_defaults.execution.approval = ApprovalMode::Auto;
     config.role.instructions = "ROLE A".into();
     AgentCreate {
         operation_id: OperationId::new().unwrap(),

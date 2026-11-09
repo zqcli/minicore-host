@@ -167,6 +167,8 @@ pub fn agent(workspace: &Path, tools: &[&str]) -> Value {
     let mut request = support::agent_request();
     request["config"]["session_defaults"]["workspace"] = json!({"path":workspace});
     request["config"]["session_defaults"]["tools"] = json!(bindings(tools));
+    // Ordinary-tool and credential fixtures explicitly opt into unattended execution.
+    request["config"]["session_defaults"]["execution"]["approval"] = json!("auto");
     request
 }
 pub struct App {

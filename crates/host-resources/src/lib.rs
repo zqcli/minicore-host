@@ -22,6 +22,7 @@ use minicore_runtime::{
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
+mod approval;
 mod workspaces;
 
 /// The deployment's statically compiled registry. Keep one builder across
@@ -224,7 +225,7 @@ impl ProductionResources {
             self.models[&config.model].clone(),
             reasoning(config.reasoning),
             selected,
-            None,
+            Some(Arc::new(approval::Policy::new(config.execution.approval))),
             prompt,
         )
         .map_err(|error| session_invalid(error.to_string()))?;
