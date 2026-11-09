@@ -34,3 +34,17 @@ Environment: Linux, Rust/Cargo 1.90.0, Git 2.52.0. Commands use `RUSTUP_HOME=/wo
 Apply original commits `e9b3020`, `3194521`, and `e40f5ef` once, then this validation-note commit. The sole root manifest/lock change is the bootstrap; all implementation and test paths stay inside the assigned crate/task. Independent review may proceed at `e40f5ef` while these notes are finalized.
 
 Before declaring the six canonical methods delivered, the Session service must select/authorize the actual binding, map the typed local errors into the public Fault registry, route workspace versus Session/Turn scopes to their real source, and connect the existing tool write owner to retained/saved edit observations. Unknown prior tool snapshots are not recoverable by scanning Git. Tests establish the reusable real module, not those remaining integrations.
+
+
+## Parent integration checkpoint
+
+Topic-to-dev mapping: `e9b3020` → `a48201f`, `3194521` → `d27575d`,
+`e40f5ef` → `b0fdbfb`. The following topic `32686dc` only records final validation.
+At fixed `b0fdbfb`, the main workspace `./scripts/check.sh` passed all 275 unique
+unit/integration tests and 2 doctests, formatting, strict Clippy/rustdoc and
+committed whitespace. The 21 module cases add to the 254-test canonical-control
+baseline. `cargo test --workspace --all-targets --locked -- --list` independently
+confirmed 275 entries; nested storage process probes were not counted again.
+Logs: `minicore-host-validation/workspace-integrated-b0fdbfb.log` and
+`workspace-test-list-b0fdbfb.txt`. Independent scoped review is in progress.
+No canonical Session integration, real write-tool recording or push is claimed.

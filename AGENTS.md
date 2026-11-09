@@ -10,4 +10,5 @@
 - Keep TUI unchanged during the foundation stage. Record its pinned baseline and distinguish it from Runtime HEAD.
 - Never hold owner state locks across I/O or child calls. Accepted work must outlive a caller's wait.
 - Run formatting, lint, unit/integration tests, and documentation checks. Document checks that were not run or are blocked.
+- Count unique test cases with `cargo test --workspace --all-targets --locked -- --list`; nested storage subprocess probe output is not an additional test case.
 - Parallel contributors own disjoint paths. Coordinate shared manifests and public types before changing them.

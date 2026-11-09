@@ -16,6 +16,7 @@ The required Runtime history/partial extension is pinned to published commit `18
 - [Protocol contracts](crates/host-protocol/README.md)
 - [Provider adapter](crates/host-provider/README.md)
 - [Storage schema](crates/host-storage/README.md)
+- [Workspace and change-reading backend](crates/host-workspace/README.md)
 - [Public method implementation map](docs/method-coverage.md)
 - [Self-contained review handoff](docs/review-handoff.md)
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)

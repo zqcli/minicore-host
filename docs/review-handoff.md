@@ -2,7 +2,7 @@
 
 ## Review target and authority
 
-The target is the `dev` foundation, with canonical-control correction checkpoint `b961f9f45ea31def2e215fa07368c05893cdf6fa`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
+The target is the `dev` foundation, with workspace-backend checkpoint `b0fdbfb`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
 
 Read `AGENTS.md`, the complete `SPEC.md`, `PROJECT.md`, and `docs/method-coverage.md` first. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`. The 52-method catalog describes names/contracts, not 52 finished handlers. No remote Host publication or main merge has been performed. Remote pushes require the owner's explicit approval.
 
@@ -23,6 +23,8 @@ This handoff is self-contained in the repository. The review must not depend on 
 4. Persistent owners: initialization, owned asynchronous creation, partial receipts, configuration/default publication after confirmed metadata saves, explicit original-candidate reconciliation, lazy history loads, durable close ordering and stop aggregation. Child notifications carry no parent mutation authority; live memory descendants still retain the root lease.
 5. Lifecycle: immediate canonical shutdown facts; monotonic graceful/force; failed-save blocking; Session-only explicit original-save confirmation; actual task joins and directory/resource release; memory removal and concurrent last-child/create/close ownership. Ordinary call/connection abandonment does not abandon work.
 6. Provider: real OpenAI-compatible Chat Completions HTTP/SSE, conservative delivery/retry classification, original tool IDs, authoritative partial content, and non-executable incomplete tool-name/ID fragments retained as provider partial metadata. It is not the old Agent's Responses adapter.
+
+7. Workspace backend: configured directory containment, actual file/search ranges, Git status and content comparisons, and explicit tool-edit observations. It supplies reusable reads only; Session routing, authorization/Fault mapping, actual write-tool capture and persistent change records are still pending.
 
 Pay particular attention to acceptance versus publication, owner retirement versus a caller's completed wait, configuration revision versus other state revisions, actual current/pending default references, and the distinction between a completed Runtime execution and a durably finalized public Turn.
 
@@ -53,6 +55,8 @@ The final clean-source checkpoint at `0b9b390` passed the entire 198-test/2-doct
 At lifecycle checkpoint `413916c`, the entire gate passes 240 unit/integration tests and 2 doctests (core 100, protocol 47, provider 36, storage 57). The 19 runtime-owner tests passed 25 consecutive runs after five old tombstone expectations were updated to check real reclamation while preserving their default/acceptance/preparation assertions. A separate scoped review passed 12 additional real public-API cases and the 38 focused repository cases, including the concurrent-close handoff correction. Exact integration mappings and commands are in task 012. This is a local integrated pass, not a hosted Host CI or external review result.
 
 The subsequent canonical-control checkpoint `b961f9f` passes the complete 254-test/2-doctest gate. Formation-time control receipts and owner-backed lookup are implemented. A separate review passed the preceding 160 core/protocol cases and found one P2: lookup absence/ambiguity incorrectly used the unsupported-method Fault. The correction gives those facts separate registered lookup leaves and adds a real-owner regression. Independent verification of the fixed correction passed all 161 core/protocol cases in a fresh archive and separate build target, with no remaining scoped finding. This does not replace the full external review.
+
+The workspace backend at `b0fdbfb` adds 21 real filesystem/Git/edit-observation tests and passes the full integrated gate with 275 unique tests and 2 doctests. Counts were cross-checked with `--list`; storage child-process result lines are not additional cases. Its scoped independent review is in progress, and canonical workspace/changes routing remains unfinished.
 
 ## Required scope still open
 
