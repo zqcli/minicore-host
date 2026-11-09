@@ -104,3 +104,6 @@ pub use interaction::*;
 
 mod compaction;
 pub use compaction::*;
+
+mod public_controls;
+pub use public_controls::*;
