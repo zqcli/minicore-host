@@ -133,3 +133,15 @@ aggregate does not close the independently discovered query projection gaps or
 claim deletion, cold-read corrections, provenance or business diagnostics are
 integrated. Earlier failed runs and checkpoints are preserved. No remote publish
 or main merge has occurred for this stage.
+
+## Reviewed cold-read composition
+
+Task052 source98ce59b and its bootstrap/red-test/docs are integrated without
+conflicts through `e3d634a2b0cd9e662d8efc26284c85af82edd8e5`. Independent review
+replayed the original active-writer failure and passed 248 core + 28 transport cases,
+8 additional authority/lifetime/progress probes, strict lint/docs and 4 doctests.
+The normal complete combined gate now passes **779 unique tests and 4 doctests**;
+`--list` independently confirms 779. Exact evidence is in
+`docs/executable-cold-history-verification.json`; the prior 761-case manifest and
+failed runs are not replaced. Query projections, deletion, provenance and full
+business diagnostics remain separate unfinished work.

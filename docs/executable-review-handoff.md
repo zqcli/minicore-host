@@ -1,5 +1,9 @@
 # Executable checkpoint review handoff
 
+## Latest cold-history composition
+
+Local code `e3d634a2b0cd9e662d8efc26284c85af82edd8e5` adds the four reviewed task052 commits to the earlier fixed checkpoint below, without conflicts. `./scripts/check.sh` passes **779 unique cases and 4 doctests** on the first combined run. The new [verification manifest](executable-cold-history-verification.json) records the independent inventory, sole Runtime pin and exact log hashes. The source map now contains 52 topic commits. The deterministic original active-writer failure and independent 276-case/8-probe review are preserved; the old 761-case evidence below remains valid for its named source. No remote publication is claimed. Other listed findings remain open; cold-read coordination alone is now resolved in this local composition.
+
 ## Fixed checkpoint and publication
 
 - Local code: `70c17e7226bd90c7bb1e146ed141081f567e9d23`, integration topic `stage/executable-next`; compare local published-source baseline `810e3817a78855871d13f8127a3f0e87db821d66`.
