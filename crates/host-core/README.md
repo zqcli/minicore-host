@@ -89,3 +89,18 @@ preparation. During the real call, `ToolOutputSink::current()` provides the
 bound process-output capability. Clones become inactive when that call returns
 or is cancelled, and never hold a Session alive. Final ToolResult text is not
 re-emitted as invented process output.
+
+The local Runtime retry-state integration reads `LoopHandle::watch_state`
+directly. `TurnInfo` and `turn.state` share actual attempt counts, the original
+response index, retry phase, structured Fault and source RFC3339 retry time.
+A waiting cancellation does not increment the actual-call count. Retry clearing
+is a normal state change, including for state-only subscribers.
+
+`Host::history_read` pages adapted conversation items with an opaque Session/run
+cursor. Already-loaded history copies only the requested page. Cold persistent
+reads use the real SessionStore read path without creating a Runner, changing
+residency or restoring old Turn/ToolCall/output objects. The response does not
+expose JSONL rows or internal Loop identities. Public interaction IDs are stable
+Host-format IDs mapped by the original Session to actual Runtime interactions;
+request, state and settlement projections reuse them. Public answer routing is
+not implemented by this module.

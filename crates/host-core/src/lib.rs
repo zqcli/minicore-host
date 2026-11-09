@@ -23,8 +23,9 @@ pub use types::*;
 
 mod observation;
 pub use observation::{
-    ActivityEvent, EventSubscription, HostStateData, MessageEventData, ModelFinishedData,
-    ModelResponseData, ObservationEvent, ObservationNotification, StateEvent, ToolCallData,
-    ToolCallState, ToolCallStateData, ToolFinishedData, ToolInvocationData, ToolProgressData,
-    ToolResultData, TurnStateData,
+    ActivityEvent, ApprovalRiskData, EventSubscription, HostStateData, InteractionRequestData,
+    InteractionResolution, InteractionResolvedData, MessageEventData, ModelFinishedData,
+    ModelResponseData, ObservationEvent, ObservationNotification, PendingInteractionData,
+    StateEvent, ToolCallData, ToolCallState, ToolCallStateData, ToolFinishedData,
+    ToolInvocationData, ToolProgressData, ToolResultData, TurnStateData,
 };

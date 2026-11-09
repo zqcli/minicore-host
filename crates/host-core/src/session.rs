@@ -6,6 +6,7 @@ use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 
 mod controls;
 mod history;
+mod history_read;
 mod metadata;
 mod observation;
 mod tool_output;
@@ -158,6 +159,7 @@ struct ActiveTurn {
     report: Option<Arc<LoopReport>>,
     partial_accepted: bool,
     terminal_accepted: bool,
+    pending_interaction: Option<crate::PendingInteractionData>,
 }
 struct SessionState {
     info: SessionInfo,
@@ -183,6 +185,7 @@ struct SessionState {
     history: Vec<HistoryItem>,
     output: BTreeMap<TurnId, observation::TurnObservation>,
     closed_published: bool,
+    published: bool,
     history_loaded: bool,
     preparing: bool,
     saving: bool,
@@ -270,6 +273,7 @@ impl SessionController {
             history,
             output: BTreeMap::new(),
             closed_published: false,
+            published: false,
             history_loaded: backend.mode() == StorageMode::Memory,
             preparing: false,
             saving: false,
@@ -334,6 +338,12 @@ impl SessionController {
                 load_id: state.load_id.clone(),
                 runner_revision: state.runner_revision,
                 active_turn_id: state.active.as_ref().map(|active| active.info.id.clone()),
+                pending_interactions: state
+                    .active
+                    .as_ref()
+                    .and_then(|active| active.pending_interaction.clone())
+                    .into_iter()
+                    .collect(),
                 next_step: state.next_step.iter().map(QueuedInput::summary).collect(),
                 next_turn: state.next_turn.iter().map(QueuedInput::summary).collect(),
                 preparing: state.preparing,
@@ -1014,6 +1024,9 @@ impl SessionController {
                         },
                         requests: 0,
                         tool_rounds: 0,
+                        phase: None,
+                        model_retry: None,
+                        model_attempts: Vec::new(),
                         fault: None,
                         persistence_fault: None,
                     },
@@ -1027,6 +1040,7 @@ impl SessionController {
                     report: None,
                     partial_accepted: false,
                     terminal_accepted: false,
+                    pending_interaction: None,
                 });
                 self.observe_bound(&state, &batch);
                 self.publish(&mut state);
@@ -1133,12 +1147,22 @@ impl SessionController {
                         .take_events()
                         .expect("Session owns the Runtime event receiver");
                     let loop_id = owner.id();
-                    let drain = async {
-                        while let Some(envelope) = events.recv().await {
-                            self.observe_runtime(&turn_id, loop_id, envelope.event);
+                    let mut runtime_state = owner.handle().watch_state();
+                    let joined = owner.join();
+                    tokio::pin!(joined);
+                    let joined = loop {
+                        tokio::select! {
+                            result = &mut joined => {
+                                while let Some(envelope) = events.recv().await {
+                                    self.observe_runtime(&turn_id, loop_id, envelope.event);
+                                }
+                                self.observe_runtime_state(&turn_id, loop_id, runtime_state.borrow_and_update().clone());
+                                break result;
+                            }
+                            Some(envelope) = events.recv() => self.observe_runtime(&turn_id, loop_id, envelope.event),
+                            Ok(()) = runtime_state.changed() => self.observe_runtime_state(&turn_id, loop_id, runtime_state.borrow_and_update().clone()),
                         }
                     };
-                    let (joined, ()) = tokio::join!(owner.join(), drain);
                     match joined {
                         Ok(report) => report,
                         Err(error) => {
@@ -1173,6 +1197,15 @@ impl SessionController {
                 let active = state.active.as_mut().expect("owned active Turn");
                 active.info.requests += u64::from(report.requests);
                 active.info.tool_rounds += report.tool_rounds;
+                for (index, attempts) in report.model_attempts.iter().enumerate() {
+                    let index = active.response_base as usize + index;
+                    active
+                        .info
+                        .model_attempts
+                        .resize(active.info.model_attempts.len().max(index + 1), 0);
+                    active.info.model_attempts[index] = *attempts;
+                }
+                active.info.model_retry = None;
                 active.report = Some(Arc::clone(&report));
                 active.handle = None;
             }
@@ -1408,21 +1441,42 @@ impl LoopHistory for SessionHistory {
 }
 
 fn runtime_fault(failure: &minicore_runtime::LoopFailure) -> Fault {
+    failure
+        .model_error()
+        .map(runtime_model_fault)
+        .unwrap_or_else(|| {
+            Fault::new(
+                FaultKind::TurnInternalUnexpected,
+                failure.diagnostic.message().as_str(),
+            )
+        })
+}
+fn runtime_model_fault(error: &minicore_runtime::model::ModelError) -> Fault {
     use minicore_runtime::model::ModelErrorKind;
-    let kind = match failure.model_error().map(|error| error.kind()) {
-        Some(ModelErrorKind::RateLimited) => FaultKind::TurnModelUpstreamRateLimited,
-        Some(ModelErrorKind::ProviderUnavailable) => FaultKind::TurnModelUpstreamOverloaded,
-        Some(ModelErrorKind::QuotaExceeded) => FaultKind::TurnModelUpstreamQuotaExhausted,
-        Some(ModelErrorKind::AuthMissing | ModelErrorKind::AuthRejected) => {
+    let kind = match error.kind() {
+        ModelErrorKind::RateLimited => FaultKind::TurnModelUpstreamRateLimited,
+        ModelErrorKind::ProviderUnavailable => FaultKind::TurnModelUpstreamOverloaded,
+        ModelErrorKind::QuotaExceeded => FaultKind::TurnModelUpstreamQuotaExhausted,
+        ModelErrorKind::AuthMissing | ModelErrorKind::AuthRejected => {
             FaultKind::TurnModelUpstreamAuthenticationFailed
         }
-        Some(ModelErrorKind::IncompleteResponse | ModelErrorKind::StreamInterrupted) => {
+        ModelErrorKind::IncompleteResponse | ModelErrorKind::StreamInterrupted => {
             FaultKind::TurnModelStreamInterrupted
         }
-        Some(_) => FaultKind::TurnModelUpstreamUnclassified,
-        None => FaultKind::TurnInternalUnexpected,
+        _ => FaultKind::TurnModelUpstreamUnclassified,
     };
-    Fault::new(kind, failure.diagnostic.message().as_str())
+    let mut fault = Fault::new(kind, error.diagnostic().message().as_str());
+    if kind.allows_retry_after_ms()
+        && let minicore_runtime::model::RetryHint::Retryable {
+            retry_after: Some(duration),
+        } = error.retry_hint()
+        && let Ok(milliseconds) = u64::try_from(duration.as_millis())
+    {
+        fault = fault
+            .with_retry_after_ms(milliseconds)
+            .expect("registered temporary model fault");
+    }
+    fault
 }
 
 #[cfg(test)]

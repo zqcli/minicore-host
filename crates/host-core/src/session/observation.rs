@@ -4,8 +4,29 @@ use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};
 
 #[derive(Default)]
 pub(super) struct TurnObservation {
+    pub(super) interactions: BTreeMap<minicore_runtime::InteractionId, InteractionRecord>,
     pub(super) models: BTreeMap<u64, BTreeMap<String, Body>>,
     pub(super) tools: BTreeMap<ToolCallId, ToolRecord>,
+}
+pub(super) struct InteractionRecord {
+    pub(super) data: PendingInteractionData,
+    pub(super) resolved: bool,
+}
+impl TurnObservation {
+    fn interaction(
+        &mut self,
+        pending: &minicore_runtime::interaction::PendingInteraction,
+    ) -> &mut InteractionRecord {
+        self.interactions
+            .entry(pending.interaction_id)
+            .or_insert_with(|| InteractionRecord {
+                data: PendingInteractionData::from_runtime(
+                    pending,
+                    InteractionId::new().expect("Host interaction identity generation"),
+                ),
+                resolved: false,
+            })
+    }
 }
 #[derive(Default)]
 pub(super) struct Body {
@@ -47,11 +68,17 @@ impl SessionController {
             persistence: info.persistence,
             requests: info.requests,
             tool_rounds: info.tool_rounds,
+            phase: info.phase,
+            model_retry: info.model_retry.clone(),
+            model_attempts: info.model_attempts.clone(),
             fault: info.fault.clone(),
             persistence_fault: info.persistence_fault.clone(),
         }
     }
     pub(super) fn publish_observation(&self, state: &mut SessionState, snapshot: &SessionSnapshot) {
+        if !state.published {
+            return;
+        }
         self.access
             .observation
             .publish(ObservationEvent::State(StateEvent::Session {
@@ -78,6 +105,7 @@ impl SessionController {
     }
     pub(crate) fn publish_initial(&self) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        state.published = true;
         self.publish(&mut state);
     }
     pub(super) fn observe_message(
@@ -223,6 +251,60 @@ impl SessionController {
             }
         }
     }
+    pub(super) fn observe_runtime_state(
+        &self,
+        turn_id: &TurnId,
+        loop_id: LoopId,
+        runtime: minicore_runtime::LoopState,
+    ) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        if state.active.as_ref().is_none_or(|a| {
+            &a.info.id != turn_id || a.loop_id != Some(loop_id) || runtime.loop_id != loop_id
+        }) {
+            return;
+        }
+        let pending = runtime.pending_interaction.as_ref().and_then(|pending| {
+            let record = state
+                .output
+                .entry(turn_id.clone())
+                .or_default()
+                .interaction(pending);
+            (!record.resolved).then(|| record.data.clone())
+        });
+        let active = state.active.as_mut().expect("checked original Turn");
+        let response_index = active.response_base + u64::from(runtime.request_index);
+        active.pending_interaction = pending;
+        active.info.phase = match runtime.status {
+            minicore_runtime::LoopStatus::RunningModel => Some(TurnPhase::Model),
+            minicore_runtime::LoopStatus::RunningTools => Some(TurnPhase::Tools),
+            minicore_runtime::LoopStatus::WaitingForInput => Some(TurnPhase::WaitingForInput),
+            minicore_runtime::LoopStatus::Finishing => Some(TurnPhase::Finalizing),
+            _ => None,
+        };
+        active.info.model_retry = runtime.model_retry.map(|retry| ModelRetryProgress {
+            response_index,
+            attempt: retry.attempt,
+            max_attempts: retry.max_attempts,
+            fault: runtime_model_fault(&retry.error),
+            phase: match retry.phase {
+                minicore_runtime::ModelRetryPhase::Waiting { retry_at, .. } => {
+                    ModelRetryPhase::Waiting {
+                        retry_at: retry_at.into(),
+                    }
+                }
+                minicore_runtime::ModelRetryPhase::Requesting => ModelRetryPhase::Requesting,
+            },
+        });
+        if runtime.model_attempts > 0 {
+            let index = response_index as usize;
+            active
+                .info
+                .model_attempts
+                .resize(active.info.model_attempts.len().max(index + 1), 0);
+            active.info.model_attempts[index] = runtime.model_attempts;
+        }
+        self.publish(&mut state);
+    }
     pub(super) fn observe_runtime(&self, turn_id: &TurnId, loop_id: LoopId, event: LoopEvent) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         let Some(active) = state
@@ -234,7 +316,10 @@ impl SessionController {
         };
         let source = self.turn_identity(&active.info);
         let base = active.response_base;
-        state.runner_revision += 1;
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
         let revision = state.runner_revision;
         let output = state.output.entry(turn_id.clone()).or_default();
         match event {
@@ -349,11 +434,76 @@ impl SessionController {
                     ));
                 }
             }
+            LoopEvent::InteractionRequested {
+                loop_id: actual,
+                interaction,
+            } if actual == loop_id => {
+                let pending = output.interaction(&interaction).data.clone();
+                self.access.observation.publish(ObservationEvent::Activity(
+                    ActivityEvent::InteractionRequested {
+                        source: ToolCallIdentity {
+                            turn: source,
+                            tool_call_id: pending.tool_call_id,
+                        },
+                        interaction_id: pending.interaction_id,
+                        data: pending.request,
+                    },
+                ));
+            }
+            LoopEvent::InteractionResolved {
+                loop_id: actual,
+                interaction_id,
+            } if actual == loop_id => {
+                if let Some(record) = output.interactions.get_mut(&interaction_id)
+                    && !record.resolved
+                {
+                    record.resolved = true;
+                    let tool_call_id = record.data.tool_call_id.clone();
+                    let interaction_id = record.data.interaction_id.clone();
+                    self.access.observation.publish(ObservationEvent::Activity(
+                        ActivityEvent::InteractionResolved {
+                            source: ToolCallIdentity {
+                                turn: source,
+                                tool_call_id,
+                            },
+                            interaction_id,
+                            data: InteractionResolvedData {
+                                resolution: InteractionResolution::Answered,
+                            },
+                        },
+                    ));
+                }
+            }
             // ToolFinished is deliberately not used to synthesize a ToolResult.
             _ => {}
         }
     }
-    pub(super) fn observe_finished(&self, info: &TurnInfo, revision: u64) {
+    pub(super) fn observe_finished(&self, state: &mut SessionState, info: &TurnInfo) {
+        let revision = state.runner_revision;
+        if let Some(resolution) = match info.outcome {
+            Some(TurnOutcome::Cancelled) => Some(InteractionResolution::Cancelled),
+            Some(TurnOutcome::Failed) => Some(InteractionResolution::Failed),
+            _ => None,
+        } && let Some(output) = state.output.get_mut(&info.id)
+        {
+            for record in output
+                .interactions
+                .values_mut()
+                .filter(|record| !record.resolved)
+            {
+                record.resolved = true;
+                self.access.observation.publish(ObservationEvent::Activity(
+                    ActivityEvent::InteractionResolved {
+                        source: ToolCallIdentity {
+                            turn: self.turn_identity(info),
+                            tool_call_id: record.data.tool_call_id.clone(),
+                        },
+                        interaction_id: record.data.interaction_id.clone(),
+                        data: InteractionResolvedData { resolution },
+                    },
+                ));
+            }
+        }
         let source = self.turn_identity(info);
         let data = Self::turn_state(info, revision);
         self.access

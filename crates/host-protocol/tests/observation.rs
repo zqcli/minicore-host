@@ -86,3 +86,28 @@ fn output_source_has_one_identity_and_no_fabricated_load() {
         position
     );
 }
+
+#[test]
+fn retry_state_validates_attempts_and_source_rfc3339_time() {
+    let progress = ModelRetryProgress {
+        response_index: 0,
+        attempt: 2,
+        max_attempts: 3,
+        fault: Fault::new(FaultKind::TurnModelUpstreamOverloaded, "retry fixture"),
+        phase: ModelRetryPhase::Waiting {
+            retry_at: time::OffsetDateTime::UNIX_EPOCH,
+        },
+    };
+    let value = serde_json::to_value(&progress).unwrap();
+    assert_eq!(value["retry_at"], "1970-01-01T00:00:00Z");
+    assert_eq!(
+        serde_json::from_value::<ModelRetryProgress>(value.clone()).unwrap(),
+        progress
+    );
+    let mut invalid = value.clone();
+    invalid["attempt"] = json!(1);
+    assert!(serde_json::from_value::<ModelRetryProgress>(invalid).is_err());
+    let mut invalid = value;
+    invalid["retry_at"] = json!("yesterday");
+    assert!(serde_json::from_value::<ModelRetryProgress>(invalid).is_err());
+}

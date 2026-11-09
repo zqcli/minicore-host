@@ -560,6 +560,21 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
     for round in 0..2 {
         send(&host, &caller, &target, MessageMode::FollowUp);
         starts.recv().await.unwrap();
+        let active = host
+            .session_state(&caller, &target)
+            .unwrap()
+            .data
+            .active_turn_id
+            .unwrap();
+        let mut turn_scope = subscribe(
+            &host,
+            &caller,
+            SubscriptionScope::Turn {
+                session_id: target.session_id.clone(),
+                turn_id: active.clone(),
+            },
+            &[EventCategory::Output],
+        );
         call_file(&events[round * 2], &path);
         arrivals.recv().await.unwrap();
         let (source, data) = loop {
@@ -569,6 +584,15 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
                 break (source, data);
             }
         };
+        loop {
+            if let ObservationEvent::Activity(ActivityEvent::ToolOutput {
+                source: scoped, ..
+            }) = next(&mut turn_scope).await
+            {
+                assert_eq!(scoped.turn.turn_id, active);
+                break;
+            }
+        }
         assert_eq!(data.text, "读🙂");
         assert_eq!((data.start, data.end), (0, 7));
         let tool_ref = ToolCallRef {
@@ -709,4 +733,610 @@ async fn retained_subscription_does_not_retain_reclaimed_source() {
             .is_err()
     );
     drop(retained);
+}
+
+#[tokio::test]
+async fn completion_can_precede_tail_events_without_losing_original_source_bytes() {
+    let (host, connection, events, _starts) = setup(1, None);
+    let caller = connection.caller();
+    let target = agent(&host, &caller);
+    let mut sub = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[EventCategory::Output, EventCategory::Completion],
+    );
+    complete(&events[0], "early complete🙂");
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    let (finished, positions) = match next(&mut sub).await {
+        ObservationEvent::Activity(ActivityEvent::ModelFinished { source, data }) => {
+            (source, data.output_positions)
+        }
+        other => {
+            panic!("complete history handoff must precede the single-thread event drain: {other:?}")
+        }
+    };
+    let (tail, delta) = delta(&mut sub).await;
+    assert_eq!(tail, finished);
+    assert_eq!(delta.text, "early complete🙂");
+    assert_eq!(
+        positions.iter().find(|p| p.channel == "text").unwrap().end,
+        delta.end
+    );
+    assert_eq!(
+        host.turn_output_read(
+            &caller,
+            &target,
+            &tail.turn.turn_id,
+            0,
+            &read(0, delta.end, 100)
+        )
+        .unwrap()
+        .data
+        .text,
+        delta.text
+    );
+    finish(&mut sub).await;
+}
+
+struct RetryModel {
+    descriptor: ModelDescriptor,
+    calls: std::sync::atomic::AtomicUsize,
+    starts: mpsc::UnboundedSender<usize>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+impl Model for RetryModel {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        let attempt = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        self.starts.send(attempt).unwrap();
+        Box::pin(async move {
+            if attempt == 1 {
+                return Err(minicore_runtime::model::ModelError::not_started(
+                    minicore_runtime::model::ModelErrorKind::ProviderUnavailable,
+                    None,
+                    minicore_runtime::error::DiagnosticSummary::new(
+                        minicore_runtime::error::DiagnosticCode::ModelUnavailable,
+                        minicore_runtime::error::DiagnosticCategory::Model,
+                        minicore_runtime::Text::new("retry fixture"),
+                        true,
+                    )
+                    .unwrap(),
+                ));
+            }
+            self.release.acquire().await.unwrap().forget();
+            Ok(Box::pin(stream::iter([
+                Ok(ModelEvent::text_delta("recovered")),
+                Ok(ModelEvent::Finish {
+                    reason: ModelFinishReason::Stop,
+                }),
+            ])) as ModelStream)
+        })
+    }
+}
+struct RetryResources {
+    model: Arc<RetryModel>,
+    delay: std::time::Duration,
+}
+impl ResourceResolver for RetryResources {
+    fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
+        Ok(())
+    }
+    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+        Box::pin(async move {
+            let mut options = LoopOptions::default_checked().unwrap();
+            options.model_retry_attempts = 3;
+            options.model_retry_base_delay = self.delay;
+            Ok(BoundResources {
+                execution: ExecutionConfig::new(
+                    self.model.clone(),
+                    RuntimeReasoning::Auto,
+                    ToolSet::default(),
+                    None,
+                    Arc::new(DefaultPromptProvider::new(None)),
+                )
+                .unwrap(),
+                options,
+            })
+        })
+    }
+}
+fn retry_setup(
+    delay: std::time::Duration,
+) -> (
+    Arc<Host>,
+    ConnectionHandle,
+    SessionRef,
+    Arc<RetryModel>,
+    mpsc::UnboundedReceiver<usize>,
+) {
+    let (starts, started) = mpsc::unbounded_channel();
+    let model = Arc::new(RetryModel {
+        descriptor: ModelDescriptor::new(
+            "test/retry".parse().unwrap(),
+            128000,
+            BTreeSet::from([RuntimeReasoning::Auto]),
+            true,
+        )
+        .unwrap(),
+        calls: std::sync::atomic::AtomicUsize::new(0),
+        starts,
+        release: Arc::new(tokio::sync::Semaphore::new(0)),
+    });
+    let host = Host::memory(Arc::new(RetryResources {
+        model: model.clone(),
+        delay,
+    }))
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let target = agent(&host, &connection.caller());
+    (host, connection, target, model, started)
+}
+async fn retry_state(
+    sub: &mut EventSubscription,
+    requesting: bool,
+) -> (TurnIdentity, TurnStateData) {
+    loop {
+        if let ObservationEvent::State(StateEvent::Turn { source, data }) = next(sub).await
+            && data.model_retry.as_ref().is_some_and(|retry| {
+                matches!(retry.phase, ModelRetryPhase::Requesting) == requesting
+            })
+        {
+            return (source, data);
+        }
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retry_wait_cancel_clears_authoritative_state_without_starting_attempt_two() {
+    let (host, connection, target, model, mut starts) =
+        retry_setup(std::time::Duration::from_secs(30));
+    let caller = connection.caller();
+    let mut state = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[EventCategory::State],
+    );
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    assert_eq!(starts.recv().await, Some(1));
+    let (source, waiting) = retry_state(&mut state, false).await;
+    let retry = waiting.model_retry.unwrap();
+    assert_eq!(
+        (retry.response_index, retry.attempt, retry.max_attempts),
+        (0, 2, 3)
+    );
+    assert_eq!(waiting.model_attempts, vec![1]);
+    assert_eq!(waiting.phase, Some(TurnPhase::Model));
+    let baseline = subscribe(
+        &host,
+        &caller,
+        SubscriptionScope::Turn {
+            session_id: target.session_id.clone(),
+            turn_id: source.turn_id.clone(),
+        },
+        &[EventCategory::State],
+    );
+    assert!(
+        baseline
+            .result()
+            .initial_states
+            .iter()
+            .any(|s| matches!(s,StateEvent::Turn {data,..} if data.model_retry.is_some()))
+    );
+    assert!(
+        host.turn_info(&caller, &target, &source.turn_id)
+            .unwrap()
+            .model_retry
+            .is_some()
+    );
+    host.cancel_turn(&caller, &target, &source.turn_id, false)
+        .unwrap();
+    loop {
+        if let ObservationEvent::State(StateEvent::Turn { data, .. }) = next(&mut state).await
+            && data.state == TurnState::Finished
+        {
+            assert!(data.model_retry.is_none());
+            assert_eq!(data.model_attempts, vec![1]);
+            break;
+        }
+    }
+    assert_eq!(model.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retry_requesting_and_clear_use_original_response_and_actual_attempts() {
+    let (host, connection, target, model, mut starts) =
+        retry_setup(std::time::Duration::from_millis(1));
+    let caller = connection.caller();
+    let mut state = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[EventCategory::State],
+    );
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    assert_eq!(starts.recv().await, Some(1));
+    assert_eq!(starts.recv().await, Some(2));
+    let (source, requesting) = retry_state(&mut state, true).await;
+    assert_eq!(requesting.model_attempts, vec![2]);
+    assert_eq!(requesting.model_retry.as_ref().unwrap().response_index, 0);
+    model.release.add_permits(1);
+    loop {
+        if let ObservationEvent::State(StateEvent::Turn { data, .. }) = next(&mut state).await
+            && data.state == TurnState::Finished
+        {
+            assert!(data.model_retry.is_none());
+            assert_eq!(data.requests, 1);
+            assert_eq!(data.model_attempts, vec![2]);
+            break;
+        }
+    }
+    assert_eq!(
+        host.turn_output_read(&caller, &target, &source.turn_id, 0, &read(0, 9, 100))
+            .unwrap()
+            .data
+            .text,
+        "recovered"
+    );
+}
+
+struct RequestInputTool {
+    spec: minicore_runtime::tools::ToolSpec,
+}
+impl minicore_runtime::tools::Tool for RequestInputTool {
+    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+        &self.spec
+    }
+    fn execute<'a>(
+        &'a self,
+        _: minicore_runtime::tools::ToolInvocation,
+        _: minicore_runtime::tools::ToolContext,
+    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        Box::pin(async {
+            Ok(minicore_runtime::tools::ToolExecutionOutcome::RequestInput(
+                minicore_runtime::tools::ToolInputRequest::new(
+                    "choose",
+                    vec![minicore_runtime::Text::new("one")],
+                    minicore_runtime::tools::ToolInputAnswerKind::SingleChoice,
+                )
+                .unwrap(),
+            ))
+        })
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interaction_observation_uses_actual_request_and_cancel_settlement() {
+    let tool = Arc::new(RequestInputTool {
+        spec: minicore_runtime::tools::ToolSpec::new(
+            "read_fixture".parse().unwrap(),
+            "ask fixture",
+            serde_json::json!({"type":"object"}),
+        )
+        .unwrap(),
+    });
+    let (host, connection, events, mut starts) = setup(1, Some(tool));
+    let caller = connection.caller();
+    let target = agent(&host, &caller);
+    let mut sub = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[
+            EventCategory::Interaction,
+            EventCategory::State,
+            EventCategory::Completion,
+        ],
+    );
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    starts.recv().await.unwrap();
+    call_file(&events[0], std::path::Path::new("fixture"));
+    let (source, id) = loop {
+        if let ObservationEvent::Activity(ActivityEvent::InteractionRequested {
+            source,
+            interaction_id,
+            data,
+        }) = next(&mut sub).await
+        {
+            assert!(
+                matches!(data,InteractionRequestData::ToolInput {request} if request.prompt.as_str()=="choose")
+            );
+            break (source, interaction_id);
+        }
+    };
+    assert_eq!(id.as_str().len(), 20);
+    assert!(!id.as_str().starts_with("int_"));
+    let mut states = host.session_states(&caller, &target).unwrap();
+    while states
+        .snapshot()
+        .unwrap()
+        .data
+        .pending_interactions
+        .is_empty()
+    {
+        states.changed().await.unwrap();
+    }
+    let baseline = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[EventCategory::State],
+    );
+    assert!(baseline.result().initial_states.iter().any(|s|matches!(s,StateEvent::Session {data,..} if data.pending_interactions.iter().any(|p|p.interaction_id==id))));
+    host.cancel_turn(&caller, &target, &source.turn.turn_id, false)
+        .unwrap();
+    loop {
+        if let ObservationEvent::Activity(ActivityEvent::InteractionResolved {
+            source: resolved,
+            interaction_id,
+            data,
+        }) = next(&mut sub).await
+        {
+            assert_eq!(resolved, source);
+            assert_eq!(interaction_id, id);
+            assert_eq!(data.resolution, InteractionResolution::Cancelled);
+            break;
+        }
+    }
+    finish(&mut sub).await;
+    assert!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .pending_interactions
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn history_pages_read_real_saved_content_without_recreating_old_execution() {
+    let directory = tempfile::tempdir().unwrap();
+    let (events, receiver) = mpsc::unbounded_channel();
+    let (started, _starts) = mpsc::unbounded_channel();
+    let model = Arc::new(ScriptedModel {
+        descriptor: ModelDescriptor::new(
+            "test/history".parse().unwrap(),
+            128000,
+            BTreeSet::from([RuntimeReasoning::Auto]),
+            true,
+        )
+        .unwrap(),
+        rounds: Mutex::new(VecDeque::from([receiver])),
+        started,
+    });
+    let resources: Arc<dyn ResourceResolver> = Arc::new(Resources { model, tool: None });
+    let host = Host::open_persistent(
+        directory.path(),
+        HostSettings {
+            name: "history fixture".into(),
+        },
+        resources.clone(),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let receipt = host
+        .create_agent_async(
+            &caller,
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "saved".into(),
+                mode: StorageMode::Persistent,
+                config: AgentConfig::default(),
+                default_session: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let target = SessionRef {
+        agent_id: receipt.agent_id.unwrap(),
+        session_id: receipt.session_id.unwrap(),
+    };
+    let mut completed = subscribe(
+        &host,
+        &caller,
+        session_scope(&target),
+        &[EventCategory::Completion],
+    );
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    complete(&events, "saved真实正文");
+    let original = finish(&mut completed).await;
+    let first = host
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(&first.data.items[0],HistoryItemData::User {text} if text=="observe"));
+    let old_cursor = first.data.next_cursor.clone().unwrap();
+    let second = host
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                cursor: Some(old_cursor.clone()),
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(&second.data.items[0],HistoryItemData::Assistant {response} if matches!(&response.content[0],minicore_runtime::model::AssistantPart::Text(text) if text.as_ref()=="saved真实正文"))
+    );
+    assert!(second.data.next_cursor.is_none());
+    let mut host_states = subscribe(
+        &host,
+        &caller,
+        SubscriptionScope::Host {
+            host_id: host.info(&caller).unwrap().host_id,
+        },
+        &[EventCategory::State],
+    );
+    host.shutdown(
+        &caller,
+        HostShutdownRequest {
+            operation_id: OperationId::new().unwrap(),
+            strategy: HostShutdownStrategy::Graceful,
+        },
+    )
+    .unwrap();
+    loop {
+        if let ObservationEvent::State(StateEvent::Host { data, .. }) = next(&mut host_states).await
+            && data.lifecycle == HostLifecycle::Stopped
+        {
+            break;
+        }
+    }
+    drop(host_states);
+    drop(completed);
+    drop(connection);
+    drop(host);
+    let reopened = Host::open_persistent(
+        directory.path(),
+        HostSettings {
+            name: "ignored".into(),
+        },
+        resources,
+    )
+    .await
+    .unwrap();
+    let operator = reopened.connect().unwrap();
+    let reader = reopened.connect().unwrap();
+    let caller = reader.caller();
+    assert_eq!(
+        reopened
+            .session_state(&caller, &target)
+            .unwrap()
+            .data
+            .residency,
+        Residency::Unloaded
+    );
+    assert_eq!(
+        reopened
+            .history_read(
+                &caller,
+                &target,
+                &HistoryReadRequest {
+                    cursor: Some(old_cursor),
+                    limit: 1
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::SessionHistoryCursorInvalid)
+    );
+    let page = reopened
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 20,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(page.data.items.len(), 2);
+    assert!(page.data.next_cursor.is_none());
+    assert_eq!(
+        reopened
+            .session_state(&caller, &target)
+            .unwrap()
+            .data
+            .residency,
+        Residency::Unloaded
+    );
+    assert!(reopened.turns(&caller, &target).unwrap().is_empty());
+    assert_eq!(
+        reopened
+            .turn_output_read(&caller, &target, &original.turn_id, 0, &read(0, 4, 4))
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::SessionTurnNotFound)
+    );
+    let wire = serde_json::to_value(&page).unwrap();
+    assert!(!wire.to_string().contains("loop_id"));
+    assert!(wire.get("load_id").is_none());
+    drop(operator);
+}
+
+#[tokio::test]
+async fn session_preparation_is_not_published_as_a_registered_child() {
+    let (host, connection, _events, _starts) = setup(0, None);
+    let caller = connection.caller();
+    let mut sub = subscribe(
+        &host,
+        &caller,
+        SubscriptionScope::Host {
+            host_id: host.info(&caller).unwrap().host_id,
+        },
+        &[EventCategory::State],
+    );
+    let target = agent(&host, &caller);
+    host.events_unsubscribe(
+        &caller,
+        &UnsubscribeRequest {
+            subscription_id: sub.result().subscription_id.clone(),
+        },
+    )
+    .unwrap();
+    let mut states = 0;
+    while let Some(ObservationNotification::Event(push)) = sub.recv().await.unwrap() {
+        if let ObservationEvent::State(StateEvent::Session { source, .. }) = push.event {
+            assert_eq!(source.session_id, target.session_id);
+            states += 1;
+        }
+    }
+    assert_eq!(
+        states, 1,
+        "only the registered Session publishes its initial state"
+    );
+}
+
+#[tokio::test]
+async fn agent_scope_covers_later_direct_sessions_without_rebuilding() {
+    let (host, connection, _events, _starts) = setup(0, None);
+    let caller = connection.caller();
+    let first = agent(&host, &caller);
+    let host_id = host.info(&caller).unwrap().host_id;
+    let mut sub = subscribe(
+        &host,
+        &caller,
+        SubscriptionScope::Agent {
+            host_id: host_id.clone(),
+            agent_id: first.agent_id.clone(),
+        },
+        &[EventCategory::State],
+    );
+    assert!(sub.result().initial_states.iter().any(|state|matches!(state,StateEvent::Session {source,..} if source.session_id==first.session_id)));
+    let receipt = host
+        .create_session(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: AgentRef {
+                    host_id,
+                    agent_id: first.agent_id.clone(),
+                },
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .unwrap();
+    match next(&mut sub).await {
+        ObservationEvent::State(StateEvent::Session { source, .. }) => {
+            assert_eq!(source.session_id, receipt.session_id.unwrap());
+            assert_eq!(source.agent_id, first.agent_id);
+        }
+        other => panic!("unexpected later child event: {other:?}"),
+    }
 }

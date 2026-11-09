@@ -92,7 +92,8 @@ ids!(
     LoadId,
     MessageId,
     OperationId,
-    SubscriptionId
+    SubscriptionId,
+    InteractionId
 );
 
 /// Upstream ToolCall identifiers are preserved exactly, not normalized or

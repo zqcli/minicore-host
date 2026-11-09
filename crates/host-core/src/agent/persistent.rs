@@ -45,7 +45,8 @@ impl AgentOwner {
                         .lock()
                         .expect("Agent mutex poisoned")
                         .sessions
-                        .insert(id, session);
+                        .insert(id, Arc::clone(&session));
+                    session.publish_initial();
                 }
                 Err(fault) => {
                     owner

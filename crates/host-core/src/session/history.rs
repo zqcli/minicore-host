@@ -392,7 +392,7 @@ impl SessionController {
             history: state.history[active.start_history..].to_vec(),
             partials: active.partials,
         };
-        self.observe_finished(&result.info, state.runner_revision);
+        self.observe_finished(&mut state, &result.info);
         state.completion_order.push(turn_id.clone());
         state.completed.insert(turn_id.clone(), result);
         if state.lifecycle == SessionLifecycle::Closing && state.info.mode == StorageMode::Memory {

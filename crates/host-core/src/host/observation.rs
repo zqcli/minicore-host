@@ -2,6 +2,16 @@ use super::*;
 use crate::observation::*;
 
 impl Host {
+    pub async fn history_read(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: &HistoryReadRequest,
+    ) -> Result<SessionHistorySnapshot, Fault> {
+        self.session(caller, target)?
+            .history_read(caller, request)
+            .await
+    }
     pub(crate) fn publish_host_state_owned(&self) {
         let control = self.access.control_state_owned();
         let state = self.state.lock().expect("Host mutex poisoned");

@@ -24,6 +24,9 @@ pub struct TurnStateData {
     pub persistence: PersistenceState,
     pub requests: u64,
     pub tool_rounds: u64,
+    pub phase: Option<TurnPhase>,
+    pub model_retry: Option<ModelRetryProgress>,
+    pub model_attempts: Vec<u8>,
     pub fault: Option<Fault>,
     pub persistence_fault: Option<Fault>,
 }
@@ -133,6 +136,72 @@ pub enum ObservationEvent {
     State(StateEvent),
     Activity(ActivityEvent),
 }
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalRiskData {
+    Low,
+    Medium,
+    High,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InteractionRequestData {
+    Approval {
+        prompt: String,
+        risk: ApprovalRiskData,
+    },
+    ToolInput {
+        request: minicore_runtime::tools::ToolInputRequest,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingInteractionData {
+    pub interaction_id: InteractionId,
+    pub tool_call_id: ToolCallId,
+    pub name: String,
+    pub request: InteractionRequestData,
+}
+impl PendingInteractionData {
+    pub(crate) fn from_runtime(
+        value: &minicore_runtime::interaction::PendingInteraction,
+        interaction_id: InteractionId,
+    ) -> Self {
+        let request = match &value.kind {
+            minicore_runtime::interaction::InteractionKind::ToolInput(request) => {
+                InteractionRequestData::ToolInput {
+                    request: request.clone(),
+                }
+            }
+            minicore_runtime::interaction::InteractionKind::Approval(request) => {
+                InteractionRequestData::Approval {
+                    prompt: request.prompt.as_str().to_owned(),
+                    risk: match request.risk {
+                        minicore_runtime::tools::ApprovalRisk::Low => ApprovalRiskData::Low,
+                        minicore_runtime::tools::ApprovalRisk::Medium => ApprovalRiskData::Medium,
+                        minicore_runtime::tools::ApprovalRisk::High => ApprovalRiskData::High,
+                    },
+                }
+            }
+        };
+        Self {
+            interaction_id,
+            tool_call_id: ToolCallId(value.tool_call_id.as_str().to_owned()),
+            name: value.tool_name.as_str().to_owned(),
+            request,
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct InteractionResolvedData {
+    pub resolution: InteractionResolution,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InteractionResolution {
+    Answered,
+    Cancelled,
+    Failed,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageEventData {
     pub text: String,
@@ -146,6 +215,20 @@ pub struct MessageEventData {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum ActivityEvent {
+    #[serde(rename = "interaction.requested")]
+    InteractionRequested {
+        #[serde(flatten)]
+        source: ToolCallIdentity,
+        interaction_id: InteractionId,
+        data: InteractionRequestData,
+    },
+    #[serde(rename = "interaction.resolved")]
+    InteractionResolved {
+        #[serde(flatten)]
+        source: ToolCallIdentity,
+        interaction_id: InteractionId,
+        data: InteractionResolvedData,
+    },
     #[serde(rename = "toolcall.started")]
     ToolStarted {
         #[serde(flatten)]
@@ -215,6 +298,10 @@ impl ObservationEvent {
             Self::Activity(
                 ActivityEvent::MessageAccepted { .. } | ActivityEvent::MessageBound { .. },
             ) => EventCategory::Message,
+            Self::Activity(
+                ActivityEvent::InteractionRequested { .. }
+                | ActivityEvent::InteractionResolved { .. },
+            ) => EventCategory::Interaction,
             Self::Activity(_) => EventCategory::Completion,
         }
     }
@@ -242,7 +329,9 @@ impl ObservationEvent {
             Self::Activity(
                 ActivityEvent::ToolOutput { source, .. }
                 | ActivityEvent::ToolFinished { source, .. }
-                | ActivityEvent::ToolStarted { source, .. },
+                | ActivityEvent::ToolStarted { source, .. }
+                | ActivityEvent::InteractionRequested { source, .. }
+                | ActivityEvent::InteractionResolved { source, .. },
             ) => (&source.turn.session, Some(&source.turn.turn_id)),
             Self::Activity(
                 ActivityEvent::TurnFinished { source, .. }

@@ -73,6 +73,7 @@ pub struct SessionStateData {
     pub load_id: Option<LoadId>,
     pub runner_revision: u64,
     pub active_turn_id: Option<TurnId>,
+    pub pending_interactions: Vec<crate::PendingInteractionData>,
     pub next_step: Vec<InputSummary>,
     pub next_turn: Vec<InputSummary>,
     pub preparing: bool,
@@ -103,6 +104,9 @@ pub struct TurnInfo {
     pub persistence: PersistenceState,
     pub requests: u64,
     pub tool_rounds: u64,
+    pub phase: Option<TurnPhase>,
+    pub model_retry: Option<ModelRetryProgress>,
+    pub model_attempts: Vec<u8>,
     pub fault: Option<Fault>,
     pub persistence_fault: Option<Fault>,
 }
@@ -185,4 +189,51 @@ pub struct ToolCallSnapshot {
     #[serde(flatten)]
     pub source: ToolCallIdentity,
     pub data: crate::ToolCallData,
+}
+
+/// Public conversation content, not a raw JSONL record or a reconstructed past
+/// execution. Restarted histories do not acquire fabricated current Turn/Load IDs.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum HistoryItemData {
+    User {
+        text: String,
+    },
+    Assistant {
+        response: crate::ModelResponseData,
+    },
+    ToolResult {
+        tool_call_id: ToolCallId,
+        name: String,
+        result: crate::ToolResultData,
+    },
+    Summary {
+        text: String,
+    },
+}
+impl From<&HistoryItem> for HistoryItemData {
+    fn from(value: &HistoryItem) -> Self {
+        match value {
+            HistoryItem::User(value) => Self::User {
+                text: value.input.as_text().to_owned(),
+            },
+            HistoryItem::Assistant(value) => Self::Assistant {
+                response: value.into(),
+            },
+            HistoryItem::ToolResult(value) => Self::ToolResult {
+                tool_call_id: ToolCallId(value.call_id.as_str().to_owned()),
+                name: value.tool_name.as_str().to_owned(),
+                result: value.into(),
+            },
+            HistoryItem::Summary(value) => Self::Summary {
+                text: value.content.as_str().to_owned(),
+            },
+        }
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionHistorySnapshot {
+    #[serde(flatten)]
+    pub source: SessionIdentity,
+    pub data: HistoryPageData<HistoryItemData>,
 }

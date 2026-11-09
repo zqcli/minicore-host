@@ -62,3 +62,66 @@ large notification enum. The concurrent Fault API integration briefly triggered
 `result_large_err`; upstream sibling fix `ab4a56b` boxes optional details without
 changing its public/wire contract and is included. These checks are local
 integration, not remotely reproducible Runtime-0.10 publication or hosted CI.
+
+## Authoritative state and real history follow-up
+
+Separate local Runtime candidate: `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`
+at `/workspace/shared/minicore-runtime-retry-state`. Its parent `142412b` adds
+the authoritative state handoff; the last commit adds tests/docs only. These
+changes are not silently included in the previously published Runtime pin.
+Bootstrap `49af8f8` pins `time = 0.3.55` with serde/formatting/parsing for strict
+RFC3339 values; no unrelated dependency upgrade is requested.
+
+- Runtime state/watch, rather than public output events, supplies current retry
+  phase, actual Model::start counts, source time and original response identity.
+  Session always drains output and joins the real Runtime, with or without any
+  subscribers. Terminal state clears the retry field.
+- Source-owned interaction mapping translates actual Runtime identities into
+  stable Host-format 20-character IDs. Initial state, request and resolved
+  events reuse that mapping. Actual cancellation/failure settles remaining
+  interactions after the Turn joins and saves; it never fabricates an answer.
+  Public answer routing remains future integration; the original owner retains
+  the mapping for that entry point.
+- History pagination adapts actual owner-held history or uses
+  `SessionStore::read_history` for cold persistent content. It creates no Runner
+  and restores no old execution; the real-file restart test confirms unchanged
+  unloaded residency, rejected old cursor and missing old Turn/output source.
+  In-memory pagination clones only the requested page.
+- Session preparation does not emit a registered-child snapshot. Observation
+  starts after actual insertion; discovered persistent Sessions are registered
+  in the same way.
+
+New deterministic tests cover completion before tail bytes, retry waiting
+cancellation, requesting/clear with actual attempt counts, interaction request
+and cancel settlement, real persistent cold history, unpublished-child gating,
+and Agent/Turn dynamic descendants. No sleeps guess race order. All earlier
+observation scenarios remain covered. No public events reconstruct durable
+history; final tool results are still separate from actual process output.
+
+Known remaining integration: typed/stdio/WSS subscription push and read routes;
+public interaction answer routing; Host state notifications when connection
+control changes on close/key rotation (the authoritative query and initial
+baseline already reflect current control). No new global event sequence,
+capacity quota, permanent replay store, ACK or business fast path was added.
+
+### Follow-up gate (2026-11-09 UTC)
+
+Same environment as above; the command-line patch path is now
+`/workspace/shared/minicore-runtime-retry-state`, fixed HEAD
+`3cf57e3e1947b0464bd8843ed0508bfddfb2639a`. Temporary Runtime version/lock changes
+remain uncommitted. `cargo fmt --all --check`, workspace all-targets Clippy with
+`-D warnings`, workspace all-targets tests, all 3 doctests and rustdoc with
+`RUSTDOCFLAGS='-D warnings'` passed using `--locked --offline` and that explicit
+patch. `cargo test --workspace --all-targets --locked --offline -- --list`
+contains **332 unique test cases** (13 scoped-observation cases, 4 observation
+protocol cases). The final extra assertion that public interaction IDs use the
+20-character Host format also passed its focused real Runtime case. No test
+claims live external model, TUI, remote Host CI or published retry-state source.
+
+During development the retry fixture used an invalid 60-second configured base
+(backoff maximum is the existing 30 seconds), so the model never started. The
+fixture was corrected to the valid 30-second base and cancellation is gated by
+the observed real waiting state, not elapsed time. Protocol round-trip testing
+also caught serde flatten/deny-unknown-fields interaction; retry wire branches
+now explicitly validate their exact fields and RFC3339 timestamp. Neither test
+failure was concealed as a successful production path.

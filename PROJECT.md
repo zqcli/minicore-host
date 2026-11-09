@@ -69,3 +69,12 @@ on return. A scripted gated model and a real temporary-file tool cover output,
 scope, cancellation cleanup, internal Loop indexing and source reclamation.
 This checkpoint does not claim finished interaction/retry projection, history
 pagination, transport event routing or live-provider/TUI acceptance. See task 018.
+
+A separate local observation checkpoint integrates authoritative Runtime retry
+state, Host-format interaction identity mapping, real interaction settlement and
+cold persistent history pagination. It is validated against the unpublished
+Runtime retry-state candidate `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`;
+it is not part of the previously published Runtime pin or a claim that this
+candidate is remotely reproducible. It also prevents unpublished Session
+preparation from appearing as a registered child. Transport observation routing,
+public interaction answers and all broader remaining product work remain open.
