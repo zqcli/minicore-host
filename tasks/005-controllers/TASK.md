@@ -30,3 +30,14 @@ The core requires the separately developed Runtime history/partial patch. Runtim
 The public Host entry currently accepts memory entities only. Durable storage and JournalHistory exist, but persistent Host/Agent/Session startup and lifecycle composition are unfinished. Core controls still need complete typed receipt mapping for the canonical RPC service. Full 52-method coverage, stdio/WSS, DSH, tools/workspace/compaction and real TUI integration are unfinished. There is no implicit success handler for missing features.
 
 Further work: real-file Session save-boundary tests, final Runtime combined-failure integration, full workspace gate, and complete owner lifecycle/transport stages.
+
+## Save and production-adapter integration checkpoint
+
+Against Runtime local commit `49a6e8b06512616a2fb9c6104c07536b8396c4ca`:
+
+- `cargo test -p minicore-host-core --lib --locked`: 4 passed. Real temp-directory JSONL confirms response-before-tool, tool-batch-before-next-model, and final-save-before-public-finished barriers. Cancellation retains the save owner and actual complete response. Truncated output persists as a distinct partial. Simultaneous stream/save failure retains the primary fault, separate persistence fault, full authoritative report and blocked finalization, without duplicate append or fake finished.
+- `cargo test -p minicore-host-core --test http_host --offline`: 1 passed. Two turns traverse public Host -> Agent -> SessionController -> real Runtime -> production reqwest/SSE -> real loopback TCP fixture. Exact user history and one framework/Role injection per request are checked. This is not a live external model or TUI test.
+- `cargo test -p minicore-host-core --test runtime_owners --locked`: 15 passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed after correcting two test-only lint issues (explicit default initializer and lexical mutex-guard scope).
+
+Independent targeted review re-ran the final non-Tokio regression and confirmed it closed. Full external review remains pending; main has not been merged.

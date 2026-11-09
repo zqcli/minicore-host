@@ -530,6 +530,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "minicore-host-protocol",
+ "minicore-host-provider",
  "minicore-host-storage",
  "minicore-runtime",
  "serde",
@@ -537,6 +538,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

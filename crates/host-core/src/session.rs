@@ -1502,3 +1502,6 @@ fn runtime_fault(failure: &minicore_runtime::LoopFailure) -> Fault {
     };
     Fault::new(kind, failure.diagnostic.message().as_str())
 }
+
+#[cfg(test)]
+mod tests;
