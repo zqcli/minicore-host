@@ -180,6 +180,41 @@ struct ActiveTurn {
     terminal_accepted: bool,
     pending_interaction: Option<crate::PendingInteractionData>,
 }
+impl ActiveTurn {
+    fn claim_terminal(&mut self, outcome: TurnOutcome, fault: Option<Fault>) {
+        if self.info.outcome.is_none() {
+            if self.info.state == TurnState::Cancelling {
+                self.info.outcome = Some(TurnOutcome::Cancelled);
+                self.info.cleanup_faults.extend(fault);
+            } else {
+                self.info.outcome = Some(outcome);
+                self.info.fault = fault;
+            }
+        }
+        self._activation.expire();
+        self.info.state = TurnState::Finalizing;
+        self.handle = None;
+    }
+    fn claim_report(&mut self, report: &LoopReport) {
+        let (outcome, fault) = match &report.outcome {
+            LoopOutcome::Completed => (TurnOutcome::Completed, None),
+            LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
+            LoopOutcome::Failed(failure) => (
+                TurnOutcome::Failed,
+                (failure.kind != minicore_runtime::LoopFailureKind::History)
+                    .then(|| runtime_fault(failure)),
+            ),
+            _ => (
+                TurnOutcome::Failed,
+                Some(Fault::new(
+                    FaultKind::TurnInternalUnexpected,
+                    "unknown Runtime outcome",
+                )),
+            ),
+        };
+        self.claim_terminal(outcome, fault);
+    }
+}
 struct SessionState {
     info: SessionInfo,
     lifecycle: SessionLifecycle,
@@ -1327,6 +1362,15 @@ impl SessionController {
                 active.info.model_retry = None;
                 active.report = Some(Arc::clone(&report));
                 active.handle = None;
+                // Failed/cancelled execution cannot become cancellable again
+                // while this owner saves its returned report or partial.
+                if report.outcome != LoopOutcome::Completed {
+                    active.claim_report(&report);
+                    if active.info.outcome == Some(TurnOutcome::Failed) {
+                        state.failure_paused = true;
+                    }
+                    self.publish(&mut state);
+                }
             }
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
@@ -1337,26 +1381,7 @@ impl SessionController {
                     if let Some(active) = state.active.as_mut() {
                         active.info.persistence = PersistenceState::Failed;
                         active.info.persistence_fault = Some(fault);
-                        active.info.fault = match &report.outcome {
-                            LoopOutcome::Failed(failure)
-                                if failure.kind != minicore_runtime::LoopFailureKind::History =>
-                            {
-                                Some(runtime_fault(failure))
-                            }
-                            _ => None,
-                        };
-                        active.info.outcome = Some(match report.outcome {
-                            LoopOutcome::Completed
-                                if active.info.state == TurnState::Cancelling =>
-                            {
-                                TurnOutcome::Cancelled
-                            }
-                            LoopOutcome::Completed => TurnOutcome::Completed,
-                            LoopOutcome::Cancelled(_) => TurnOutcome::Cancelled,
-                            _ => TurnOutcome::Failed,
-                        });
-                        active._activation.expire();
-                        active.info.state = TurnState::Finalizing;
+                        active.claim_report(&report);
                         if active.info.outcome == Some(TurnOutcome::Failed) {
                             state.failure_paused = true;
                         }
@@ -1383,29 +1408,7 @@ impl SessionController {
                     Some(next)
                 } else {
                     let active = state.active.as_mut().expect("owned active Turn");
-                    let (outcome, fault) = match &report.outcome {
-                        LoopOutcome::Completed if active.info.state == TurnState::Cancelling => {
-                            (TurnOutcome::Cancelled, None)
-                        }
-                        LoopOutcome::Completed => (TurnOutcome::Completed, None),
-                        LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
-                        LoopOutcome::Failed(failure) => (
-                            TurnOutcome::Failed,
-                            (failure.kind != minicore_runtime::LoopFailureKind::History)
-                                .then(|| runtime_fault(failure)),
-                        ),
-                        _ => (
-                            TurnOutcome::Failed,
-                            Some(Fault::new(
-                                FaultKind::TurnInternalUnexpected,
-                                "unknown Runtime outcome",
-                            )),
-                        ),
-                    };
-                    active._activation.expire();
-                    active.info.state = TurnState::Finalizing;
-                    active.info.outcome = Some(outcome);
-                    active.info.fault = fault;
+                    active.claim_report(&report);
                     self.publish(&mut state);
                     None
                 }

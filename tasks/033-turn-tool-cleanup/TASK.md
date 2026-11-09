@@ -1,5 +1,7 @@
 # Task 033: Retain actual tool cleanup under the public Turn
 
+The separate generic [terminal claim fix](CLAIM.md) preserves cancellation/failure ordering before history I/O and does not depend on the local-tool producer or registry.
+
 ## Scope and fixed inputs
 
 - Base: `04ba5bc07a7d9bb73eabb143839fbaeb264a0cea`; topic `feat/turn-tool-cleanup`.

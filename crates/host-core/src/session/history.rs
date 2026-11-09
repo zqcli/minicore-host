@@ -329,14 +329,7 @@ impl SessionController {
             else {
                 return;
             };
-            // A later save/cancel/force cannot revise a previously claimed outcome.
-            if active.info.outcome.is_none() {
-                active.info.outcome = Some(outcome);
-                active.info.fault = fault;
-            }
-            active._activation.expire();
-            active.info.state = TurnState::Finalizing;
-            active.handle = None;
+            active.claim_terminal(outcome, fault);
             if active.info.outcome == Some(TurnOutcome::Failed) {
                 state.failure_paused = true;
             }
@@ -381,7 +374,9 @@ impl SessionController {
                                     LoopOutcome::Cancelled(reason) => {
                                         Some(format!("Runtime cancellation: {reason:?}"))
                                     }
-                                    LoopOutcome::Failed(failure) => {
+                                    LoopOutcome::Failed(failure)
+                                        if outcome == TurnOutcome::Failed =>
+                                    {
                                         Some(failure.diagnostic.message().as_str().to_owned())
                                     }
                                     _ => None,
