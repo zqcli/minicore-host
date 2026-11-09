@@ -41,3 +41,12 @@ Against Runtime local commit `49a6e8b06512616a2fb9c6104c07536b8396c4ca`:
 - `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed after correcting two test-only lint issues (explicit default initializer and lexical mutex-guard scope).
 
 Independent targeted review re-ran the final non-Tokio regression and confirmed it closed. Full external review remains pending; main has not been merged.
+
+## Multi-thread scheduling checkpoint
+
+- Most owner regressions now run on four Tokio worker threads. The cancellation claim/send/repeat test retains a current-thread executor to keep that synchronous sequence inside one declared schedule boundary.
+- Added the opposite finish/steer ordering: after an actual first-Turn final claim, a new steer receives a new Turn without a lost wake, duplicate finish or previous-Turn rebinding.
+- Replaced fixed yield-count assumptions in close/preparation/failure tests with actual state/Turn settlement waits. Idle Agent stop uses a bounded condition wait rather than assuming ten yields completes an owner task.
+- `cargo test -p minicore-host-core --test runtime_owners --locked`: 16 passed.
+- Repeated the same 16-test suite 25 times: every run passed. This is repeated scheduling coverage, not 400 distinct cases or a capacity claim.
+- `cargo clippy -p minicore-host-core --all-targets --locked -- -D warnings` and formatting passed. No production source changes were needed.
