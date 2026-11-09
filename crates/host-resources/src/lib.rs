@@ -14,7 +14,7 @@ use minicore_host_workspace::Workspace;
 use minicore_runtime::{
     ExecutionConfig, LoopOptions, Text,
     model::{Model, ModelDescriptor, ModelMessage, ReasoningPreference as RuntimeReasoning},
-    prompt::{DefaultPromptProvider, PromptFuture, PromptProvider, PromptRequest},
+    prompt::{PromptFuture, PromptProvider, PromptRequest},
     tools::ToolSet,
 };
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
@@ -277,7 +277,7 @@ struct BoundPrompt {
 impl PromptProvider for BoundPrompt {
     fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
         Box::pin(async move {
-            let mut prompt = DefaultPromptProvider::new(None).prepare(request).await?;
+            let mut prompt = minicore_host_core::prepare_prompt_history(request).await?;
             let mut prefix = Vec::new();
             if !self.framework.is_empty() {
                 prefix.push(ModelMessage::System(Arc::from(self.framework.as_str())));
