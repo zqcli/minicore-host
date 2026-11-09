@@ -2,7 +2,7 @@
 
 ## Review target and authority
 
-The target is the `dev` foundation, with provider-correction checkpoint `38991d37bc4980fc31a3312e943a62a060ce635a`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
+The target is the `dev` foundation, with shutdown/retirement checkpoint `413916cac0730d291e5c8163cdc3d59e5dbedcd1`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
 
 Read `AGENTS.md`, the complete `SPEC.md`, `PROJECT.md`, and `docs/method-coverage.md` first. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`. The 52-method catalog describes names/contracts, not 52 finished handlers. No remote Host publication or main merge has been performed. Remote pushes require the owner's explicit approval.
 
@@ -21,7 +21,8 @@ This handoff is self-contained in the repository. The review must not depend on 
 2. Storage: Linux directory-inode ownership, fd-relative no-follow operations, independent child discovery, exact object identities, strict native-history JSONL and durability/reconciliation ranges. Check that neither a readable file nor accepted bytes are mislabeled as confirmed persistence.
 3. Core: Host -> Agent -> SessionController -> real Runtime. Follow both input queues, Turn binding, same-Turn continuation, cancellation claim ownership, finalization and separate execution/save failures. No public event stream is used to reconstruct persistent model content.
 4. Persistent owners: initialization, owned asynchronous creation, partial receipts, configuration/default publication after confirmed metadata saves, explicit original-candidate reconciliation, lazy history loads, durable close ordering and stop aggregation. Child notifications carry no parent mutation authority; live memory descendants still retain the root lease.
-5. Provider: real OpenAI-compatible Chat Completions HTTP/SSE, conservative delivery/retry classification, original tool IDs, authoritative partial content, and non-executable incomplete tool-name/ID fragments retained as provider partial metadata. It is not the old Agent's Responses adapter.
+5. Lifecycle: immediate canonical shutdown facts; monotonic graceful/force; failed-save blocking; Session-only explicit original-save confirmation; actual task joins and directory/resource release; memory removal and concurrent last-child/create/close ownership. Ordinary call/connection abandonment does not abandon work.
+6. Provider: real OpenAI-compatible Chat Completions HTTP/SSE, conservative delivery/retry classification, original tool IDs, authoritative partial content, and non-executable incomplete tool-name/ID fragments retained as provider partial metadata. It is not the old Agent's Responses adapter.
 
 Pay particular attention to acceptance versus publication, owner retirement versus a caller's completed wait, configuration revision versus other state revisions, actual current/pending default references, and the distinction between a completed Runtime execution and a durably finalized public Turn.
 
@@ -42,19 +43,28 @@ Test evidence is actual code execution, with its boundaries kept explicit:
 - `host-core/tests/runtime_owners.rs`: real owners and real AgentLoop with scripted/gated model fixtures; most tests use multiple Tokio worker threads.
 - `host-core/src/session/tests.rs`: real temporary JSONL and save barriers, cancellation during a save, authoritative partial and simultaneous execution/save failure.
 - `host-core/tests/persistent_owners.rs`: actual object records, restart, corruption isolation, owned creation/configuration, default/close dependencies, root lease and metadata concurrency.
+- `host-core/tests/host_shutdown.rs`, `entity_retirement.rs` and `history_continuation.rs`: actual Runtime cancellation/partial and ordinary-tool results, original save confirmation, graceful paused backlog, force upgrade, ownership release and reclaimed sources.
 - `host-core/tests/http_host.rs`: two turns through Host, Runtime and the production provider over actual loopback HTTP/SSE.
 - Storage tests: real filesystem/process locking, abrupt process exit, unsafe paths, corruption, partial writes and sync/reconciliation failures. Metadata gates coordinate only the same file's raw snapshot/publication, not owner state or unrelated files.
 - Provider tests: production HTTP/SSE transport plus real Runtime. No live external model credentials or endpoint were used.
 
 The final clean-source checkpoint at `0b9b390` passed the entire 198-test/2-doctest gate in a fresh local Git clone with its own empty target directory, using the published Runtime Git source. An earlier clean clone at `d73b161` passed its then-current 190-test/2-doctest gate. Cargo downloads were cached; this was not a remote Host clone or hosted workflow. Those clean-source counts are core 67, protocol 47, provider 27 and storage 57. A later independent review found the HTTP 200 SSE Retry-After defect; fix `7b24ca2` and nine new real HTTP regressions are integrated at `38991d3`, whose complete gate passes 207 tests and 2 doctests (provider 36). The original defect was reproduced before fixing it; a separate provider-scoped review passed the fixed regression and additional probes. The earlier 198-test result is not evidence that this missed case was covered. Seven additional default-reference, revocation and gate-reacquisition regressions from targeted review are part of those counts. A separate fresh-target review passed core/storage tests and lint/doc checks; it is not the requested external review. Exact commands and source checkpoints are recorded in task 001 and task 006.
 
+At lifecycle checkpoint `413916c`, the entire gate passes 240 unit/integration tests and 2 doctests (core 100, protocol 47, provider 36, storage 57). The 19 runtime-owner tests passed 25 consecutive runs after five old tombstone expectations were updated to check real reclamation while preserving their default/acceptance/preparation assertions. A separate scoped review passed 12 additional real public-API cases and the 38 focused repository cases, including the concurrent-close handoff correction. Exact integration mappings and commands are in task 012. This is a local integrated pass, not a hosted Host CI or external review result.
+
 ## Required scope still open
 
 - Complete canonical service implementations and receipts for all 52 methods, typed/stdio/WSS equivalence, shared client timeout ownership and actual Host process integration.
-- Host shutdown/reload and execution-resource configuration; HostSettings currently contains only name metadata. Network authentication, key changes and full scoped/filterable events are not implemented.
-- Owner-level continuation of failed Runtime history saves, phased object deletion and automatic memory-entity reclamation. The lower-level storage reconciliation API alone does not complete these owner controls.
+- Host reload and execution-resource configuration; HostSettings currently contains only name metadata. Network authentication, key changes and full scoped/filterable events are not implemented.
+- Phased persistent object deletion and lifecycle integration for not-yet-implemented delegation, interaction and compaction. Ordinary Host shutdown, Session original-save continuation and memory reclamation are implemented.
 - Output byte ranges/watermarks, DSH delegation, complete built-in tools/workspace/diff support, standard interactions, compaction and legacy incomplete-tool-history projection.
 - Other provider-specific adapters/compatibility modes, live authorized model validation, actual TUI integration and performance measurements.
 - Reconcile inherited Runtime structural/capacity ceilings with v4.93 Rule 12; the Host has not silently removed or validated those inherited limits.
 
 Do not convert these gaps into fake-success handlers or treat DTOs, fixture responses, repeated test runs, local targeted review or Runtime CI as evidence of full Host release acceptance. The requested external independent review is still required. Findings should name the exact commit and source/contract, give a reproducer when possible, and distinguish an implemented-path defect from a declared unfinished surface without excusing either for the final release.
+
+## Explicit first-version scope decisions
+
+There is no new public recovery entry for a failed necessary save of an unpublished creation. The owner deferred that rare local boundary rather than adding a new API, filesystem witnesses or automatic repair. Required save failures cannot be labeled successful controlled shutdown, and repeated shutdown returns facts without retrying. Existing Session resume confirms only its own retained originals.
+
+Dropping the final root `Arc<Host>` after an already-failed save without controlled shutdown is treated as uncontrolled instance destruction, not successful stopped retirement. No permanent self-cycle is provided for it. This does not weaken the tested owner lifetime for ordinary caller abandonment, connection revocation or accepted explicit shutdown.

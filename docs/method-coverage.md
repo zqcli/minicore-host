@@ -1,16 +1,16 @@
 # Public method implementation map
 
-This checkpoint describes Host code/test checkpoint `0b9b390` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
+This checkpoint describes Host code/test checkpoint `413916c` (published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
 `Partial` means a real in-process owner primitive exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. No stdio/WSS dispatcher is present yet. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
 
 | Canonical method | Status | Existing implementation and remaining boundary |
 | --- | --- | --- |
-| `host.info` | Partial | `Host::info`. Identity, incarnation, lifecycle and operation-right state; logging/config/complete shutdown state pending. |
+| `host.info` | Partial | `Host::info`. Identity, incarnation, lifecycle and operation-right state; actual shutdown strategy/fault state; logging and complete resource configuration pending. |
 | `host.config.get` | Partial | `Host::settings`. Only supported Host name metadata; not execution, access or logging configuration. |
 | `host.reload` | Not implemented | Required by SPEC; no completed business handler. |
 | `host.receipt.get` | Partial | `Host::receipt / session_creation_receipt`. Retained real creation progress; canonical common query mapping pending. |
-| `host.shutdown` | Not implemented | Required by SPEC; no completed business handler. |
+| `host.shutdown` | Implemented typed entry | `Host::shutdown` uses the canonical request/receipt and owns actual graceful/force cleanup. Transport dispatch remains pending. |
 | `agent.create` | Partial | `Host::create_agent_async`. Real memory/persistent creation, owned waits, partial receipts and invocation-isolated tracking; canonical request/receipt mapping pending. |
 | `agent.get` | Partial | `Host::agent_info`. Direct Agent record and committed configuration; complete derived status mapping pending. |
 | `agent.list` | Partial | `Host::agents`. Actual registered owners; load failures are separately observable. |
@@ -27,9 +27,9 @@ This checkpoint describes Host code/test checkpoint `0b9b390` (published Runtime
 | `session.load` | Partial | `Host::load_session / lazy start`. Owner-held actual history loading and validation; failures retain original bytes and block execution. Canonical control receipt mapping pending. |
 | `session.unload` | Partial | `Host::unload`. Memory context retained; persistent reload reopens the actual settled journal and preserves original failed save ranges. Canonical control receipt mapping pending. |
 | `session.pause` | Partial | `Host::pause`. Explicit pause takes effect without cancelling current Turn; canonical receipt mapping pending. |
-| `session.resume` | Partial | `Host::resume`. Preserves a later explicit pause and validates unloaded persistent history even with an empty inbox. Canonical receipt mapping pending. |
+| `session.resume` | Partial | `Host::resume`. Preserves a later explicit pause, validates unloaded history, and confirms only this Session’s original pending history/metadata saves without rerunning execution. Canonical receipt mapping pending. |
 | `session.cancel` | Partial | `Host::cancel_session`. Owner current-Turn cancellation; first claim owns optional inbox clear. |
-| `session.close` | Partial | `Host::close_session`. Reception fence, actual default-reference ordering and durable closed state; pending saves remain owner-tracked. Canonical receipt mapping pending. |
+| `session.close` | Partial | `Host::close_session`. Reception fence, actual default-reference ordering and durable closed state; pending saves remain owner-tracked; memory children disappear only after actual cleanup. Canonical receipt mapping pending. |
 | `session.delete` | Not implemented | Required by SPEC; no completed business handler. |
 | `message.send` | Partial | `Host::send`. Real Session acceptance, actual queue and typed receipt; internal delegation source path not implemented. |
 | `message.get` | Partial | `Host::message`. Retained queued/bound/removed facts; does not infer execution from absence. |
@@ -65,12 +65,15 @@ This checkpoint describes Host code/test checkpoint `0b9b390` (published Runtime
 - `crates/host-core/tests/runtime_owners.rs`: real Host/Agent/Session/Runtime acceptance, independent queues, both finish/steer orderings, config binding, cancellation, operation rights, failure pause and owner settlement. Most run on multiple Tokio worker threads.
 - `crates/host-core/src/session/tests.rs`: real temporary JSONL and Runtime save boundaries, cancellation during saving, authoritative partial and simultaneous execution/save failure.
 - `crates/host-core/tests/persistent_owners.rs`: real persistent startup, identity/restart, corruption isolation, owned asynchronous creation, explicit storage modes, partial creation failures, confirmed metadata updates, close/default ordering, stop wakeups and root-lease lifetime.
+- `crates/host-core/tests/host_shutdown.rs`, `entity_retirement.rs`, and `history_continuation.rs`: actual shutdown/GC, original save continuation, model/tool cancellation and root-release barriers.
 - `crates/host-core/tests/http_host.rs`: two turns through real owners/Runtime and the production provider over loopback TCP/HTTP/SSE. No live external model or TUI is implied.
 - `crates/host-storage/tests/` and storage unit tests: actual filesystem locking, identity checks, atomic object saves, strict JSONL, durability/reconciliation boundaries and failure injection.
 - `crates/host-provider/tests/http_runtime.rs`: production adapter with real HTTP/SSE fixtures and actual Runtime; complete, partial, error, retry and tool-history paths.
 
 ## Cross-cutting open scope
 
-Canonical receipt/state mapping, request dispatch, client wait timeout ownership, Host shutdown/reload, network authentication and key changes, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
+Canonical receipt/state mapping, request dispatch, client wait timeout ownership, Host execution configuration/reload, network authentication and key changes, output byte ranges, full scoped subscriptions, DSH delegation, built-in tools/workspace/diffs, interactions, compaction, diagnostics and final TUI integration remain separate work. Internal targeted review is useful evidence but does not replace the requested external Host review.
 
 The targeted review findings for memory-owner root leases, empty-queue resume validation, unsafe-child isolation, duplicate caller operation IDs, worker retirement, late stop wakeups and initialization fencing are fixed in the recorded commits. `a088b00` adds file-scoped metadata snapshot/publication coordination; `d73b161` limits close dependencies to actual current or pending default references. The complete workspace gate at `0b9b390` passes 198 unit/integration tests and 2 doctests against the published Runtime revision. The same gate passed from a fresh local Git clone with an empty per-checkout build target and no local patch. Targeted follow-up review found no new blocker in these fixes; its seven additional regressions are now permanent tests. This is not full lifecycle or release completion, and the requested external review is still pending.
+
+The integrated lifecycle checkpoint `413916c` passes the complete 240-test/2-doctest gate (core 100, protocol 47, provider 36, storage 57). A scoped independent review passed 12 additional public-API cases; the normal concurrent-close handoff it found was fixed before integration. There is no new unpublished-creation recovery entry or implicit repeated-shutdown retry. Dropping the final root Host after an already-failed save without controlled shutdown is an explicit uncontrolled-destruction limit, not a successful stopped state. Canonical controls and workspace reads are the next active work; they are not advertised here before implementation.

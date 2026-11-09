@@ -171,3 +171,14 @@ The foundation checkpoint did not finish project development or establish full r
 The fix only preserves response status/retry metadata for the existing structured error classifier; Runtime remains the sole retry owner. Nine additional real TCP/Runtime cases and a test-only Tokio clock feature cover timing, 30-second cap, remaining original deadline, cancellation, primary error and Started/Unknown/permanent safeguards. At exact integrated `38991d37bc4980fc31a3312e943a62a060ce635a`, the full gate passes 207 tests plus 2 doctests, all lint/doc checks and committed-range whitespace. The root lock is unchanged. A separate provider review rebuilt old and fixed archives independently, reproduced the old failure, passed the new full provider suite and six more probes, and repeated each controlled-clock test 100 times without a failure. These remain scoped provider evidence, not full first-version acceptance.
 
 `5ac4d08` separately removes the two committed manifest EOF blank lines missed by the old clean-worktree-only gate. The new quality helper checks all committed development from the project root baseline, then staged/unstaged changes; shallow history is explicitly rejected and CI fetches full history. Five isolated Git fixture cases and the complete workspace gate passed. No remote Host changes were made. The next lifecycle/history/retirement stage continues in topic worktrees.
+
+## Controlled lifecycle integration
+
+At `413916cac0730d291e5c8163cdc3d59e5dbedcd1`, the full gate passes 240 unit/integration
+tests and 2 doctests (core 100, protocol 47, provider 36, storage 57), strict
+format/lint/documentation checks and the committed whitespace gate. Controlled
+Host shutdown, Session original history/metadata save continuation and ordinary
+memory reclamation are integrated. Task 012 records every original-to-dev commit,
+commands, scoped independent review and user-deferred boundaries. Subsequent
+`3874e9a` changes only Session verification documentation. Host publication and
+external review remain pending; canonical controls and workspace reads continue.
