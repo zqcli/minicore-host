@@ -27,7 +27,9 @@ The Rust regressions duplicate the actual acquired production descriptor into
 a child process's unused stderr, preserving the same open-file description
 across exec to make the fork-before-exec window deterministic. Pipe handshakes
 replace timing guesses. No unsafe code, sleeps, lock retries, suite
-serialization, strace, ptrace, or permission changes are used.
+serialization, strace or ptrace is used. The original seven red probes do not
+change permissions. A later failed-deletion cleanup regression changes only its
+own temporary history fixture permissions to inject that explicit error.
 
 Before any production fix, seven regressions fail: final root owner, root
 initialization sync error, journal writer completion, shared reader completion,
