@@ -67,7 +67,7 @@ impl SessionController {
             session_id: self.id.clone(),
         }
     }
-    fn turn_identity(&self, info: &TurnInfo) -> TurnIdentity {
+    pub(super) fn turn_identity(&self, info: &TurnInfo) -> TurnIdentity {
         TurnIdentity {
             session: self.identity(),
             turn_id: info.id.clone(),
@@ -141,7 +141,7 @@ impl SessionController {
         state: &SessionState,
         record: &MessageRecord,
         turn: Option<&TurnInfo>,
-    ) {
+    ) -> Record {
         let data = MessageEventData {
             text: record.input.text.clone(),
             mode: record.input.mode,
@@ -167,8 +167,21 @@ impl SessionController {
         self.access
             .observation
             .publish(ObservationEvent::Activity(event));
+        let context = turn.map_or_else(
+            || diagnostic::session_context(&self.identity()),
+            |info| diagnostic::turn_context(&self.turn_identity(info)),
+        );
+        diagnostics::input(
+            context,
+            record,
+            state.controller_revision,
+            state.next_step.len(),
+            state.next_turn.len(),
+            turn.is_some(),
+        )
     }
-    pub(super) fn observe_bound(&self, state: &SessionState, batch: &[QueuedInput]) {
+    pub(super) fn observe_bound(&self, state: &SessionState, batch: &[QueuedInput]) -> Vec<Record> {
+        let mut records = Vec::new();
         if let Some(active) = &state.active {
             for input in batch {
                 if let Some(record) = state.messages.iter().find(|record| {
@@ -176,10 +189,11 @@ impl SessionController {
                         && record.queue == input.queue
                         && record.order == input.order
                 }) {
-                    self.observe_message(state, record, Some(&active.info));
+                    records.push(self.observe_message(state, record, Some(&active.info)));
                 }
             }
         }
+        records
     }
     pub(super) fn observe_history(&self, state: &mut SessionState, items: &[HistoryItem]) {
         let active = state.active.as_ref().expect("accepted active Turn");

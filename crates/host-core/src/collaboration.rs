@@ -393,27 +393,28 @@ impl DelegationPermit {
                 "original direct parent is no longer available",
             )
         })?;
-        access
-            .accept_internal_owned(|| {
-                access.ensure_execution_owned()?;
-                self.state.scope.check_open()?;
-                if self.state.released.load(Ordering::SeqCst)
-                    || self.state.notified.swap(true, Ordering::SeqCst)
-                {
-                    return Err(Fault::new(
-                        FaultKind::SessionInputInvalid,
-                        "this delegation notification was already attempted or released",
-                    ));
-                }
-                if input.message_id == self.state.registration.task_message_id {
-                    return Err(Fault::new(
-                        FaultKind::SessionInputInvalid,
-                        "a final notification requires a new MessageId",
-                    ));
-                }
-                parent.receive_notification_owned(&self.state, input)
-            })
-            .inspect(|_| parent.wake_owned())
+        let (receipt, record) = access.accept_internal_owned(|| {
+            access.ensure_execution_owned()?;
+            self.state.scope.check_open()?;
+            if self.state.released.load(Ordering::SeqCst)
+                || self.state.notified.swap(true, Ordering::SeqCst)
+            {
+                return Err(Fault::new(
+                    FaultKind::SessionInputInvalid,
+                    "this delegation notification was already attempted or released",
+                ));
+            }
+            if input.message_id == self.state.registration.task_message_id {
+                return Err(Fault::new(
+                    FaultKind::SessionInputInvalid,
+                    "a final notification requires a new MessageId",
+                ));
+            }
+            parent.receive_notification_owned(&self.state, input)
+        })?;
+        record.emit();
+        parent.wake_owned();
+        Ok(receipt)
     }
     pub async fn release(&self, disposition: DelegationDisposition) -> Result<(), Fault> {
         if let Some(child) = self.state.child.upgrade() {

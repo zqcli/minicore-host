@@ -1,4 +1,5 @@
 use crate::control::{CallerContext, ConnectionRegistry};
+use crate::diagnostics::{self as diagnostic, Record};
 use crate::types::*;
 use futures_util::FutureExt;
 use minicore_host_protocol::*;
@@ -10,6 +11,7 @@ pub use compaction::{BoundCompactionResources, CompactionResourceFuture};
 mod context;
 mod controls;
 mod deletion;
+mod diagnostics;
 mod discovery;
 mod history;
 mod history_read;
@@ -692,9 +694,10 @@ impl SessionController {
         self.access.ensure_execution_owned()?;
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
-        let receipt = self.access.accept_business(caller, || {
+        let (receipt, record) = self.access.accept_business(caller, || {
             self.accept_message(message, runtime, caller.source())
         })?;
+        record.emit();
         self.wake();
         Ok(receipt)
     }
@@ -707,7 +710,9 @@ impl SessionController {
         self.access.ensure_execution_owned()?;
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
-        let receipt = self.accept_message(message, runtime, MessageSource::User)?;
+        let (receipt, record) = self.accept_message(message, runtime, MessageSource::User)?;
+        // Creation callers have already left their owner/admission scopes.
+        record.emit();
         self.wake();
         Ok(receipt)
     }
@@ -716,7 +721,7 @@ impl SessionController {
         message: MessageInput,
         runtime: UserInput,
         source: MessageSource,
-    ) -> Result<MessageAccepted, Fault> {
+    ) -> Result<(MessageAccepted, Record), Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         self.accept_message_locked(&mut state, message, runtime, source)
     }
@@ -726,7 +731,7 @@ impl SessionController {
         message: MessageInput,
         runtime: UserInput,
         source: MessageSource,
-    ) -> Result<MessageAccepted, Fault> {
+    ) -> Result<(MessageAccepted, Record), Fault> {
         Self::open(state)?;
         self.access.ensure_execution_owned()?;
         if state.host_stopping {
@@ -780,7 +785,7 @@ impl SessionController {
             InputQueue::NextTurn => state.next_turn.push_back(entry),
         }
         self.publish(state);
-        self.observe_message(
+        let record = self.observe_message(
             state,
             state.messages.last().expect("accepted message"),
             None,
@@ -792,15 +797,18 @@ impl SessionController {
         } else {
             None
         };
-        Ok(MessageAccepted::new(
-            self.host_id.clone(),
-            self.incarnation.clone(),
-            SessionRef {
-                agent_id: self.agent_id.clone(),
-                session_id: self.id.clone(),
-            },
-            message.message_id,
-            facts,
+        Ok((
+            MessageAccepted::new(
+                self.host_id.clone(),
+                self.incarnation.clone(),
+                SessionRef {
+                    agent_id: self.agent_id.clone(),
+                    session_id: self.id.clone(),
+                },
+                message.message_id,
+                facts,
+            ),
+            record,
         ))
     }
     pub(crate) fn update(
@@ -1194,7 +1202,7 @@ impl SessionController {
                     return;
                 }
             };
-            let batch = {
+            let (batch, records) = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 state.preparing = false;
                 if !self.schedulable(&state) || state.info.config_revision != preparation.1 {
@@ -1253,10 +1261,23 @@ impl SessionController {
                     terminal_accepted: false,
                     pending_interaction: None,
                 });
-                self.observe_bound(&state, &batch);
+                let records = self.observe_bound(&state, &batch);
                 self.publish(&mut state);
-                batch
+                let mut records = records
+                    .into_iter()
+                    .map(|record| {
+                        record.published(state.controller_revision, state.runner_revision)
+                    })
+                    .collect::<Vec<_>>();
+                let active = state.active.as_ref().expect("bound actual Turn");
+                records.push(diagnostics::turn_started(
+                    &self.turn_identity(&active.info),
+                    &active.info,
+                    state.controller_revision,
+                ));
+                (batch, records)
             };
+            diagnostic::emit(records);
             self.run_turn(turn_id, batch, resources).await;
         }
     }
@@ -1454,7 +1475,7 @@ impl SessionController {
                 self.finish_tool_cleanup(&turn_id).await;
                 return;
             }
-            let next = {
+            let (next, records) = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 let schedulable = self.schedulable(&state);
                 let active = state.active.as_mut().expect("owned active Turn");
@@ -1466,16 +1487,23 @@ impl SessionController {
                     && !state.next_step.is_empty();
                 if continue_same {
                     let next = take_batch(&mut state, false, &turn_id);
-                    self.observe_bound(&state, &next);
+                    let records = self.observe_bound(&state, &next);
                     self.publish(&mut state);
-                    Some(next)
+                    let records = records
+                        .into_iter()
+                        .map(|record| {
+                            record.published(state.controller_revision, state.runner_revision)
+                        })
+                        .collect::<Vec<_>>();
+                    (Some(next), records)
                 } else {
                     let active = state.active.as_mut().expect("owned active Turn");
                     active.claim_report(&report);
                     self.publish(&mut state);
-                    None
+                    (None, Vec::new())
                 }
             };
+            diagnostic::emit(records);
             if let Some(next) = next {
                 batch = next;
                 continue;
@@ -1586,13 +1614,14 @@ impl LoopInputs for SessionInputs {
             .drain(..)
             .map(|input| input.runtime)
             .collect::<Vec<_>>();
+        let mut records = Vec::new();
         if self.session.schedulable(&state)
             && state.active.as_ref().is_some_and(|active| {
                 active.info.id == self.turn_id && active.info.state == TurnState::Running
             })
         {
             let batch = take_batch(&mut state, false, &self.turn_id);
-            self.session.observe_bound(&state, &batch);
+            records = self.session.observe_bound(&state, &batch);
             values.extend(batch.iter().map(|input| input.runtime.clone()));
             state
                 .active
@@ -1602,6 +1631,12 @@ impl LoopInputs for SessionInputs {
                 .extend(batch);
             self.session.publish(&mut state);
         }
+        let records = records
+            .into_iter()
+            .map(|record| record.published(state.controller_revision, state.runner_revision))
+            .collect::<Vec<_>>();
+        drop(state);
+        diagnostic::emit(records);
         values
     }
 }

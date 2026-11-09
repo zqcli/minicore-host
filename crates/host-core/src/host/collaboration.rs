@@ -40,7 +40,7 @@ impl Host {
         let source = self.session(&caller, &turn.source().session)?;
         let child = self.session(&caller, &registration.child)?;
         let scope = source.scope_owned(&registration.root)?;
-        let result = self.access.accept_execution(&caller, || {
+        let (result, record) = self.access.accept_execution(&caller, || {
             scope.check_open()?;
             child.receive_delegated_owned(
                 registration,
@@ -49,6 +49,7 @@ impl Host {
                 input,
             )
         })?;
+        record.emit();
         child.wake_owned();
         Ok(result)
     }

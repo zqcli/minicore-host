@@ -134,7 +134,7 @@ impl SessionController {
         scope: &Arc<ScopeState>,
         source: SessionRef,
         message: MessageInput,
-    ) -> Result<MessageAccepted, Fault> {
+    ) -> Result<(MessageAccepted, Record), Fault> {
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let mut state = self.state.lock().expect("Session mutex poisoned");
@@ -185,7 +185,7 @@ impl SessionController {
         &self,
         relation: &DelegationState,
         mut message: MessageInput,
-    ) -> Result<MessageAccepted, Fault> {
+    ) -> Result<(MessageAccepted, Record), Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         relation.scope.check_open()?;
         message.mode = if state.active.is_some() {

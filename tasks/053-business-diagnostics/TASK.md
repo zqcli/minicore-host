@@ -360,3 +360,36 @@ identity. An initial new unit fixture mistakenly included session_id in ToolCall
 changing production protocol types. Final 13 focused cases and all-target
 transport strict Clippy passed (`task053-remove-diagnostic-parse-tests-fixed.log`
 and `task053-remove-diagnostic-parse-clippy.log`); formatting and diff checks pass.
+
+### Session input acceptance and binding
+
+The original recovered scalar input helper is now used by the real Session
+acceptance and binding boundaries. Public send and the already-admitted creation
+send keep their public signatures. The private locked accept returns the existing
+MessageAccepted plus its Record. Delegated input and final notification carry
+that same Record through the existing Host execution/internal admission closure;
+only the outer caller emits it, once the ConnectionRegistry and Session locks
+have ended. No additional acceptance, body copy, queue, logger state or event
+observer is introduced. Host/Agent creation must not log the same input again.
+
+`observe_bound` returns scalar records rather than emitting. All three real
+binding callers (initial Turn claim, same-Turn continuation and Runtime input
+handoff) finalize their records using the revision produced by their existing
+publish, release the Session lock, then emit. The small additive
+`Record::published` helper changes only declared revision attributes. Initial
+`turn.started` uses that same published revision and the actual Turn/Load identity;
+no candidate Turn is reported as started. Public observation and original atomic
+binding/save semantics are unchanged.
+
+The actual Host/production resources/Runtime/HTTP test now asserts exactly three
+accepted inputs, three bindings and three started Turns, with original IDs,
+in_reply_to, real pre/post-dequeue lengths, no Turn on queued input, the accepted
+receipt revision, and equal committed input_bound/turn.started revisions. It still
+checks closed-pipeline business progress and private-content exclusion. This case
+and focused strict Clippy passed. The 34 existing delegation/notification/deletion
+fence tests also passed (6 delegation_acceptance_fences, 22 delegation_owners,
+6 task051_deletion_fences); those retain their explicitly named gated model test
+fixtures and are not called live provider tests. Outputs are
+`task053-session-acceptance-tests.log`, `task053-session-acceptance-fences.log`
+and `task053-session-acceptance-clippy.log`. Formatting and diff checks passed.
+The remaining Session terminal/save/cleanup/close paths are not yet claimed.

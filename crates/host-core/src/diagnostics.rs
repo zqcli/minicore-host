@@ -10,6 +10,17 @@ impl Record {
     pub(crate) fn new(spec: EventSpec, data: EventData) -> Self {
         Self(spec, data)
     }
+    /// Attach the revisions actually published by the same owner boundary.
+    /// Preparing a public observation may precede publish; emission never does.
+    pub(crate) fn published(mut self, controller_revision: u64, runner_revision: u64) -> Self {
+        if self.0.attributes.contains(&"controller_revision") {
+            self.1 = self.1.attribute("controller_revision", controller_revision);
+        }
+        if self.0.attributes.contains(&"runner_revision") {
+            self.1 = self.1.attribute("runner_revision", runner_revision);
+        }
+        self
+    }
     pub(crate) fn emit(self) {
         self.0.emit(|| self.1);
     }

@@ -142,7 +142,7 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
         .await
         .unwrap();
     let pending = input();
-    remote_session
+    let pending_receipt = remote_session
         .send(pending.clone(), options())
         .await
         .unwrap();
@@ -191,6 +191,80 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    let accepted: Vec<_> = records
+        .iter()
+        .filter(|row| row["event"] == "session.input_accepted")
+        .collect();
+    let bound_inputs: Vec<_> = records
+        .iter()
+        .filter(|row| row["event"] == "session.input_bound")
+        .collect();
+    let turns: Vec<_> = records
+        .iter()
+        .filter(|row| row["event"] == "turn.started")
+        .collect();
+    assert_eq!(accepted.len(), 3);
+    assert_eq!(bound_inputs.len(), 3);
+    assert_eq!(turns.len(), 3);
+    for (message, source) in [
+        (&local_message, &completed.source),
+        (&remote_message, &failed.source),
+        (&pending, &resumed.source),
+    ] {
+        let input: Vec<_> = accepted
+            .iter()
+            .filter(|row| row["message_id"] == message.message_id.as_str())
+            .collect();
+        let binding: Vec<_> = bound_inputs
+            .iter()
+            .filter(|row| row["message_id"] == message.message_id.as_str())
+            .collect();
+        let started: Vec<_> = turns
+            .iter()
+            .filter(|row| row["turn_id"] == source.turn_id.as_str())
+            .collect();
+        assert_eq!(input.len(), 1);
+        assert_eq!(binding.len(), 1);
+        assert_eq!(started.len(), 1);
+        for row in [input[0], binding[0]] {
+            assert_eq!(row["host_id"], source.session.host_id.as_str());
+            assert_eq!(row["session_id"], source.session.session_id.as_str());
+            assert_eq!(
+                row["in_reply_to"],
+                message.in_reply_to.as_ref().unwrap().as_str()
+            );
+            assert_eq!(row["attributes"]["queue"], "next-turn");
+            assert_eq!(row["attributes"]["next_step_len"], 0);
+        }
+        assert!(input[0].get("turn_id").is_none());
+        assert_eq!(input[0]["attributes"]["next_turn_len"], 1);
+        assert_eq!(binding[0]["attributes"]["next_turn_len"], 0);
+        assert_eq!(binding[0]["turn_id"], source.turn_id.as_str());
+        assert_eq!(
+            binding[0]["load_id"],
+            source.load_id.as_ref().unwrap().as_str()
+        );
+        assert_eq!(
+            binding[0]["attributes"]["controller_revision"],
+            started[0]["attributes"]["controller_revision"]
+        );
+        assert!(
+            binding[0]["attributes"]["controller_revision"]
+                .as_u64()
+                .unwrap()
+                > input[0]["attributes"]["controller_revision"]
+                    .as_u64()
+                    .unwrap()
+        );
+    }
+    let pending_row = accepted
+        .iter()
+        .find(|row| row["message_id"] == pending.message_id.as_str())
+        .unwrap();
+    assert_eq!(
+        pending_row["attributes"]["controller_revision"],
+        pending_receipt.result.controller_revision
+    );
     let starts: Vec<_> = records
         .iter()
         .filter(|row| row["component"] == "session.runtime" && row["event"] == "model.started")
