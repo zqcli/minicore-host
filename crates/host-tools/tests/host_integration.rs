@@ -32,6 +32,7 @@ struct FixtureModel {
     six_actions: bool,
     close_scope: bool,
     create_agent: bool,
+    child_mode: StorageMode,
     child: Mutex<Option<SessionRef>>,
     child_gate: Arc<Semaphore>,
     calls: mpsc::UnboundedSender<(usize, ModelRequest)>,
@@ -142,9 +143,9 @@ impl Model for FixtureModel {
             let target = self.agent.lock().unwrap().clone().unwrap();
             let call = "upstream-delegate".parse().unwrap();
             let arguments = if self.create_agent {
-                json!({"action":"create","resource":"agent","target":{"host_id":target.host_id},"name":"delegated reviewer","from_agent_id":target.agent_id,"mode":"memory","text":"child work"})
+                json!({"action":"create","resource":"agent","target":{"host_id":target.host_id},"name":"delegated reviewer","from_agent_id":target.agent_id,"mode":self.child_mode,"text":"child work"})
             } else {
-                json!({"action":"create","resource":"session","target":target,"mode":"memory","text":"child work"})
+                json!({"action":"create","resource":"session","target":target,"mode":self.child_mode,"text":"child work"})
             };
             vec![
                 ModelEvent::ToolCallStart {
@@ -247,13 +248,13 @@ async fn settled(
 }
 #[tokio::test]
 async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
-    run_host_delegation(false).await;
+    run_host_delegation(false, false, false).await;
 }
 #[tokio::test]
 async fn real_agent_delegation_copies_config_and_reclaims_temporary_owners() {
-    run_host_delegation(true).await;
+    run_host_delegation(true, false, false).await;
 }
-async fn run_host_delegation(create_agent: bool) {
+async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete_root: bool) {
     let (calls, mut requests) = mpsc::unbounded_channel();
     let gate = Arc::new(Semaphore::new(0));
     let model = Arc::new(FixtureModel {
@@ -268,6 +269,11 @@ async fn run_host_delegation(create_agent: bool) {
         round: AtomicUsize::new(0),
         six_actions: false,
         close_scope: false,
+        child_mode: if delete_persistent {
+            StorageMode::Persistent
+        } else {
+            StorageMode::Memory
+        },
         create_agent,
         child: Mutex::new(None),
         child_gate: Arc::clone(&gate),
@@ -277,11 +283,26 @@ async fn run_host_delegation(create_agent: bool) {
     tools
         .register(Arc::new(AgentToolFactory::new(ScopeManager::new())))
         .unwrap();
-    let host = Host::memory(Arc::new(Resources {
+    let resources = Arc::new(Resources {
         model: Arc::clone(&model),
         tools,
-    }))
-    .unwrap();
+    });
+    let directory =
+        std::env::temp_dir().join(format!("task051-delegation-{}", SessionId::new().unwrap()));
+    let host = if delete_persistent {
+        std::fs::create_dir(&directory).unwrap();
+        Host::open_persistent(
+            &directory,
+            minicore_host_core::HostSettings {
+                name: "explicit deletion fixture".into(),
+            },
+            resources,
+        )
+        .await
+        .unwrap()
+    } else {
+        Host::memory(resources).unwrap()
+    };
     let connection = host.connect().unwrap();
     let mut config = AgentConfig::default();
     config.role.name = "Source role".into();
@@ -297,7 +318,11 @@ async fn run_host_delegation(create_agent: bool) {
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
                 name: "root".into(),
-                mode: StorageMode::Memory,
+                mode: if delete_persistent {
+                    StorageMode::Persistent
+                } else {
+                    StorageMode::Memory
+                },
                 config,
                 default_session: None,
                 initial_message: None,
@@ -369,6 +394,86 @@ async fn run_host_delegation(create_agent: bool) {
             .active_turn_id
             .is_some()
     );
+    if delete_root && !delete_persistent {
+        let agent = model.agent.lock().unwrap().clone().unwrap();
+        let receipt = host
+            .agent_delete(
+                &connection.caller(),
+                &agent,
+                AgentDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    scope: AgentDeleteScope::Sessions {
+                        session_ids: vec![root.session_id.clone(), child.session_id.clone()],
+                        close: true,
+                    },
+                },
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.agent_info(&connection.caller(), &agent).is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            host.receipt_get(&connection.caller(), &receipt.operation_id)
+                .unwrap(),
+            Receipt::AgentDelete(receipt)
+        );
+        return;
+    }
+    if delete_root {
+        let receipt = host
+            .session_delete(
+                &connection.caller(),
+                &root,
+                SessionDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    close: true,
+                },
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.session_info(&connection.caller(), &root).is_ok() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let child_state = host.session_state(&connection.caller(), &child).unwrap();
+        assert_eq!(child_state.data.lifecycle, SessionLifecycle::Closed);
+        assert!(child_state.data.deletion.is_none());
+        let child_path = directory
+            .join("agents")
+            .join(child.agent_id.as_str())
+            .join("sessions")
+            .join(child.session_id.as_str());
+        assert!(child_path.join("session.json").exists());
+        assert!(child_path.join("history.jsonl").exists());
+        assert_eq!(
+            host.receipt_get(&connection.caller(), &receipt.operation_id)
+                .unwrap(),
+            Receipt::SessionDelete(receipt)
+        );
+        host.shutdown(
+            &connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.info(&connection.caller()).unwrap().lifecycle != HostLifecycle::Stopped {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+        return;
+    }
     connection.close();
     let replacement = host.connect().unwrap();
     gate.add_permits(1);
@@ -408,6 +513,35 @@ async fn run_host_delegation(create_agent: bool) {
         })
         .unwrap();
     assert_eq!(original_tool.output, tool.output);
+    if delete_persistent {
+        // The persistent child retains its own context after completion. Only
+        // this explicit deletion closes/removes it, after the parent received
+        // both the actual launch ToolResult and completion notification.
+        if create_agent {
+            host.agent_delete(
+                &replacement.caller(),
+                &child_agent,
+                AgentDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    scope: AgentDeleteScope::Sessions {
+                        session_ids: vec![child.session_id.clone()],
+                        close: true,
+                    },
+                },
+            )
+            .unwrap();
+        } else {
+            host.session_delete(
+                &replacement.caller(),
+                &child,
+                SessionDeleteRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    close: true,
+                },
+            )
+            .unwrap();
+        }
+    }
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if host.session_info(&replacement.caller(), &child).is_err()
@@ -423,6 +557,36 @@ async fn run_host_delegation(create_agent: bool) {
     })
     .await
     .unwrap();
+    if delete_persistent {
+        let retained = host.history(&replacement.caller(), &root).unwrap();
+        assert!(retained.iter().any(
+            |item| matches!(item,HistoryItem::ToolResult(result) if result.output == tool.output)
+        ));
+        assert!(retained.iter().any(|item| matches!(item,HistoryItem::User(input) if serde_json::from_str::<Value>(input.input.as_text()).ok().as_ref() == Some(&notification))));
+        let child_path = directory
+            .join("agents")
+            .join(child.agent_id.as_str())
+            .join("sessions")
+            .join(child.session_id.as_str());
+        assert!(!child_path.exists());
+        host.shutdown(
+            &replacement.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while host.info(&replacement.caller()).unwrap().lifecycle != HostLifecycle::Stopped {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        // This path was generated and created by this test only.
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -442,6 +606,7 @@ async fn all_six_actions_execute_through_real_owners_and_one_runtime_turn() {
         six_actions: true,
         close_scope: false,
         create_agent: false,
+        child_mode: StorageMode::Memory,
         child: Mutex::new(None),
         child_gate: Arc::clone(&gate),
         calls,
@@ -567,6 +732,7 @@ async fn actual_factory_binding_failure_keeps_input_queued_without_a_turn() {
         six_actions: false,
         close_scope: false,
         create_agent: false,
+        child_mode: StorageMode::Memory,
         child: Mutex::new(None),
         child_gate: Arc::new(Semaphore::new(0)),
         calls,
@@ -658,6 +824,7 @@ async fn real_close_scope_does_not_join_its_own_runtime_tool() {
         six_actions: false,
         close_scope: true,
         create_agent: false,
+        child_mode: StorageMode::Memory,
         child: Mutex::new(None),
         child_gate: Arc::new(Semaphore::new(0)),
         calls,
@@ -749,4 +916,23 @@ async fn real_close_scope_does_not_join_its_own_runtime_tool() {
     // The child never needed a model finish to permit actual close/cancel/join.
     // The root may reach a request boundary after the control acceptance and
     // before its independent close owner cancels the still-current Turn.
+}
+
+#[tokio::test]
+async fn task051_session_deletion_preserves_received_launch_and_completion_history() {
+    run_host_delegation(false, true, false).await;
+}
+#[tokio::test]
+async fn task051_agent_deletion_preserves_received_launch_and_completion_history() {
+    run_host_delegation(true, true, false).await;
+}
+
+#[tokio::test]
+async fn task051_root_delete_closes_real_scope_without_deleting_independent_child_data() {
+    run_host_delegation(true, true, true).await;
+}
+
+#[tokio::test]
+async fn task051_agent_cascade_and_root_scope_share_real_memory_child_cleanup() {
+    run_host_delegation(false, false, true).await;
 }
