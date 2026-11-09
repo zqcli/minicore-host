@@ -1,5 +1,8 @@
 use crate::CompactionError;
-use minicore_runtime::{HistoryItem, model::AssistantPart};
+use minicore_runtime::{
+    HistoryItem,
+    model::{AssistantPart, ModelMessage},
+};
 use serde_json::{Value, json};
 use std::{collections::BTreeSet, ops::Range};
 
@@ -55,10 +58,29 @@ pub(crate) fn exchange_ranges(items: &[HistoryItem]) -> Result<Vec<Range<usize>>
 /// messages. Preserve full text, arguments, results, identities and outcomes.
 /// Opaque provider replay and encrypted/signature artifacts are not prose and
 /// are not decoded or exposed as text. Their presence is explicit instead.
-pub(crate) fn group_data(items: &[HistoryItem]) -> Value {
-    let records: Vec<_> = items
+pub(crate) fn group_data(
+    items: &[HistoryItem],
+    messages: &[ModelMessage],
+) -> Result<Value, CompactionError> {
+    if items.len() != messages.len() {
+        return Err(CompactionError::InvalidHistory);
+    }
+    let records: Result<Vec<_>, _> = items
         .iter()
-        .map(|item| match item {
+        .zip(messages)
+        .map(|(item, message)| Ok(match item {
+            HistoryItem::User(user) => {
+                let ModelMessage::User(text) = message else {
+                    return Err(CompactionError::InvalidHistory);
+                };
+                // Reuse the actual prepared per-item input. Its source/reply
+                // context is untrusted data, never parsed as owner authority.
+                // Keep native kind/Loop identity without duplicating the text.
+                json!({"type": "user", "data": {
+                    "loop_id": user.loop_id, "kind": user.kind,
+                    "input": {"text": text},
+                }})
+            }
             HistoryItem::Assistant(value) => {
                 let parts: Vec<_> = value.content.iter().map(|part| match part {
                     AssistantPart::Text(text) => json!({"type": "text", "text": text}),
@@ -85,7 +107,7 @@ pub(crate) fn group_data(items: &[HistoryItem]) -> Value {
             // These Runtime variants contain no opaque provider replay. Their
             // native serialization retains the actual outcomes and provenance.
             item => json!(item),
-        })
+        }))
         .collect();
-    Value::Array(records)
+    Ok(Value::Array(records?))
 }

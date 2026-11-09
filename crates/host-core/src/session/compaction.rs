@@ -94,6 +94,7 @@ pub(super) struct FinishedManualCompaction {
 /// Base/appended retain the actual internal Loop distinction. Only the
 /// unhanded suffix is protected; earlier batches of this same Turn are eligible.
 struct RequestHistory {
+    input_provenance: input_provenance::InputProvenance,
     source: HistorySnapshot,
     base_len: usize,
     preserve_from: usize,
@@ -114,10 +115,21 @@ impl RequestHistory {
             .as_ref()
             .map(|value| vec![HistoryItem::Summary(value.summary.clone())])
             .unwrap_or_default();
+        let mut input_provenance = input_provenance::InputProvenance::default();
         if covered_index < raw_base {
+            input_provenance.append_range(
+                &state.input_provenance,
+                covered_index..raw_base,
+                items.len(),
+            );
             items.extend_from_slice(&state.history[covered_index..raw_base]);
         }
         let base_len = items.len();
+        input_provenance.append_range(
+            &state.input_provenance,
+            raw_base.max(covered_index)..state.history.len(),
+            items.len(),
+        );
         items.extend_from_slice(&state.history[raw_base.max(covered_index)..]);
         let mut preserve_from = items.len();
         // A genuinely incomplete *accepted* tail is not a closed exchange for
@@ -127,8 +139,10 @@ impl RequestHistory {
         if let Some(start) = incomplete_tail(&state.history) {
             preserve_from = usize::from(state.projection.is_some()) + start - covered_index;
         }
+        input_provenance.append_unhanded(items.len(), unhanded, state.active.as_ref())?;
         items.extend_from_slice(unhanded);
         Ok(Self {
+            input_provenance,
             source: HistorySnapshot {
                 revision: state.history_position,
                 items: items.into(),
@@ -229,7 +243,7 @@ impl SessionController {
                 CompactionSource::Manual {
                     operation_id: request.operation_id.clone(),
                 },
-                snapshot.source,
+                snapshot.source.clone(),
                 snapshot.previous_coverage,
                 CancellationToken::new(),
             );
@@ -244,10 +258,14 @@ impl SessionController {
                     if let Some(previous) = previous {
                         let _ = previous.await;
                     }
-                    let result =
-                        AssertUnwindSafe(owner.run_manual(&binding, &info.config, preparation))
-                            .catch_unwind()
-                            .await;
+                    let result = AssertUnwindSafe(owner.run_manual(
+                        &binding,
+                        &info.config,
+                        snapshot,
+                        preparation,
+                    ))
+                    .catch_unwind()
+                    .await;
                     if result.is_err() {
                         owner.fail_compaction(&binding, failure("compaction worker panicked"));
                     }
@@ -370,13 +388,19 @@ impl SessionController {
         self: &Arc<Self>,
         binding: &CompactionBinding,
         config: &SessionConfig,
+        history: RequestHistory,
         preparation: CompactionResourceFuture,
     ) {
-        let (source, cancellation) = {
+        let cancellation = {
             let state = self.state.lock().expect("Session mutex poisoned");
-            let work = state.compaction.as_ref().expect("registered manual work");
-            (work.source.clone(), work.cancellation.clone())
+            state
+                .compaction
+                .as_ref()
+                .expect("registered manual work")
+                .cancellation
+                .clone()
         };
+        let source = &history.source;
         if source.items.is_empty() {
             self.complete_compaction(binding, CompactionOutcome::Unchanged, Ok(()));
             return;
@@ -423,6 +447,7 @@ impl SessionController {
             result = tokio::time::timeout_at(deadline, prompt) => result.unwrap_or(Err(PromptError::Cancelled)),
         };
         let plan = prompt
+            .and_then(|prompt| history.input_provenance.project(&source.items, prompt))
             .map_err(|error| failure(error.to_string()))
             .and_then(|prompt| {
                 let request = ModelRequest::new(
@@ -958,7 +983,8 @@ impl SessionPrompt {
         history: &RequestHistory,
         request: &PromptRequest<'_>,
     ) -> Result<PreparedPrompt, PromptError> {
-        self.inner
+        let prompt = self
+            .inner
             .prepare(PromptRequest {
                 loop_id: request.loop_id,
                 request_index: request.request_index,
@@ -969,7 +995,10 @@ impl SessionPrompt {
                 cancellation: request.cancellation.clone(),
                 deadline: request.deadline,
             })
-            .await
+            .await?;
+        history
+            .input_provenance
+            .project(&history.source.items, prompt)
     }
 }
 fn failure(message: impl Into<String>) -> Fault {
@@ -978,3 +1007,7 @@ fn failure(message: impl Into<String>) -> Fault {
 fn stale() -> Fault {
     failure("compaction no longer matches its original Session history and execution")
 }
+
+#[cfg(test)]
+#[path = "input_provenance_tests.rs"]
+mod input_provenance_tests;
