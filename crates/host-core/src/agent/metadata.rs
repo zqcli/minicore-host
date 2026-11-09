@@ -75,54 +75,35 @@ impl AgentOwner {
                 "Agent configuration revision changed",
             ));
         }
-        let candidate = original
+        let config = original
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        self.resources_owned()?.validate(
-            &SessionConfig::from_agent(&candidate, &SessionOverrides::default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-        )?;
-        let persistent_default = self.persisted_default(&original.default_session_id)?;
-        let (sender, receiver) = oneshot::channel();
-        self.access.accept_business(caller, || {
-            let mut state = self.state.lock().expect("Agent mutex poisoned");
-            Self::writable(&state)?;
-            if state.info.config_revision != expected
-                || state.info.default_session_id != original.default_session_id
-            {
-                return Err(Fault::new(
-                    FaultKind::AgentConfigConflict,
-                    "Agent configuration or default changed during preparation",
-                ));
-            }
-            let mut info = state.info.clone();
-            info.config = candidate;
-            info.config_revision = expected.checked_add(1).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "configuration revision exhausted",
-                )
-            })?;
-            let record = self.record(&info, persistent_default);
-            self.spawn_record_save(&mut state, record, info.default_session_id, sender)?;
-            Ok(())
-        })?;
-        receiver.await.map_err(|_| {
-            Fault::new(
-                FaultKind::AgentInternalUnexpected,
-                "metadata owner ended without a result",
-            )
-        })?
+        self.update_candidate_async(caller, expected, config, original.name)
+            .await
     }
     pub(crate) async fn set_default_async(
         self: &Arc<Self>,
         caller: &CallerContext,
         target: Option<SessionId>,
     ) -> Result<(), Fault> {
-        if self.store().is_none() {
-            return self.set_default(caller, target);
-        }
+        let (_, receiver) = self.accept_default(caller, target, |_| ())?;
+        receiver
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "metadata owner ended without a result",
+                )
+            })?
+            .map(|_| ())
+    }
+    fn accept_default<T>(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        target: Option<SessionId>,
+        accepted: impl FnOnce(&mut AgentState) -> T,
+    ) -> Result<(T, oneshot::Receiver<Result<AgentInfo, Fault>>), Fault> {
         let child = target.as_ref().map(|id| self.session(id)).transpose()?;
         if child.as_ref().is_some_and(|child| !child.is_open_owned()) {
             return Err(Fault::new(
@@ -134,28 +115,65 @@ impl AgentOwner {
             .filter(|child| child.storage_mode() == StorageMode::Persistent)
             .map(|child| child.id.clone());
         let (sender, receiver) = oneshot::channel();
-        self.access.accept_business(caller, || {
+        let result = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
+            if target
+                .as_ref()
+                .is_some_and(|id| !state.sessions.contains_key(id))
+            {
+                return Err(Fault::new(
+                    FaultKind::AgentSessionNotFound,
+                    "Session does not belong to this Agent",
+                ));
+            }
             if target.as_ref().is_some_and(|id| state.closing.contains(id)) {
                 return Err(Fault::new(
                     FaultKind::AgentDefaultSessionUnavailable,
                     "default Session is closing",
                 ));
             }
-            let record = self.record(&state.info, persistent_default);
-            self.spawn_record_save(&mut state, record, target, sender)?;
-            Ok(())
+            if state.info.mode == StorageMode::Memory {
+                state.info.default_session_id = target;
+                let _ = sender.send(Ok(state.info.clone()));
+                self.changed.notify_waiters();
+            } else {
+                let record = self.record(&state.info, persistent_default);
+                self.spawn_record_save(&mut state, record, target, sender)?;
+            }
+            Ok(accepted(&mut state))
         })?;
-        receiver
-            .await
-            .map_err(|_| {
-                Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "metadata owner ended without a result",
-                )
-            })?
-            .map(|_| ())
+        Ok((result, receiver))
+    }
+    pub(crate) fn set_default_control(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: AgentSetDefaultSessionRequest,
+    ) -> Result<AgentSetDefaultSessionReceipt, Fault> {
+        let requested = request.session_id.clone();
+        let (receipt, _) = self.accept_default(caller, request.session_id, |state| {
+            let result = if state.info.metadata_saving {
+                AgentSetDefaultSessionResult::Saving {
+                    default_session_id: state.info.default_session_id.clone(),
+                    requested_session_id: requested,
+                }
+            } else {
+                AgentSetDefaultSessionResult::Committed {
+                    default_session_id: state.info.default_session_id.clone(),
+                }
+            };
+            let receipt = AgentSetDefaultSessionReceipt {
+                kind: AgentSetDefaultSessionKind::AgentSetDefaultSession,
+                host_id: self.host_id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                agent_id: self.id.clone(),
+                operation_id: request.operation_id,
+                result,
+            };
+            Self::retain_control(state, Receipt::AgentSetDefaultSession(receipt.clone()));
+            receipt
+        })?;
+        Ok(receipt)
     }
     fn spawn_record_save(
         self: &Arc<Self>,
@@ -399,14 +417,15 @@ impl AgentOwner {
 }
 
 impl AgentOwner {
-    pub(crate) async fn update_candidate_async(
+    fn accept_update_candidate<T>(
         self: &Arc<Self>,
         caller: &CallerContext,
         expected: u64,
         config: AgentConfig,
         name: String,
-    ) -> Result<AgentInfo, Fault> {
-        if name.trim().is_empty() {
+        accepted: impl FnOnce(&mut AgentState) -> T,
+    ) -> Result<(T, oneshot::Receiver<Result<AgentInfo, Fault>>), Fault> {
+        if name.trim().is_empty() || name.contains('\0') {
             return Err(Fault::new(
                 FaultKind::AgentConfigInvalid,
                 "Agent name must not be blank",
@@ -429,7 +448,7 @@ impl AgentOwner {
             None
         };
         let (sender, receiver) = oneshot::channel();
-        let memory = self.access.accept_business(caller, || {
+        let result = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if state.info.config_revision != expected
@@ -452,21 +471,78 @@ impl AgentOwner {
             if state.info.mode == StorageMode::Memory {
                 state.info = candidate;
                 self.changed.notify_waiters();
-                Ok(Some(state.info.clone()))
+                let _ = sender.send(Ok(state.info.clone()));
             } else {
                 let record = self.record(&candidate, persistent_default);
                 self.spawn_record_save(&mut state, record, candidate.default_session_id, sender)?;
-                Ok(None)
             }
+            Ok(accepted(&mut state))
         })?;
-        if let Some(info) = memory {
-            return Ok(info);
-        }
+        Ok((result, receiver))
+    }
+    pub(crate) async fn update_candidate_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected: u64,
+        config: AgentConfig,
+        name: String,
+    ) -> Result<AgentInfo, Fault> {
+        let (_, receiver) = self.accept_update_candidate(caller, expected, config, name, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
                 "metadata owner ended without a result",
             )
         })?
+    }
+    pub(crate) fn update_control(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: AgentUpdateRequest,
+    ) -> Result<AgentUpdateReceipt, Fault> {
+        request
+            .changes
+            .validate()
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        let original = self.info(caller)?;
+        if original.config_revision != request.expected_config_revision {
+            return Err(Fault::new(
+                FaultKind::AgentConfigConflict,
+                "Agent configuration revision changed",
+            ));
+        }
+        let config = original
+            .config
+            .apply_patch(&request.changes.config)
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        let name = request.changes.name.unwrap_or(original.name);
+        let (receipt, _) = self.accept_update_candidate(
+            caller,
+            request.expected_config_revision,
+            config,
+            name,
+            |state| {
+                let result = if state.info.metadata_saving {
+                    MetadataUpdateResult::Saving {
+                        config_revision: state.info.config_revision,
+                    }
+                } else {
+                    MetadataUpdateResult::Committed {
+                        config_revision: state.info.config_revision,
+                    }
+                };
+                let receipt = AgentUpdateReceipt {
+                    kind: AgentUpdateKind::AgentUpdate,
+                    host_id: self.host_id.clone(),
+                    host_incarnation: self.incarnation.clone(),
+                    agent_id: self.id.clone(),
+                    operation_id: request.operation_id,
+                    result,
+                };
+                Self::retain_control(state, Receipt::AgentUpdate(receipt.clone()));
+                receipt
+            },
+        )?;
+        Ok(receipt)
     }
 }

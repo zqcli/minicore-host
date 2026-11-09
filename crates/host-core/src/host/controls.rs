@@ -5,6 +5,20 @@ impl Host {
         OperationId::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))
     }
+    pub fn agent_start(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+        request: AgentStartRequest,
+    ) -> Result<AgentStartReceipt, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?
+            .set_enabled(caller, true, Some(request.operation_id))
+            .map(|receipt| match receipt {
+                Some(Receipt::AgentStart(receipt)) => receipt,
+                _ => unreachable!("requested start receipt"),
+            })
+    }
     pub fn agent_stop(
         &self,
         caller: &CallerContext,
@@ -14,7 +28,10 @@ impl Host {
         self.check_host(&target.host_id)?;
         self.agent(caller, &target.agent_id)?
             .set_enabled(caller, false, Some(request.operation_id))
-            .map(|receipt| receipt.expect("requested stop receipt"))
+            .map(|receipt| match receipt {
+                Some(Receipt::AgentStop(receipt)) => receipt,
+                _ => unreachable!("requested stop receipt"),
+            })
     }
     pub fn session_pause(
         &self,

@@ -1,5 +1,26 @@
 use super::*;
 impl Host {
+    pub fn agent_update(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+        request: AgentUpdateRequest,
+    ) -> Result<AgentUpdateReceipt, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?
+            .update_control(caller, request)
+    }
+    pub fn agent_set_default_session(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+        request: AgentSetDefaultSessionRequest,
+    ) -> Result<AgentSetDefaultSessionReceipt, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?
+            .set_default_control(caller, request)
+    }
+
     pub fn load_session(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
         self.session_load(
             caller,

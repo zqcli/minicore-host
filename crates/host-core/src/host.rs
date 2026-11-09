@@ -578,10 +578,14 @@ impl Host {
         .map(|_| ())
     }
     pub fn start_agent(&self, caller: &CallerContext, target: &AgentRef) -> Result<(), Fault> {
-        self.check_host(&target.host_id)?;
-        self.agent(caller, &target.agent_id)?
-            .set_enabled(caller, true, None)
-            .map(|_| ())
+        self.agent_start(
+            caller,
+            target,
+            AgentStartRequest {
+                operation_id: Self::operation_id()?,
+            },
+        )
+        .map(|_| ())
     }
     pub fn remove_input(
         &self,

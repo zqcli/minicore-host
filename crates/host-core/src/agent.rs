@@ -35,7 +35,7 @@ struct AgentState {
     load_failures: BTreeMap<SessionId, Fault>,
     creations: BTreeMap<SessionId, SessionCreateReceipt>,
     public_creations: std::collections::BTreeSet<SessionId>,
-    controls: BTreeMap<OperationId, Vec<AgentStopReceipt>>,
+    controls: BTreeMap<OperationId, Vec<Receipt>>,
     create_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     creating: usize,
     creation_committed: bool,
@@ -393,7 +393,7 @@ impl AgentOwner {
         caller: &CallerContext,
         enabled: bool,
         operation: Option<OperationId>,
-    ) -> Result<Option<AgentStopReceipt>, Fault> {
+    ) -> Result<Option<Receipt>, Fault> {
         let (children, receipt) = self.access.accept(caller, || {
             if enabled {
                 self.access.ensure_execution_owned()?;
@@ -428,7 +428,7 @@ impl AgentOwner {
                 ))
                 || (enabled && state.info.lifecycle == AgentLifecycle::Active)
             {
-                let receipt = self.stop_receipt(&mut state, operation);
+                let receipt = self.enabled_receipt(&mut state, operation, enabled);
                 return Ok((None, receipt));
             }
             self.enabled.store(enabled, Ordering::SeqCst);
@@ -438,7 +438,7 @@ impl AgentOwner {
                 AgentLifecycle::Stopping
             };
             let children = state.sessions.values().cloned().collect::<Vec<_>>();
-            let receipt = self.stop_receipt(&mut state, operation);
+            let receipt = self.enabled_receipt(&mut state, operation, enabled);
             Ok((Some(children), receipt))
         })?;
         let Some(children) = children else {
