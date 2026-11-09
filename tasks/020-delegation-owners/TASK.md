@@ -104,3 +104,15 @@ commands. It is not counted as a passing gate or retained in the repository.
 - Final topic gate at `04fc9b8` plus this test-only change: whitespace, fmt check, workspace all-target Clippy `-D warnings`, workspace all-target tests, workspace doctests, and rustdoc `-D warnings` all passed. Commands use `--locked --offline --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-retry-state"'` with exact local Runtime `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`.
 - Exact `cargo test --workspace --all-targets --locked --offline --config <same patch> -- --list` count: **354 unique test cases**, including **22 delegation cases**; **3 doctests** passed separately. The nested storage subprocess probe is not an additional case. This count is for this topic, not the parent's larger composed workspace.
 - Validation logs: `/workspace/shared/delegation-final-gates.log` and `/workspace/shared/delegation-final-list.log`. Temporary validation manifests/lock are not committed. No TUI or live-provider validation and no remote push occurred.
+
+## Integration test ordering correction
+
+The combined `713efb0` full gate failed the existing
+`dropping_scope_close_wait_does_not_drop_actual_owner_cleanup` test: it released
+the cleanup gate before establishing its observation, allowing correct memory
+reclamation to make that setup query return `AgentSessionNotFound`. The test
+now registers its watch before releasing the gate. Caller-abandonment, actual
+cleanup and original assertions are preserved; no production behavior changes.
+The failed gate is retained as `stage-713efb0-full-published-runtime.log` and is
+not counted as a pass. Independent review's two DSH P1 findings remain separate
+work and are not claimed fixed by this test-only ordering correction.

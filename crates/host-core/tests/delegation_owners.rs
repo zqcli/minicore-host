@@ -789,11 +789,13 @@ async fn dropping_scope_close_wait_does_not_drop_actual_owner_cleanup() {
     recv(&mut entering).await;
     close.abort();
     let _ = close.await;
-    gate.add_permits(1);
+    // Register while cleanup still owns its gate. After release the memory
+    // Session may already be reclaimed, which is successful cleanup.
     let mut states = f
         .host
         .session_states(&f.connection.caller(), &parent)
         .unwrap();
+    gate.add_permits(1);
     loop {
         match states.snapshot() {
             Ok(snapshot) if snapshot.data.lifecycle != SessionLifecycle::Closed => {
