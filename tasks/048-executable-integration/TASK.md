@@ -17,8 +17,11 @@ No diagnostics source correction is duplicated: source af0f88e was already in th
 
 `cargo check --workspace --all-targets --locked` passes at the exact composition.
 Log: `/workspace/shared/minicore-host-validation/executable-next-workspace-check.log`.
-A combined all-target test run excluding the two known-blocked storage and
-diagnostics packages is in progress; exclusion is not a whole-workspace pass.
+The combined all-target test run excluding the two known-blocked storage and
+diagnostics packages passed **610 unique cases** at code `78d1fe2`. The separate
+`--list` inventory confirms the count. Logs are `executable-next-unblocked-tests.log`
+and `executable-next-unblocked-list.txt` under the same validation directory.
+This explicit exclusion is not a whole-workspace pass.
 
 Known aggregate failures are preserved, not dismissed by rerunning until green:
 
@@ -44,3 +47,18 @@ context, persistent deletion, full input association and business diagnostics
 remain separate tasks. Update PROJECT and the method map after validated
 composition; no route count alone proves complete contracts. Runtime remains
 published 0.10.0/69faf919, SPEC unchanged, TUI unchanged. No main merge or push.
+
+## Six canonical controls integrated
+
+Reviewed control source `570b886fcd4c4315e155d3f244576a681320fa7e` and documentation
+`cef0c189e7972d5607d61e0303d8ee7e8ed1c0ff` are integrated through local
+`f98af861d1bf618c99b8c28688ee1fb5122dacd5`. Seven source commits applied without
+conflicts, bringing the source map to 33 entries and actual shared routes to 49
+(including the separately managed `events.subscribe` route). This adds Agent
+update/start/default selection, Session update and input list/remove. Independent
+review reproduced the synchronous-validation timeout P1, then passed the unchanged
+seven probes after validation moved outside the caller poll and before final owner
+acceptance. Accepted saves retain their prior owner semantics. Its scoped review
+passed; global lease blockers are still open. Context and deletion routes are not
+included. The earlier 610-case run predates these seven commits, so it is not
+claimed as their aggregate validation.
