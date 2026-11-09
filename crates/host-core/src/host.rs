@@ -26,9 +26,11 @@ pub struct Host {
 struct HostState {
     lifecycle: HostLifecycle,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
-    creations: BTreeMap<OperationId, AgentCreateReceipt>,
+    // The generated object identity distinguishes accepted invocations. The
+    // caller's operation_id is correlation data, never an idempotency key.
+    creations: BTreeMap<AgentId, AgentCreateReceipt>,
     load_failures: BTreeMap<AgentId, Fault>,
-    create_tasks: BTreeMap<OperationId, tokio::task::JoinHandle<()>>,
+    create_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
 }
 impl Host {
     pub fn memory(resources: Arc<dyn ResourceResolver>) -> Result<Arc<Self>, Fault> {
@@ -208,7 +210,7 @@ impl Host {
             host_id: self.id.clone(),
             host_incarnation: self.incarnation.clone(),
             operation_id: request.operation_id.clone(),
-            agent_id: Some(id),
+            agent_id: Some(id.clone()),
             session_id,
             message_id,
             result,
@@ -217,7 +219,7 @@ impl Host {
             .lock()
             .expect("Host mutex poisoned")
             .creations
-            .insert(request.operation_id, receipt.clone());
+            .insert(id, receipt.clone());
         Ok(receipt)
     }
     pub fn receipt(
@@ -225,19 +227,38 @@ impl Host {
         caller: &CallerContext,
         operation_id: &OperationId,
     ) -> Result<AgentCreateReceipt, Fault> {
+        let mut receipts = self.creation_receipts(caller, operation_id)?.into_iter();
+        let receipt = receipts.next().ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "no retained creation receipt for this operation",
+            )
+        })?;
+        if receipts.next().is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "operation_id matches multiple invocations; use creation_receipts",
+            ));
+        }
+        Ok(receipt)
+    }
+    /// All accepted invocations with this correlation ID. Reusing an operation
+    /// ID neither deduplicates a request nor replaces another invocation's facts.
+    pub fn creation_receipts(
+        &self,
+        caller: &CallerContext,
+        operation_id: &OperationId,
+    ) -> Result<Vec<AgentCreateReceipt>, Fault> {
         self.access.read(caller, || {
-            self.state
+            Ok(self
+                .state
                 .lock()
                 .expect("Host mutex poisoned")
                 .creations
-                .get(operation_id)
+                .values()
+                .filter(|receipt| &receipt.operation_id == operation_id)
                 .cloned()
-                .ok_or_else(|| {
-                    Fault::new(
-                        FaultKind::HostMethodUnavailable,
-                        "no retained creation receipt for this operation",
-                    )
-                })
+                .collect())
         })
     }
     pub fn agent_info(

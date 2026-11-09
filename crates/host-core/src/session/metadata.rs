@@ -196,6 +196,7 @@ impl SessionController {
         state.record_task = Some(state.executor.as_ref().expect("checked runtime").spawn(
             async move {
                 let result = owner.save_record(candidate).await;
+                drop(owner);
                 let _ = sender.send(result);
             },
         ));

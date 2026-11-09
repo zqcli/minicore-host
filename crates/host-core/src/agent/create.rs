@@ -31,19 +31,36 @@ impl AgentOwner {
         caller: &CallerContext,
         operation: &OperationId,
     ) -> Result<SessionCreateReceipt, Fault> {
+        let mut receipts = self.creation_receipts(caller, operation)?.into_iter();
+        let receipt = receipts.next().ok_or_else(|| {
+            Fault::new(
+                FaultKind::AgentSessionNotFound,
+                "no retained Session creation receipt for this operation",
+            )
+        })?;
+        if receipts.next().is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "operation_id matches multiple invocations; use session_creation_receipts",
+            ));
+        }
+        Ok(receipt)
+    }
+    pub(crate) fn creation_receipts(
+        &self,
+        caller: &CallerContext,
+        operation: &OperationId,
+    ) -> Result<Vec<SessionCreateReceipt>, Fault> {
         self.access.read(caller, || {
-            self.state
+            Ok(self
+                .state
                 .lock()
                 .expect("Agent mutex poisoned")
                 .creations
-                .get(operation)
+                .values()
+                .filter(|receipt| &receipt.operation_id == operation)
                 .cloned()
-                .ok_or_else(|| {
-                    Fault::new(
-                        FaultKind::AgentSessionNotFound,
-                        "no retained Session creation receipt for this operation",
-                    )
-                })
+                .collect())
         })
     }
     pub(crate) async fn create_session_async(
@@ -118,7 +135,7 @@ impl AgentOwner {
             SessionConfig::from_agent(&state.info.config, &options.overrides.unwrap_or_default())
                 .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
         let prepared = PreparedSession {
-            id,
+            id: id.clone(),
             mode,
             config,
             agent_revision: state.info.config_revision,
@@ -138,13 +155,13 @@ impl AgentOwner {
         };
         state.creating += 1;
         state.executor = Some(runtime.clone());
-        state.creations.insert(operation.clone(), initial);
+        state.creations.insert(id.clone(), initial);
         let (sender, receiver) = oneshot::channel();
         let owner = Arc::clone(self);
-        let task_operation = operation.clone();
+        let task_id = id.clone();
         let task = runtime.spawn(async move {
             let result = AssertUnwindSafe(owner.create_session_work(
-                &task_operation,
+                &task_id,
                 prepared,
                 message,
                 make_default,
@@ -160,7 +177,7 @@ impl AgentOwner {
             let mut state = owner.state.lock().expect("Agent mutex poisoned");
             let receipt = state
                 .creations
-                .get_mut(&task_operation)
+                .get_mut(&task_id)
                 .expect("accepted creation registered");
             if let Err(error) = result {
                 let mut steps = receipt.result.steps.clone();
@@ -176,17 +193,18 @@ impl AgentOwner {
             }
             let receipt = receipt.clone();
             state.creating -= 1;
-            state.create_tasks.remove(&task_operation);
+            state.create_tasks.remove(&task_id);
             owner.changed.notify_waiters();
             drop(state);
+            drop(owner);
             let _ = sender.send(receipt);
         });
-        state.create_tasks.insert(operation, task);
+        state.create_tasks.insert(id, task);
         Ok(receiver)
     }
     async fn create_session_work(
         self: &Arc<Self>,
-        operation: &OperationId,
+        work_id: &SessionId,
         prepared: PreparedSession,
         message: Option<MessageInput>,
         make_default: bool,
@@ -291,7 +309,7 @@ impl AgentOwner {
             }
             let receipt = state
                 .creations
-                .get_mut(operation)
+                .get_mut(work_id)
                 .expect("registered creation");
             receipt.session_id = Some(prepared.id);
             receipt.result.steps.session = CreateStep::Succeeded;
@@ -304,7 +322,7 @@ impl AgentOwner {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             let receipt = state
                 .creations
-                .get_mut(operation)
+                .get_mut(work_id)
                 .expect("registered creation");
             receipt.result = match delivered {
                 Ok(accepted) => SessionCreateResult::accepted(

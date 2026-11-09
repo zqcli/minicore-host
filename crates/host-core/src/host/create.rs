@@ -33,6 +33,8 @@ impl Host {
             )
         })?;
         let operation = request.operation_id.clone();
+        let id = AgentId::new()
+            .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
         let initial = AgentCreateReceipt {
             kind: AgentCreateKind::AgentCreate,
             host_id: self.id.clone(),
@@ -62,17 +64,17 @@ impl Host {
                     "Host is not accepting new Agents",
                 ));
             }
-            state.creations.insert(operation.clone(), initial);
+            state.creations.insert(id.clone(), initial);
             let owner = Arc::clone(self);
-            let task_operation = operation.clone();
+            let task_id = id.clone();
             let task = runtime.spawn(async move {
-                let result = AssertUnwindSafe(owner.create_agent_work(request))
+                let result = AssertUnwindSafe(owner.create_agent_work(task_id.clone(), request))
                     .catch_unwind()
                     .await;
                 let receipt = match result {
                     Ok(receipt) => receipt,
                     Err(_) => owner.fail_agent_creation(
-                        &task_operation,
+                        &task_id,
                         Fault::new(
                             FaultKind::HostInternalUnexpected,
                             "accepted Agent creation failed unexpectedly",
@@ -84,16 +86,20 @@ impl Host {
                     .lock()
                     .expect("Host mutex poisoned")
                     .creations
-                    .insert(task_operation.clone(), receipt.clone());
+                    .insert(task_id.clone(), receipt.clone());
                 owner
                     .state
                     .lock()
                     .expect("Host mutex poisoned")
                     .create_tasks
-                    .remove(&task_operation);
+                    .remove(&task_id);
+                // Returning the final receipt also retires this owned creation
+                // task. Its temporary root lease must not race an immediate
+                // drop/reopen by a caller that has awaited the result.
+                drop(owner);
                 let _ = sender.send(receipt);
             });
-            state.create_tasks.insert(operation, task);
+            state.create_tasks.insert(id, task);
             Ok(())
         })?;
         receiver.await.map_err(|_| {
@@ -103,13 +109,13 @@ impl Host {
             )
         })
     }
-    fn fail_agent_creation(&self, operation: &OperationId, error: Fault) -> AgentCreateReceipt {
+    fn fail_agent_creation(&self, id: &AgentId, error: Fault) -> AgentCreateReceipt {
         let mut receipt = self
             .state
             .lock()
             .expect("Host mutex poisoned")
             .creations
-            .get(operation)
+            .get(id)
             .expect("accepted creation registered")
             .clone();
         let mut steps = receipt.result.steps.clone();
@@ -127,12 +133,13 @@ impl Host {
         receipt.result = AgentCreateResult::without_delivery(steps);
         receipt
     }
-    async fn create_agent_work(self: &Arc<Self>, request: AgentCreate) -> AgentCreateReceipt {
+    async fn create_agent_work(
+        self: &Arc<Self>,
+        id: AgentId,
+        request: AgentCreate,
+    ) -> AgentCreateReceipt {
         let operation = request.operation_id.clone();
         let created = async {
-            let id = AgentId::new().map_err(|error| {
-                Fault::new(FaultKind::HostInternalUnexpected, error.to_string())
-            })?;
             let agent = if request.mode == StorageMode::Persistent {
                 let store = self
                     .store
@@ -183,11 +190,8 @@ impl Host {
             {
                 let mut state = self.state.lock().expect("Host mutex poisoned");
                 state.agents.insert(id.clone(), Arc::clone(&agent));
-                let receipt = state
-                    .creations
-                    .get_mut(&operation)
-                    .expect("registered creation");
-                receipt.agent_id = Some(id);
+                let receipt = state.creations.get_mut(&id).expect("registered creation");
+                receipt.agent_id = Some(id.clone());
                 receipt.result.steps.agent = CreateStep::Succeeded;
                 receipt.result.steps.session = CreateStep::Running;
             }
@@ -210,7 +214,7 @@ impl Host {
                     .lock()
                     .expect("Host mutex poisoned")
                     .creations
-                    .get(&operation)
+                    .get(&id)
                     .expect("registered creation")
                     .clone();
                 receipt.session_id = session.session_id;
@@ -235,7 +239,7 @@ impl Host {
                 };
                 receipt
             }
-            Err(error) => self.fail_agent_creation(&operation, error),
+            Err(error) => self.fail_agent_creation(&id, error),
         }
     }
     pub async fn create_session_async(
@@ -258,5 +262,16 @@ impl Host {
         self.check_host(&target.host_id)?;
         self.agent(caller, &target.agent_id)?
             .creation_receipt(caller, operation)
+    }
+    /// All matching Session creation invocations, read from their direct Agent.
+    pub fn session_creation_receipts(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+        operation: &OperationId,
+    ) -> Result<Vec<SessionCreateReceipt>, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?
+            .creation_receipts(caller, operation)
     }
 }

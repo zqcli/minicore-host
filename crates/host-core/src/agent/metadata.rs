@@ -192,6 +192,7 @@ impl AgentOwner {
         let owner = Arc::clone(self);
         state.record_task = Some(runtime.spawn(async move {
             let result = owner.save_record(candidate, runtime_default).await;
+            drop(owner);
             let _ = sender.send(result);
         }));
         Ok(())

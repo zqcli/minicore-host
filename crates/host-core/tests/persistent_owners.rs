@@ -500,6 +500,7 @@ async fn persistent_creation_modes_reopen_and_real_partial_input_failure() {
     completed(&host, &caller, &persistent).await;
     drop(connection);
     drop(host);
+    wait_for_root_release(directory.path()).await;
     let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
         .await
         .unwrap();
@@ -960,6 +961,7 @@ async fn durable_config_versions_defaults_and_reload_preserve_real_history() {
     );
     drop(connection);
     drop(host);
+    wait_for_root_release(directory.path()).await;
     let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
         .await
         .unwrap();
@@ -1733,4 +1735,581 @@ fn later_pause_wins_over_accepted_resume_history_load() {
             PersistenceState::Persisted
         );
     });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_reused_operation_does_not_mix_owner_or_message() {
+    let directory = tempfile::tempdir().unwrap();
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut first = create_request(StorageMode::Persistent);
+    first.initial_message = Some(input("first independent invocation"));
+    let operation = first.operation_id.clone();
+    let first_message = first.initial_message.as_ref().unwrap().message_id.clone();
+    let owner = host.clone();
+    let first_caller = caller.clone();
+    let waiting = tokio::spawn(async move { owner.create_agent_async(&first_caller, first).await });
+    gate.entered.notified().await;
+    let first_agent = host.receipt(&caller, &operation).unwrap().agent_id.unwrap();
+    let mut second = create_request(StorageMode::Persistent);
+    second.operation_id = operation.clone();
+    second.initial_message = Some(input("second independent invocation"));
+    let second_receipt = host.create_agent_async(&caller, second).await.unwrap();
+    gate.release();
+    let first_receipt = waiting.await.unwrap().unwrap();
+    first_receipt.validate_call_return().unwrap();
+    second_receipt.validate_call_return().unwrap();
+    let retained = host.creation_receipts(&caller, &operation).unwrap();
+    assert_eq!(retained.len(), 2);
+    assert!(retained.contains(&first_receipt));
+    assert!(retained.contains(&second_receipt));
+    assert!(host.receipt(&caller, &operation).is_err());
+
+    assert_ne!(first_agent, second_receipt.agent_id.clone().unwrap());
+    assert_eq!(
+        first_receipt.agent_id.as_ref(),
+        Some(&first_agent),
+        "first creation returned second invocation's Agent"
+    );
+    assert_eq!(
+        first_receipt.message_id.as_ref(),
+        Some(&first_message),
+        "first creation returned second invocation's MessageId"
+    );
+    let target = SessionRef {
+        agent_id: first_receipt.agent_id.unwrap(),
+        session_id: first_receipt.session_id.unwrap(),
+    };
+    assert!(
+        host.session_info(&caller, &target).is_ok(),
+        "receipt must contain a valid direct-owner pair"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_check_direct_session_survives_abandoned_waiter() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, _) = seed(directory.path());
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(1),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = AgentRef { host_id, agent_id };
+    let operation = OperationId::new().unwrap();
+    let request = SessionCreate {
+        operation_id: operation.clone(),
+        target: target.clone(),
+        mode: None,
+        overrides: None,
+        initial_message: Some(input("standalone owned creation")),
+    };
+    let owner = host.clone();
+    let child_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_session_async(&child_caller, request).await });
+    gate.entered.notified().await;
+    let pending = host
+        .session_creation_receipt(&caller, &target, &operation)
+        .unwrap();
+    pending.validate().unwrap();
+    assert!(pending.result.steps.session.in_progress());
+    waiting.abort();
+    connection.close();
+    gate.release();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let receipt = host
+                .session_creation_receipt(&caller, &target, &operation)
+                .unwrap();
+            if receipt.validate_call_return().is_ok() {
+                break receipt;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(receipt.result.steps.session.succeeded());
+    assert!(receipt.result.steps.message.unwrap().succeeded());
+    let created = SessionRef {
+        agent_id: target.agent_id,
+        session_id: receipt.session_id.unwrap(),
+    };
+    assert_eq!(
+        completed(&host, &caller, &created).await.info.persistence,
+        PersistenceState::Persisted
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_check_stop_waits_for_accepted_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let (inner, seen) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut request = create_request(StorageMode::Persistent);
+    request.initial_message = Some(input("must be refused after stop"));
+    let operation = request.operation_id.clone();
+    let owner = host.clone();
+    let child_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_agent_async(&child_caller, request).await });
+    gate.entered.notified().await;
+    let initial = host.receipt(&caller, &operation).unwrap();
+    let target = AgentRef {
+        host_id: initial.host_id,
+        agent_id: initial.agent_id.unwrap(),
+    };
+    let stop = host.stop_agent(&caller, &target);
+    let during = host.agent_info(&caller, &target).unwrap().lifecycle;
+    let early_start = host.start_agent(&caller, &target);
+    gate.release();
+    stop.unwrap();
+    assert_eq!(during, AgentLifecycle::Stopping);
+    assert!(early_start.is_err());
+    let receipt = waiting.await.unwrap().unwrap();
+    receipt.validate_call_return().unwrap();
+    assert!(receipt.result.steps.agent.succeeded());
+    assert!(receipt.result.steps.session.succeeded());
+    assert!(matches!(
+        receipt.result.steps.message,
+        Some(CreateStep::Failed { .. })
+    ));
+    assert!(receipt.result.delivery.is_none());
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while host.agent_info(&caller, &target).unwrap().lifecycle != AgentLifecycle::Stopped {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(seen.lock().unwrap().is_empty());
+    let created = SessionRef {
+        agent_id: target.agent_id.clone(),
+        session_id: receipt.session_id.unwrap(),
+    };
+    assert!(
+        host.session_state(&caller, &created)
+            .unwrap()
+            .data
+            .next_turn
+            .is_empty()
+    );
+    host.start_agent(&caller, &target).unwrap();
+    host.send(
+        &caller,
+        SendMessage::new(input("new explicit input after start"), created.clone()),
+    )
+    .unwrap();
+    assert_eq!(
+        completed(&host, &caller, &created).await.info.outcome,
+        Some(TurnOutcome::Completed)
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_check_selected_config_version_is_not_reread() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, _) = seed(directory.path());
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(1),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = AgentRef { host_id, agent_id };
+    let selected = host.agent_info(&caller, &target).unwrap();
+    let request = SessionCreate {
+        operation_id: OperationId::new().unwrap(),
+        target: target.clone(),
+        mode: None,
+        overrides: None,
+        initial_message: None,
+    };
+    let owner = host.clone();
+    let child_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_session_async(&child_caller, request).await });
+    gate.entered.notified().await;
+    let next = Role {
+        instructions: "future version eight".into(),
+        ..Default::default()
+    };
+    let update = host
+        .update_agent_async(
+            &caller,
+            &target,
+            7,
+            &AgentConfigPatch {
+                role: Some(next),
+                session_defaults: None,
+            },
+        )
+        .await;
+    gate.release();
+    assert_eq!(update.unwrap().config_revision, 8);
+    let receipt = waiting.await.unwrap().unwrap();
+    let first = SessionRef {
+        agent_id: target.agent_id.clone(),
+        session_id: receipt.session_id.unwrap(),
+    };
+    let first_info = host.session_info(&caller, &first).unwrap();
+    assert_eq!(first_info.config.role, selected.config.role);
+    assert_eq!(first_info.agent_config_revision, 7);
+    let new = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: target.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let second = SessionRef {
+        agent_id: target.agent_id,
+        session_id: new.session_id.unwrap(),
+    };
+    assert_eq!(
+        host.session_info(&caller, &second)
+            .unwrap()
+            .config
+            .role
+            .instructions,
+        "future version eight"
+    );
+    assert_eq!(
+        host.session_info(&caller, &second)
+            .unwrap()
+            .agent_config_revision,
+        8
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_check_distinct_invocations_keep_actual_ownership() {
+    let directory = tempfile::tempdir().unwrap();
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("test"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut tasks = Vec::new();
+    for i in 0..16 {
+        let mut request = create_request(StorageMode::Persistent);
+        request.initial_message = Some(input(&format!("independent request {i}")));
+        let operation = request.operation_id.clone();
+        let message = request.initial_message.as_ref().unwrap().message_id.clone();
+        let owner = host.clone();
+        let child_caller = caller.clone();
+        tasks.push(tokio::spawn(async move {
+            (
+                operation,
+                message,
+                owner
+                    .create_agent_async(&child_caller, request)
+                    .await
+                    .unwrap(),
+            )
+        }));
+    }
+    let mut agents = BTreeSet::new();
+    for task in tasks {
+        let (operation, message, receipt) = task.await.unwrap();
+        receipt.validate_call_return().unwrap();
+        assert_eq!(receipt.operation_id, operation);
+        assert_eq!(receipt.message_id.as_ref(), Some(&message));
+        assert_eq!(host.receipt(&caller, &operation).unwrap(), receipt);
+        let target = SessionRef {
+            agent_id: receipt.agent_id.unwrap(),
+            session_id: receipt.session_id.unwrap(),
+        };
+        assert!(agents.insert(target.agent_id.clone()));
+        assert_eq!(
+            host.session_info(&caller, &target).unwrap().agent_id,
+            target.agent_id
+        );
+        assert_eq!(
+            completed(&host, &caller, &target).await.info.persistence,
+            PersistenceState::Persisted
+        );
+    }
+    assert_eq!(agents.len(), 16);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_create_reused_session_operation_keeps_actual_message() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, _) = seed(directory.path());
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(1),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = AgentRef { host_id, agent_id };
+    let operation = OperationId::new().unwrap();
+    let first_input = input("first Session creation");
+    let first_message = first_input.message_id.clone();
+    let first = SessionCreate {
+        operation_id: operation.clone(),
+        target: target.clone(),
+        mode: None,
+        overrides: None,
+        initial_message: Some(first_input),
+    };
+    let owner = host.clone();
+    let child_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_session_async(&child_caller, first).await });
+    gate.entered.notified().await;
+    let second = SessionCreate {
+        operation_id: operation.clone(),
+        target: target.clone(),
+        mode: None,
+        overrides: None,
+        initial_message: Some(input("second Session creation")),
+    };
+    let second_receipt = host.create_session_async(&caller, second).await.unwrap();
+    gate.release();
+    let first_receipt = waiting.await.unwrap().unwrap();
+    first_receipt.validate_call_return().unwrap();
+    second_receipt.validate_call_return().unwrap();
+    let retained = host
+        .session_creation_receipts(&caller, &target, &operation)
+        .unwrap();
+    assert_eq!(retained.len(), 2);
+    assert!(retained.contains(&first_receipt));
+    assert!(retained.contains(&second_receipt));
+    assert!(
+        host.session_creation_receipt(&caller, &target, &operation)
+            .is_err()
+    );
+
+    assert_ne!(first_receipt.session_id, second_receipt.session_id);
+    let created = SessionRef {
+        agent_id: first_receipt.agent_id,
+        session_id: first_receipt.session_id.unwrap(),
+    };
+    assert!(host.message(&caller, &created, &first_message).is_ok());
+    assert_eq!(
+        first_receipt.message_id.as_ref(),
+        Some(&first_message),
+        "receipt claimed acceptance of the other invocation's MessageId"
+    );
+}
+
+#[tokio::test]
+async fn review_fix_check_async_memory_children_keep_and_release_root() {
+    for mode in [StorageMode::Memory, StorageMode::Persistent] {
+        let directory = tempfile::tempdir().unwrap();
+        let (resources, entered, release) = review_gate_resources();
+        let host = Host::open_persistent(directory.path(), settings("first"), resources.clone())
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let mut request = create_request(mode);
+        request.default_session = Some(SessionOptions {
+            mode: Some(StorageMode::Memory),
+            overrides: None,
+        });
+        request.initial_message = Some(input("active memory work"));
+        host.create_agent_async(&connection.caller(), request)
+            .await
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        drop(connection);
+        drop(host);
+        assert!(
+            Host::open_persistent(directory.path(), settings("second"), resources)
+                .await
+                .is_err(),
+            "active memory child of {mode:?} Agent released root"
+        );
+        release.add_permits(1);
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(root) = DataRoot::acquire(directory.path()) {
+                    drop(root);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn awaited_creation_retires_its_owner_before_immediate_root_reopen() {
+    for (agent_mode, session_mode) in [
+        (StorageMode::Memory, StorageMode::Memory),
+        (StorageMode::Persistent, StorageMode::Memory),
+        (StorageMode::Persistent, StorageMode::Persistent),
+    ] {
+        for _ in 0..24 {
+            let directory = tempfile::tempdir().unwrap();
+            let (resources, _) = resources();
+            let host =
+                Host::open_persistent(directory.path(), settings("first"), resources.clone())
+                    .await
+                    .unwrap();
+            let connection = host.connect().unwrap();
+            let mut request = create_request(agent_mode);
+            request.default_session = Some(SessionOptions {
+                mode: Some(session_mode),
+                overrides: None,
+            });
+            let receipt = host
+                .create_agent_async(&connection.caller(), request)
+                .await
+                .unwrap();
+            receipt.validate_call_return().unwrap();
+            assert!(receipt.result.steps.session.succeeded());
+            drop(connection);
+            drop(host);
+            // No retry, sleep, or scheduling yield hides task retirement. No
+            // Runtime was started, so only this creation could retain a lease.
+            let reopened = Host::open_persistent(directory.path(), settings("second"), resources)
+                .await
+                .unwrap();
+            let connection = reopened.connect().unwrap();
+            assert_eq!(
+                reopened.info(&connection.caller()).unwrap().host_id,
+                receipt.host_id
+            );
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn awaited_metadata_retires_workers_before_immediate_root_reopen() {
+    for _ in 0..24 {
+        let directory = tempfile::tempdir().unwrap();
+        let (host_id, agent_id, ids) = seed(directory.path());
+        let (resources, _) = resources();
+        let host = Host::open_persistent(directory.path(), settings("first"), resources.clone())
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let agent = AgentRef {
+            host_id,
+            agent_id: agent_id.clone(),
+        };
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let patch_agent = AgentConfigPatch {
+            role: Some(Role {
+                name: "confirmed Agent".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let patch_session = SessionConfigPatch {
+            role: Some(Role {
+                name: "confirmed Session".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let agent_result = host
+            .update_agent_async(&caller, &agent, 7, &patch_agent)
+            .await;
+        let session_result = host
+            .update_session_async(&caller, &target, 4, &patch_session)
+            .await;
+        assert_eq!(agent_result.unwrap().config_revision, 8);
+        assert_eq!(session_result.unwrap().config_revision, 5);
+        drop(connection);
+        drop(host);
+        let reopened = Host::open_persistent(directory.path(), settings("second"), resources)
+            .await
+            .unwrap();
+        let connection = reopened.connect().unwrap();
+        assert_eq!(
+            reopened
+                .agent_info(&connection.caller(), &agent)
+                .unwrap()
+                .config_revision,
+            8
+        );
+        assert_eq!(
+            reopened
+                .session_info(&connection.caller(), &target)
+                .unwrap()
+                .config_revision,
+            5
+        );
+    }
+}
+
+// Public completed Turn snapshots are execution facts, not a Host shutdown or
+// task-join barrier. Before restart tests, observe the actual lease releasing;
+// unexpected storage errors fail immediately, and no elapsed-time sleep is used.
+async fn wait_for_root_release(path: &Path) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            match DataRoot::acquire(path) {
+                Ok(root) => {
+                    drop(root);
+                    return;
+                }
+                Err(StorageError::RootInUse) => tokio::task::yield_now().await,
+                Err(error) => panic!("unexpected root acquisition failure: {error}"),
+            }
+        }
+    })
+    .await
+    .expect("all old owner work must eventually release the root");
 }
