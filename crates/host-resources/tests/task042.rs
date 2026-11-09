@@ -1,6 +1,9 @@
 //! Real local-tool integration through HostResourceBuilder + HTTP/SSE provider + Runtime.
 //! Only the explicit loopback model replies are fixtures; filesystem, processes,
 //! owner records, tool declarations and result handoffs are production paths.
+#[cfg(target_os = "linux")]
+#[path = "task042/completion.rs"]
+mod completion;
 #[cfg(unix)]
 #[path = "task042/process.rs"]
 mod process;

@@ -431,3 +431,55 @@ async fn separate_turn_tools_share_mutation_order_and_disjoint_edit_snapshots() 
         FileSnapshot::Content(expected.as_bytes().to_vec())
     );
 }
+
+#[tokio::test]
+async fn rejected_before_worker_start_reports_actual_cleanup_without_waiting_for_turn_end() {
+    let (_root, tools, records) = fixture().await;
+    for (id, arguments, cancelled) in [
+        (
+            "invalid",
+            serde_json::json!({"missing":"read fields"}),
+            false,
+        ),
+        (
+            "cancelled",
+            serde_json::json!({"path":"file", "limit":1}),
+            true,
+        ),
+    ] {
+        let context = context();
+        if cancelled {
+            context.cancellation.cancel();
+        }
+        let result = tools
+            .tool("read")
+            .unwrap()
+            .execute(
+                minicore_runtime::tools::ToolInvocation::new(
+                    id.parse().unwrap(),
+                    "read".parse().unwrap(),
+                    arguments,
+                )
+                .unwrap(),
+                context,
+            )
+            .await;
+        assert_eq!(
+            result.unwrap_err(),
+            if cancelled {
+                ToolError::Cancelled
+            } else {
+                ToolError::InvalidInvocation
+            }
+        );
+        assert_eq!(
+            records.completions.lock().unwrap().last(),
+            Some(&(id.to_owned(), true))
+        );
+    }
+    assert!(
+        tools.finish().await.is_empty(),
+        "neither rejected invocation started a worker"
+    );
+    assert_eq!(records.completions.lock().unwrap().len(), 2);
+}

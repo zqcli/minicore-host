@@ -27,10 +27,18 @@ pub type RecordedChunk = (String, OutputChannel, u64, Vec<u8>);
 #[derive(Default)]
 pub struct Recorder {
     pub edits: Mutex<Vec<(String, CapturedEdit)>>,
+    pub completions: Mutex<Vec<(String, bool)>>,
     pub commands: Mutex<Vec<(String, CommandResult)>>,
     pub chunks: Mutex<Vec<RecordedChunk>>,
 }
 impl LocalToolSink for Recorder {
+    fn complete(&self, call: &ToolCallId, cleanup_confirmed: bool) -> Result<(), RecordError> {
+        self.completions
+            .lock()
+            .unwrap()
+            .push((call.as_str().to_owned(), cleanup_confirmed));
+        Ok(())
+    }
     fn output(
         &self,
         call: &ToolCallId,

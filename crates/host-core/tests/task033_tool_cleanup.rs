@@ -689,6 +689,26 @@ async fn unconfirmed_cleanup_and_panics_remain_visible_without_false_finished_or
             (TurnState::Finalizing, Some(TurnOutcome::Cancelled))
         );
         assert!(info.fault.is_none());
+        let owned = bundle.owned_output.lock().unwrap()[0].clone();
+        let observed = host
+            .toolcall_get(
+                &caller,
+                &target,
+                &ToolCallRef {
+                    turn_id: turn.clone(),
+                    tool_call_id: owned.source().tool_call_id.clone(),
+                },
+            )
+            .unwrap();
+        assert!(
+            observed.data.result.is_some(),
+            "the native result is handed off despite unconfirmed cleanup"
+        );
+        assert_ne!(
+            observed.data.state.state,
+            ToolCallState::Finished,
+            "unconfirmed cleanup must not publish a finished ToolCall"
+        );
         host.shutdown(
             &caller,
             HostShutdownRequest {
@@ -867,6 +887,15 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
         turn_id: turn.clone(),
         tool_call_id: owned.source().tool_call_id.clone(),
     };
+    let observed = host.toolcall_get(&caller, &target, &call).unwrap();
+    assert!(
+        observed.data.result.is_some(),
+        "native result handoff is not delayed by actual cleanup"
+    );
+    assert_ne!(observed.data.state.state, ToolCallState::Finished);
+    assert!(host.history(&caller, &target).unwrap().iter().any(|item| {
+        matches!(item, minicore_runtime::HistoryItem::ToolResult(result) if result.call_id.as_str() == call.tool_call_id.0)
+    }));
     let text = "before 真实 child cleanup";
     let range = TextReadRequest {
         channel: "stdout".into(),
@@ -884,6 +913,14 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
     bundle.release.add_permits(1);
     terminal(&host, &caller, &target, &turn).await;
     assert!(!owned.emit("stdout", "after confirmed cleanup"));
+    assert_eq!(
+        host.toolcall_get(&caller, &target, &call)
+            .unwrap()
+            .data
+            .state
+            .state,
+        ToolCallState::Finished
+    );
     assert_eq!(
         host.toolcall_output_read(&caller, &target, &call, &range)
             .unwrap()
