@@ -90,6 +90,8 @@ fault_registry! {
     SessionOutputRangeInvalid = 3502, "SESSION_OUTPUT_RANGE_INVALID", [Session], None, false;
     SessionHistoryCursorInvalid = 3503, "SESSION_HISTORY_CURSOR_INVALID", [Session, SessionHistory], None, false;
     SessionToolCallNotFound = 3504, "SESSION_TOOLCALL_NOT_FOUND", [Session, SessionLookup], None, false;
+    SessionInteractionNotPending = 3601, "SESSION_INTERACTION_NOT_PENDING", [Session], None, false;
+    SessionInteractionAnswerInvalid = 3602, "SESSION_INTERACTION_ANSWER_INVALID", [Session], None, false;
     SessionInternalUnexpected = 3999, "SESSION_INTERNAL_UNEXPECTED", [Session], None, false;
     TurnModelUpstreamRateLimited = 4201, "TURN_MODEL_UPSTREAM_RATE_LIMITED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
     TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;

@@ -95,3 +95,6 @@ pub(crate) fn nullable<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'
 
 mod observation;
 pub use observation::*;
+
+mod interaction;
+pub use interaction::*;

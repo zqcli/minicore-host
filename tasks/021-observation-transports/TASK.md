@@ -137,3 +137,18 @@ cache, lifetime extension or fabricated empty exact-source result is introduced.
 `cargo test -p minicore-host-core enumerated_descendant_reclaimed_before_baseline
 --locked --offline` passed with the explicit Runtime patch. This correction is
 independent of interaction answer routing.
+
+## Interaction contract
+
+The dedicated protocol change adds generic `InteractionAnswerRequest<A>` with
+original Turn/Load/InteractionId and OperationId, a strictly typed answered
+receipt in the common `Receipt` union, and stable `SESSION_INTERACTION_NOT_PENDING`
+(3601) / `SESSION_INTERACTION_ANSWER_INVALID` (3602) leaves. The generic payload
+lets core use Runtime's existing tool-input answer type without making protocol
+depend on Runtime or copying another input schema. An answered receipt has no
+execution-completed status. All fields and receipt branches reject unknown shape.
+
+`cargo test -p minicore-host-protocol --all-targets --locked --offline` passed
+with the same explicit patch. Two new contract tests cover mandatory execution
+identity, unknown/null fields, receipt round-trip and invalid completion claims.
+The following source change supplies the actual owner/Runtime route.
