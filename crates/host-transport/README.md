@@ -107,9 +107,10 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 31 real routes:
+`SUPPORTED_METHODS` lists these 34 real routes:
 
-- Host: `host.info`, `host.receipt.get`, `host.shutdown`.
+- Host: `host.info`, `host.config.get`, `host.receipt.get`, `host.shutdown`.
+- Resources: `model.list`, `tool.list`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
 - Session: `session.create`, `session.get`, `session.list`, `session.state`,
   `session.load`, `session.unload`, `session.pause`, `session.resume`,
@@ -130,6 +131,28 @@ creating a Runner or restoring old Turns. Text reads take the original Session,
 Turn plus response index or ToolCall, and `request: { channel, start, end,
 max_bytes }`. `end` is the fixed catch-up endpoint; all positions are UTF-8 bytes.
 Missing/reclaimed sources return the real owner's Fault, not an empty success.
+
+`HostClient::config`, `models` and `tools` use the same operation table and real
+Host configuration owners on all three connections. `host.config.get` and
+`model.list` take `{}`. `tool.list` takes `{}` for available tools, or
+`{ "target": AgentRef }` / `{ "target": SessionRef }` for that owner's committed
+enabled selection. `ToolListRequest` and `ToolListTarget` are the typed forms.
+Mixed or incomplete references are rejected, and an Agent's Host qualifier is
+never stripped. A Session may select tools outside its Agent's default list.
+
+These queries are available to read-only connections. Results preserve complete
+model references and original Runtime `ToolSpec` declarations in lexical order,
+without new resource IDs, per-item kind tags, executors, or credential values.
+Configuration contains credential source names, not resolved keys. An empty
+enabled set is distinct from a missing target or a selected tool removed by a
+successful configuration reload; those missing cases retain the owner's Fault.
+Known references can be used directly without first calling either list method.
+
+The prepared `Host::reload_configuration` embedding API is not a public
+`host.reload` adapter: operation-correlated Host receipts and their owner-backed
+lookup must be integrated before that route is exposed. No `host.reload_config`
+alias exists. Resource query coverage does not complete configuration loading,
+ordinary file-tool installation, or Session compaction.
 
 ## Shared observations and client content
 
