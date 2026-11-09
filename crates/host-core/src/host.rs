@@ -468,7 +468,7 @@ impl Host {
         if !self.access.execution_allowed_owned() {
             return self
                 .access
-                .accept(caller, || session.continue_history_owned());
+                .accept(caller, || session.continue_saves_owned());
         }
         session.resume(caller)
     }
