@@ -161,6 +161,8 @@ pub(crate) struct SessionController {
     state: Mutex<SessionState>,
     store: Option<SessionStore>,
     root_lease: Option<Arc<dyn Send + Sync>>,
+    // A completion notification carries no parent state or mutation authority.
+    parent_changed: Option<Arc<Notify>>,
     provenance: Option<SessionRecord>,
     changed: Notify,
     snapshots: watch::Sender<SessionSnapshot>,
@@ -233,6 +235,7 @@ impl SessionController {
             backend,
             store: None,
             root_lease: None,
+            parent_changed: None,
             provenance: None,
             state: Mutex::new(state),
             changed: Notify::new(),
@@ -302,6 +305,9 @@ impl SessionController {
             &self.id,
         ));
         self.changed.notify_waiters();
+        if let Some(parent_changed) = &self.parent_changed {
+            parent_changed.notify_waiters();
+        }
     }
     fn open(state: &SessionState) -> Result<(), Fault> {
         match state.lifecycle {

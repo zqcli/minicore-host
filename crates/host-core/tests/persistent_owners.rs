@@ -2313,3 +2313,467 @@ async fn wait_for_root_release(path: &Path) {
     .await
     .expect("all old owner work must eventually release the root");
 }
+
+#[test]
+fn review_meta_stop_wakes_after_late_child_metadata_save() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (host_id, agent_id, mut ids) = seed(directory.path());
+        ids.sort();
+        let first = SessionRef {
+            agent_id: agent_id.clone(),
+            session_id: ids[0].clone(),
+        };
+        let last = SessionRef {
+            agent_id: agent_id.clone(),
+            session_id: ids[1].clone(),
+        };
+        let agent = AgentRef { host_id, agent_id };
+        let (resources, _) = resources();
+        let host = Host::open_persistent(directory.path(), settings("stop wake"), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+
+        let (release_first, held_first) = std::sync::mpsc::channel::<()>();
+        let (entered_first, entering_first) = tokio::sync::oneshot::channel();
+        let first_blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered_first.send(());
+            let _ = held_first.recv();
+        });
+        entering_first.await.unwrap();
+        host.load_session(&caller, &last).unwrap();
+        wait_state(&host, &caller, &last, |state| state.preparing).await;
+        // Let the production load task enqueue its blocking read behind blocker1.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let (release_second, held_second) = std::sync::mpsc::channel::<()>();
+        let (entered_second, entering_second) = tokio::sync::oneshot::channel();
+        let second_blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered_second.send(());
+            let _ = held_second.recv();
+        });
+        host.stop_agent(&caller, &agent).unwrap();
+        assert_eq!(
+            host.agent_info(&caller, &agent).unwrap().lifecycle,
+            AgentLifecycle::Stopping
+        );
+        // Stop has walked the earlier, quiescent child and waits on the last child.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let task_host = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = first.clone();
+        let save = tokio::spawn(async move {
+            task_host
+                .update_session_async(
+                    &task_caller,
+                    &task_target,
+                    4,
+                    &SessionConfigPatch {
+                        role: Some(Role {
+                            name: "late accepted metadata".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        wait_state(&host, &caller, &first, |state| state.metadata_saving).await;
+        release_first.send(()).unwrap();
+        first_blocker.await.unwrap();
+        entering_second.await.unwrap();
+        wait_state(&host, &caller, &last, |state| !state.preparing).await;
+        // Stop's second aggregate check now sees the first child's pending save.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        assert_eq!(
+            host.agent_info(&caller, &agent).unwrap().lifecycle,
+            AgentLifecycle::Stopping
+        );
+        release_second.send(()).unwrap();
+        second_blocker.await.unwrap();
+        save.await.unwrap().unwrap();
+        assert!(
+            !host
+                .session_state(&caller, &first)
+                .unwrap()
+                .data
+                .metadata_saving
+        );
+        let stopped = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if host.agent_info(&caller, &agent).unwrap().lifecycle == AgentLifecycle::Stopped {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        assert!(
+            stopped.is_ok(),
+            "Agent stop lost the child's completion wake and stays stopping indefinitely"
+        );
+        host.start_agent(&caller, &agent).unwrap();
+        assert_eq!(
+            host.agent_info(&caller, &agent).unwrap().lifecycle,
+            AgentLifecycle::Active
+        );
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_meta_start_does_not_activate_unfinished_creation() {
+    let directory = tempfile::tempdir().unwrap();
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("creating fence"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let request = create_request(StorageMode::Persistent);
+    let operation = request.operation_id.clone();
+    let task_host = Arc::clone(&host);
+    let task_caller = caller.clone();
+    let create =
+        tokio::spawn(async move { task_host.create_agent_async(&task_caller, request).await });
+    gate.entered.notified().await;
+    let progress = host.receipt(&caller, &operation).unwrap();
+    let agent = AgentRef {
+        host_id: progress.host_id,
+        agent_id: progress.agent_id.unwrap(),
+    };
+    assert_eq!(
+        host.agent_info(&caller, &agent).unwrap().lifecycle,
+        AgentLifecycle::Creating
+    );
+    let result = host.start_agent(&caller, &agent);
+    let after_start = host.agent_info(&caller, &agent).unwrap().lifecycle;
+    let updated = host
+        .update_agent_async(
+            &caller,
+            &agent,
+            0,
+            &AgentConfigPatch {
+                role: Some(Role {
+                    name: "update before initial create completed".into(),
+                    ..Role::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await;
+    gate.release();
+    create.await.unwrap().unwrap();
+    assert_eq!(after_start, AgentLifecycle::Creating);
+    assert!(updated.is_err());
+    assert!(
+        result.is_err(),
+        "start cannot publish Active while initial creation still owns unfinished work"
+    );
+}
+
+#[test]
+fn review_meta_check_close_and_stop_wait_for_owned_saves() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (host_id, agent_id, ids) = seed(directory.path());
+        let target = SessionRef {
+            agent_id: agent_id.clone(),
+            session_id: ids[0].clone(),
+        };
+        let agent = AgentRef { host_id, agent_id };
+        let (resources, seen) = resources();
+        let host = Host::open_persistent(directory.path(), settings("save close stop"), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = target.clone();
+        let session_save = tokio::spawn(async move {
+            owner
+                .update_session_async(
+                    &task_caller,
+                    &task_target,
+                    4,
+                    &SessionConfigPatch {
+                        role: Some(Role {
+                            name: "confirmed Session value".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_agent = agent.clone();
+        let agent_save = tokio::spawn(async move {
+            owner
+                .update_agent_async(
+                    &task_caller,
+                    &task_agent,
+                    7,
+                    &AgentConfigPatch {
+                        role: Some(Role {
+                            name: "confirmed Agent value".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        wait_state(&host, &caller, &target, |state| state.metadata_saving).await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !host.agent_info(&caller, &agent).unwrap().metadata_saving {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        host.close_session(&caller, &target).unwrap();
+        host.stop_agent(&caller, &agent).unwrap();
+        assert_eq!(
+            host.agent_info(&caller, &agent).unwrap().lifecycle,
+            AgentLifecycle::Stopping
+        );
+        assert_eq!(
+            host.session_state(&caller, &target).unwrap().data.lifecycle,
+            SessionLifecycle::Closing
+        );
+        assert_eq!(
+            host.session_info(&caller, &target).unwrap().config_revision,
+            4
+        );
+        assert_eq!(host.agent_info(&caller, &agent).unwrap().config_revision, 7);
+        session_save.abort();
+        agent_save.abort();
+        assert!(session_save.await.unwrap_err().is_cancelled());
+        assert!(agent_save.await.unwrap_err().is_cancelled());
+        connection.close();
+        let observer = host.connect().unwrap();
+        let caller = observer.caller();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        wait_state(&host, &caller, &target, |state| {
+            state.lifecycle == SessionLifecycle::Closed
+        })
+        .await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while host.agent_info(&caller, &agent).unwrap().lifecycle != AgentLifecycle::Stopped {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let saved_agent = read_agent(&agent_path(directory.path(), &agent.agent_id));
+        let saved_session = read_session(&session_path(directory.path(), &target));
+        assert_eq!(saved_agent.data.config_revision, 8);
+        assert_eq!(saved_agent.data.config.role.name, "confirmed Agent value");
+        assert!(saved_agent.data.default_session_id.is_none());
+        assert_eq!(saved_session.data.config_revision, 5);
+        assert_eq!(
+            saved_session.data.effective_config.role.name,
+            "confirmed Session value"
+        );
+        assert!(saved_session.data.closed.is_some());
+        assert!(seen.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn review_meta_check_pending_load_close_owns_root_until_closed() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (_, agent_id, ids) = seed(directory.path());
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let (resources, seen) = resources();
+        let host = Host::open_persistent(
+            directory.path(),
+            settings("load close root"),
+            Arc::clone(&resources),
+        )
+        .await
+        .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        host.load_session(&caller, &target).unwrap();
+        wait_state(&host, &caller, &target, |state| state.preparing).await;
+        host.close_session(&caller, &target).unwrap();
+        assert_eq!(
+            host.session_state(&caller, &target).unwrap().data.lifecycle,
+            SessionLifecycle::Closing
+        );
+        drop(connection);
+        drop(host);
+        assert!(DataRoot::acquire(directory.path()).is_err());
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                if let Ok(root) = DataRoot::acquire(directory.path()) {
+                    drop(root);
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            read_session(&session_path(directory.path(), &target))
+                .data
+                .closed
+                .is_some()
+        );
+        assert!(
+            read_agent(&agent_path(directory.path(), &target.agent_id))
+                .data
+                .default_session_id
+                .is_none()
+        );
+        assert!(seen.lock().unwrap().is_empty());
+        let reopened = Host::open_persistent(directory.path(), settings("reopen"), resources)
+            .await
+            .unwrap();
+        let connection = reopened.connect().unwrap();
+        assert_eq!(
+            reopened
+                .session_state(&connection.caller(), &target)
+                .unwrap()
+                .data
+                .lifecycle,
+            SessionLifecycle::Closed
+        );
+    });
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_meta_check_confirmed_update_does_not_rebind_active_turn() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    let (resources, entered, release) = review_gate_resources();
+    let host = Host::open_persistent(directory.path(), settings("turn binding"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    host.send(
+        &caller,
+        SendMessage::new(input("bound before save"), target.clone()),
+    )
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    let first = host
+        .turns(&caller, &target)
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(first.config_revision, 4);
+    let updated = host
+        .update_session_async(
+            &caller,
+            &target,
+            4,
+            &SessionConfigPatch {
+                role: Some(Role {
+                    name: "next turn config".into(),
+                    ..Role::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.config_revision, 5);
+    assert_eq!(
+        host.turns(&caller, &target)
+            .unwrap()
+            .last()
+            .unwrap()
+            .config_revision,
+        4
+    );
+    host.send(
+        &caller,
+        SendMessage::new(input("bound after save"), target.clone()),
+    )
+    .unwrap();
+    release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    let turns = host.turns(&caller, &target).unwrap();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0].config_revision, 4);
+    assert_eq!(turns[1].config_revision, 5);
+    assert_eq!(turns[0].persistence, PersistenceState::Persisted);
+    release.add_permits(1);
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        host.wait_turn(&caller, &target, &turns[1].id),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert_eq!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .config_revision,
+        5
+    );
+}

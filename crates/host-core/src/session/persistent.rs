@@ -54,6 +54,12 @@ impl SessionController {
 }
 
 impl SessionController {
+    pub(crate) fn notify_parent_on_change(mut self: Arc<Self>, changed: Arc<Notify>) -> Arc<Self> {
+        Arc::get_mut(&mut self)
+            .expect("unpublished Session")
+            .parent_changed = Some(changed);
+        self
+    }
     pub(crate) fn hold_root(mut self: Arc<Self>, lease: Option<Arc<dyn Send + Sync>>) -> Arc<Self> {
         Arc::get_mut(&mut self)
             .expect("unpublished Session")

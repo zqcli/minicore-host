@@ -36,7 +36,8 @@ impl AgentOwner {
                         Arc::clone(&owner.access),
                         Arc::clone(&owner.resources),
                         Arc::clone(&owner.enabled),
-                    );
+                    )
+                    .notify_parent_on_change(Arc::clone(&owner.changed));
                     owner
                         .state
                         .lock()
@@ -74,7 +75,7 @@ impl AgentOwner {
             enabled: Arc::new(AtomicBool::new(true)),
             store: Some(store),
             root_lease: Some(root_lease),
-            changed: tokio::sync::Notify::new(),
+            changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
                     id: record.id,

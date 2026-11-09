@@ -265,7 +265,9 @@ impl AgentOwner {
                 Arc::clone(&self.enabled),
             )
         };
-        let session = session.hold_root(self.root_lease.clone());
+        let session = session
+            .hold_root(self.root_lease.clone())
+            .notify_parent_on_change(Arc::clone(&self.changed));
         session.set_source_revision(prepared.agent_revision);
         // Default publication is ordered after Session files, and before exposing
         // the default Session. A failed phase retains actual disk artifacts; it

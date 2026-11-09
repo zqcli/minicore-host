@@ -22,7 +22,7 @@ pub(crate) struct AgentOwner {
     state: Mutex<AgentState>,
     enabled: Arc<AtomicBool>,
     store: Option<AgentStore>,
-    changed: tokio::sync::Notify,
+    changed: Arc<tokio::sync::Notify>,
     root_lease: Option<Arc<dyn Send + Sync>>,
 }
 struct AgentState {
@@ -60,7 +60,7 @@ impl AgentOwner {
             enabled: Arc::new(AtomicBool::new(true)),
             store: None,
             root_lease: None,
-            changed: tokio::sync::Notify::new(),
+            changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
                     id,
@@ -211,7 +211,9 @@ impl AgentOwner {
             Vec::new(),
             Arc::clone(&self.enabled),
         );
-        let session = session.hold_root(self.root_lease.clone());
+        let session = session
+            .hold_root(self.root_lease.clone())
+            .notify_parent_on_change(Arc::clone(&self.changed));
         session.set_source_revision(source_revision);
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         if state.info.lifecycle != AgentLifecycle::Active {
@@ -328,10 +330,26 @@ impl AgentOwner {
     ) -> Result<(), Fault> {
         let children = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
-            if enabled && state.info.lifecycle == AgentLifecycle::Stopping {
+            if enabled
+                && !matches!(
+                    state.info.lifecycle,
+                    AgentLifecycle::Active | AgentLifecycle::Stopped
+                )
+            {
                 return Err(Fault::new(
                     FaultKind::AgentLifecycleUnavailable,
-                    "Agent cannot start until its stop work has settled",
+                    "Agent can start only after initialization or stop work has settled",
+                ));
+            }
+            if !enabled
+                && matches!(
+                    state.info.lifecycle,
+                    AgentLifecycle::Retiring | AgentLifecycle::Retired
+                )
+            {
+                return Err(Fault::new(
+                    FaultKind::AgentLifecycleUnavailable,
+                    "retiring Agents cannot reenter stop or start",
                 ));
             }
             if (!enabled
@@ -374,6 +392,10 @@ impl AgentOwner {
         let owner = Arc::clone(self);
         let task = executor.spawn(async move {
             loop {
+                // Every child publishes to this narrow notification token too.
+                // A child checked earlier may acquire independent metadata/load
+                // work while we await a later sibling; its completion must wake
+                // the aggregate without giving it access to Agent state.
                 let notified = owner.changed.notified();
                 tokio::pin!(notified);
                 notified.as_mut().enable();
