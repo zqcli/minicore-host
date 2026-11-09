@@ -58,14 +58,16 @@ timeout or errors after provider events have Started delivery and never retry.
 
 ## Validation baseline
 
-The production manifest names Runtime's original fixed API baseline. Local
-integration tests use the real Runtime handoff branch at
-`5e61c22da4b88891249902ed88184b1eca334504` via a command-line path patch. This
-adds authoritative history/partial reporting and preserves complete Unknown
-responses before failing them. The workspace integrator must carry this actual
-Runtime change; a build against the older API alone is not equivalent coverage.
-The isolated crate lock reflects that temporary patch. The final root workspace
-lock and published Runtime pin are owned by the integrator.
+The production manifest and the workspace's sole `Cargo.lock` pin published Runtime
+`18a6ac9b82d003330cd870275efca793cdcc9a96`. It provides authoritative history/partial
+reporting and retains complete Unknown responses before failing them. The earlier
+isolated-crate checks used a local handoff patch; that is historical provenance,
+not a current build prerequisite. No local Runtime patch is required now.
+
+The provider's 27 unit/integration tests and compiling doctest pass with the
+published Runtime source as part of the full workspace gate. Real loopback
+HTTP/SSE and Runtime are exercised, not a live external provider. Run checks
+from the workspace root; the obsolete isolated provider lock has been removed.
 
 ## Explicit remaining scope
 

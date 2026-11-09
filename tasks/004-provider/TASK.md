@@ -50,3 +50,9 @@ The public constructor takes exact endpoint, provider model, actual ModelDescrip
 The isolated crate manifest pins the original Runtime API baseline; its local lock reflects the command-line handoff patch. The root integrator must carry Runtime `5e61c22da4b88891249902ed88184b1eca334504` and own the final workspace dependency/lock strategy. Integration tests using ModelPartial are not claimed to compile against the unmodified earlier Runtime.
 
 Remaining beyond this assigned adapter scope: full Host→Agent→Session→provider integration (owned by parent), independent review, authorized live provider testing, Responses/all-provider parity, multimedia and opaque provider reasoning support, and unchanged TUI integration. No remote push was made.
+
+## Workspace integration provenance
+
+The final workspace selects published Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96` through its manifests and sole root `Cargo.lock`. No local Runtime patch is required. The original isolated-crate `Cargo.lock` was removed because Cargo ignores member lockfiles once the crate joins this workspace; retaining it falsely suggested a second dependency authority and preserved the obsolete local-patch state. Provider source and behavior did not change in that cleanup.
+
+At integrated Host `e2f9ad7`, the full quality gate passed 191 workspace unit/integration tests and 2 doctests, including all 27 provider tests and its compiling doctest, using the published Git source. A separate fresh local clone at `d73b161` also passed the then-current full gate with an empty build target and no ignored local patch. Earlier isolated-worktree results above retain their actual historical dependency conditions.
