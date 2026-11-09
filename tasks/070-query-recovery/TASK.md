@@ -135,3 +135,44 @@ were used; exact environment is retained in its `env.sh`.
   protected-source diff checks passed.
 - Whole-workspace validation, independent review, and publication remain with
   the coordinator. No remote write was performed by this worker.
+
+## Follow-up: prove and fix query-fixture pipe teardown
+
+Base: `4daeb72d60ce76cc084b9f26134a1d62802e04ea`. This is separate from the
+preceding binary-fixture JSON-path migration. The integrated full gate failed
+in the existing task054 same-Turn partial/history test at its final pipe server
+join. Unchanged-source targeted repetition reproduced `BrokenPipe` on attempt 3.
+The original full-gate output and the repeated red output are preserved.
+
+Commit `5033e3b7bb316e6faf96a1362ca206013f58cde2` changes only that test's pipe
+fixture/teardown and adds private test support. Explicit SDK unsubscribe ends
+its local stream but Drop still sends an idempotent unsubscribe request.
+Immediate `client.close()` aborts both SDK I/O tasks without ordering the actual
+pipe endpoint drops. A pending cleanup reply can therefore hit a closed response
+reader before request EOF, correctly yielding a real OS `BrokenPipe`.
+
+The new gated regression intercepts the actual second unsubscribe reply
+(`ended=false`) caused solely by SDK Drop after the explicit `ended=true` reply.
+It proves both orders without timing sleeps: confirmed response-reader closure
+while request EOF is held gives exactly `BrokenPipe`; request EOF first while
+the response reader remains alive gives a successful actual server join. Real
+Runtime work completes through its original owner after either observer closes.
+
+The query fixture now closes its real request pipe first, strictly joins the
+server, then closes the SDK and drops the already-ended subscription. The relay
+copies request bytes unchanged. All original business assertions, real pipes,
+worker concurrency and raw-server join remain. No production error is swallowed,
+no server join is cancelled, and no production file or public API changes.
+
+Evidence: `/workspace/shared/task070-query-validation/pipe-teardown/`.
+At the fixed executable checkpoint:
+
+- `cargo test -p minicore-host-transport --test task054_query_contracts --locked -- --nocapture`
+  passed all six cases in 50 consecutive full-suite runs. This is six unique
+  cases, including the new controlled-close regression, not 300 unique tests.
+- `cargo test -p minicore-host-transport --all-targets --locked`: passed all
+  126 cases (`all-transport-tests.log`); `-- --list` independently confirms 126.
+- `cargo clippy -p minicore-host-transport --all-targets --locked -- -D warnings`,
+  whitespace, formatting and protected-production diff checks passed.
+- Whole-workspace revalidation and independent review remain with the parent.
+  No remote write was performed.
