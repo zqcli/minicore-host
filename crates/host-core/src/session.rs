@@ -481,12 +481,8 @@ impl SessionController {
     ) -> Result<MessageAccepted, Fault> {
         self.ensure_executor()?;
         self.access.ensure_execution_owned()?;
-        let runtime = UserInput::text(&message.text).map_err(|_| {
-            Fault::new(
-                FaultKind::SessionInputInvalid,
-                "input is empty or exceeds the pinned Runtime's structural text limit",
-            )
-        })?;
+        let runtime = UserInput::text(&message.text)
+            .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let receipt = self.access.accept_business(caller, || {
             self.accept_message(message, runtime, MessageSource::User)
         })?;
@@ -500,12 +496,8 @@ impl SessionController {
     ) -> Result<MessageAccepted, Fault> {
         self.ensure_executor()?;
         self.access.ensure_execution_owned()?;
-        let runtime = UserInput::text(&message.text).map_err(|_| {
-            Fault::new(
-                FaultKind::SessionInputInvalid,
-                "input is empty or exceeds the pinned Runtime's structural text limit",
-            )
-        })?;
+        let runtime = UserInput::text(&message.text)
+            .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let receipt = self.accept_message(message, runtime, MessageSource::User)?;
         self.wake();
         Ok(receipt)
