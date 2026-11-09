@@ -16,9 +16,10 @@ closes admission and joins them. Dropping a finish waiter does not cancel cleanu
 Do not declare the Turn finished merely because Runtime joined or kill was sent.
 Each completion separates its tool error from `cleanup_confirmed`: a record sink
 failure after actual child/worker join is confirmed cleanup with an internal
-error, while a worker panic, failed child wait, group-stop failure, or unfinished
-pipe cleanup is unconfirmed. The integrating owner must keep unconfirmed work
-blocked in finalization rather than treating a returned diagnostic as proof of exit.
+error, while a worker panic, failed group wait, unconfirmed process-group end,
+or unfinished pipe cleanup is unconfirmed. The integrating owner must keep
+unconfirmed work blocked in finalization rather than treating a returned
+diagnostic as proof of exit.
 
 The recording sink is a short, nonblocking owner callback, not an observer or an
 external store call. Its owner supplies Session/Turn/Load identity, validates
@@ -38,15 +39,27 @@ Bash executes `/bin/bash --noprofile --norc -c` with child-local cwd and null
 stdin. It inherits the process environment; it is not a filesystem or network
 sandbox. Runtime policy supplies permission, never Role text. Unix process groups
 are stopped on cancellation/deadline and remaining group descendants are stopped
-after leader exit. The direct child is always actually waited. Pipes are read to
-EOF, or explicitly marked incomplete if an escaped descendant holds them after
-one second of cleanup. Deliberately escaped process groups are outside this
-local-host scope; no general process supervisor or Windows job system is claimed.
+after leader exit, including when they redirected both output pipes. The real
+process wrapper wait is always joined without dropping it mid-flight, while both
+pipes are drained. A separate no-signal group probe must observe ESRCH before
+cleanup is confirmed; a successful kill request, direct-child exit, or pipe EOF
+alone is insufficient. Scope observation allows ten 20 ms intervals before
+reporting unconfirmed cleanup, never an invented successful termination. Pipes
+are read to EOF, or explicitly marked incomplete if an escaped descendant holds
+them after one second of cleanup. Deliberately escaped process groups are outside
+this local-host scope; no general process supervisor or Windows job system is claimed.
 Full output is retained; non-UTF-8 output uses exact byte encoding. There is no
 automatic retry of commands or file writes.
 
 Path checks reject traversal, writes through symlinks, nonregular targets, and
-`.git` metadata edits. In-workspace symlinks are supported for reads. Same-binding
-writes are serialized; external hostile path/permission races and cross-process
-locking are outside this local-host foundation. Parent-directory creation is not
-an atomic multi-directory transaction. `apply_patch` and other tools are absent.
+`.git` metadata edits. In-workspace symlinks are supported for reads. Workspace
+clones share a dedicated mutation operation guard across all their LocalTools
+bindings, from source capture through replacement and authoritative after capture.
+This guard belongs to the actual blocking worker, not its caller's wait. It is
+not an owner-state lock. Separately opening the same path creates a different
+binding and does not share this guard. Production resource preparation currently
+opens a Workspace for each Turn; integration must retain and clone the selected
+binding wherever shared mutation ordering is needed. Shell writes, external
+path/permission races and cross-process locking are outside this boundary.
+Parent-directory creation is not an atomic multi-directory transaction.
+`apply_patch` and other tools are absent.
