@@ -32,8 +32,9 @@ The existing shutdown regressions are also run. No new recovery path is added.
 ## Progress
 
 CLI/config parsing, effective-config diagnostics installation, explicit PEM TLS
-preparation, and process signal/transport composition are being implemented.
-Application subprocess acceptance and independent review are not yet complete.
+preparation, and process signal/transport composition are implemented. Eleven
+actual-executable acceptance tests and targeted strict lint pass. Independent
+review and final fixed-checkpoint workspace validation are still pending.
 Production ordinary-tool assembly is a separate task and must integrate before
 claiming executable tool acceptance. Business owner instrumentation and host.info
 logging health are not provided by the process lifecycle log events.
@@ -50,3 +51,54 @@ Using the configured Rust environment and a separate app target directory:
 Reports are retained outside the repository under the shared workspace with
 `minicore-host-process-hook-` and `minicore-host-app-` prefixes. Final source
 checkpoints, exact test totals and remaining limits will be recorded below.
+
+## Actual diagnostic file ownership
+
+Process integration exposed the need to coordinate configured file outputs
+across different data roots. The real diagnostics File now acquires an exclusive
+advisory lock before becoming the writer. File aliases share that lease. The
+writer drops the File before acknowledging completion; a bounded flush timeout
+does not release a File still owned by the blocked writer. There is no separate
+application-side lease, output fallback, retry, or business durability claim.
+
+The focused diagnostics gate passed all 19 unique unit/integration cases,
+including four new cases for same-process/path-alias ownership, a nested real
+subprocess, and a real FIFO writer blocked beyond the shutdown budget. The nested
+probe is not counted again. `cargo clippy -p minicore-host-diagnostics --all-targets
+--locked -- -D warnings` also passed. The original diagnostics pipeline review is
+not claimed to cover this new change; independent review remains pending.
+
+
+## Application implementation
+
+- Trusted process hook: `8bff066118e0ac7615219583c962cefbfca9832a`.
+- Actual diagnostic file ownership: `af0f88eff812239fb0152e78cba78a02420e9f37`.
+- Binary/package: `minicore-host`; implementation directory: `crates/host-app`.
+- `--data-root` is mandatory. `--config` supplies a new root's initial canonical
+  HostConfig; saved config wins on reopen. `--stdio` and configured WSS may
+  coexist. WSS requires explicit PEM certificate/key files and the configured
+  access-key environment source. It never falls back to plaintext/anonymous.
+- Diagnostics is installed once from the effective saved configuration after
+  acquiring the root, before any executable owner or actual connection.
+- SIGINT/SIGTERM request graceful. Repeated signals do not force. EOF or broken
+  stdio closes only that connection; accepted work and WSS remain alive. A fatal
+  listener/task failure requests graceful cleanup. Only explicit RPC force can
+  upgrade application shutdown. Original save faults keep stopping/root ownership.
+- Actual stopped cleanup precedes transport cancellation and runtime exit;
+  only afterwards does the process request bounded best-effort diagnostic flush.
+  A parked Tokio stdin reader does not keep a truly stopped process alive.
+- Help, invalid inputs, TLS/configuration errors and panic summaries never use
+  stdout or print source bodies, raw failures, credentials, paths or prompts.
+
+The 11 subprocess tests use OS pipes/signals, real temporary storage, production
+provider/resources/Runtime, a gated loopback HTTP/SSE fixture, and generated TLS
+certificates. They cover normal startup and failures; saved identity/new
+incarnation/root conflict; real message/output/history; draining accepted work;
+WSS trust/hostname/authentication/operation rights; clean and broken stdio
+connection lifetime; repeated signals versus explicit force; retained failed
+save and externally killed abnormal exit; and log-file ownership across roots.
+
+Initial app gates: `cargo test -p minicore-host --all-targets --locked` (11 tests)
+and `cargo clippy -p minicore-host --all-targets --locked -- -D warnings` passed.
+Only Linux execution is verified. No external model, remote-device or TUI
+acceptance is claimed. Ordinary tools await the coordinated production binding.
