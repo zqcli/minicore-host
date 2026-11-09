@@ -161,6 +161,23 @@ pub(crate) struct AnswerParams {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct DeleteAgentParams {
+    pub target: AgentRef,
+    pub operation_id: OperationId,
+    #[serde(default)]
+    pub scope: AgentDeleteScope,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DeleteSessionParams {
+    pub target: SessionRef,
+    pub operation_id: OperationId,
+    #[serde(default)]
+    pub close: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct UpdateAgentParams {
     pub target: AgentRef,
     pub operation_id: OperationId,
@@ -258,6 +275,7 @@ operations! {
     UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     SetDefaultSession, "agent.set_default_session", SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
     StopAgent, "agent.stop", AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
+    DeleteAgent, "agent.delete", DeleteAgentParams => AgentDeleteReceipt, |h, c, p| { h.agent_delete(&c, &p.target, AgentDeleteRequest { operation_id: p.operation_id, scope: p.scope }) };
     CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
     GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
     GetSessionContext, "session.context", SessionTarget => SessionContextSnapshot, |h, c, p| { h.session_context(&c, &p.target).await };
@@ -272,6 +290,7 @@ operations! {
     ResumeSession, "session.resume", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_resume(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
     CancelSession, "session.cancel", CancelSessionParams => SessionCancelReceipt, |h, c, p| { h.session_cancel(&c, &p.target, SessionCancelRequest { operation_id: p.operation_id, keep_inbox: p.keep_inbox }) };
     CloseSession, "session.close", SessionOperation => SessionCloseReceipt, |h, c, p| { h.session_close(&c, &p.target, SessionCloseRequest { operation_id: p.operation_id }) };
+    DeleteSession, "session.delete", DeleteSessionParams => SessionDeleteReceipt, |h, c, p| { h.session_delete(&c, &p.target, SessionDeleteRequest { operation_id: p.operation_id, close: p.close }) };
     CompactSession, "session.compact", SessionOperation => CompactReceipt, |h, c, p| { h.session_compact(&c, &p.target, CompactRequest { operation_id: p.operation_id }) };
     CancelCompact, "session.compact.cancel", CancelCompactParams => CompactCancelReceipt, |h, c, p| { h.session_compact_cancel(&c, &p.target, CompactCancelRequest { operation_id: p.operation_id, target_operation_id: p.target_operation_id }) };
     SendMessageOp, "message.send", SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };

@@ -305,6 +305,23 @@ impl HostClient {
         )
         .await
     }
+    /// Delete only explicitly included owner data, after its lifecycle boundary.
+    pub async fn delete_agent(
+        &self,
+        target: AgentRef,
+        request: AgentDeleteRequest,
+        options: CallOptions,
+    ) -> Result<AgentDeleteReceipt, CallError> {
+        self.call(
+            DeleteAgent(DeleteAgentParams {
+                target,
+                operation_id: request.operation_id,
+                scope: request.scope,
+            }),
+            options,
+        )
+        .await
+    }
     pub async fn create_session(
         &self,
         request: SessionCreate,
@@ -506,6 +523,23 @@ impl SessionClient {
                 CloseSession(SessionOperation {
                     target: self.target.clone(),
                     operation_id: request.operation_id,
+                }),
+                options,
+            )
+            .await
+    }
+    /// Admission is separate from later close, worker settlement and file removal.
+    pub async fn delete(
+        &self,
+        request: SessionDeleteRequest,
+        options: CallOptions,
+    ) -> Result<SessionDeleteReceipt, CallError> {
+        self.client
+            .call(
+                DeleteSession(DeleteSessionParams {
+                    target: self.target.clone(),
+                    operation_id: request.operation_id,
+                    close: request.close,
                 }),
                 options,
             )

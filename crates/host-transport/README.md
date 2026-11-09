@@ -337,3 +337,32 @@ queryable. There is no additional durable edit database.
 deadline. It is never serialized or connected to the active Turn's cancellation.
 The low-level Host methods accept the backend's optional `QueryContext` for an
 embedding's own query cancellation; that context also cannot cancel a Turn.
+
+## Explicit owned-data deletion
+
+`SessionClient::delete` and `HostClient::delete_agent` share the same direct-owner
+admission and cleanup through typed calls, stdio and authenticated TLS WSS.
+
+- `session.delete` takes `{ target: SessionRef, operation_id, close?: boolean }`.
+  Omitted/false `close` requires an already closed, settled Session. True requests
+  normal close, required result/save/tool cleanup and then only its owned data.
+- `agent.delete` takes `{ target: AgentRef, operation_id, scope? }`. Omitted scope
+  is `{ "kind": "empty" }`, requiring a stopped Agent with no retained Sessions.
+  Explicit cascade is `{ "kind": "sessions", "session_ids": [...], "close": true }`.
+  IDs must exactly cover the current direct children; omission of `close` does
+  not authorize stopping/closing them. Unknown fields/duplicate IDs are rejected.
+
+The control receipt is formed when its actual owner accepts and fences the
+work. It never claims that files have already been removed. Agent get and
+Session state expose the corresponding current deletion work, including partial
+failure. Later progress never rewrites the receipt. Success removes the actual
+source, so subsequent source reads return not-found. A Session delete receipt
+belongs to its Agent; an Agent delete receipt belongs to Host, subject to those
+owners' real lifetimes. Other child-owned receipts are not copied to a cache.
+
+Cascade deletion never follows physical nesting as authorization. Root scope
+close may settle registered descendants through their real owners while their
+persistent directories remain intact unless explicitly included. Received
+launch ToolResults/completion messages and independent workspace artifacts are
+not deleted. A filesystem error may follow partial removal and is reported as
+such, without rollback, implicit retry or fabricated full deletion.
