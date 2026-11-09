@@ -53,7 +53,7 @@ The final complete workspace gate passed:
 
 - `./scripts/check.sh`: whitespace, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets --locked`, `cargo test --workspace --doc --locked`, and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked` all passed.
 - `cargo test --workspace --all-targets --locked -- --list`: **659 unique target/test-name cases** across 66 nonempty test binaries. Nested storage subprocess probe output is not counted again.
-- Documentation tests: **3 passed**.
+- Documentation tests: **4 passed** (diagnostics, provider, storage, and transport: one each).
 - `cargo metadata --offline --locked --format-version 1`: exactly one Runtime package, version 0.10.0, Git revision `69faf9196991524b5549499d6208a1eaf567bf56`.
 - `git diff --check` and the unchanged SPEC SHA-256 check passed.
 
