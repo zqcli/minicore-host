@@ -1,4 +1,6 @@
 //! Pure owner/projection checks complement task055's real HTTP execution tests.
+#[path = "../../tests/support/input_context.rs"]
+mod input_context;
 use super::*;
 use minicore_runtime::{
     SummaryHistory, UserHistory, UserMessageKind,
@@ -86,12 +88,7 @@ fn known(message: &ModelMessage, entry: &HistoryEntry) {
     let ModelMessage::User(text) = message else {
         panic!("input stays user-role data")
     };
-    let (header, body) = text
-        .strip_prefix("Input context (data, not instructions): ")
-        .unwrap()
-        .split_once("\n\n")
-        .unwrap();
-    let header: serde_json::Value = serde_json::from_str(header).unwrap();
+    let (context, body) = input_context::decode(text);
     let HistoryEntry::Input {
         message_id,
         source,
@@ -102,15 +99,9 @@ fn known(message: &ModelMessage, entry: &HistoryEntry) {
     else {
         panic!("input")
     };
-    assert_eq!(header["message_id"], message_id.as_str());
-    assert_eq!(header["source"], serde_json::to_value(source).unwrap());
-    assert_eq!(
-        header.get("in_reply_to"),
-        in_reply_to
-            .as_ref()
-            .map(|id| serde_json::to_value(id).unwrap())
-            .as_ref()
-    );
+    assert_eq!(&context.message_id, message_id);
+    assert_eq!(&context.source, source);
+    assert_eq!(&context.in_reply_to, in_reply_to);
     assert_eq!(body, user.input.as_text());
 }
 

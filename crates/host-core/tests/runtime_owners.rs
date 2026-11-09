@@ -1,5 +1,7 @@
 //! These tests use the real Host owners and AgentLoop. Only model responses are
 //! scripted fixtures; no external provider or TUI validation is implied.
+#[path = "support/input_context.rs"]
+mod input_context;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -188,7 +190,12 @@ fn user_texts(request: &ModelRequest) -> Vec<String> {
         .messages()
         .iter()
         .filter_map(|message| match message {
-            ModelMessage::User(text) => Some(text.to_string()),
+            ModelMessage::User(text) => {
+                let (context, original) = input_context::decode(text);
+                assert_eq!(context.source, MessageSource::User);
+                assert!(context.in_reply_to.is_none());
+                Some(original.to_owned())
+            }
             _ => None,
         })
         .collect()

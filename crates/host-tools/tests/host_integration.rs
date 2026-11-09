@@ -1,4 +1,6 @@
 //! Production Host owners and Runtime. Only the model is a scripted fixture.
+#[path = "../../host-core/tests/support/input_context.rs"]
+mod input_context;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::{
     BoundResources, Host, PreparedTurnBinding, ResourceFuture, ResourceResolver,
@@ -43,7 +45,7 @@ impl Model for FixtureModel {
     }
     fn start<'a>(&'a self, request: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
         let is_child = request.messages().iter().any(
-            |message| matches!(message,ModelMessage::User(text) if text.as_ref()=="child work"),
+            |message| matches!(message,ModelMessage::User(text) if input_context::decode(text).1=="child work"),
         );
         if is_child {
             let gate = Arc::clone(&self.child_gate);
@@ -351,8 +353,13 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
         ),
     )
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while requests.recv().await.unwrap().0 != usize::MAX {}
+    let child_request = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let (round, request) = requests.recv().await.unwrap();
+            if round == usize::MAX {
+                break request;
+            }
+        }
     })
     .await
     .unwrap();
@@ -371,6 +378,28 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
     assert_eq!(tool.call_id.as_str(), "upstream-delegate");
     let launch: Value = serde_json::from_str(tool.output.content().as_str()).unwrap();
     assert_eq!(launch["result"]["delivery"], "accepted");
+    let (context, body) = child_request
+        .messages()
+        .iter()
+        .find_map(|message| {
+            let ModelMessage::User(text) = message else {
+                return None;
+            };
+            Some(input_context::decode(text))
+        })
+        .unwrap();
+    assert_eq!(body, "child work");
+    assert_eq!(
+        context.source,
+        MessageSource::Agent {
+            source: root.clone()
+        }
+    );
+    assert_eq!(
+        serde_json::to_value(context.message_id).unwrap(),
+        launch["message_id"]
+    );
+    assert!(context.in_reply_to.is_none());
     let child = SessionRef {
         agent_id: serde_json::from_value(launch["agent_id"].clone()).unwrap(),
         session_id: serde_json::from_value(launch["session_id"].clone()).unwrap(),

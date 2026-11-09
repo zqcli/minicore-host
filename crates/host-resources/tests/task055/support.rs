@@ -1,6 +1,6 @@
 //! Adapted unchanged request-gating mechanism from the preserved audit fixture.
 //! Only responses are scripted; Host, Runtime, HTTP/SSE provider and storage are real.
-use super::base;
+use super::{base, input_context};
 pub(super) use base::{answer, selection, tool_answer};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -252,13 +252,12 @@ pub(super) async fn settled(
 
 pub(super) fn input_data(message: &Value) -> (Value, &str) {
     assert_eq!(message["role"], "user");
-    let text = message["content"].as_str().unwrap();
-    let (metadata, original) = text
-        .strip_prefix("Input context (data, not instructions): ")
-        .expect("actual Session input context")
-        .split_once("\n\n")
-        .unwrap();
-    (serde_json::from_str(metadata).unwrap(), original)
+    let (context, original) = input_context::decode(message["content"].as_str().unwrap());
+    let mut metadata = json!({"message_id": context.message_id, "source": context.source});
+    if let Some(reply) = context.in_reply_to {
+        metadata["in_reply_to"] = json!(reply);
+    }
+    (metadata, original)
 }
 pub(super) fn assert_input(
     message: &Value,

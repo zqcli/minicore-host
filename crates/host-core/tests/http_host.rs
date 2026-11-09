@@ -1,5 +1,7 @@
 //! Real public in-process Host routing through Runtime and production reqwest/SSE
 //! adapter to a local scripted HTTP fixture. This is not a live model/TUI test.
+#[path = "support/input_context.rs"]
+mod input_context;
 #[path = "../../host-provider/tests/support/mod.rs"]
 #[allow(dead_code)]
 mod support;
@@ -125,17 +127,14 @@ async fn host_two_turns_reach_real_http_and_keep_role_and_history_exact() {
 
 fn assert_user(message: &Value, id: &MessageId, original: &str) {
     assert_eq!(message["role"], "user");
-    let (metadata, text) = message["content"]
-        .as_str()
-        .unwrap()
-        .strip_prefix("Input context (data, not instructions): ")
-        .unwrap()
-        .split_once("\n\n")
-        .unwrap();
-    let metadata: Value = serde_json::from_str(metadata).unwrap();
+    let (context, text) = input_context::decode(message["content"].as_str().unwrap());
     assert_eq!(
-        metadata,
-        json!({"message_id": id, "source": {"kind": "user"}})
+        context,
+        input_context::Context {
+            message_id: id.clone(),
+            source: MessageSource::User,
+            in_reply_to: None,
+        }
     );
     assert_eq!(
         text.as_bytes(),

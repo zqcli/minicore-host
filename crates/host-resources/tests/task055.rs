@@ -7,5 +7,7 @@ mod base;
 mod compaction;
 #[path = "task055/input.rs"]
 mod input;
+#[path = "../../host-core/tests/support/input_context.rs"]
+mod input_context;
 #[path = "task055/support.rs"]
 mod support;

@@ -1,4 +1,6 @@
 //! Production Host, Runtime, agent tool, owner ports and sink; gated model only.
+#[path = "../../host-core/tests/support/input_context.rs"]
+mod input_context;
 use futures_util::stream;
 use minicore_host_core::{
     BoundResources, ConnectionHandle, Host, MessageBinding, PreparedTurnBinding, ResourceFuture,
@@ -361,7 +363,17 @@ async fn shared_range_with_real_tools(end: End) {
         .iter()
         .filter_map(|message| {
             if let ModelMessage::User(text) = message {
-                serde_json::from_str::<Value>(text).ok()
+                let (context, original) = input_context::decode(text);
+                let notice = serde_json::from_str::<Value>(original).ok()?;
+                if notice.get("task_message_id").is_some() {
+                    assert_eq!(
+                        context.source,
+                        MessageSource::Agent {
+                            source: child.clone()
+                        }
+                    );
+                }
+                Some(notice)
             } else {
                 None
             }
