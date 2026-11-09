@@ -100,6 +100,7 @@ impl SessionController {
                 }
                 owner.publish(&mut state);
             }
+            owner.handoff_delegation_owned();
             owner.wake();
         }));
         self.publish(state);
