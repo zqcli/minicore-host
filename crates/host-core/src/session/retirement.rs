@@ -126,8 +126,87 @@ impl SessionController {
     pub(crate) async fn release_host_resources_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.release_resources(false).await
     }
+    /// Only the built-in no-resource MemoryHistory may retire without an async
+    /// worker. Custom backends still receive their explicit release callback.
+    pub(crate) fn retire_closed_immediately_owned(self: &Arc<Self>) -> Result<bool, Fault> {
+        if self.backend.as_ref().type_id() != std::any::TypeId::of::<MemoryHistory>() {
+            return Ok(false);
+        }
+        let tasks = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.reclaimed {
+                return Ok(true);
+            }
+            if state.info.mode != StorageMode::Memory
+                || state.lifecycle != SessionLifecycle::Closed
+                || state.releasing
+                || !Self::work_settled(&state)
+                || [
+                    &state.driver_task,
+                    &state.load_task,
+                    &state.record_task,
+                    &state.history_task,
+                ]
+                .into_iter()
+                .any(|task| task.as_ref().is_some_and(|task| !task.is_finished()))
+            {
+                return Ok(false);
+            }
+            state.releasing = true;
+            [
+                state.driver_task.take(),
+                state.load_task.take(),
+                state.record_task.take(),
+                state.history_task.take(),
+            ]
+        };
+        for task in tasks.into_iter().flatten() {
+            if !matches!(task.now_or_never(), Some(Ok(()))) {
+                let fault = Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "memory Session worker did not retire normally",
+                );
+                let mut state = self.state.lock().expect("Session mutex poisoned");
+                state.releasing = false;
+                state.close_fault = Some(fault.clone());
+                self.publish(&mut state);
+                return Err(fault);
+            }
+        }
+        let store = self
+            .store
+            .lock()
+            .expect("Session store mutex poisoned")
+            .take();
+        let lease = self
+            .root_lease
+            .lock()
+            .expect("Session lease mutex poisoned")
+            .take();
+        let resources = self
+            .resources
+            .lock()
+            .expect("Session resources mutex poisoned")
+            .take();
+        drop(store);
+        drop(lease);
+        drop(resources);
+        {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            state.releasing = false;
+            state.released = true;
+            state.residency = Residency::Unloaded;
+            state.load_id = None;
+        }
+        self.reclaim_bodies();
+        Ok(true)
+    }
     pub(crate) async fn retire_closed_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.release_resources(true).await?;
+        self.reclaim_bodies();
+        Ok(())
+    }
+    fn reclaim_bodies(&self) {
         let retired = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             state.reclaimed = true;
@@ -142,7 +221,6 @@ impl SessionController {
             retired
         };
         drop(retired);
-        Ok(())
     }
     async fn release_resources(self: &Arc<Self>, closed_memory: bool) -> Result<(), Fault> {
         let tasks = {

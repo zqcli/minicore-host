@@ -61,7 +61,7 @@ impl Tool for CountTool {
     }
 }
 struct Resources {
-    model: Arc<FixtureModel>,
+    model: Arc<dyn Model>,
     tools: ToolSet,
 }
 impl ResourceResolver for Resources {
@@ -86,12 +86,12 @@ impl ResourceResolver for Resources {
         })
     }
 }
-struct Fixture {
+pub(super) struct Fixture {
     _dir: tempfile::TempDir,
     store: SessionStore,
     access: Arc<ConnectionRegistry>,
     connection: crate::ConnectionHandle,
-    session: Arc<SessionController>,
+    pub(super) session: Arc<SessionController>,
 }
 fn model(scripts: Vec<Vec<ModelEvent>>) -> Arc<FixtureModel> {
     Arc::new(FixtureModel {
@@ -568,5 +568,623 @@ fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
             .unwrap()
             .default_session_id,
         Some(first.id.clone())
+    );
+}
+
+// This fixture injects write interruptions into the real production backend.
+// It does not mock storage acknowledgement, Runtime, or the Session owner.
+struct FailureJournal {
+    inner: Arc<JournalHistory>,
+    failures: Mutex<VecDeque<Option<crate::backend::TestAppendFault>>>,
+    appends: AtomicUsize,
+    reconciles: AtomicUsize,
+    reconcile_gate: Option<Arc<Semaphore>>,
+    reconcile_entered: mpsc::UnboundedSender<()>,
+}
+impl HistoryBackend for FailureJournal {
+    fn mode(&self) -> StorageMode {
+        StorageMode::Persistent
+    }
+    fn load(&self) -> LoadFuture<'_> {
+        self.inner.load()
+    }
+    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+        self.appends.fetch_add(1, Ordering::SeqCst);
+        if let Some(failure) = self.failures.lock().unwrap().pop_front().flatten() {
+            self.inner.inject_next_append_fault(failure);
+        }
+        self.inner.append(entries)
+    }
+    fn reconcile(&self) -> SaveFuture<'_> {
+        Box::pin(async move {
+            self.reconciles.fetch_add(1, Ordering::SeqCst);
+            let _ = self.reconcile_entered.send(());
+            if let Some(gate) = &self.reconcile_gate {
+                gate.acquire().await.unwrap().forget();
+            }
+            self.inner.reconcile().await
+        })
+    }
+    fn release(&self) -> SaveFuture<'_> {
+        self.inner.release()
+    }
+}
+fn failure_setup(
+    model: Arc<dyn Model>,
+    tools: ToolSet,
+    failures: Vec<Option<crate::backend::TestAppendFault>>,
+    gate: Option<Arc<Semaphore>>,
+) -> (Fixture, Arc<FailureJournal>, mpsc::UnboundedReceiver<()>) {
+    let (entered, received) = mpsc::unbounded_channel();
+    let captured = Arc::new(Mutex::new(None));
+    let out = captured.clone();
+    let fixture = setup(Arc::new(Resources { model, tools }), |inner| {
+        let backend = Arc::new(FailureJournal {
+            inner,
+            failures: Mutex::new(failures.into()),
+            appends: AtomicUsize::new(0),
+            reconciles: AtomicUsize::new(0),
+            reconcile_gate: gate,
+            reconcile_entered: entered,
+        });
+        *out.lock().unwrap() = Some(backend.clone());
+        backend
+    });
+    let backend = captured.lock().unwrap().take().unwrap();
+    (fixture, backend, received)
+}
+async fn blocked(fixture: &Fixture) -> TurnInfo {
+    until(fixture, |state| {
+        !state.driver_running
+            && state.history_work.is_some()
+            && !state.saving
+            && state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.info.state == TurnState::Finalizing)
+    })
+    .await;
+    fixture
+        .session
+        .state
+        .lock()
+        .unwrap()
+        .active
+        .as_ref()
+        .unwrap()
+        .info
+        .clone()
+}
+fn assert_single_terminal(fixture: &Fixture, outcome: TurnOutcome, partials: usize) {
+    let saved = records(fixture);
+    assert_eq!(
+        saved
+            .iter()
+            .filter(|record| matches!(record.entry, HistoryEntry::Input { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        saved
+            .iter()
+            .filter(|record| matches!(record.entry, HistoryEntry::Partial { .. }))
+            .count(),
+        partials
+    );
+    assert_eq!(
+        saved
+            .iter()
+            .filter(|record| matches!(record.entry, HistoryEntry::TurnFinished { .. }))
+            .count(),
+        1
+    );
+    assert!(
+        matches!(saved.last().unwrap().entry, HistoryEntry::TurnFinished { outcome: saved, .. } if saved == outcome)
+    );
+    let state = fixture.session.state.lock().unwrap();
+    assert_eq!(state.completed.len(), 1);
+    let result = state.completed.values().next().unwrap();
+    assert_eq!(result.info.outcome, Some(outcome));
+    assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert!(result.info.persistence_fault.is_none());
+    assert_eq!(result.partials.len(), partials);
+    assert!(state.history_work.is_none());
+    assert!(state.block_reason.is_none());
+}
+#[tokio::test]
+async fn resume_confirms_original_zero_or_full_write_without_second_model_or_tool() {
+    use crate::backend::TestAppendFault::{FullWrite, NoWrite};
+    for failure in [NoWrite, FullWrite] {
+        let call_id = "must-not-execute".parse().unwrap();
+        let model = model(vec![vec![
+            ModelEvent::ToolCallStart {
+                tool_call_id: call_id,
+                tool_name: "count".parse().unwrap(),
+            },
+            ModelEvent::tool_call_arguments_delta("must-not-execute".parse().unwrap(), "{}")
+                .unwrap(),
+            ModelEvent::ToolCallEnd {
+                tool_call_id: "must-not-execute".parse().unwrap(),
+            },
+            ModelEvent::Finish {
+                reason: ModelFinishReason::ToolCalls,
+            },
+        ]]);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut tools = ToolSet::builder();
+        tools.register(CountTool {
+            spec: ToolSpec::new(
+                "count".parse().unwrap(),
+                "count fixture",
+                serde_json::json!({}),
+            )
+            .unwrap(),
+            calls: calls.clone(),
+        });
+        let (fixture, backend, _) = failure_setup(
+            model.clone(),
+            tools.build().unwrap(),
+            vec![Some(failure)],
+            None,
+        );
+        send(&fixture, "original range");
+        let original = blocked(&fixture).await;
+        assert_eq!(original.outcome, Some(TurnOutcome::Failed));
+        assert!(
+            original.fault.is_none(),
+            "history failure is not a fabricated model fault"
+        );
+        let before = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+        assert_eq!(backend.appends.load(Ordering::SeqCst), 1);
+        fixture
+            .session
+            .resume(&fixture.connection.caller())
+            .unwrap();
+        until(&fixture, |state| state.completed.len() == 1).await;
+        assert_single_terminal(&fixture, TurnOutcome::Failed, 0);
+        let after = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+        assert!(after.starts_with(&before));
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert_eq!(backend.appends.load(Ordering::SeqCst), 2);
+        assert_eq!(backend.reconciles.load(Ordering::SeqCst), 1);
+        // Repeated resume with no pending original save never appends another end.
+        fixture
+            .session
+            .resume(&fixture.connection.caller())
+            .unwrap();
+        assert_eq!(
+            std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+            after
+        );
+    }
+}
+#[tokio::test]
+async fn report_partial_and_terminal_each_continue_once_and_keep_primary_failure() {
+    use crate::backend::TestAppendFault::{FullWrite, NoWrite};
+    let model = model(vec![vec![
+        ModelEvent::text_delta("actual unfinished output").unwrap(),
+    ]]);
+    let (fixture, backend, _) = failure_setup(
+        model.clone(),
+        ToolSet::default(),
+        vec![Some(NoWrite), Some(FullWrite), Some(FullWrite)],
+        None,
+    );
+    send(&fixture, "fail during stream and each save");
+    let original = blocked(&fixture).await;
+    assert_eq!(
+        original.fault.as_ref().unwrap().kind(),
+        FaultKind::TurnModelStreamInterrupted
+    );
+    for expected_appends in [2, 3] {
+        fixture
+            .session
+            .resume(&fixture.connection.caller())
+            .unwrap();
+        until(&fixture, |state| {
+            !state.saving
+                && state.history_work.is_some()
+                && backend.appends.load(Ordering::SeqCst) == expected_appends
+        })
+        .await;
+        let active = fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .active
+            .as_ref()
+            .unwrap()
+            .info
+            .clone();
+        assert_eq!(active.id, original.id);
+        assert_eq!(active.load_id, original.load_id);
+        assert_eq!(active.outcome, original.outcome);
+        assert_eq!(
+            active.fault.as_ref().unwrap().kind(),
+            original.fault.as_ref().unwrap().kind()
+        );
+        assert_eq!(active.persistence, PersistenceState::Failed);
+    }
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_single_terminal(&fixture, TurnOutcome::Failed, 1);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.appends.load(Ordering::SeqCst), 3);
+    assert_eq!(backend.reconciles.load(Ordering::SeqCst), 3);
+    assert_eq!(records(&fixture).len(), 3);
+}
+#[tokio::test]
+async fn terminal_save_continuation_preserves_completed_claim_despite_force() {
+    use crate::backend::TestAppendFault::FullWrite;
+    let model = model(vec![final_events("complete response")]);
+    let (fixture, backend, _) = failure_setup(
+        model.clone(),
+        ToolSet::default(),
+        vec![None, Some(FullWrite)],
+        None,
+    );
+    send(&fixture, "complete then terminal fault");
+    let original = blocked(&fixture).await;
+    assert_eq!(original.outcome, Some(TurnOutcome::Completed));
+    fixture.session.begin_host_shutdown_owned(true);
+    assert!(!fixture.session.shutdown_status_owned().quiescent);
+    assert!(
+        fixture
+            .session
+            .release_host_resources_owned()
+            .await
+            .is_err()
+    );
+    fixture.session.continue_history_owned().unwrap();
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_single_terminal(&fixture, TurnOutcome::Completed, 0);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.appends.load(Ordering::SeqCst), 2);
+    fixture
+        .session
+        .release_host_resources_owned()
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .session
+            .resume(&fixture.connection.caller())
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostLifecycleUnavailable
+    );
+}
+#[tokio::test]
+async fn abandoned_waiter_revoked_connection_and_force_do_not_drop_original_continuation() {
+    use crate::backend::TestAppendFault::FullWrite;
+    let model = model(vec![final_events("already complete")]);
+    let gate = Arc::new(Semaphore::new(0));
+    let (fixture, backend, mut entered) = failure_setup(
+        model.clone(),
+        ToolSet::default(),
+        vec![Some(FullWrite)],
+        Some(gate.clone()),
+    );
+    send(&fixture, "save survives callers");
+    let original = blocked(&fixture).await;
+    let waiter_owner = fixture.session.clone();
+    let waiter_caller = fixture.connection.caller();
+    let id = original.id.clone();
+    let waiter = tokio::spawn(async move { waiter_owner.wait_turn(&waiter_caller, &id).await });
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
+    entered.recv().await.unwrap();
+    assert_eq!(
+        fixture
+            .session
+            .resume(&fixture.connection.caller())
+            .unwrap_err()
+            .kind(),
+        FaultKind::SessionBusy
+    );
+    waiter.abort();
+    assert!(waiter.await.unwrap_err().is_cancelled());
+    fixture.connection.close();
+    fixture.session.begin_host_shutdown_owned(true);
+    assert!(!fixture.session.shutdown_status_owned().drained);
+    gate.add_permits(1);
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_single_terminal(&fixture, original.outcome.unwrap(), 0);
+    assert_eq!(original.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(backend.reconciles.load(Ordering::SeqCst), 1);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    fixture
+        .session
+        .release_host_resources_owned()
+        .await
+        .unwrap();
+}
+#[tokio::test]
+async fn partial_or_changed_original_bytes_remain_blocked_and_unchanged() {
+    use crate::backend::TestAppendFault::{FullWrite, Prefix};
+    for change in [false, true] {
+        let model = model(vec![final_events("original content")]);
+        let (fixture, backend, _) = failure_setup(
+            model.clone(),
+            ToolSet::default(),
+            vec![Some(if change { FullWrite } else { Prefix(17) })],
+            None,
+        );
+        send(&fixture, "original input");
+        let original = blocked(&fixture).await;
+        let path = fixture.store.canonical_path().join("history.jsonl");
+        if change {
+            let bytes = std::fs::read_to_string(&path).unwrap();
+            std::fs::write(&path, bytes.replace("original input", "modified input")).unwrap();
+        }
+        let before = std::fs::read(&path).unwrap();
+        for attempt in 1..=2 {
+            fixture
+                .session
+                .resume(&fixture.connection.caller())
+                .unwrap();
+            until(&fixture, |state| {
+                !state.saving && backend.reconciles.load(Ordering::SeqCst) == attempt
+            })
+            .await;
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            let state = fixture.session.state.lock().unwrap();
+            let active = state.active.as_ref().unwrap();
+            assert_eq!(active.info.id, original.id);
+            assert_eq!(active.info.load_id, original.load_id);
+            assert_eq!(active.info.persistence, PersistenceState::Failed);
+            assert!(state.completed.is_empty());
+        }
+        assert_eq!(backend.appends.load(Ordering::SeqCst), 1);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+        fixture.session.begin_host_shutdown_owned(true);
+        assert!(!fixture.session.shutdown_status_owned().quiescent);
+        assert!(
+            fixture
+                .session
+                .release_host_resources_owned()
+                .await
+                .is_err()
+        );
+    }
+}
+
+struct PartialUntilCancelled {
+    descriptor: minicore_runtime::model::ModelDescriptor,
+    consumed_delta: Arc<Semaphore>,
+}
+impl Model for PartialUntilCancelled {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        use futures_util::StreamExt;
+        let consumed = self.consumed_delta.clone();
+        Box::pin(async move {
+            let mut signal = Some(consumed);
+            let pending = futures_util::stream::poll_fn(move |_| {
+                if let Some(signal) = signal.take() {
+                    signal.add_permits(1);
+                }
+                std::task::Poll::Pending
+            });
+            Ok(Box::pin(
+                futures_util::stream::iter([Ok(ModelEvent::text_delta(
+                    "actual cancellation partial",
+                )
+                .unwrap())])
+                .chain(pending),
+            ) as ModelStream)
+        })
+    }
+}
+#[tokio::test]
+async fn force_keeps_cancelled_partial_and_original_save_through_continuation() {
+    use crate::backend::TestAppendFault::FullWrite;
+    let consumed_delta = Arc::new(Semaphore::new(0));
+    let model = Arc::new(PartialUntilCancelled {
+        descriptor: ModelDescriptor::new(
+            "test/model".parse().unwrap(),
+            128_000,
+            BTreeSet::from([ReasoningPreference::Auto]),
+            true,
+        )
+        .unwrap(),
+        consumed_delta: consumed_delta.clone(),
+    });
+    let (fixture, backend, _) =
+        failure_setup(model, ToolSet::default(), vec![Some(FullWrite)], None);
+    send(&fixture, "force during actual streaming");
+    consumed_delta.acquire().await.unwrap().forget();
+    fixture.session.begin_host_shutdown_owned(true);
+    let original = blocked(&fixture).await;
+    assert_eq!(original.outcome, Some(TurnOutcome::Cancelled));
+    assert!(original.fault.is_none());
+    assert!(!fixture.session.shutdown_status_owned().quiescent);
+    fixture.session.continue_history_owned().unwrap();
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_single_terminal(&fixture, TurnOutcome::Cancelled, 1);
+    assert_eq!(backend.appends.load(Ordering::SeqCst), 3);
+    let saved = records(&fixture);
+    assert!(matches!(&saved.last().unwrap().entry,
+        HistoryEntry::TurnFinished { reason: Some(reason), .. } if reason.contains("Shutdown")));
+    fixture
+        .session
+        .release_host_resources_owned()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn confirmed_tool_execution_is_not_repeated_after_its_save_fails() {
+    use crate::backend::TestAppendFault::FullWrite;
+    let first = vec![
+        ModelEvent::ToolCallStart {
+            tool_call_id: "executed-once".parse().unwrap(),
+            tool_name: "count".parse().unwrap(),
+        },
+        ModelEvent::tool_call_arguments_delta("executed-once".parse().unwrap(), "{}").unwrap(),
+        ModelEvent::ToolCallEnd {
+            tool_call_id: "executed-once".parse().unwrap(),
+        },
+        ModelEvent::Finish {
+            reason: ModelFinishReason::ToolCalls,
+        },
+    ];
+    let model = model(vec![first, final_events("must not be requested")]);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut tools = ToolSet::builder();
+    tools.register(CountTool {
+        spec: ToolSpec::new(
+            "count".parse().unwrap(),
+            "count fixture",
+            serde_json::json!({}),
+        )
+        .unwrap(),
+        calls: calls.clone(),
+    });
+    let (fixture, backend, _) = failure_setup(
+        model.clone(),
+        tools.build().unwrap(),
+        vec![None, Some(FullWrite)],
+        None,
+    );
+    send(&fixture, "execute once");
+    let original = blocked(&fixture).await;
+    assert_eq!(original.outcome, Some(TurnOutcome::Failed));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_single_terminal(&fixture, TurnOutcome::Failed, 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(backend.appends.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        records(&fixture)
+            .iter()
+            .filter(|record| matches!(
+                record.entry,
+                HistoryEntry::Runtime {
+                    item: HistoryItem::ToolResult(_),
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+}
+
+pub(super) async fn original_save_fixture() -> Fixture {
+    let (fixture, _, _) = failure_setup(
+        model(vec![final_events("binding fixture")]),
+        ToolSet::default(),
+        vec![Some(crate::backend::TestAppendFault::NoWrite)],
+        None,
+    );
+    send(&fixture, "original binding");
+    blocked(&fixture).await;
+    fixture
+}
+
+#[test]
+fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = DataRoot::acquire(dir.path().join("root")).unwrap();
+    let host_id = HostId::new().unwrap();
+    let incarnation = HostIncarnation::new().unwrap();
+    let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
+    let connection = access.connect().unwrap();
+    let session = SessionController::new(
+        SessionId::new().unwrap(),
+        AgentId::new().unwrap(),
+        host_id,
+        incarnation,
+        SessionConfig::default(),
+        access,
+        Arc::new(Resources {
+            model: model(Vec::new()),
+            tools: ToolSet::default(),
+        }),
+        Arc::new(MemoryHistory),
+        vec![HistoryItem::Summary(
+            minicore_runtime::history::SummaryHistory {
+                content: BoundedText::new("provided memory fixture context").unwrap(),
+            },
+        )],
+        Arc::new(AtomicBool::new(true)),
+    )
+    .hold_root(Some(Arc::new(root)));
+    let observer = session.subscribe_state(&connection.caller()).unwrap();
+    let retained = session.clone();
+    assert_eq!(session.history(&connection.caller()).unwrap().len(), 1);
+    assert!(DataRoot::acquire(dir.path().join("root")).is_err());
+    session.begin_close_owned().unwrap();
+    assert!(session.retire_closed_immediately_owned().unwrap());
+    assert_eq!(
+        observer.snapshot().unwrap_err().kind(),
+        FaultKind::AgentSessionNotFound
+    );
+    assert_eq!(
+        retained.history(&connection.caller()).unwrap_err().kind(),
+        FaultKind::AgentSessionNotFound
+    );
+    assert!(retained.state.lock().unwrap().history.is_empty());
+    let reopened = DataRoot::acquire(dir.path().join("root")).unwrap();
+    assert!(
+        !dir.path().join("root/agents").exists(),
+        "memory creates no Session JSONL"
+    );
+    drop(reopened);
+}
+
+struct ConstructorPanicHistory;
+impl HistoryBackend for ConstructorPanicHistory {
+    fn mode(&self) -> StorageMode {
+        StorageMode::Persistent
+    }
+    fn load(&self) -> LoadFuture<'_> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn append<'a>(&'a self, _: Vec<HistoryEntry>) -> SaveFuture<'a> {
+        panic!("fixture append construction panic")
+    }
+    fn reconcile(&self) -> SaveFuture<'_> {
+        panic!("fixture reconciliation construction panic")
+    }
+}
+#[tokio::test]
+async fn synchronous_backend_panics_are_failed_saves_not_lost_owners() {
+    let fixture = setup(
+        Arc::new(Resources {
+            model: model(vec![final_events("complete fixture")]),
+            tools: ToolSet::default(),
+        }),
+        |_| Arc::new(ConstructorPanicHistory),
+    );
+    send(&fixture, "capture constructor panic");
+    let original = blocked(&fixture).await;
+    assert_eq!(original.persistence, PersistenceState::Failed);
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
+    until(&fixture, |state| !state.saving).await;
+    let state = fixture.session.state.lock().unwrap();
+    assert!(state.history_work.is_some());
+    assert!(state.completed.is_empty());
+    assert_eq!(
+        state.active.as_ref().unwrap().info.outcome,
+        original.outcome
     );
 }

@@ -80,7 +80,7 @@ pub type SaveFuture<'a> =
 /// batches through cancellation and perform disk work outside owner state locks.
 pub type LoadFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Vec<HistoryItem>, Fault>> + Send + 'a>>;
-pub trait HistoryBackend: Send + Sync + 'static {
+pub trait HistoryBackend: Send + Sync + std::any::Any {
     fn mode(&self) -> StorageMode;
     fn load(&self) -> LoadFuture<'_>;
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
@@ -1402,8 +1402,26 @@ struct SessionInputs {
 }
 impl LoopInputs for SessionInputs {
     fn take(&self) -> Vec<UserInput> {
+        let mut state = self.session.state.lock().expect("Session mutex poisoned");
+        if state.host_stopping || !self.session.access.execution_allowed_owned() {
+            let handle = state
+                .active
+                .as_mut()
+                .filter(|active| active.info.id == self.turn_id)
+                .and_then(|active| {
+                    if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active.info.state = TurnState::Cancelling;
+                    }
+                    active.handle.clone()
+                });
+            drop(state);
+            if let Some(handle) = handle {
+                handle.shutdown();
+            }
+            return Vec::new();
+        }
         // Already bound remainder is handoff storage, not a third inbox. Pause
-        // never withdraws these items after the initial binding boundary.
+        // never withdraws it. Force does not consume even a bound remainder.
         let mut values = self
             .initial
             .lock()
@@ -1411,7 +1429,6 @@ impl LoopInputs for SessionInputs {
             .drain(..)
             .map(|input| input.runtime)
             .collect::<Vec<_>>();
-        let mut state = self.session.state.lock().expect("Session mutex poisoned");
         if self.session.schedulable(&state)
             && state.active.as_ref().is_some_and(|active| {
                 active.info.id == self.turn_id && active.info.state == TurnState::Running
@@ -1442,19 +1459,38 @@ impl LoopHistory for SessionHistory {
         items: &'a [HistoryItem],
     ) -> HistoryFuture<'a> {
         Box::pin(async move {
-            self.session
+            let result = self
+                .session
                 .accept_history(&self.turn_id, loop_id, offset, items)
-                .await
-                .map_err(|_| {
-                    DiagnosticSummary::new(
-                        DiagnosticCode::ContextFailed,
-                        DiagnosticCategory::Context,
-                        BoundedText::new("Session could not confirm its history save boundary")
-                            .expect("static diagnostic"),
-                        false,
-                    )
-                    .expect("static diagnostic")
-                })
+                .await;
+            // Observe the Host's accepted force fence at the Runtime boundary,
+            // even if direct-owner traversal has not reached this Session yet.
+            // Save completion is never cancelled, but subsequent business is.
+            if !self.session.access.execution_allowed_owned() {
+                let handle = {
+                    let state = self.session.state.lock().expect("Session mutex poisoned");
+                    state
+                        .active
+                        .as_ref()
+                        .filter(|active| {
+                            active.info.id == self.turn_id && active.loop_id == Some(loop_id)
+                        })
+                        .and_then(|active| active.handle.clone())
+                };
+                if let Some(handle) = handle {
+                    handle.shutdown();
+                }
+            }
+            result.map_err(|_| {
+                DiagnosticSummary::new(
+                    DiagnosticCode::ContextFailed,
+                    DiagnosticCategory::Context,
+                    BoundedText::new("Session could not confirm its history save boundary")
+                        .expect("static diagnostic"),
+                    false,
+                )
+                .expect("static diagnostic")
+            })
         })
     }
 }

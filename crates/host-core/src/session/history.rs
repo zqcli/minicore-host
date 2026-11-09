@@ -223,7 +223,7 @@ impl SessionController {
             self.publish(&mut state);
             binding
         };
-        let result = checked_save(self.backend.append(entries)).await;
+        let result = checked_save(async { self.backend.append(entries).await }).await;
         self.settle_save(&binding, result)
     }
     fn settle_save(
@@ -295,6 +295,7 @@ impl SessionController {
             if state.history_work.is_some() {
                 return;
             }
+            let stopping = state.host_stopping;
             let Some(active) = state
                 .active
                 .as_mut()
@@ -321,7 +322,30 @@ impl SessionController {
                         .info
                         .fault
                         .as_ref()
-                        .map(|fault| fault.message().to_owned()),
+                        .map(|fault| fault.message().to_owned())
+                        .or_else(|| {
+                            active
+                                .report
+                                .as_ref()
+                                .and_then(|report| match &report.outcome {
+                                    LoopOutcome::Cancelled(reason) => {
+                                        Some(format!("Runtime cancellation: {reason:?}"))
+                                    }
+                                    LoopOutcome::Failed(failure) => {
+                                        Some(failure.diagnostic.message().as_str().to_owned())
+                                    }
+                                    _ => None,
+                                })
+                        })
+                        .or_else(|| {
+                            (outcome == TurnOutcome::Cancelled).then(|| {
+                                if stopping {
+                                    "Host shutdown".to_owned()
+                                } else {
+                                    "user cancellation".to_owned()
+                                }
+                            })
+                        }),
                 })
             };
             if outcome == TurnOutcome::Failed {
@@ -389,11 +413,7 @@ impl SessionController {
                 "there is no original history save to continue",
             )
         })?;
-        if work.running
-            || state.driver_running
-            || state.saving
-            || active.info.state != TurnState::Finalizing
-        {
+        if work.running || state.saving || active.info.state != TurnState::Finalizing {
             return Err(Fault::new(
                 FaultKind::SessionBusy,
                 "original execution or save is still returning",
@@ -414,13 +434,26 @@ impl SessionController {
             .running = true;
         state.saving = true;
         let previous = state.history_task.take();
+        let driver = state.driver_task.take();
         let owner = Arc::clone(self);
         state.history_task = Some(state.executor.as_ref().expect("checked runtime").spawn(
             async move {
                 if let Some(previous) = previous {
                     let _ = previous.await;
                 }
-                let result = checked_save(owner.backend.reconcile()).await;
+                if let Some(driver) = driver
+                    && driver.await.is_err()
+                {
+                    let _ = owner.settle_save(
+                        &binding,
+                        Err(Fault::new(
+                            FaultKind::SessionHistoryWriteFailed,
+                            "original execution owner did not retire normally",
+                        )),
+                    );
+                    return;
+                }
+                let result = checked_save(async { owner.backend.reconcile().await }).await;
                 if owner.settle_save(&binding, result).is_err() {
                     return;
                 }
@@ -453,7 +486,9 @@ impl SessionController {
         Ok(())
     }
 }
-async fn checked_save(future: SaveFuture<'_>) -> Result<PersistenceState, Fault> {
+async fn checked_save(
+    future: impl Future<Output = Result<PersistenceState, Fault>>,
+) -> Result<PersistenceState, Fault> {
     AssertUnwindSafe(future)
         .catch_unwind()
         .await
@@ -476,4 +511,48 @@ fn stale_history() -> Fault {
         FaultKind::SessionInternalUnexpected,
         "history work does not match its original Turn, Load, and execution range",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn stale_turn_load_or_boundary_completion_cannot_settle_another_range() {
+        let fixture = super::super::tests::original_save_fixture().await;
+        let original = fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .history_work
+            .as_ref()
+            .unwrap()
+            .binding
+            .clone();
+        let mut bindings = Vec::new();
+        let mut wrong_turn = original.clone();
+        wrong_turn.turn_id = TurnId::new().unwrap();
+        bindings.push(wrong_turn);
+        let mut wrong_load = original.clone();
+        wrong_load.load_id = LoadId::new().unwrap();
+        bindings.push(wrong_load);
+        let mut wrong_range = original.clone();
+        wrong_range.boundary = Boundary::Terminal;
+        bindings.push(wrong_range);
+        for stale in bindings {
+            assert!(
+                fixture
+                    .session
+                    .settle_save(&stale, Ok(PersistenceState::Persisted))
+                    .is_err()
+            );
+            let state = fixture.session.state.lock().unwrap();
+            assert_eq!(state.history_work.as_ref().unwrap().binding, original);
+            assert_eq!(
+                state.active.as_ref().unwrap().info.persistence,
+                PersistenceState::Failed
+            );
+            assert!(state.completed.is_empty());
+        }
+    }
 }
