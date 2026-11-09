@@ -18,6 +18,7 @@ tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", 
 futures-util = "=0.3.34"
 
 [dev-dependencies]
+sha2 = "=0.10.9"
 minicore-host-provider = { path = "../host-provider", version = "0.1.0" }
 tokio-util = "=0.7.20"
 tempfile = "=3.27.0"
