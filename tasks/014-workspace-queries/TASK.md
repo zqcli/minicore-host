@@ -1,13 +1,13 @@
 # Implement workspace queries
 
-Status: implementation and focused tests complete; final whole-workspace validation is in progress. Canonical Session/tool integration remains a separate stage.
+Status: module implementation and full workspace validation complete; independent review and canonical Session/tool integration are separate stages.
 
 ## Scope and provenance
 
 - SPEC v4.93 §§2, 7–9, 11 and 13; baseline `413916cac0730d291e5c8163cdc3d59e5dbedcd1`.
-- Reference implementation read at `minicore-agent:f36a87366d8e2fe0a1c8216463887902e471c739`: `src/workspace*`, `src/changes.rs`, `src/diff.rs`, and `src/tools/file_change.rs`. Current pinned TUI's workspace/change DTOs informed path/kind, Git XY, hunk and line fields. TUI is unchanged.
+- Reference implementation read at `minicore-agent:f36a87366d8e2fe0a1c8216463887902e471c739`: `src/workspace*`, `src/changes.rs`, `src/diff.rs`, and `src/tools/file_change.rs`. TUI `3beeb1d8a525e58ce6352e05061f242c5580e248` workspace/change DTOs informed path/kind, Git XY, hunk and line fields. TUI is unchanged.
 - Runtime stays locked at `18a6ac9b82d003330cd870275efca793cdcc9a96`. This crate needs no Runtime dependency or public protocol changes. No version negotiation, storage migration, defensive recovery framework, application capacity quota or owner-lock I/O was added.
-- Only `crates/host-workspace/**` and this task are implemented. The workspace member/dependency lock bootstrap is isolated as `e9b3020` (`build(workspace): register fixed workspace query dependencies`); the earlier unpublished `a6a4de9` was replaced before integration. No other root manifest/lock changes are needed.
+- Only `crates/host-workspace/**` and this task are implemented. The workspace member/dependency lock bootstrap is isolated as `e9b3020` (`build(workspace): register fixed workspace query dependencies`). No other root manifest/lock changes are needed.
 
 ## Delivered module
 
@@ -19,11 +19,18 @@ Status: implementation and focused tests complete; final whole-workspace validat
 
 ## Validation
 
-Environment: Linux, Rust/Cargo 1.90.0. Commands use `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shared/cargo`, `PATH=/workspace/shared/cargo/bin:$PATH`, `TMPDIR=/workspace/shared/minicore-host-tmp`, and `CARGO_TARGET_DIR=/workspace/shared/minicore-host-workspace-target`.
+Environment: Linux, Rust/Cargo 1.90.0, Git 2.52.0. Commands use `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shared/cargo`, `PATH=/workspace/shared/cargo/bin:$PATH`, `TMPDIR=/workspace/shared/minicore-host-tmp`, and `CARGO_TARGET_DIR=/workspace/shared/minicore-host-workspace-target`.
 
 - `cargo fmt -p minicore-host-workspace`: passed.
-- `cargo test -p minicore-host-workspace --locked`: 20 focused tests passed before the final literal-path/detached/bare fixture was added; final rerun is pending below.
-- `cargo clippy -p minicore-host-workspace --all-targets --locked -- -D warnings`: passed before that final fixture/context-bound arithmetic update; final full-workspace check is pending.
+- `cargo test -p minicore-host-workspace --locked`: 21/21 tests passed (8 filesystem, 8 Git, 5 edit journal). This crate currently has no doctest examples.
+- `cargo clippy -p minicore-host-workspace --all-targets --locked -- -D warnings`: passed; the final whole-workspace Clippy rerun also passed.
+- `./scripts/check.sh`: exit 0. `check-whitespace.sh`, `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace --all-targets --locked` (261 tests: 42 lib + 219 integration), `cargo test --workspace --doc --locked` (2 doctests), and `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked` all passed on the final source/test bytes.
+- `cargo test --workspace --all-targets --locked -- --list` independently confirmed 261 unique tests: the 240-test baseline plus this module's 0 lib / 21 integration tests. A storage test launches a filtered child test process whose extra `1 passed; 36 filtered out` output must not be counted again.
+- The fixed source and tests are `3194521` (`feat(workspace): read bound files and real change sources`) and `e40f5ef` (`test(workspace): verify real files git states and edit snapshots`). A caller requesting all available diff context is clamped only to the actual line count, avoiding arithmetic overflow without an application quota.
 - Fixtures use real temporary files, local Git repositories, actual staging/commits/merges and captured file edits. No user repository is mutated by tests. No live provider/model, RPC/TUI, cross-platform or remote-host validation is claimed. No push or main merge occurred.
 
-Full command outcomes and final commit references will be appended after the aggregate gate completes.
+## Integration boundary
+
+Apply original commits `e9b3020`, `3194521`, and `e40f5ef` once, then this validation-note commit. The sole root manifest/lock change is the bootstrap; all implementation and test paths stay inside the assigned crate/task. Independent review may proceed at `e40f5ef` while these notes are finalized.
+
+Before declaring the six canonical methods delivered, the Session service must select/authorize the actual binding, map the typed local errors into the public Fault registry, route workspace versus Session/Turn scopes to their real source, and connect the existing tool write owner to retained/saved edit observations. Unknown prior tool snapshots are not recoverable by scanning Git. Tests establish the reusable real module, not those remaining integrations.
