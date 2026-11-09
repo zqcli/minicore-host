@@ -217,6 +217,7 @@ impl SessionController {
             let status = match state.active.as_mut() {
                 Some(active) if target.is_none_or(|id| id == &active.info.id) => {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                         handle = active.handle.clone();
                         CancelStatus::Claimed
@@ -285,12 +286,14 @@ impl SessionController {
         if let Some(handle) = handle {
             handle.cancel();
         }
+        self.handoff_delegation_owned();
         Ok((result, receipt))
     }
     pub(super) fn close_owned(
         &self,
         operation: OperationId,
     ) -> Result<(SessionCloseReceipt, Option<LoopHandle>), Fault> {
+        self.start_scope_cleanup_owned();
         let mut state = self.state.lock().expect("Session mutex poisoned");
         Self::available(&state)?;
         let handle = if state.lifecycle == SessionLifecycle::Closed {
@@ -300,6 +303,7 @@ impl SessionController {
             clear_inbox(&mut state);
             let handle = state.active.as_mut().and_then(|active| {
                 if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                    active._activation.expire();
                     active.info.state = TurnState::Cancelling;
                 }
                 active.handle.clone()
@@ -308,6 +312,11 @@ impl SessionController {
                 && state.active.is_none()
                 && !state.preparing
                 && !state.saving
+                && !state.scope_cleanup_pending
+                && !state
+                    .delegation
+                    .as_ref()
+                    .is_some_and(|slot| slot.needs_handoff())
             {
                 state.lifecycle = SessionLifecycle::Closed;
                 state.residency = Residency::Unloaded;

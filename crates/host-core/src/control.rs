@@ -13,14 +13,44 @@ use subtle::ConstantTimeEq;
 #[derive(Clone)]
 pub struct CallerContext {
     registry: Weak<ConnectionRegistry>,
-    identity: Arc<ConnectionIdentity>,
+    identity: Option<Arc<ConnectionIdentity>>,
+    internal: Option<Arc<dyn InternalAuthority>>,
+}
+
+pub(crate) trait InternalAuthority: Send + Sync {
+    fn check(&self) -> Result<(), Fault>;
+    fn source(&self) -> minicore_host_protocol::MessageSource;
 }
 impl CallerContext {
+    pub(crate) fn internal(
+        registry: &Arc<ConnectionRegistry>,
+        authority: Arc<dyn InternalAuthority>,
+    ) -> Self {
+        Self {
+            registry: Arc::downgrade(registry),
+            identity: None,
+            internal: Some(authority),
+        }
+    }
+    pub(crate) fn source(&self) -> minicore_host_protocol::MessageSource {
+        self.internal
+            .as_ref()
+            .map_or(minicore_host_protocol::MessageSource::User, |authority| {
+                authority.source()
+            })
+    }
     pub(crate) fn connection_number(&self) -> u64 {
-        self.identity.number
+        self.identity
+            .as_ref()
+            .expect("external observation context")
+            .number
     }
     pub(crate) fn revocation(&self) -> tokio::sync::watch::Receiver<bool> {
-        self.identity.validity.subscribe()
+        self.identity
+            .as_ref()
+            .expect("external observation context")
+            .validity
+            .subscribe()
     }
 }
 impl std::fmt::Debug for CallerContext {
@@ -40,7 +70,8 @@ impl ConnectionHandle {
     pub fn caller(&self) -> CallerContext {
         CallerContext {
             registry: Arc::downgrade(&self.registry),
-            identity: Arc::clone(&self.identity),
+            identity: Some(Arc::clone(&self.identity)),
+            internal: None,
         }
     }
     pub fn initial_info(&self) -> &ConnectionInfo {
@@ -105,17 +136,30 @@ pub(crate) struct ConnectionRegistry {
     pub(crate) observation: Arc<crate::observation::ObservationHub>,
     host_id: HostId,
     incarnation: HostIncarnation,
+    host: std::sync::OnceLock<Weak<crate::Host>>,
     state: Mutex<RegistryState>,
     // Admission fences, not a second lifecycle owner. Updated only by Host.
     host_phase: AtomicU8,
     execution_enabled: Arc<AtomicBool>,
 }
 impl ConnectionRegistry {
+    pub(crate) fn attach_host(&self, host: &Arc<crate::Host>) {
+        let _ = self.host.set(Arc::downgrade(host));
+    }
+    pub(crate) fn host_owned(&self) -> Result<Arc<crate::Host>, Fault> {
+        self.host.get().and_then(Weak::upgrade).ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostLifecycleUnavailable,
+                "Host owner is no longer available",
+            )
+        })
+    }
     pub(crate) fn new(host_id: HostId, incarnation: HostIncarnation) -> Arc<Self> {
         Arc::new(Self {
             observation: crate::observation::ObservationHub::new(),
             host_id,
             incarnation,
+            host: std::sync::OnceLock::new(),
             host_phase: AtomicU8::new(0),
             execution_enabled: Arc::new(AtomicBool::new(true)),
             state: Mutex::new(RegistryState {
@@ -278,18 +322,32 @@ impl ConnectionRegistry {
             .registry
             .upgrade()
             .is_some_and(|registry| std::ptr::eq(registry.as_ref(), self));
+        if same_registry && let Some(authority) = &caller.internal {
+            return authority.check();
+        }
+        let identity = caller.identity.as_ref().ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostAccessInvalid,
+                "internal capability belongs to another Host",
+            )
+        })?;
         let alive = state
             .connections
-            .get(&caller.identity.number)
+            .get(&identity.number)
             .and_then(Weak::upgrade)
-            .is_some_and(|identity| Arc::ptr_eq(&identity, &caller.identity));
+            .is_some_and(|identity| {
+                Arc::ptr_eq(
+                    &identity,
+                    caller.identity.as_ref().expect("external identity"),
+                )
+            });
         if !same_registry || !alive {
             return Err(Fault::new(
                 FaultKind::HostAccessInvalid,
                 "the original connection is no longer valid for this Host",
             ));
         }
-        if write && state.operator != Some(caller.identity.number) {
+        if write && state.operator != Some(identity.number) {
             return Err(Fault::new(
                 FaultKind::HostAccessReadOnly,
                 "this connection has read-only access",
@@ -330,6 +388,15 @@ impl ConnectionRegistry {
             self.ensure_execution_owned()?;
             action()
         })
+    }
+    /// The Host admission mutex also fences independently registered cleanup
+    /// and notifications. The closure checks its non-connection capability.
+    pub(crate) fn accept_internal_owned<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, Fault>,
+    ) -> Result<T, Fault> {
+        let _state = self.state.lock().expect("connection mutex poisoned");
+        action()
     }
     pub(crate) fn ensure_business_owned(&self) -> Result<(), Fault> {
         if self.host_phase.load(Ordering::SeqCst) != 0 {

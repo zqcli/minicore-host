@@ -9,9 +9,10 @@ impl SessionController {
     pub(super) async fn prepare_resources(
         &self,
         config: &SessionConfig,
+        binding: crate::PreparedTurnBinding,
     ) -> Result<BoundResources, Fault> {
         let resources = self.resources_owned()?;
-        let preparation = resources.resolve(config);
+        let preparation = resources.resolve_for_turn(config, binding);
         tokio::pin!(preparation);
         loop {
             let changed = self.changed.notified();
@@ -70,10 +71,14 @@ impl SessionController {
             }
             state.host_draining = true;
             state.host_stopping |= force;
+            if force {
+                self.start_scope_cleanup_locked(&mut state, false);
+            }
             let handle = if state.host_stopping {
                 clear_inbox(&mut state);
                 state.active.as_mut().and_then(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                     }
                     active.handle.clone()
@@ -89,6 +94,7 @@ impl SessionController {
         if let Some(handle) = handle {
             handle.shutdown();
         }
+        self.handoff_delegation_owned();
     }
     pub(crate) fn shutdown_status_owned(&self) -> SessionShutdownStatus {
         let state = self.state.lock().expect("Session mutex poisoned");
@@ -120,11 +126,20 @@ impl SessionController {
             && state.history_work.is_none()
             && state.record_work.is_none()
             && state.close_fault.is_none()
+            && !state.handoff_pending
+            && !state.scope_cleanup_pending
+            && !state.delegation.as_ref().is_some_and(|slot| slot.pending())
+            && state
+                .root_scope
+                .as_ref()
+                .is_none_or(|scope| scope.pending.load(Ordering::SeqCst) == 0)
     }
     /// This is resource retirement, not business close and not an acknowledgement
     /// shortcut. The direct Agent calls it only after its accepted shutdown fence.
     pub(crate) async fn release_host_resources_owned(self: &Arc<Self>) -> Result<(), Fault> {
-        self.release_resources(false).await
+        self.release_resources(false).await?;
+        self.scope_root_closed_owned();
+        Ok(())
     }
     /// Only the built-in no-resource MemoryHistory may retire without an async
     /// worker. Custom backends still receive their explicit release callback.
@@ -146,6 +161,7 @@ impl SessionController {
                     &state.load_task,
                     &state.record_task,
                     &state.history_task,
+                    &state.scope_task,
                 ]
                 .into_iter()
                 .any(|task| task.as_ref().is_some_and(|task| !task.is_finished()))
@@ -158,6 +174,7 @@ impl SessionController {
                 state.load_task.take(),
                 state.record_task.take(),
                 state.history_task.take(),
+                state.scope_task.take(),
             ]
         };
         for task in tasks.into_iter().flatten() {
@@ -198,6 +215,7 @@ impl SessionController {
             state.residency = Residency::Unloaded;
             state.load_id = None;
         }
+        self.scope_root_closed_owned();
         self.reclaim_bodies();
         Ok(true)
     }
@@ -218,6 +236,7 @@ impl SessionController {
     }
     pub(crate) async fn retire_closed_owned(self: &Arc<Self>) -> Result<(), Fault> {
         self.release_resources(true).await?;
+        self.scope_root_closed_owned();
         self.reclaim_bodies();
         Ok(())
     }
@@ -287,6 +306,7 @@ impl SessionController {
                 state.load_task.take(),
                 state.record_task.take(),
                 state.history_task.take(),
+                state.scope_task.take(),
             ]
         };
         // State acknowledgements can precede task return. Join every retained

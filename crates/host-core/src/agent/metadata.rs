@@ -293,6 +293,7 @@ impl AgentOwner {
                     .insert(id.clone());
                 Ok(receipt)
             })?;
+            child.handoff_delegation_owned();
             self.clear_default_if(id);
             // Failure after acceptance stays in the child's close state. It
             // must not replace an already-formed receipt with a late error.
@@ -314,6 +315,7 @@ impl AgentOwner {
             state.closing.insert(id.clone());
             Ok((state.close_running.insert(id.clone()), receipt))
         })?;
+        child.handoff_delegation_owned();
         if !first {
             return Ok(receipt);
         }
@@ -340,7 +342,10 @@ impl AgentOwner {
         state.close_tasks.insert(task_id, task);
         Ok(receipt)
     }
-    async fn clear_default_before_close(self: &Arc<Self>, id: &SessionId) -> Result<(), Fault> {
+    pub(super) async fn clear_default_before_close(
+        self: &Arc<Self>,
+        id: &SessionId,
+    ) -> Result<(), Fault> {
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);

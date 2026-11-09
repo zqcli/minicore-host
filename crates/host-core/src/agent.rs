@@ -3,6 +3,7 @@ use crate::session::{HistoryBackend, MemoryHistory, ResourceResolver, SessionCon
 use crate::types::{AgentInfo, SessionLoadFailure};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
+mod collaboration;
 mod controls;
 mod create;
 mod metadata;

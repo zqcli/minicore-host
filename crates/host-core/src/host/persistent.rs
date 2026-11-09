@@ -94,6 +94,7 @@ impl Host {
             }
         }
         owner.state.lock().expect("Host mutex poisoned").lifecycle = HostLifecycle::Running;
+        owner.access.attach_host(&owner);
         Ok(owner)
     }
 

@@ -184,6 +184,7 @@ impl SessionController {
                                             name: call.name().as_str().to_owned(),
                                             state: ToolCallState::Pending,
                                             progress: None,
+                                            delegations: Vec::new(),
                                             outcome: None,
                                         },
                                         arguments: call.arguments().clone(),

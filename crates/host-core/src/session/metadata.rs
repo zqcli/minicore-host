@@ -338,9 +338,6 @@ impl SessionController {
     }
     pub(crate) fn set_close_fault(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        if state.lifecycle == SessionLifecycle::Closed {
-            return;
-        }
         state.close_fault = Some(fault);
         self.publish(&mut state);
     }
@@ -374,6 +371,8 @@ impl SessionController {
             self.publish(&mut state);
             candidate
         };
-        self.save_record(candidate).await.map(|_| ())
+        self.save_record(candidate).await?;
+        self.scope_root_closed_owned();
+        Ok(())
     }
 }

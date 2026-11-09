@@ -6,6 +6,7 @@ use minicore_host_protocol::*;
 use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
 
+mod collaboration;
 mod controls;
 mod create;
 mod metadata;
@@ -77,6 +78,7 @@ impl Host {
                 create_tasks: BTreeMap::new(),
             }),
         });
+        owner.access.attach_host(&owner);
         Ok(owner)
     }
     fn resources_owned(&self) -> Result<Arc<dyn ResourceResolver>, Fault> {

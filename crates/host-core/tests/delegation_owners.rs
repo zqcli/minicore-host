@@ -1,0 +1,791 @@
+//! Actual Host -> Agent -> Session -> Runtime ownership; only models are gated fixtures.
+use futures_util::{FutureExt, stream};
+use minicore_host_core::*;
+use minicore_host_protocol::*;
+use minicore_runtime::{
+    ExecutionConfig, LoopOptions,
+    model::{
+        Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
+        ModelStartFuture, ModelStream, ReasoningPreference,
+    },
+    prompt::DefaultPromptProvider,
+    tools::ToolSet,
+};
+use std::{
+    collections::{BTreeSet, VecDeque},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+use tokio::sync::{Semaphore, mpsc};
+
+type Events = mpsc::UnboundedSender<ModelEvent>;
+struct ModelFixture {
+    descriptor: ModelDescriptor,
+    rounds: Mutex<VecDeque<mpsc::UnboundedReceiver<ModelEvent>>>,
+    starts: mpsc::UnboundedSender<()>,
+}
+impl Model for ModelFixture {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        let receiver = self
+            .rounds
+            .lock()
+            .unwrap()
+            .pop_front()
+            .expect("declared model round");
+        self.starts.send(()).unwrap();
+        Box::pin(async move {
+            Ok(Box::pin(stream::unfold(
+                (receiver, false),
+                |(mut receiver, done)| async move {
+                    if done {
+                        None
+                    } else {
+                        receiver.recv().await.map(|event| {
+                            let done = matches!(event, ModelEvent::Finish { .. });
+                            (Ok(event), (receiver, done))
+                        })
+                    }
+                },
+            )) as ModelStream)
+        })
+    }
+}
+struct Resources {
+    model: Arc<dyn Model>,
+    bindings: mpsc::UnboundedSender<PreparedTurnBinding>,
+    prepare_gate: Option<Arc<Semaphore>>,
+    fail: AtomicBool,
+    plan: Option<Arc<FileDelegationPlan>>,
+}
+impl ResourceResolver for Resources {
+    fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
+        Ok(())
+    }
+    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+        panic!("Turn preparation must use its candidate binding")
+    }
+    fn resolve_for_turn<'a>(
+        &'a self,
+        config: &'a SessionConfig,
+        binding: PreparedTurnBinding,
+    ) -> ResourceFuture<'a> {
+        self.bindings.send(binding.clone()).unwrap();
+        Box::pin(async move {
+            assert!(binding.capability().check_active().is_err());
+            if let Some(gate) = &self.prepare_gate {
+                gate.acquire().await.unwrap().forget();
+            }
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(Fault::new(
+                    FaultKind::SessionResourceMissing,
+                    "gated binding failure",
+                ));
+            }
+            let mut tools = ToolSet::builder();
+            if config
+                .tools
+                .iter()
+                .any(|tool| tool.name == "delegate_fixture")
+            {
+                let plan = self.plan.as_ref().expect("registered fixture tool");
+                tools.register_arc(Arc::new(FileDelegatingTool {
+                    spec: minicore_runtime::tools::ToolSpec::new(
+                        "delegate_fixture".parse().unwrap(),
+                        "Delegate a real file task",
+                        serde_json::json!({"type":"object"}),
+                    )
+                    .unwrap(),
+                    cap: binding.capability(),
+                    plan: Arc::clone(plan),
+                }));
+            }
+            Ok(BoundResources {
+                execution: ExecutionConfig::new(
+                    Arc::clone(&self.model),
+                    ReasoningPreference::Auto,
+                    tools.build().unwrap(),
+                    None,
+                    Arc::new(DefaultPromptProvider::new(None)),
+                )
+                .unwrap(),
+                options: LoopOptions::default_checked().unwrap(),
+            })
+        })
+    }
+}
+struct Fixture {
+    host: Arc<Host>,
+    connection: ConnectionHandle,
+    events: Vec<Events>,
+    starts: mpsc::UnboundedReceiver<()>,
+    bindings: mpsc::UnboundedReceiver<PreparedTurnBinding>,
+}
+fn setup(rounds: usize, prepare_gate: Option<Arc<Semaphore>>, fail: bool) -> Fixture {
+    setup_tool(rounds, prepare_gate, fail, None)
+}
+fn setup_tool(
+    rounds: usize,
+    prepare_gate: Option<Arc<Semaphore>>,
+    fail: bool,
+    plan: Option<Arc<FileDelegationPlan>>,
+) -> Fixture {
+    let mut events = Vec::new();
+    let mut streams = VecDeque::new();
+    for _ in 0..rounds {
+        let (tx, rx) = mpsc::unbounded_channel();
+        events.push(tx);
+        streams.push_back(rx);
+    }
+    let (starts, started) = mpsc::unbounded_channel();
+    let (bindings, bound) = mpsc::unbounded_channel();
+    let model = Arc::new(ModelFixture {
+        descriptor: ModelDescriptor::new(
+            "fixture/model".parse().unwrap(),
+            128000,
+            BTreeSet::from([ReasoningPreference::Auto]),
+            true,
+        )
+        .unwrap(),
+        rounds: Mutex::new(streams),
+        starts,
+    });
+    let host = Host::memory(Arc::new(Resources {
+        model,
+        bindings,
+        prepare_gate,
+        fail: AtomicBool::new(fail),
+        plan,
+    }))
+    .unwrap();
+    let connection = host.connect().unwrap();
+    Fixture {
+        host,
+        connection,
+        events,
+        starts: started,
+        bindings: bound,
+    }
+}
+fn agent(f: &Fixture) -> SessionRef {
+    let receipt = f
+        .host
+        .create_agent(
+            &f.connection.caller(),
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "delegation fixture".into(),
+                mode: StorageMode::Memory,
+                config: AgentConfig::default(),
+                default_session: None,
+                initial_message: None,
+            },
+        )
+        .unwrap();
+    SessionRef {
+        agent_id: receipt.agent_id.unwrap(),
+        session_id: receipt.session_id.unwrap(),
+    }
+}
+fn input(mode: MessageMode) -> MessageInput {
+    MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode,
+        text: "actual fixture task".into(),
+        in_reply_to: None,
+    }
+}
+fn send(f: &Fixture, target: &SessionRef) -> MessageInput {
+    let input = input(MessageMode::FollowUp);
+    f.host
+        .send(
+            &f.connection.caller(),
+            SendMessage::new(input.clone(), target.clone()),
+        )
+        .unwrap();
+    input
+}
+fn complete(events: &Events, text: &str) {
+    events.send(ModelEvent::text_delta(text)).unwrap();
+    events
+        .send(ModelEvent::Finish {
+            reason: ModelFinishReason::Stop,
+        })
+        .unwrap();
+}
+async fn recv<T>(rx: &mut mpsc::UnboundedReceiver<T>) -> T {
+    tokio::time::timeout(Duration::from_secs(10), rx.recv())
+        .await
+        .expect("explicit gate must progress")
+        .expect("sender alive")
+}
+async fn finished(f: &Fixture, target: &SessionRef, turn: &TurnId) {
+    f.host
+        .wait_turn(&f.connection.caller(), target, turn)
+        .await
+        .unwrap();
+}
+struct Hooks {
+    sealed: AtomicBool,
+    gate: Option<Arc<Semaphore>>,
+    entered: Option<mpsc::UnboundedSender<()>>,
+    closed: AtomicBool,
+}
+impl ScopeHooks for Hooks {
+    fn seal(&self) {
+        self.sealed.store(true, Ordering::SeqCst);
+    }
+    fn close_members(&self) -> OwnerFuture<'_, ()> {
+        Box::pin(async {
+            if let Some(entered) = &self.entered {
+                entered.send(()).unwrap();
+            }
+            if let Some(gate) = &self.gate {
+                gate.acquire().await.unwrap().forget();
+            }
+            Ok(())
+        })
+    }
+    fn root_closed(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+}
+fn hooks() -> Arc<Hooks> {
+    Arc::new(Hooks {
+        sealed: AtomicBool::new(false),
+        gate: None,
+        entered: None,
+        closed: AtomicBool::new(false),
+    })
+}
+struct Sink(mpsc::UnboundedSender<DelegationCompletion>);
+impl DelegationSink for Sink {
+    fn handoff(&self, completion: DelegationCompletion) -> Result<(), Fault> {
+        self.0.send(completion).unwrap();
+        Ok(())
+    }
+}
+fn registration(
+    cap: &TurnCapability,
+    child: SessionRef,
+    task: &MessageInput,
+) -> DelegationRegistration {
+    let s = cap.source();
+    DelegationRegistration {
+        host_id: s.host_id.clone(),
+        host_incarnation: s.host_incarnation.clone(),
+        root: s.session.clone(),
+        parent: s.session.clone(),
+        child,
+        task_message_id: task.message_id.clone(),
+        origin: ToolCallRef {
+            turn_id: s.turn.turn_id.clone(),
+            tool_call_id: ToolCallId("actual-bound-call".into()),
+        },
+        temporary: false,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn candidate_failure_never_publishes_turn_or_consumes_queued_input() {
+    let gate = Arc::new(Semaphore::new(0));
+    let mut f = setup(0, Some(gate.clone()), true);
+    let target = agent(&f);
+    let task = send(&f, &target);
+    let candidate = recv(&mut f.bindings).await;
+    assert!(candidate.capability().check_active().is_err());
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &target)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &target, &task.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &target)
+        .unwrap();
+    gate.add_permits(1);
+    while states.snapshot().unwrap().data.block_reason.is_none() {
+        states.changed().await.unwrap();
+    }
+    assert!(candidate.capability().check_active().is_err());
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &target)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn active_capability_outlives_external_connection_but_not_original_turn() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    let target = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    f.host.pause(&f.connection.caller(), &target).unwrap();
+    f.connection.close();
+    cap.check_active().unwrap();
+    let message = input(MessageMode::FollowUp);
+    cap.send(SendMessage::new(message.clone(), target.clone()))
+        .unwrap();
+    assert!(
+        matches!(cap.message(&target, &message.message_id).unwrap().source, MessageSource::Agent { source } if source == parent)
+    );
+    let replacement = f.host.connect().unwrap();
+    f.connection = replacement;
+    complete(&f.events[0], "parent done");
+    finished(&f, &parent, &cap.source().turn.turn_id).await;
+    assert!(cap.check_active().is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn busy_reuse_old_turn_cannot_finish_unconsumed_new_task() {
+    let mut f = setup(3, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    send(&f, &child);
+    let old = recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task.clone()).unwrap();
+    complete(&f.events[1], "unrelated old final");
+    let new = recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    assert_ne!(old.source().turn, new.source().turn);
+    assert!(results.try_recv().is_err());
+    complete(&f.events[2], "actual delegated final");
+    let completion = recv(&mut results).await;
+    assert_eq!(completion.results.len(), 1);
+    assert_eq!(completion.results[0].info.id, new.source().turn.turn_id);
+    assert_eq!(completion.inputs[0].message_ids, vec![task.message_id]);
+    let notice = input(MessageMode::FollowUp);
+    let receipt = permit.notify(notice).await.unwrap();
+    assert_eq!(receipt.result.queue, InputQueue::NextStep);
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_handoff_survives_parent_cancel_and_notifies_paused_original_parent_once() {
+    let mut f = setup(2, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+    finished(&f, &parent, &cap.source().turn.turn_id).await;
+    f.host.pause(&f.connection.caller(), &parent).unwrap();
+    assert!(cap.check_active().is_err());
+    complete(&f.events[1], "independent child result");
+    recv(&mut results).await;
+    let notice = input(MessageMode::Steer);
+    let id = notice.message_id.clone();
+    let receipt = permit.notify(notice).await.unwrap();
+    assert_eq!(receipt.result.queue, InputQueue::NextTurn);
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &parent, &id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    assert!(permit.notify(input(MessageMode::Steer)).await.is_err());
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn wait_ignores_next_turn_and_paused_next_step_without_consuming() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let waiting = cap.wait_input();
+    tokio::pin!(waiting);
+    assert!(waiting.as_mut().now_or_never().is_none());
+    f.host
+        .send(
+            &f.connection.caller(),
+            SendMessage::new(input(MessageMode::FollowUp), parent.clone()),
+        )
+        .unwrap();
+    assert!(waiting.as_mut().now_or_never().is_none());
+    f.host.pause(&f.connection.caller(), &parent).unwrap();
+    let steer = input(MessageMode::Steer);
+    f.host
+        .send(
+            &f.connection.caller(),
+            SendMessage::new(steer.clone(), parent.clone()),
+        )
+        .unwrap();
+    assert!(waiting.as_mut().now_or_never().is_none());
+    f.host.resume(&f.connection.caller(), &parent).unwrap();
+    waiting.await.unwrap();
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &parent, &steer.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn root_close_seals_receiving_and_waits_for_actual_cleanup_gate() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let hooks = Arc::new(Hooks {
+        sealed: AtomicBool::new(false),
+        gate: Some(gate.clone()),
+        entered: Some(entered),
+        closed: AtomicBool::new(false),
+    });
+    let permit = cap.prepare_scope(hooks.clone()).unwrap();
+    permit.seal().unwrap();
+    assert!(
+        f.host
+            .send(
+                &f.connection.caller(),
+                SendMessage::new(input(MessageMode::FollowUp), parent.clone())
+            )
+            .is_err()
+    );
+    let cleanup = tokio::spawn(async move { permit.close_root(OperationId::new().unwrap()).await });
+    recv(&mut entering).await;
+    assert!(!cleanup.is_finished());
+    assert!(!hooks.closed.load(Ordering::SeqCst));
+    gate.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(10), cleanup)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(hooks.closed.load(Ordering::SeqCst));
+}
+
+struct FileDelegationPlan {
+    path: std::path::PathBuf,
+    tool_gate: Arc<Semaphore>,
+    accepted: mpsc::UnboundedSender<(DelegationPermit, DelegationRegistration)>,
+    sink: mpsc::UnboundedSender<DelegationCompletion>,
+}
+struct FileDelegatingTool {
+    spec: minicore_runtime::tools::ToolSpec,
+    cap: TurnCapability,
+    plan: Arc<FileDelegationPlan>,
+}
+impl minicore_runtime::tools::Tool for FileDelegatingTool {
+    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+        &self.spec
+    }
+    fn execute<'a>(
+        &'a self,
+        call: minicore_runtime::tools::ToolInvocation,
+        _: minicore_runtime::tools::ToolContext,
+    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        Box::pin(async move {
+            let text = tokio::fs::read_to_string(&self.plan.path).await.unwrap();
+            self.cap.prepare_scope(hooks()).unwrap();
+            let (created, _) = self
+                .cap
+                .create_session_for_delegation(SessionCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    target: AgentRef {
+                        host_id: self.cap.source().host_id.clone(),
+                        agent_id: self.cap.source().session.agent_id.clone(),
+                    },
+                    mode: Some(StorageMode::Memory),
+                    overrides: Some(SessionOverrides(SessionConfigPatch {
+                        tools: Some(Vec::new()),
+                        ..Default::default()
+                    })),
+                    initial_message: None,
+                })
+                .await
+                .unwrap();
+            let child = SessionRef {
+                agent_id: created.agent_id,
+                session_id: created.session_id.unwrap(),
+            };
+            let mut task = input(MessageMode::FollowUp);
+            task.text = text;
+            let mut relation = registration(&self.cap, child, &task);
+            relation.temporary = true;
+            relation.origin.tool_call_id = ToolCallId(call.tool_call_id.as_str().into());
+            let permit = self
+                .cap
+                .prepare_delegation(relation.clone(), Arc::new(Sink(self.plan.sink.clone())))
+                .unwrap();
+            self.cap.send_delegated(&relation, task).unwrap();
+            self.cap.record_delegation(&relation.origin, &relation);
+            self.plan.accepted.send((permit, relation)).unwrap();
+            self.plan.tool_gate.acquire().await.unwrap().forget();
+            Ok(minicore_runtime::tools::ToolExecutionOutcome::Completed(
+                minicore_runtime::tools::ToolOutput::new("actual startup receipt").unwrap(),
+            ))
+        })
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_observers() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("task.txt");
+    std::fs::write(&path, "review this real file 🙂").unwrap();
+    let gate = Arc::new(Semaphore::new(0));
+    let (accepted, mut receipts) = mpsc::unbounded_channel();
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let mut f = setup_tool(
+        3,
+        None,
+        false,
+        Some(Arc::new(FileDelegationPlan {
+            path,
+            tool_gate: gate.clone(),
+            accepted,
+            sink,
+        })),
+    );
+    let parent = agent(&f);
+    f.host
+        .update_session(
+            &f.connection.caller(),
+            &parent,
+            0,
+            &SessionConfigPatch {
+                tools: Some(vec![ToolBinding {
+                    name: "delegate_fixture".into(),
+                }]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    send(&f, &parent);
+    let parent_binding = recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    let id: minicore_runtime::ToolCallId = "reused-provider-id".parse().unwrap();
+    f.events[0]
+        .send(ModelEvent::ToolCallStart {
+            tool_call_id: id.clone(),
+            tool_name: "delegate_fixture".parse().unwrap(),
+        })
+        .unwrap();
+    f.events[0]
+        .send(ModelEvent::tool_call_arguments_delta(id.clone(), "{}"))
+        .unwrap();
+    f.events[0]
+        .send(ModelEvent::ToolCallEnd { tool_call_id: id })
+        .unwrap();
+    f.events[0]
+        .send(ModelEvent::Finish {
+            reason: ModelFinishReason::ToolCalls,
+        })
+        .unwrap();
+    let (permit, relation) = recv(&mut receipts).await;
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    complete(&f.events[1], "file reviewed successfully");
+    let completion = recv(&mut results).await;
+    assert_eq!(
+        completion.inputs[0].message_ids,
+        vec![relation.task_message_id.clone()]
+    );
+    assert!(
+        f.host
+            .toolcall_get(&f.connection.caller(), &parent, &relation.origin)
+            .unwrap()
+            .data
+            .result
+            .is_none()
+    );
+    permit.close(OperationId::new().unwrap()).await.unwrap();
+    assert!(
+        f.host
+            .session_info(&f.connection.caller(), &relation.child)
+            .is_err()
+    );
+    let receipt = permit.notify(input(MessageMode::FollowUp)).await.unwrap();
+    assert_eq!(receipt.result.queue, InputQueue::NextStep);
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    gate.add_permits(1);
+    recv(&mut f.starts).await;
+    complete(&f.events[2], "parent summary");
+    finished(&f, &parent, &parent_binding.source().turn.turn_id).await;
+    let record = f
+        .host
+        .toolcall_get(&f.connection.caller(), &parent, &relation.origin)
+        .unwrap();
+    assert_eq!(record.data.state.delegations[0].child, relation.child);
+    assert!(record.data.result.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn busy_steer_delegation_transfers_all_inputs_that_actually_shared_the_turn() {
+    let mut f = setup(3, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let earlier = send(&f, &child);
+    let child_binding = recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::Steer);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task.clone()).unwrap();
+    let external = input(MessageMode::Steer);
+    f.host
+        .send(
+            &f.connection.caller(),
+            SendMessage::new(external.clone(), child.clone()),
+        )
+        .unwrap();
+    complete(&f.events[1], "old input answered");
+    recv(&mut f.starts).await;
+    complete(&f.events[2], "joint output");
+    let result = recv(&mut results).await;
+    assert_eq!(result.inputs.len(), 1);
+    assert_eq!(result.inputs[0].turn, child_binding.source().turn);
+    assert_eq!(
+        result.inputs[0].message_ids,
+        vec![earlier.message_id, task.message_id, external.message_id]
+    );
+    let receipt = permit.notify(input(MessageMode::Steer)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accepted_but_unconsumed_task_cancellation_hands_off_discarded_fact() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    f.host.pause(&f.connection.caller(), &child).unwrap();
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task.clone()).unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &child, false)
+        .unwrap();
+    let completion = recv(&mut results).await;
+    assert!(completion.results.is_empty());
+    assert!(completion.inputs.is_empty());
+    assert_eq!(completion.discarded_inputs, vec![task.message_id]);
+    let receipt = permit.notify(input(MessageMode::Steer)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn dropping_scope_close_wait_does_not_drop_actual_owner_cleanup() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let gate = Arc::new(Semaphore::new(0));
+    let hooks = Arc::new(Hooks {
+        sealed: AtomicBool::new(false),
+        gate: Some(gate.clone()),
+        entered: Some(entered),
+        closed: AtomicBool::new(false),
+    });
+    let permit = cap.prepare_scope(hooks.clone()).unwrap();
+    let close = tokio::spawn(async move { permit.close_root(OperationId::new().unwrap()).await });
+    recv(&mut entering).await;
+    close.abort();
+    let _ = close.await;
+    gate.add_permits(1);
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &parent)
+        .unwrap();
+    loop {
+        match states.snapshot() {
+            Ok(snapshot) if snapshot.data.lifecycle != SessionLifecycle::Closed => {
+                let _ = states.changed().await;
+            }
+            _ => break,
+        }
+    }
+    assert!(hooks.sealed.load(Ordering::SeqCst));
+}

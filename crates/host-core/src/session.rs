@@ -4,6 +4,7 @@ use futures_util::FutureExt;
 use minicore_host_protocol::*;
 use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 
+mod collaboration;
 mod controls;
 mod history;
 mod history_read;
@@ -72,6 +73,14 @@ pub trait ResourceResolver: Send + Sync + 'static {
     /// or filesystem here; resource preparation belongs in `resolve`.
     fn validate(&self, config: &SessionConfig) -> Result<(), Fault>;
     fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a>;
+    /// Prepare the complete selected tool set before any input is claimed.
+    fn resolve_for_turn<'a>(
+        &'a self,
+        config: &'a SessionConfig,
+        _binding: crate::PreparedTurnBinding,
+    ) -> ResourceFuture<'a> {
+        self.resolve(config)
+    }
     /// Attach only the original Turn's output sink to already-prepared tools.
     /// This infallible, non-I/O step must not select resources or prepare business authority.
     /// Those fallible steps belong in `resolve`, before input is consumed.
@@ -148,10 +157,12 @@ impl QueuedInput {
     }
 }
 struct ActiveTurn {
+    _activation: crate::collaboration::ActivationLease,
     info: TurnInfo,
     loop_id: Option<LoopId>,
     handle: Option<LoopHandle>,
     accepted: usize,
+    consumed_inputs: Vec<MessageId>,
     response_base: u64,
     bound_pending: VecDeque<QueuedInput>,
     start_history: usize,
@@ -207,6 +218,11 @@ struct SessionState {
     record_task: Option<tokio::task::JoinHandle<()>>,
     load_task: Option<tokio::task::JoinHandle<()>>,
     close_fault: Option<Fault>,
+    root_scope: Option<Arc<crate::collaboration::ScopeState>>,
+    scope_task: Option<tokio::task::JoinHandle<()>>,
+    scope_cleanup_pending: bool,
+    delegation: Option<collaboration::DelegationSlot>,
+    handoff_pending: bool,
 }
 
 pub(crate) struct SessionController {
@@ -295,6 +311,11 @@ impl SessionController {
             record_task: None,
             load_task: None,
             close_fault: None,
+            root_scope: None,
+            scope_task: None,
+            scope_cleanup_pending: false,
+            delegation: None,
+            handoff_pending: false,
         };
         let snapshot = Self::make_snapshot(&state, &host_id, &incarnation, &agent_id, &id);
         let (snapshots, _) = watch::channel(snapshot);
@@ -402,6 +423,20 @@ impl SessionController {
     }
     fn open(state: &SessionState) -> Result<(), Fault> {
         Self::available(state)?;
+        if state
+            .root_scope
+            .as_ref()
+            .is_some_and(|scope| scope.sealed.load(Ordering::SeqCst))
+            || state
+                .delegation
+                .as_ref()
+                .is_some_and(|slot| slot.scope_closed())
+        {
+            return Err(Fault::new(
+                FaultKind::SessionLifecycleClosing,
+                "the root collaboration scope is closing",
+            ));
+        }
         match state.lifecycle {
             SessionLifecycle::Open => Ok(()),
             SessionLifecycle::Closing => Err(Fault::new(
@@ -424,6 +459,10 @@ impl SessionController {
             return false;
         }
         state.lifecycle == SessionLifecycle::Open
+            && !state
+                .root_scope
+                .as_ref()
+                .is_some_and(|scope| scope.sealed.load(Ordering::SeqCst))
             && !state.paused
             && !state.failure_paused
             && !state.unloaded_with_input
@@ -517,7 +556,7 @@ impl SessionController {
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let receipt = self.access.accept_business(caller, || {
-            self.accept_message(message, runtime, MessageSource::User)
+            self.accept_message(message, runtime, caller.source())
         })?;
         self.wake();
         Ok(receipt)
@@ -542,7 +581,16 @@ impl SessionController {
         source: MessageSource,
     ) -> Result<MessageAccepted, Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        Self::open(&state)?;
+        self.accept_message_locked(&mut state, message, runtime, source)
+    }
+    fn accept_message_locked(
+        &self,
+        state: &mut SessionState,
+        message: MessageInput,
+        runtime: UserInput,
+        source: MessageSource,
+    ) -> Result<MessageAccepted, Fault> {
+        Self::open(state)?;
         self.access.ensure_execution_owned()?;
         if state.host_stopping {
             return Err(Fault::new(
@@ -594,9 +642,9 @@ impl SessionController {
             InputQueue::NextStep => state.next_step.push_back(entry),
             InputQueue::NextTurn => state.next_turn.push_back(entry),
         }
-        self.publish(&mut state);
+        self.publish(state);
         self.observe_message(
-            &state,
+            state,
             state.messages.last().expect("accepted message"),
             None,
         );
@@ -676,7 +724,7 @@ impl SessionController {
         caller: &CallerContext,
         message_id: &MessageId,
     ) -> Result<(), Fault> {
-        self.access.accept(caller, || {
+        let result = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::available(&state)?;
             let position = state
@@ -713,7 +761,36 @@ impl SessionController {
             mark_message(&mut state, &removed, MessageBinding::Removed);
             self.publish(&mut state);
             Ok(())
-        })
+        });
+        if result.is_ok() {
+            self.handoff_delegation_owned();
+        }
+        result
+    }
+    pub(crate) async fn wait_input_owned(
+        &self,
+        capability: &crate::TurnCapability,
+    ) -> Result<(), Fault> {
+        loop {
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+            capability.check_active()?;
+            {
+                let state = self.state.lock().expect("Session mutex poisoned");
+                Self::open(&state)?;
+                if self.schedulable(&state)
+                    && !state.next_step.is_empty()
+                    && state.active.as_ref().is_some_and(|active| {
+                        active.info.id == capability.source().turn.turn_id
+                            && active.info.state != TurnState::Cancelling
+                    })
+                {
+                    return Ok(());
+                }
+            }
+            changed.await;
+        }
     }
     pub(crate) fn is_quiescent_owned(&self) -> bool {
         let state = self.state.lock().expect("Session mutex poisoned");
@@ -723,6 +800,8 @@ impl SessionController {
             && !state.driver_running
             && state.history_work.is_none()
             && state.record_work.is_none()
+            && !state.scope_cleanup_pending
+            && !state.handoff_pending
     }
     pub(crate) async fn wait_quiescent_owned(&self) {
         let mut snapshots = self.snapshots.subscribe();
@@ -744,6 +823,7 @@ impl SessionController {
             let handle = if !enabled {
                 state.active.as_mut().and_then(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                         active.handle.clone()
                     } else {
@@ -895,6 +975,7 @@ impl SessionController {
                         && state.active.is_none()
                         && !state.preparing
                         && !state.saving
+                        && !state.scope_cleanup_pending
                     {
                         state.lifecycle = SessionLifecycle::Closed;
                         state.residency = Residency::Unloaded;
@@ -947,15 +1028,42 @@ impl SessionController {
                     }
                 }
             }
-            let resources = AssertUnwindSafe(self.prepare_resources(&preparation.0))
-                .catch_unwind()
-                .await
-                .unwrap_or_else(|_| {
-                    Err(Fault::new(
+            let turn_id = match TurnId::new() {
+                Ok(id) => id,
+                Err(error) => {
+                    self.preparation_failed(Fault::new(
                         FaultKind::SessionInternalUnexpected,
-                        "resource preparation panicked; accepted inputs remain queued",
-                    ))
-                });
+                        error.to_string(),
+                    ));
+                    return;
+                }
+            };
+            let binding = crate::PreparedTurnBinding::new(
+                &self,
+                crate::TurnSource {
+                    host_id: self.host_id.clone(),
+                    host_incarnation: self.incarnation.clone(),
+                    session: SessionRef {
+                        agent_id: self.agent_id.clone(),
+                        session_id: self.id.clone(),
+                    },
+                    turn: TurnRef {
+                        session_id: self.id.clone(),
+                        turn_id: turn_id.clone(),
+                    },
+                },
+                &self.access,
+            );
+            let resources =
+                AssertUnwindSafe(self.prepare_resources(&preparation.0, binding.clone()))
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(Fault::new(
+                            FaultKind::SessionInternalUnexpected,
+                            "resource preparation panicked; accepted inputs remain queued",
+                        ))
+                    });
             let resources = match resources {
                 Ok(resources) => resources,
                 Err(fault) => {
@@ -972,16 +1080,6 @@ impl SessionController {
                         state.lifecycle = SessionLifecycle::Closed;
                     }
                     self.publish(&mut state);
-                    return;
-                }
-            };
-            let turn_id = match TurnId::new() {
-                Ok(id) => id,
-                Err(error) => {
-                    self.preparation_failed(Fault::new(
-                        FaultKind::SessionInternalUnexpected,
-                        error.to_string(),
-                    ));
                     return;
                 }
             };
@@ -1010,6 +1108,7 @@ impl SessionController {
                 state.residency = Residency::Loaded;
                 let start_history = state.history.len();
                 state.active = Some(ActiveTurn {
+                    _activation: binding.activate(),
                     info: TurnInfo {
                         id: turn_id.clone(),
                         session_id: self.id.clone(),
@@ -1033,6 +1132,7 @@ impl SessionController {
                     loop_id: None,
                     handle: None,
                     accepted: 0,
+                    consumed_inputs: Vec::new(),
                     response_base: 0,
                     bound_pending: VecDeque::new(),
                     start_history,
@@ -1130,6 +1230,7 @@ impl SessionController {
                                 .expect("runner revision exhausted");
                         }
                         Err(_) => {
+                            active._activation.expire();
                             active.info.state = TurnState::Finalizing;
                         }
                     }
@@ -1233,6 +1334,7 @@ impl SessionController {
                         LoopOutcome::Cancelled(_) => TurnOutcome::Cancelled,
                         _ => TurnOutcome::Failed,
                     });
+                    active._activation.expire();
                     active.info.state = TurnState::Finalizing;
                     if active.info.outcome == Some(TurnOutcome::Failed) {
                         state.failure_paused = true;
@@ -1277,6 +1379,7 @@ impl SessionController {
                             )),
                         ),
                     };
+                    active._activation.expire();
                     active.info.state = TurnState::Finalizing;
                     active.info.outcome = Some(outcome);
                     active.info.fault = fault;
@@ -1308,6 +1411,11 @@ fn mark_message(state: &mut SessionState, input: &QueuedInput, binding: MessageB
             && record.queue == input.queue
             && record.order == input.order
     }) {
+        if matches!(binding, MessageBinding::Removed)
+            && let Some(slot) = state.delegation.as_mut()
+        {
+            slot.record_discarded(&input.message.message_id);
+        }
         record.binding = binding;
     }
 }
@@ -1355,6 +1463,7 @@ impl LoopInputs for SessionInputs {
                 .filter(|active| active.info.id == self.turn_id)
                 .and_then(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                     }
                     active.handle.clone()

@@ -122,6 +122,7 @@ impl SessionController {
                 ));
             }
             let mut entries = Vec::new();
+            let mut consumed = Vec::new();
             for item in items {
                 match item {
                     HistoryItem::User(user) => {
@@ -137,6 +138,7 @@ impl SessionController {
                                 "Runtime input order differs from bound messages",
                             ));
                         }
+                        consumed.push(input.message.message_id.clone());
                         entries.push(HistoryEntry::Input {
                             turn_id: turn_id.clone(),
                             message_id: input.message.message_id,
@@ -171,6 +173,10 @@ impl SessionController {
             // Accepted cursor is advanced before I/O and never rolled back on a
             // save failure. The final report supplements only the unseen suffix.
             active.accepted += items.len();
+            active.consumed_inputs.extend(consumed.iter().cloned());
+            for message in consumed {
+                Self::record_delegated_input(&mut state, turn_id, &message);
+            }
             state.history.extend_from_slice(items);
             self.observe_history(&mut state, items);
             self.publish(&mut state);
@@ -318,6 +324,7 @@ impl SessionController {
                 active.info.outcome = Some(outcome);
                 active.info.fault = fault;
             }
+            active._activation.expire();
             active.info.state = TurnState::Finalizing;
             active.handle = None;
             let outcome = active.info.outcome.expect("terminal claim");
@@ -394,13 +401,23 @@ impl SessionController {
         };
         self.observe_finished(&mut state, &result.info);
         state.completion_order.push(turn_id.clone());
+        Self::record_delegated_result(&mut state, &result, active.consumed_inputs);
         state.completed.insert(turn_id.clone(), result);
-        if state.lifecycle == SessionLifecycle::Closing && state.info.mode == StorageMode::Memory {
+        if state.lifecycle == SessionLifecycle::Closing
+            && state.info.mode == StorageMode::Memory
+            && !state.scope_cleanup_pending
+            && !state
+                .delegation
+                .as_ref()
+                .is_some_and(|slot| slot.needs_handoff())
+        {
             state.lifecycle = SessionLifecycle::Closed;
             state.residency = Residency::Unloaded;
             state.load_id = None;
         }
         self.publish(&mut state);
+        drop(state);
+        self.handoff_delegation_owned();
     }
     pub(super) fn start_save_continuations(
         self: &Arc<Self>,

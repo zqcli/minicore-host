@@ -50,6 +50,8 @@ pub struct ToolCallStateData {
     pub name: String,
     pub state: ToolCallState,
     pub progress: Option<ToolProgressData>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<crate::DelegationAssociation>,
     pub outcome: Option<minicore_runtime::tools::ToolResultOutcome>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

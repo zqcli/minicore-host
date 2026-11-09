@@ -6,7 +6,9 @@
 
 mod agent;
 mod backend;
+mod collaboration;
 mod control;
+pub use collaboration::*;
 mod host;
 mod persistence;
 mod session;
