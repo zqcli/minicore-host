@@ -1,0 +1,115 @@
+{
+  "branch": "stage/executable-next",
+  "base": "f4f03b1cd9ac9d6e139f8e6a457a2e9d7c154e44",
+  "mapping": [
+    {
+      "source": "17661c4e02435574ad44031a8582bb15d92c4baa",
+      "integrated": "36fc23df21baaa32090bb448d6bd95ee0546f179"
+    },
+    {
+      "source": "34ec6237c59cef28a40d6cd29c9bcec181bc09d1",
+      "integrated": "5c2557a1dc62abe78c6067bee0b14b9d53c0d446"
+    },
+    {
+      "source": "79d13fa0b0c2ebafba3a51a6e9b8b42e04e2b47a",
+      "integrated": "a080668807b207999e1c061bc91c0c93a3919772"
+    },
+    {
+      "source": "6fcc85a540ae59dc9bf84ac6b496b25a893e1e24",
+      "integrated": "6a1184b0f48582bb230bc1bcf12261de0e8e65e3"
+    },
+    {
+      "source": "70f731df039adcb56d2d112d31c58d5f9c7c99e8",
+      "integrated": "cb4107d9975b1a843f417482254b8b558b847f39"
+    },
+    {
+      "source": "1045aa469e4444f1136a5c1e1c3a866edb7d74a6",
+      "integrated": "031fa21841012ea26d91fa1d713c365f780e799c"
+    },
+    {
+      "source": "10fd934869eed750fce559685c6c18fcd806db51",
+      "integrated": "d675f13b9f984131efd41958c695130136a28a5e"
+    },
+    {
+      "source": "1bb488b2ef40f89b85481a8f795ef1eb6003e331",
+      "integrated": "89643a2c1d84a257b4fe03988caad43347244d5c"
+    },
+    {
+      "source": "6b4bef527e0c77dfed0542d9411e5c560dd7f769",
+      "integrated": "087a395905e32b04c5f53355b2108b22d3f8ecff"
+    },
+    {
+      "source": "e350a0679ebfea9d1539249307baf4b2f46e982a",
+      "integrated": "f6ab2b6926d4208657061e5afb782304e35df5d8"
+    },
+    {
+      "source": "290b657de52644664a5a1d7a8396e80ed16648a0",
+      "integrated": "555371cb6b14c792e48d9d001f55c3425ce370b0"
+    },
+    {
+      "source": "4f0988b5aaffd83ccf8221156de9cff371bf3ab5",
+      "integrated": "7b2f8d1ba117b869d6b9ba1dbaea953a3c8bb5e3"
+    },
+    {
+      "source": "e330db7c2afb815cbceb04b25875f06bb3ca0e2b",
+      "integrated": "0d3d266029971b71b548429efbb3a2cbe16ba163"
+    },
+    {
+      "source": "0a4f90de99655231c45cd1e3d9996460f9c94281",
+      "integrated": "4ca11237c205784cfe6f60c6c71f09decd2a82bf"
+    },
+    {
+      "source": "f002f8b8894f0c5116c161eeea4e081fa735ca3d",
+      "integrated": "a6a6ecdabb7bcc5e0989a36ce2b128f684ee71ff"
+    },
+    {
+      "source": "8bff066118e0ac7615219583c962cefbfca9832a",
+      "integrated": "09f72dbccbeb4196ff47182e0021dd7304feab25"
+    },
+    {
+      "source": "4e85b03be73c921d93edb3f3351da04967d0715e",
+      "integrated": "3f9208f7a4271a11bd813667bd79a05f79444ec5",
+      "adjustment": "Restored full original app TASK.md after conflict with previously relocated diagnostics note; production files applied unchanged."
+    },
+    {
+      "source": "544fd079c9af8571b4ea545c61db141aa94bd8f1",
+      "integrated": "f3e094fc49c4190958a04160afc9ed4944bea9a5"
+    },
+    {
+      "source": "48c62ada9a5a7eb707cd0b68797cd7a9d1f0e973",
+      "integrated": "5bf602dc27addf9953a93adab9ed55cf45811d3f"
+    },
+    {
+      "source": "ec5b703005a624a90fdf97eae67d0de85e8c6e66",
+      "integrated": "f7bdc77cf45ff67c4a11d80566b74dc06e27b563",
+      "adjustment": "Kept both independent host tool_edits and workspace module declarations."
+    },
+    {
+      "source": "038b3fd09da55c22326e70ab43687a0f47f69269",
+      "integrated": "e86b9227722bd9bc1ac927348a1165b2105ef0c2",
+      "adjustment": "Kept both trusted process and workspace snapshot public exports."
+    },
+    {
+      "source": "9ec99d852076749717421630969719025863317f",
+      "integrated": "6a58f95b765c56db9eb35ff5e6e658d4a8069b25"
+    },
+    {
+      "source": "d7f1ac2ba1840c46a47651bfa3874fed31dbe9c2",
+      "integrated": "847b07d5c1d7ea21b5864c4529eeedf490d8cd0c"
+    },
+    {
+      "source": "30569c6cff17616b7ccc61a82838e6bc43a13e18",
+      "integrated": "f3b08305b05e5f7f6e9bf2ba142f0dfe157f40f2"
+    },
+    {
+      "source": "4f91fd14645d09703cc325e79f08948054c97753",
+      "integrated": "41e7dc305892399b21764aed844c4afb7f5bcc4c"
+    },
+    {
+      "source": "fa2b13034894dbc4963b42baec0f1fe18b3a0bf8",
+      "integrated": "78d1fe24d46ce355409e0899dd7b96e957a558f8"
+    }
+  ],
+  "head": "78d1fe24d46ce355409e0899dd7b96e957a558f8",
+  "status": "Local composition; aggregate blocked on independently reproduced storage/diagnostics lease release failures. Not published."
+}

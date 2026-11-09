@@ -1,6 +1,12 @@
 # MiniCore Host
 
-## Current execution integration checkpoint
+## Current executable composition
+
+Local staging code `78d1fe24d46ce355409e0899dd7b96e957a558f8` on `stage/executable-next` composes the separately reviewed production ordinary-tool/output/edit binding, actual Host process and canonical workspace routes over the execution checkpoint below. The 26 source commits remain granular and mapped in [task 048](tasks/048-executable-integration/TASK.md) and [the source map](docs/executable-source-map.json). Both workspace-source and tool-completion P1 fixes are included. All-target compilation passes; combined acceptance is still underway.
+
+**Publication is held:** diagnostics and storage have reproducible close/reopen lock failures in later aggregate tests. Dedicated corrections are being developed without weakening ownership or replacing failures with retries. Real ordinary-tool acceptance through the Host executable, final combined gates and review remain required. This local composition is not a remote handoff and does not change the current published dev `a84e36f`.
+
+## Earlier execution integration checkpoint
 
 The fixed local code checkpoint is `76a7bfbe7f70d7f707d48cc38190829d14c137f2` on `stage/reviewed-next-dev`, based on `810e3817a78855871d13f8127a3f0e87db821d66` (published as [a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f](https://github.com/zqcli/minicore-host/commit/a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f)). The exact code gate passes **650 unique tests and 4 doctests**. This next checkpoint is not yet published and is not the complete first version. A subsequent aggregate run exposed a diagnostic file-lease release race after a reported flush; publication is held while task 047 reproduces and corrects it. The earlier passing gate is retained, not treated as proof that this new finding is resolved.
 
