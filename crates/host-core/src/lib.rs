@@ -28,8 +28,8 @@ pub use host::Host;
 pub use session::{
     ApprovalAnswer, BoundCompactionResources, BoundResources, CompactionResourceFuture,
     HistoryBackend, InteractionAnswerData, LoadFuture, MemoryHistory, ResourceFuture,
-    ResourceResolver, SaveFuture, SessionSubscription, ToolOutputBinding, ToolOutputSink,
-    TurnToolCleanup,
+    ResourceResolver, SaveFuture, SessionSubscription, ToolOutputBinding, ToolOutputLease,
+    ToolOutputSink, TurnToolCleanup,
 };
 pub use types::*;
 

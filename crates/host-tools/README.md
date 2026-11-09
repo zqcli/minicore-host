@@ -52,3 +52,11 @@ of notification ends that attempt and is reported to its permit, without retry
 or retargeting.
 
 No remote push is authorized. No TUI files or SPEC are modified.
+
+## Ordinary local-tool binding
+
+`ToolRegistry::register_local_tools` registers the compiled read/edit/write/bash declarations from `minicore-host-local-tools`. It does not automatically select or enable them. Selected local tools require `BoundLocalTools::prepare` with the actual prepared Turn binding, a frozen `Workspace`, and a real `LocalToolInvocationSink`; ordinary `bind` explicitly rejects them without those resources.
+
+The invocation adapter checks the existing Turn capability, receives a real owner-minted output lease, and calls the sink's synchronous `begin` before starting the worker. `ResourceResolver::bind_tool_output` must wrap selected implementations with the original `ToolOutputBinding`. Actual worker collection is registered with that public Turn, survives Runtime cancellation, and runs only at public Turn finalization. Internal errors with confirmed cleanup remain diagnostics; unconfirmed cleanup blocks finished. No standard agent action or delegation scope is changed.
+
+The production record/persistence sink and resource assembly remain separate integration work. The in-memory sink in `tests/local_binding.rs` is an explicit test fixture, not durable edit capture or a production fallback.

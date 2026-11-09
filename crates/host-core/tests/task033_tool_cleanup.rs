@@ -128,6 +128,8 @@ struct ProcessBundle {
     paths: Mutex<Vec<PathBuf>>,
     root: PathBuf,
     cleanup_result: CleanupResult,
+    ordinary_output: Mutex<Vec<ToolOutputSink>>,
+    owned_output: Mutex<Vec<ToolOutputLease>>,
 }
 impl ProcessBundle {
     fn new(binding: &PreparedTurnBinding, root: PathBuf, cleanup_result: CleanupResult) -> Self {
@@ -149,6 +151,8 @@ impl ProcessBundle {
             paths: Mutex::new(Vec::new()),
             root,
             cleanup_result,
+            ordinary_output: Mutex::new(Vec::new()),
+            owned_output: Mutex::new(Vec::new()),
         }
     }
 }
@@ -168,6 +172,13 @@ impl Tool for ProcessBundle {
                 .check_active()
                 .map_err(|_| ToolError::Internal)?;
             let _dropped = FutureDropped(self.future_dropped.clone());
+            if let Some(output) = ToolOutputSink::current() {
+                self.owned_output
+                    .lock()
+                    .unwrap()
+                    .push(output.retain_owned().unwrap());
+                self.ordinary_output.lock().unwrap().push(output);
+            }
             let path = {
                 let mut paths = self.paths.lock().unwrap();
                 let path = self.root.join(format!(
@@ -298,6 +309,24 @@ impl ResourceResolver for Resources {
                 options: LoopOptions::default_checked().unwrap(),
             })
         })
+    }
+    fn bind_tool_output(
+        &self,
+        execution: &ExecutionConfig,
+        output: ToolOutputBinding,
+    ) -> ExecutionConfig {
+        let mut tools = ToolSet::builder();
+        if let Some(tool) = execution.tools().get(&"process_fixture".parse().unwrap()) {
+            tools.register_arc(output.wrap(tool));
+        }
+        ExecutionConfig::new(
+            execution.model().clone(),
+            execution.reasoning(),
+            tools.build().unwrap(),
+            execution.policy().cloned(),
+            execution.prompt().clone(),
+        )
+        .unwrap()
     }
 }
 fn resources(root: PathBuf, rounds: Vec<Round>, cleanup_result: CleanupResult) -> Arc<Resources> {
@@ -809,4 +838,57 @@ async fn memory_close_cannot_reclaim_while_actual_tool_worker_is_still_running()
     bundle.release.add_permits(1);
     until(|| host.session_info(&caller, &target).err()).await;
     assert_eq!(bundle.waited.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
+    let dir = tempfile::tempdir().unwrap();
+    let resources = resources(dir.path().into(), vec![Round::tool()], CleanupResult::Clean);
+    let host = Host::memory(resources.clone()).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = create(&host, &caller, StorageMode::Memory).await;
+    send(&host, &caller, &target, MessageMode::FollowUp);
+    let bundle = bundle(&resources, 0).await;
+    invoked(&bundle).await;
+    let turn = bundle.capability.source().turn.turn_id.clone();
+    let regular = bundle.ordinary_output.lock().unwrap()[0].clone();
+    let owned = bundle.owned_output.lock().unwrap()[0].clone();
+    assert_eq!(owned.source().turn.turn_id, turn);
+    assert_eq!(owned.source().turn.session.session_id, target.session_id);
+    assert!(owned.source().turn.load_id.is_some());
+    assert!(regular.emit("stdout", "before "));
+    cancel(&host, &caller, &target, &turn);
+    until(|| (bundle.finish_calls.load(Ordering::SeqCst) == 1).then_some(())).await;
+    assert!(!regular.emit("stdout", "expired"));
+    assert!(regular.retain_owned().is_err());
+    assert!(owned.emit("stdout", "真实 child cleanup"));
+    let call = ToolCallRef {
+        turn_id: turn.clone(),
+        tool_call_id: owned.source().tool_call_id.clone(),
+    };
+    let text = "before 真实 child cleanup";
+    let range = TextReadRequest {
+        channel: "stdout".into(),
+        start: 0,
+        end: text.len() as u64,
+        max_bytes: 1000,
+    };
+    assert_eq!(
+        host.toolcall_output_read(&caller, &target, &call, &range)
+            .unwrap()
+            .data
+            .text,
+        text
+    );
+    bundle.release.add_permits(1);
+    terminal(&host, &caller, &target, &turn).await;
+    assert!(!owned.emit("stdout", "after confirmed cleanup"));
+    assert_eq!(
+        host.toolcall_output_read(&caller, &target, &call, &range)
+            .unwrap()
+            .data
+            .text,
+        text
+    );
 }

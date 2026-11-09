@@ -14,6 +14,7 @@ pub trait TurnToolCleanup: Send + Sync + 'static {
 
 pub(super) struct ToolCleanupWork {
     handles: Vec<Arc<dyn TurnToolCleanup>>,
+    output_leases: Vec<Arc<AtomicBool>>,
     started: bool,
     pub(super) complete: bool,
     pub(super) fault: Option<Fault>,
@@ -22,10 +23,18 @@ impl ToolCleanupWork {
     pub(super) fn new(handles: Vec<Arc<dyn TurnToolCleanup>>) -> Self {
         Self {
             handles,
+            output_leases: Vec::new(),
             started: false,
             complete: false,
             fault: None,
         }
+    }
+    pub(super) fn retain_output(&mut self, live: Arc<AtomicBool>) -> bool {
+        if self.started || self.handles.is_empty() {
+            return false;
+        }
+        self.output_leases.push(live);
+        true
     }
 }
 
@@ -72,6 +81,9 @@ impl SessionController {
         let complete = active.tool_cleanup.fault.is_none();
         active.tool_cleanup.complete = complete;
         let released = if complete {
+            for lease in active.tool_cleanup.output_leases.drain(..) {
+                lease.store(false, Ordering::SeqCst);
+            }
             std::mem::take(&mut active.tool_cleanup.handles)
         } else {
             Vec::new()

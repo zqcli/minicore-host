@@ -52,6 +52,44 @@ impl ToolOutputSink {
             channel,
             text,
             &self.live,
+            None,
+        )
+    }
+    /// Transfer output admission to the registered actual worker owner. The
+    /// returned lease is distinct from this future-scoped sink and is revoked
+    /// only when that public Turn's actual tool cleanup is confirmed.
+    pub fn retain_owned(&self) -> Result<ToolOutputLease, Fault> {
+        let session = self.binding.session.upgrade().ok_or_else(inactive_output)?;
+        session.retain_tool_output(self)
+    }
+}
+/// An original invocation's output lease, held by a trusted execution adapter.
+/// Its identity and lifetime are minted by the Session, never by tool arguments.
+/// Cloning it cannot outlive the actual public Turn's cleanup confirmation.
+#[derive(Clone)]
+pub struct ToolOutputLease {
+    sink: ToolOutputSink,
+    source: ToolCallIdentity,
+    response_index: u64,
+}
+impl ToolOutputLease {
+    pub fn source(&self) -> &ToolCallIdentity {
+        &self.source
+    }
+    pub fn emit(&self, channel: &str, text: &str) -> bool {
+        if channel.is_empty() || !self.sink.live.load(Ordering::SeqCst) {
+            return false;
+        }
+        let Some(session) = self.sink.binding.session.upgrade() else {
+            return false;
+        };
+        session.append_tool_output(
+            &self.sink.binding.turn_id,
+            &self.sink.invocation,
+            channel,
+            text,
+            &self.sink.live,
+            Some((&self.source, self.response_index)),
         )
     }
 }
@@ -85,6 +123,55 @@ impl Tool for OutputTool {
     }
 }
 impl SessionController {
+    fn retain_tool_output(&self, sink: &ToolOutputSink) -> Result<ToolOutputLease, Fault> {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        if !sink.live.load(Ordering::SeqCst) || state.reclaimed {
+            return Err(inactive_output());
+        }
+        let call = ToolCallId(sink.invocation.tool_call_id.as_str().to_owned());
+        // Complete assistant history establishes the invocation before its real
+        // tool starts. Never wait for a ToolStarted observation event to do so.
+        let record = state
+            .output
+            .get(&sink.binding.turn_id)
+            .and_then(|turn| turn.tools.get(&call))
+            .filter(|record| {
+                record.data.result.is_none()
+                    && record.data.state.name == sink.invocation.tool_name.as_str()
+                    && record.data.arguments == sink.invocation.arguments
+            })
+            .ok_or_else(inactive_output)?;
+        let response_index = record.data.state.response_index;
+        let active = state
+            .active
+            .as_mut()
+            .filter(|active| {
+                active.info.id == sink.binding.turn_id
+                    && matches!(active.info.state, TurnState::Starting | TurnState::Running)
+            })
+            .ok_or_else(inactive_output)?;
+        let live = Arc::new(AtomicBool::new(true));
+        if !active.tool_cleanup.retain_output(Arc::clone(&live)) {
+            return Err(inactive_output());
+        }
+        Ok(ToolOutputLease {
+            sink: ToolOutputSink {
+                binding: sink.binding.clone(),
+                invocation: sink.invocation.clone(),
+                live,
+            },
+            source: ToolCallIdentity {
+                turn: TurnIdentity {
+                    session: self.identity(),
+                    turn_id: sink.binding.turn_id.clone(),
+                    load_id: Some(active.info.load_id.clone()),
+                },
+                tool_call_id: call,
+            },
+            response_index,
+        })
+    }
+    #[allow(clippy::too_many_arguments)]
     fn append_tool_output(
         &self,
         turn_id: &TurnId,
@@ -92,6 +179,7 @@ impl SessionController {
         channel: &str,
         text: &str,
         live: &AtomicBool,
+        owned: Option<(&ToolCallIdentity, u64)>,
     ) -> bool {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if !live.load(Ordering::SeqCst) || state.reclaimed {
@@ -108,6 +196,9 @@ impl SessionController {
             },
             tool_call_id: ToolCallId(invocation.tool_call_id.as_str().to_owned()),
         };
+        if owned.is_some_and(|(original, _)| original != &source) {
+            return false;
+        }
         let Some(record) = state
             .output
             .get_mut(turn_id)
@@ -115,7 +206,8 @@ impl SessionController {
         else {
             return false;
         };
-        if record.data.result.is_some()
+        if (owned.is_none() && record.data.result.is_some())
+            || owned.is_some_and(|(_, index)| record.data.state.response_index != index)
             || record.data.state.name != invocation.tool_name.as_str()
             || record.data.arguments != invocation.arguments
         {
@@ -137,4 +229,10 @@ impl SessionController {
             }));
         true
     }
+}
+fn inactive_output() -> Fault {
+    Fault::new(
+        FaultKind::TurnInternalUnexpected,
+        "output lease requires the original active invocation and registered tool cleanup owner",
+    )
 }

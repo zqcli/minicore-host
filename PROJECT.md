@@ -73,3 +73,5 @@ minicore-agent is a code reference, not a compatibility or behavior baseline. Su
 ## Tool cleanup ownership topic
 
 [Task 033](tasks/033-turn-tool-cleanup/TASK.md) adds a narrow prepared-to-active Turn cleanup registration and actual-worker finalization barrier on top of `04ba5bc`. Real Host/Runtime and child-process tests distinguish Runtime future cancellation from actual child wait, including force shutdown, memory retirement, same-Turn continuation and blocked history saves. Independent cleanup diagnostics do not overwrite business outcomes. Ordinary tool production wiring, durable edit recording and output lease integration are still pending; this topic is not a complete first-version claim.
+
+The Task 033 follow-on now binds the static local declarations to the actual prepared Turn cleanup owner and adds an owner-held output lease. Its complete topic checks pass 535 unique tests and 3 doctests, including producer tests. Production local-tool activation still awaits the real Session record/persistence sink and UTF-8/binary output projection; no no-op sink is enabled.

@@ -15,7 +15,7 @@ pub use interaction::{ApprovalAnswer, InteractionAnswerData};
 mod metadata;
 mod observation;
 mod tool_output;
-pub use tool_output::{ToolOutputBinding, ToolOutputSink};
+pub use tool_output::{ToolOutputBinding, ToolOutputLease, ToolOutputSink};
 mod tool_cleanup;
 pub use tool_cleanup::TurnToolCleanup;
 mod retirement;

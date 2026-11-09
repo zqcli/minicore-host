@@ -1,4 +1,5 @@
-use crate::{AgentTool, ScopeManager, TurnPort, agent_tool_spec};
+use crate::{AgentTool, BoundLocalTools, ScopeManager, TurnPort, agent_tool_spec};
+use minicore_host_local_tools::local_tool_specs;
 use minicore_host_protocol::{Fault, FaultKind, ToolBinding};
 use minicore_runtime::tools::{Tool, ToolSet, ToolSpec};
 use std::{collections::BTreeMap, sync::Arc};
@@ -31,7 +32,19 @@ impl ToolFactory for AgentToolFactory {
 }
 #[derive(Default)]
 pub struct ToolRegistry {
-    factories: BTreeMap<String, Arc<dyn ToolFactory>>,
+    entries: BTreeMap<String, RegisteredTool>,
+}
+enum RegisteredTool {
+    Factory(Arc<dyn ToolFactory>),
+    Local(ToolSpec),
+}
+impl RegisteredTool {
+    fn spec(&self) -> &ToolSpec {
+        match self {
+            Self::Factory(factory) => factory.spec(),
+            Self::Local(spec) => spec,
+        }
+    }
 }
 impl ToolRegistry {
     pub fn new() -> Self {
@@ -39,19 +52,37 @@ impl ToolRegistry {
     }
     pub fn register(&mut self, factory: Arc<dyn ToolFactory>) -> Result<(), Fault> {
         let name = factory.spec().name().as_str().to_owned();
-        if self.factories.contains_key(&name) {
+        if self.entries.contains_key(&name) {
             return Err(Fault::new(
                 FaultKind::SessionConfigInvalid,
                 format!("tool {name} is already registered"),
             ));
         }
-        self.factories.insert(name, factory);
+        self.entries.insert(name, RegisteredTool::Factory(factory));
+        Ok(())
+    }
+    /// Register the compiled declarations, without enabling them in a Session.
+    /// Actual binding still requires its frozen Workspace and real record sink.
+    pub fn register_local_tools(&mut self) -> Result<(), Fault> {
+        let specs = local_tool_specs();
+        for spec in &specs {
+            if self.entries.contains_key(spec.name().as_str()) {
+                return Err(Fault::new(
+                    FaultKind::SessionConfigInvalid,
+                    format!("tool {} is already registered", spec.name()),
+                ));
+            }
+        }
+        for spec in specs {
+            self.entries
+                .insert(spec.name().as_str().to_owned(), RegisteredTool::Local(spec));
+        }
         Ok(())
     }
     pub fn specs(&self) -> Vec<ToolSpec> {
-        self.factories
+        self.entries
             .values()
-            .map(|factory| factory.spec().clone())
+            .map(|entry| entry.spec().clone())
             .collect()
     }
     pub fn bind(
@@ -59,16 +90,45 @@ impl ToolRegistry {
         selected: &[ToolBinding],
         port: Arc<dyn TurnPort>,
     ) -> Result<ToolSet, Fault> {
+        self.bind_selected(selected, port, None)
+    }
+    pub fn bind_with_local(
+        &self,
+        selected: &[ToolBinding],
+        port: Arc<dyn TurnPort>,
+        local: &BoundLocalTools,
+    ) -> Result<ToolSet, Fault> {
+        self.bind_selected(selected, port, Some(local))
+    }
+    fn bind_selected(
+        &self,
+        selected: &[ToolBinding],
+        port: Arc<dyn TurnPort>,
+        local: Option<&BoundLocalTools>,
+    ) -> Result<ToolSet, Fault> {
         let mut builder = ToolSet::builder();
         for selection in selected {
-            let factory = self.factories.get(&selection.name).ok_or_else(|| {
+            let entry = self.entries.get(&selection.name).ok_or_else(|| {
                 Fault::new(
                     FaultKind::SessionResourceMissing,
                     format!("tool {} is not registered", selection.name),
                 )
             })?;
-            let tool = factory.bind(Arc::clone(&port))?;
-            if tool.spec() != factory.spec() {
+            let tool = match entry {
+                RegisteredTool::Factory(factory) => factory.bind(Arc::clone(&port))?,
+                RegisteredTool::Local(_) => local
+                    .and_then(|local| local.tool(&selection.name))
+                    .ok_or_else(|| {
+                        Fault::new(
+                            FaultKind::SessionResourceMissing,
+                            format!(
+                                "tool {} requires its bound workspace and actual record owner",
+                                selection.name
+                            ),
+                        )
+                    })?,
+            };
+            if tool.spec() != entry.spec() {
                 return Err(Fault::new(
                     FaultKind::SessionConfigInvalid,
                     "bound tool declaration differs from its registered declaration",
