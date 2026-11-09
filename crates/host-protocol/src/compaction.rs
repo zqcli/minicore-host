@@ -174,9 +174,17 @@ crate::validated_dto!(CompactCancelResult, CompactCancelResultWire, "CompactCanc
 impl CompactCancelResult {
     pub fn validate(&self) -> Result<(), ValidationError> {
         self.target.validate()?;
-        if self.cancel_claimed && !self.target.cancellation_requested {
+        if self.cancel_claimed
+            && (!self.target.cancellation_requested
+                || !matches!(
+                    self.target.state,
+                    CompactionState::Preparing {}
+                        | CompactionState::Summarizing {}
+                        | CompactionState::Merging {}
+                ))
+        {
             return Err(invalid(
-                "claimed cancellation must be reflected in original compaction facts",
+                "claimed cancellation requires a precommit target with cancellation requested",
             ));
         }
         Ok(())
@@ -201,6 +209,99 @@ impl CompactCancelReceipt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn compact_cancel_claim_requires_cancellable_original_phase_on_both_wire_paths() {
+        let change = CompactionChange {
+            source_position: 8,
+            covered_items: 4,
+            before_tokens: 500,
+            after_tokens: 100,
+        };
+        let fault = Fault::new(crate::FaultKind::SessionCompactionFailed, "fixture failure");
+        let states = [
+            (CompactionState::Preparing {}, true),
+            (CompactionState::Summarizing {}, true),
+            (CompactionState::Merging {}, true),
+            (
+                CompactionState::Committing {
+                    change: change.clone(),
+                    persistence: PersistenceState::Pending,
+                    fault: None,
+                },
+                false,
+            ),
+            (
+                CompactionState::Committing {
+                    change: change.clone(),
+                    persistence: PersistenceState::Failed,
+                    fault: Some(fault.clone()),
+                },
+                false,
+            ),
+            (
+                CompactionState::Finished {
+                    result: CompactionOutcome::Compacted {
+                        change: change.clone(),
+                        persistence: PersistenceState::Persisted,
+                    },
+                },
+                false,
+            ),
+            (
+                CompactionState::Finished {
+                    result: CompactionOutcome::Compacted {
+                        change,
+                        persistence: PersistenceState::NotApplicable,
+                    },
+                },
+                false,
+            ),
+            (
+                CompactionState::Finished {
+                    result: CompactionOutcome::Cancelled,
+                },
+                false,
+            ),
+            (
+                CompactionState::Finished {
+                    result: CompactionOutcome::Unchanged,
+                },
+                false,
+            ),
+            (
+                CompactionState::Finished {
+                    result: CompactionOutcome::Failed { fault },
+                },
+                false,
+            ),
+        ];
+        for (state, cancellable) in states {
+            for cancellation_requested in [false, true] {
+                for cancel_claimed in [false, true] {
+                    let result = CompactCancelResult {
+                        cancel_claimed,
+                        target: CompactFacts {
+                            state: state.clone(),
+                            cancellation_requested,
+                            controller_revision: 7,
+                        },
+                    };
+                    let valid = !cancel_claimed || (cancellable && cancellation_requested);
+                    assert_eq!(serde_json::to_value(&result).is_ok(), valid, "{result:?}");
+                    let wire = serde_json::json!({
+                        "cancel_claimed": cancel_claimed,
+                        "target": { "state": state, "cancellation_requested": cancellation_requested, "controller_revision": 7 }
+                    });
+                    assert_eq!(
+                        serde_json::from_value::<CompactCancelResult>(wire).is_ok(),
+                        valid,
+                        "{result:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn compact_facts_reject_unconfirmed_completion_and_invalid_save_facts() {
         for state in [

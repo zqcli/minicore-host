@@ -142,3 +142,17 @@ case preserves ambiguity without cancelling later work. The real local HTTP
 case compares public receipt_get with the original return during and after
 utility execution, while late cancel reads the real completed outcome.
 The protocol correction and the unchanged independent public probes are next.
+
+The receipt correction is fixed at
+`3cfb84ce1ab0ceb9e57aff54fd257bc5185279fb`. The second correction restricts
+cancel_claimed=true to preparing, summarizing or merging with the original
+cancellation signal set. Committing (pending or failed save) and every finished
+outcome require false. A new table test checks the rule in both serialization
+and deserialization, including the ordinary false-claim cases.
+`cargo test -p minicore-host-protocol --locked --offline` passed all 64 cases.
+
+The first attempt to link the independent probe selected mismatched feature
+build artifacts from this reused target directory; it failed to compile, not
+at a behavioral assertion. The final probe run will use the workspace gate's
+consistent dependency artifacts. Its source remains unchanged and its original
+review logs are preserved.
