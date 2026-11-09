@@ -87,3 +87,31 @@ blocked for false, but can retain a diagnostic and finish for true.
 Three additional scope regressions cover explicit worker panic (false), a joined
 record error (true), and a dropped waiter retaining a real file worker with one
 result. The focused suite now passes 26 cases and strict Clippy.
+
+## Final verification
+
+Verified source checkpoint:
+`3cdd977c70e559286a72cf06e485a5e8a89b4261` (cleanup settlement follow-up).
+All commands below completed successfully in the environment listed above:
+
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`
+- `cargo test --workspace --all-targets --locked`
+- `cargo test --workspace --doc --locked`
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`
+- `cargo test --workspace --all-targets --locked -- --list`
+
+The list contains 520 cases: 494 baseline cases and 26 local-tool cases. Nested
+storage subprocess output is not counted as another test. The local-tool cases
+comprise 3 ownership/settlement unit tests, 10 file tests, 1 production HTTP/SSE
+fixture integration, 9 Unix process tests, and 3 real-Runtime boundary tests.
+No checks were skipped for the supported Linux scope. Non-Unix execution and a
+live remote model were not claimed or tested. The worktree was clean at the
+verified source checkpoint before this documentation-only verification update.
+
+The parent integration owner has the exact sink/finish contract and must complete
+production registry selection, owner output/change persistence, and finalization
+binding. Shared-core integration and its independent review are separate from
+these module results. Public UTF-8 output projections must not silently decode
+arbitrary raw command bytes with replacement characters; CommandResult retains
+the exact original bytes and complete/incomplete facts.
