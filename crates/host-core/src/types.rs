@@ -20,10 +20,13 @@ pub struct AgentInfo {
     pub config_revision: ConfigRevision,
     pub config: AgentConfig,
     pub default_session_id: Option<SessionId>,
+    pub metadata_saving: bool,
+    pub metadata_fault: Option<Fault>,
 }
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SessionInfo {
+    pub agent_config_revision: ConfigRevision,
     pub id: SessionId,
     pub agent_id: AgentId,
     pub title: Option<String>,
@@ -71,6 +74,8 @@ pub struct SessionStateData {
     pub next_turn: Vec<InputSummary>,
     pub preparing: bool,
     pub saving: bool,
+    pub metadata_saving: bool,
+    pub metadata_fault: Option<Fault>,
     pub block_reason: Option<Fault>,
     pub last_result: Option<TurnRef>,
 }

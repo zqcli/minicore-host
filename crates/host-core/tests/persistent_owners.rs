@@ -342,6 +342,19 @@ async fn damaged_default_metadata_does_not_hide_healthy_sibling() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].session_id, ids[0]);
     assert_eq!(
+        host.update_agent_async(&caller, &agent, 7, &AgentConfigPatch::default())
+            .await
+            .unwrap_err()
+            .kind(),
+        FaultKind::AgentDefaultSessionUnavailable
+    );
+    assert_eq!(
+        read_agent(&agent_path(directory.path(), &agent_id))
+            .data
+            .default_session_id,
+        Some(ids[0].clone())
+    );
+    assert_eq!(
         host.send(
             &caller,
             SendMessage::new(
@@ -657,6 +670,41 @@ async fn default_session_real_file_failure_keeps_published_agent_receipt() {
     );
 }
 
+#[tokio::test]
+async fn review_resume_validates_history_without_new_input() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let bad = directory
+        .path()
+        .join("agents")
+        .join(agent_id.as_str())
+        .join("sessions")
+        .join(ids[0].as_str())
+        .join("history.jsonl");
+    std::fs::write(&bad, b"{broken").unwrap();
+    let (resources, seen) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    host.pause(&caller, &target).unwrap();
+    let result = host.resume(&caller, &target);
+    wait_state(&host, &caller, &target, |state| !state.preparing).await;
+    let state = host.session_state(&caller, &target).unwrap();
+    assert!(seen.lock().unwrap().is_empty());
+
+    assert!(
+        result.is_err() || state.data.block_reason.is_some(),
+        "resume succeeded without loading or validating corrupted history"
+    );
+    assert_eq!(state.data.scheduling, Scheduling::Paused);
+}
+
 struct ReviewGateModel {
     descriptor: ModelDescriptor,
     entered: Arc<tokio::sync::Notify>,
@@ -744,4 +792,945 @@ async fn review_root_guard_outlives_active_memory_session() {
         second.is_err(),
         "root ownership ended before accepted memory execution ended"
     );
+}
+
+async fn wait_state(
+    host: &Host,
+    caller: &CallerContext,
+    target: &SessionRef,
+    predicate: impl Fn(&SessionStateData) -> bool,
+) -> SessionStateData {
+    let mut changes = host.session_states(caller, target).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let state = changes.snapshot().unwrap().data;
+            if predicate(&state) {
+                return state;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap()
+}
+fn agent_path(directory: &Path, agent: &AgentId) -> std::path::PathBuf {
+    directory.join("agents").join(agent.as_str())
+}
+fn session_path(directory: &Path, target: &SessionRef) -> std::path::PathBuf {
+    agent_path(directory, &target.agent_id)
+        .join("sessions")
+        .join(target.session_id.as_str())
+}
+fn read_agent(path: &Path) -> AgentRecord {
+    serde_json::from_slice(&std::fs::read(path.join("agent.json")).unwrap()).unwrap()
+}
+fn read_session(path: &Path) -> SessionRecord {
+    serde_json::from_slice(&std::fs::read(path.join("session.json")).unwrap()).unwrap()
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn durable_config_versions_defaults_and_reload_preserve_real_history() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(
+        directory.path(),
+        settings("ignored"),
+        Arc::clone(&resources),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[0].clone(),
+    };
+    let role = Role {
+        name: "updated".into(),
+        description: String::new(),
+        instructions: "next session default".into(),
+    };
+    let updated = host
+        .update_agent_async(
+            &caller,
+            &agent,
+            7,
+            &AgentConfigPatch {
+                role: Some(role.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.config_revision, 8);
+    assert_eq!(
+        read_agent(&agent_path(directory.path(), &agent_id))
+            .data
+            .config
+            .role,
+        role
+    );
+    assert_ne!(
+        host.session_info(&caller, &target).unwrap().config.role,
+        role
+    );
+    let created = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: agent.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let new_target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: created.session_id.unwrap(),
+    };
+    let info = host.session_info(&caller, &new_target).unwrap();
+    assert_eq!(info.config.role, role);
+    assert_eq!(info.agent_config_revision, 8);
+    let updated = host
+        .update_session_async(
+            &caller,
+            &target,
+            4,
+            &SessionConfigPatch {
+                role: Some(role.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.config_revision, 5);
+    assert_eq!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .effective_config
+            .role,
+        role
+    );
+    host.send(
+        &caller,
+        SendMessage::new(input("before unload"), target.clone()),
+    )
+    .unwrap();
+    completed(&host, &caller, &target).await;
+    host.unload(&caller, &target).unwrap();
+    host.load_session(&caller, &target).unwrap();
+    wait_state(&host, &caller, &target, |state| {
+        state.residency == Residency::Loaded && !state.preparing
+    })
+    .await;
+    assert_eq!(
+        host.history(&caller, &target)
+            .unwrap()
+            .iter()
+            .filter(|item| matches!(item, HistoryItem::User(_)))
+            .count(),
+        1
+    );
+    host.send(
+        &caller,
+        SendMessage::new(input("after reload"), target.clone()),
+    )
+    .unwrap();
+    wait_state(&host, &caller, &target, |state| {
+        state.last_result.is_some()
+            && state.active_turn_id.is_none()
+            && state.next_turn.is_empty()
+            && !state.preparing
+    })
+    .await;
+    assert_eq!(
+        host.history(&caller, &target)
+            .unwrap()
+            .iter()
+            .filter(|item| matches!(item, HistoryItem::User(_)))
+            .count(),
+        2
+    );
+    drop(connection);
+    drop(host);
+    let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = reopened.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(
+        reopened
+            .agent_info(&caller, &agent)
+            .unwrap()
+            .config_revision,
+        8
+    );
+    assert_eq!(
+        reopened
+            .session_info(&caller, &target)
+            .unwrap()
+            .config_revision,
+        5
+    );
+    assert!(reopened.turns(&caller, &target).unwrap().is_empty());
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn metadata_write_failure_retains_old_config_and_reconciles_only_original_candidate() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    let path = session_path(directory.path(), &target);
+    let original = host.session_info(&caller, &target).unwrap();
+    std::fs::rename(path.join("session.json"), path.join("original.json")).unwrap();
+    std::fs::create_dir(path.join("session.json")).unwrap();
+    let role = Role {
+        name: "candidate".into(),
+        description: String::new(),
+        instructions: "new role".into(),
+    };
+    assert!(
+        host.update_session_async(
+            &caller,
+            &target,
+            4,
+            &SessionConfigPatch {
+                role: Some(role.clone()),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        host.session_info(&caller, &target).unwrap().config,
+        original.config
+    );
+    assert!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .metadata_fault
+            .is_some()
+    );
+    assert!(
+        host.update_session_async(
+            &caller,
+            &target,
+            4,
+            &SessionConfigPatch {
+                role: Some(Role::default()),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_err()
+    );
+    std::fs::remove_dir(path.join("session.json")).unwrap();
+    std::fs::rename(path.join("original.json"), path.join("session.json")).unwrap();
+    let original_bytes = std::fs::read(path.join("session.json")).unwrap();
+    let mut unrelated = read_session(&path);
+    unrelated.data.effective_config.role.name = "unrelated external value".into();
+    let unrelated_bytes = serde_json::to_vec(&unrelated).unwrap();
+    std::fs::write(path.join("session.json"), &unrelated_bytes).unwrap();
+    assert!(
+        host.reconcile_session_record(&caller, &target)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        std::fs::read(path.join("session.json")).unwrap(),
+        unrelated_bytes
+    );
+    std::fs::write(path.join("session.json"), original_bytes).unwrap();
+    assert_eq!(
+        host.session_info(&caller, &target).unwrap().config_revision,
+        4
+    );
+    let saved = host
+        .reconcile_session_record(&caller, &target)
+        .await
+        .unwrap();
+    assert_eq!(saved.config_revision, 5);
+    assert_eq!(saved.config.role, role);
+    assert_eq!(read_session(&path).data.effective_config.role, role);
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn close_persists_default_clear_before_closed_and_survives_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(
+        directory.path(),
+        settings("ignored"),
+        Arc::clone(&resources),
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[0].clone(),
+    };
+    host.close_session(&caller, &target).unwrap();
+    assert!(
+        host.send(&caller, SendMessage::new(input("rejected"), target.clone()))
+            .is_err()
+    );
+    wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert_eq!(
+        read_agent(&agent_path(directory.path(), &agent_id))
+            .data
+            .default_session_id,
+        None
+    );
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_some()
+    );
+    assert!(
+        session_path(directory.path(), &target)
+            .join("history.jsonl")
+            .exists()
+    );
+    assert!(
+        host.set_default_session_async(&caller, &agent, Some(target.session_id.clone()))
+            .await
+            .is_err()
+    );
+    drop(connection);
+    drop(host);
+    // The direct close owner may still be releasing its last stack-local lease.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Ok(root) = DataRoot::acquire(directory.path()) {
+                drop(root);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = reopened.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(
+        reopened
+            .session_state(&caller, &target)
+            .unwrap()
+            .data
+            .lifecycle,
+        SessionLifecycle::Closed
+    );
+    assert_eq!(
+        reopened
+            .agent_info(&caller, &agent)
+            .unwrap()
+            .default_session_id,
+        None
+    );
+    assert_eq!(
+        reopened.resume(&caller, &target).unwrap_err().kind(),
+        FaultKind::SessionLifecycleClosed
+    );
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn failed_default_clear_keeps_session_closing_until_exact_save_is_reconciled() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[0].clone(),
+    };
+    let path = agent_path(directory.path(), &agent_id);
+    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.metadata_fault.is_some()
+    })
+    .await;
+    assert_eq!(state.lifecycle, SessionLifecycle::Closing);
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_none()
+    );
+    std::fs::remove_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
+    let original_bytes = std::fs::read(path.join("agent.json")).unwrap();
+    let mut unrelated = read_agent(&path);
+    unrelated.data.default_session_id = Some(ids[1].clone());
+    let unrelated_bytes = serde_json::to_vec(&unrelated).unwrap();
+    std::fs::write(path.join("agent.json"), &unrelated_bytes).unwrap();
+    assert!(host.reconcile_agent_record(&caller, &agent).await.is_err());
+    assert_eq!(
+        std::fs::read(path.join("agent.json")).unwrap(),
+        unrelated_bytes
+    );
+    std::fs::write(path.join("agent.json"), original_bytes).unwrap();
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(target.session_id.clone())
+    );
+    host.reconcile_agent_record(&caller, &agent).await.unwrap();
+    assert_eq!(read_agent(&path).data.default_session_id, None);
+    host.close_session(&caller, &target).unwrap();
+    wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn memory_default_is_runtime_only_and_never_recreated_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("test"), Arc::clone(&resources))
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut request = create_request(StorageMode::Persistent);
+    request.default_session = Some(SessionOptions {
+        mode: Some(StorageMode::Memory),
+        overrides: None,
+    });
+    let receipt = host.create_agent_async(&caller, request).await.unwrap();
+    receipt.validate_call_return().unwrap();
+    let agent_id = receipt.agent_id.unwrap();
+    assert_eq!(
+        read_agent(&agent_path(directory.path(), &agent_id))
+            .data
+            .default_session_id,
+        None
+    );
+    assert!(
+        !agent_path(directory.path(), &agent_id)
+            .join("sessions")
+            .exists()
+    );
+    drop(connection);
+    drop(host);
+    let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = reopened.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id: receipt.host_id,
+        agent_id,
+    };
+    assert!(reopened.sessions(&caller, &agent).unwrap().is_empty());
+    assert_eq!(
+        reopened
+            .agent_info(&caller, &agent)
+            .unwrap()
+            .default_session_id,
+        None
+    );
+}
+
+#[tokio::test]
+async fn review_check_closed_session_cannot_reopen_or_write() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    {
+        let root = DataRoot::acquire(directory.path()).unwrap();
+        let store = root
+            .host(host_id)
+            .agent(agent_id.clone(), StorageMode::Persistent)
+            .session(ids[0].clone(), StorageMode::Persistent)
+            .unwrap();
+        let mut record = store.load().unwrap();
+        record.data.closed = Some(SessionClosure {
+            reason: "finished ownership".into(),
+        });
+        store.save(&record).unwrap();
+    }
+    let path = directory
+        .path()
+        .join("agents")
+        .join(agent_id.as_str())
+        .join("sessions")
+        .join(ids[0].as_str())
+        .join("history.jsonl");
+    let original = std::fs::read(&path).unwrap();
+    let (resources, seen) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    assert_eq!(
+        host.session_state(&caller, &target).unwrap().data.lifecycle,
+        SessionLifecycle::Closed
+    );
+    assert_eq!(
+        host.resume(&caller, &target).unwrap_err().kind(),
+        FaultKind::SessionLifecycleClosed
+    );
+    assert_eq!(
+        host.send(&caller, SendMessage::new(input("do not execute"), target))
+            .unwrap_err()
+            .kind(),
+        FaultKind::SessionLifecycleClosed
+    );
+    assert!(seen.lock().unwrap().is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+}
+
+fn review_gate_resources() -> (
+    Arc<dyn ResourceResolver>,
+    Arc<tokio::sync::Notify>,
+    Arc<tokio::sync::Semaphore>,
+) {
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let resources: Arc<dyn ResourceResolver> = Arc::new(Resources {
+        model: Arc::new(ReviewGateModel {
+            descriptor: ModelDescriptor::new(
+                "test/model".parse().unwrap(),
+                128_000,
+                BTreeSet::from([RuntimeReasoning::Auto]),
+                true,
+            )
+            .unwrap(),
+            entered: entered.clone(),
+            release: release.clone(),
+            finished: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }),
+    });
+    (resources, entered, release)
+}
+
+#[tokio::test]
+async fn review_check_active_persistent_session_retains_root_guard() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let (resources, entered, release) = review_gate_resources();
+    let host = Host::open_persistent(directory.path(), settings("first"), resources.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    host.send(
+        &connection.caller(),
+        SendMessage::new(input("keep working"), target),
+    )
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    drop(connection);
+    drop(host);
+    assert!(
+        Host::open_persistent(directory.path(), settings("second"), resources)
+            .await
+            .is_err()
+    );
+    release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Ok(root) = DataRoot::acquire(directory.path()) {
+                drop(root);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn review_check_real_save_failure_preserves_completed_outcome() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let path = directory
+        .path()
+        .join("agents")
+        .join(agent_id.as_str())
+        .join("sessions")
+        .join(ids[0].as_str())
+        .join("history.jsonl");
+    let (resources, entered, release) = review_gate_resources();
+    let host = Host::open_persistent(directory.path(), settings("first"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    host.send(
+        &caller,
+        SendMessage::new(input("keep completed"), target.clone()),
+    )
+    .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    std::fs::rename(&path, path.with_extension("jsonl.saved")).unwrap();
+    std::fs::write(&path, b"").unwrap();
+    release.add_permits(1);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Some(turn) = host.turns(&caller, &target).unwrap().last()
+                && turn.persistence == PersistenceState::Failed
+                && turn.outcome.is_some()
+            {
+                assert_eq!(turn.state, TurnState::Finalizing);
+                assert_eq!(turn.outcome, Some(TurnOutcome::Completed));
+                assert!(turn.fault.is_none());
+                assert_eq!(
+                    turn.persistence_fault.as_ref().unwrap().kind(),
+                    FaultKind::SessionHistoryWriteFailed
+                );
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
+    assert!(host.load_session(&caller, &target).is_err());
+    assert!(host.unload(&caller, &target).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
+    assert!(
+        host.history(&caller, &target)
+            .unwrap()
+            .iter()
+            .any(|item| matches!(item, HistoryItem::Assistant(_)))
+    );
+}
+
+#[tokio::test]
+async fn review_check_restart_uses_saved_context_with_fresh_turn_and_load() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    let (r1, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("first"), r1)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let old_host = host.info(&caller).unwrap();
+    host.send(
+        &caller,
+        SendMessage::new(input("old unique prompt"), target.clone()),
+    )
+    .unwrap();
+    let old = completed(&host, &caller, &target).await;
+    drop(caller);
+    drop(connection);
+    drop(host);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Ok(root) = DataRoot::acquire(directory.path()) {
+                drop(root);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let (r2, seen) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), r2)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(host.info(&caller).unwrap().host_id, old_host.host_id);
+    assert_ne!(
+        host.info(&caller).unwrap().host_incarnation,
+        old_host.host_incarnation
+    );
+    assert!(host.turns(&caller, &target).unwrap().is_empty());
+    host.send(
+        &caller,
+        SendMessage::new(input("new unique prompt"), target.clone()),
+    )
+    .unwrap();
+    let new = completed(&host, &caller, &target).await;
+    assert_ne!(new.info.id, old.info.id);
+    assert_ne!(new.info.load_id, old.info.load_id);
+    let requests = seen.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    let serialized = serde_json::to_string(&requests[0]).unwrap();
+    assert!(serialized.contains("old unique prompt"));
+    assert!(serialized.contains("new unique prompt"));
+    assert!(serialized.contains("fixture response"));
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_single_unsafe_session_directory_is_isolated() {
+    use std::os::unix::fs::PermissionsExt;
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let bad = directory
+        .path()
+        .join("agents")
+        .join(agent_id.as_str())
+        .join("sessions")
+        .join(ids[0].as_str());
+    std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o777)).unwrap();
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[1].clone(),
+    };
+    let child_result = host.session_info(&caller, &target);
+    let failures = host.agent_load_failures(&caller).unwrap();
+    assert!(failures.is_empty());
+    assert_eq!(
+        host.session_load_failures(
+            &caller,
+            &AgentRef {
+                host_id: host_id.clone(),
+                agent_id: agent_id.clone()
+            }
+        )
+        .unwrap()[0]
+            .session_id,
+        ids[0]
+    );
+    assert!(
+        child_result.is_ok(),
+        "single child directory fault hid healthy sibling and Agent {}",
+        host_id
+    );
+}
+
+#[test]
+fn accepted_metadata_saves_outlive_both_waiters_and_connection() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (host_id, agent_id, ids) = seed(directory.path());
+        let (resources, _) = resources();
+        let host = Host::open_persistent(directory.path(), settings("test"), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let agent = AgentRef {
+            host_id,
+            agent_id: agent_id.clone(),
+        };
+        let target = SessionRef {
+            agent_id: agent_id.clone(),
+            session_id: ids[0].clone(),
+        };
+        // A scheduling fixture occupies the blocking pool. The actual metadata
+        // work still uses production storage against real temporary files.
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = target.clone();
+        let session_waiter = tokio::spawn(async move {
+            owner
+                .update_session_async(
+                    &task_caller,
+                    &task_target,
+                    4,
+                    &SessionConfigPatch {
+                        role: Some(Role {
+                            name: "accepted Session config".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = agent.clone();
+        let agent_waiter = tokio::spawn(async move {
+            owner
+                .update_agent_async(
+                    &task_caller,
+                    &task_target,
+                    7,
+                    &AgentConfigPatch {
+                        role: Some(Role {
+                            name: "accepted Agent config".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                )
+                .await
+        });
+        wait_state(&host, &caller, &target, |state| state.metadata_saving).await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while !host.agent_info(&caller, &agent).unwrap().metadata_saving {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            host.session_info(&caller, &target).unwrap().config_revision,
+            4
+        );
+        assert_eq!(host.agent_info(&caller, &agent).unwrap().config_revision, 7);
+        session_waiter.abort();
+        agent_waiter.abort();
+        assert!(session_waiter.await.unwrap_err().is_cancelled());
+        assert!(agent_waiter.await.unwrap_err().is_cancelled());
+        connection.close();
+        let observer = host.connect().unwrap();
+        let caller = observer.caller();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        wait_state(&host, &caller, &target, |state| !state.metadata_saving).await;
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while host.agent_info(&caller, &agent).unwrap().metadata_saving {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        let saved_session = read_session(&session_path(directory.path(), &target));
+        let saved_agent = read_agent(&agent_path(directory.path(), &agent_id));
+        assert_eq!(saved_session.data.config_revision, 5);
+        assert_eq!(
+            saved_session.data.effective_config.role.name,
+            "accepted Session config"
+        );
+        assert_eq!(saved_agent.data.config_revision, 8);
+        assert_eq!(saved_agent.data.config.role.name, "accepted Agent config");
+        host.send(
+            &caller,
+            SendMessage::new(input("after owned saves"), target.clone()),
+        )
+        .unwrap();
+        assert_eq!(
+            completed(&host, &caller, &target).await.info.persistence,
+            PersistenceState::Persisted
+        );
+    });
+}
+
+#[test]
+fn later_pause_wins_over_accepted_resume_history_load() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (_, agent_id, ids) = seed(directory.path());
+        let (resources, seen) = resources();
+        let host = Host::open_persistent(directory.path(), settings("test"), resources)
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        host.pause(&caller, &target).unwrap();
+        host.resume(&caller, &target).unwrap();
+        wait_state(&host, &caller, &target, |state| state.preparing).await;
+        host.pause(&caller, &target).unwrap();
+        host.send(
+            &caller,
+            SendMessage::new(input("stay queued after later pause"), target.clone()),
+        )
+        .unwrap();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        let loaded = wait_state(&host, &caller, &target, |state| !state.preparing).await;
+        assert_eq!(loaded.residency, Residency::Loaded);
+        assert_eq!(loaded.scheduling, Scheduling::Paused);
+        assert_eq!(loaded.next_turn.len(), 1);
+        assert!(seen.lock().unwrap().is_empty());
+        host.resume(&caller, &target).unwrap();
+        assert_eq!(
+            completed(&host, &caller, &target).await.info.persistence,
+            PersistenceState::Persisted
+        );
+    });
 }

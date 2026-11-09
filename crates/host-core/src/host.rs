@@ -7,6 +7,7 @@ use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
 
 mod create;
+mod metadata;
 mod persistent;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -464,11 +465,8 @@ impl Host {
             .cancel(caller, Some(turn_id), keep_inbox)
     }
     pub fn close_session(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
-        let agent = self.agent(caller, &target.agent_id)?;
-        let session = agent.session(&target.session_id)?;
-        session.close(caller)?;
-        agent.clear_default_if(&target.session_id);
-        Ok(())
+        self.agent(caller, &target.agent_id)?
+            .close_session(caller, &target.session_id)
     }
     pub fn turns(
         &self,

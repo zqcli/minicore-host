@@ -4,6 +4,7 @@ use crate::types::{AgentInfo, SessionLoadFailure};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
 mod create;
+mod metadata;
 mod persistent;
 use minicore_host_protocol::*;
 use std::collections::BTreeMap;
@@ -33,6 +34,12 @@ struct AgentState {
     creating: usize,
     executor: Option<tokio::runtime::Handle>,
     stop_task: Option<tokio::task::JoinHandle<()>>,
+    record_base: Option<AgentRecord>,
+    record_work: Option<metadata::AgentRecordWork>,
+    record_task: Option<tokio::task::JoinHandle<()>>,
+    closing: std::collections::BTreeSet<SessionId>,
+    close_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
+    close_running: std::collections::BTreeSet<SessionId>,
 }
 impl AgentOwner {
     pub(crate) fn new(
@@ -64,6 +71,8 @@ impl AgentOwner {
                     config_revision: 0,
                     config,
                     default_session_id: None,
+                    metadata_saving: false,
+                    metadata_fault: None,
                 },
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
@@ -72,6 +81,12 @@ impl AgentOwner {
                 creating: 0,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,
+                record_base: None,
+                record_work: None,
+                record_task: None,
+                closing: Default::default(),
+                close_tasks: BTreeMap::new(),
+                close_running: Default::default(),
             }),
         })
     }
@@ -160,7 +175,7 @@ impl AgentOwner {
         }
         // Snapshot only direct-owner values, then release this lock before child
         // construction. Publication rechecks the actual lifecycle boundary.
-        let config = {
+        let (config, source_revision) = {
             let state = self.state.lock().expect("Agent mutex poisoned");
             if state.info.lifecycle != AgentLifecycle::Active {
                 return Err(Fault::new(
@@ -173,8 +188,14 @@ impl AgentOwner {
                 .mode
                 .session_mode(options.mode)
                 .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-            SessionConfig::from_agent(&state.info.config, &options.overrides.unwrap_or_default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?
+            (
+                SessionConfig::from_agent(
+                    &state.info.config,
+                    &options.overrides.unwrap_or_default(),
+                )
+                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
+                state.info.config_revision,
+            )
         };
         self.resources.validate(&config)?;
         let backend: Arc<dyn HistoryBackend> = Arc::new(MemoryHistory);
@@ -191,6 +212,7 @@ impl AgentOwner {
             Arc::clone(&self.enabled),
         );
         let session = session.hold_root(self.root_lease.clone());
+        session.set_source_revision(source_revision);
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         if state.info.lifecycle != AgentLifecycle::Active {
             return Err(Fault::new(
@@ -224,6 +246,7 @@ impl AgentOwner {
                 ));
             }
             let mut state = self.state.lock().expect("Agent mutex poisoned");
+            Self::writable(&state)?;
             if session
                 .as_ref()
                 .is_some_and(|id| !state.sessions.contains_key(id))
@@ -231,6 +254,15 @@ impl AgentOwner {
                 return Err(Fault::new(
                     FaultKind::AgentSessionNotFound,
                     "Session does not belong to this Agent",
+                ));
+            }
+            if session
+                .as_ref()
+                .is_some_and(|id| state.closing.contains(id))
+            {
+                return Err(Fault::new(
+                    FaultKind::AgentDefaultSessionUnavailable,
+                    "default Session is closing",
                 ));
             }
             state.info.default_session_id = session;
@@ -272,6 +304,7 @@ impl AgentOwner {
         )?;
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
+            Self::writable(&state)?;
             if state.info.config_revision != expected_revision {
                 return Err(Fault::new(
                     FaultKind::AgentConfigConflict,
@@ -367,7 +400,8 @@ impl AgentOwner {
     fn stop_settled(&self) -> bool {
         let children = {
             let state = self.state.lock().expect("Agent mutex poisoned");
-            if state.creating != 0 {
+            if state.creating != 0 || state.info.metadata_saving || !state.close_running.is_empty()
+            {
                 return false;
             }
             state.sessions.values().cloned().collect::<Vec<_>>()
@@ -376,7 +410,7 @@ impl AgentOwner {
             return false;
         }
         let mut state = self.state.lock().expect("Agent mutex poisoned");
-        if state.creating != 0 {
+        if state.creating != 0 || state.info.metadata_saving || !state.close_running.is_empty() {
             return false;
         }
         if state.info.lifecycle == AgentLifecycle::Stopping {

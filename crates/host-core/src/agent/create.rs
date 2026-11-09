@@ -248,6 +248,7 @@ impl AgentOwner {
             )
         };
         let session = session.hold_root(self.root_lease.clone());
+        session.set_source_revision(prepared.agent_revision);
         // Default publication is ordered after Session files, and before exposing
         // the default Session. A failed phase retains actual disk artifacts; it
         // does not publish a usable reference or invent a rollback.
@@ -271,10 +272,12 @@ impl AgentOwner {
                 },
             );
             let store = store.clone();
+            let saved = record.clone();
             disk(FaultKind::HostStorageUnavailable, move || {
-                store.save(&record)
+                store.save(&saved)
             })
             .await?;
+            self.state.lock().expect("Agent mutex poisoned").record_base = Some(record);
         }
         {
             let mut state = self.state.lock().expect("Agent mutex poisoned");

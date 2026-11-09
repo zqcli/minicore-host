@@ -63,6 +63,7 @@ impl AgentOwner {
         access: Arc<ConnectionRegistry>,
         resources: Arc<dyn ResourceResolver>,
     ) -> Arc<Self> {
+        let record_base = record.clone();
         let root_lease: Arc<dyn Send + Sync> = Arc::new(store.clone());
         Arc::new(Self {
             id: record.id.clone(),
@@ -84,6 +85,8 @@ impl AgentOwner {
                     config_revision: record.data.config_revision,
                     config: record.data.config,
                     default_session_id: record.data.default_session_id,
+                    metadata_saving: false,
+                    metadata_fault: None,
                 },
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
@@ -92,6 +95,12 @@ impl AgentOwner {
                 creating: 0,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,
+                record_base: Some(record_base),
+                record_work: None,
+                record_task: None,
+                closing: Default::default(),
+                close_tasks: BTreeMap::new(),
+                close_running: Default::default(),
             }),
         })
     }

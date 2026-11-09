@@ -4,6 +4,7 @@ use futures_util::FutureExt;
 use minicore_host_protocol::*;
 use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 
+mod metadata;
 mod persistent;
 use minicore_runtime::{
     AgentLoop, BoundedText, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory,
@@ -119,6 +120,7 @@ struct SessionState {
     info: SessionInfo,
     lifecycle: SessionLifecycle,
     paused: bool,
+    pause_generation: u64,
     failure_paused: bool,
     agent_enabled: Arc<AtomicBool>,
     residency: Residency,
@@ -141,6 +143,11 @@ struct SessionState {
     executor: Option<tokio::runtime::Handle>,
     driver_running: bool,
     driver_task: Option<tokio::task::JoinHandle<()>>,
+    record_base: Option<SessionRecord>,
+    record_work: Option<metadata::SessionRecordWork>,
+    record_task: Option<tokio::task::JoinHandle<()>>,
+    load_task: Option<tokio::task::JoinHandle<()>>,
+    close_fault: Option<Fault>,
 }
 
 pub(crate) struct SessionController {
@@ -175,6 +182,7 @@ impl SessionController {
     ) -> Arc<Self> {
         let state = SessionState {
             info: SessionInfo {
+                agent_config_revision: 0,
                 id: id.clone(),
                 agent_id: agent_id.clone(),
                 title: None,
@@ -184,6 +192,7 @@ impl SessionController {
             },
             lifecycle: SessionLifecycle::Open,
             paused: false,
+            pause_generation: 0,
             failure_paused: false,
             agent_enabled,
             residency: Residency::Unloaded,
@@ -206,6 +215,11 @@ impl SessionController {
             executor: tokio::runtime::Handle::try_current().ok(),
             driver_running: false,
             driver_task: None,
+            record_base: None,
+            record_work: None,
+            record_task: None,
+            load_task: None,
+            close_fault: None,
         };
         let snapshot = Self::make_snapshot(&state, &host_id, &incarnation, &agent_id, &id);
         let (snapshots, _) = watch::channel(snapshot);
@@ -261,6 +275,12 @@ impl SessionController {
                 next_turn: state.next_turn.iter().map(QueuedInput::summary).collect(),
                 preparing: state.preparing,
                 saving: state.saving,
+                metadata_saving: state.record_work.as_ref().is_some_and(|work| work.running),
+                metadata_fault: state
+                    .record_work
+                    .as_ref()
+                    .and_then(|work| work.fault.clone())
+                    .or_else(|| state.close_fault.clone()),
                 block_reason: state.block_reason.clone(),
                 last_result: state.completion_order.last().map(|id| TurnRef {
                     session_id: state.info.id.clone(),
@@ -476,12 +496,30 @@ impl SessionController {
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
+            state.pause_generation = state.pause_generation.checked_add(1).ok_or_else(|| {
+                Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "pause generation exhausted",
+                )
+            })?;
             state.paused = true;
             self.publish(&mut state);
             Ok(())
         })
     }
     pub(crate) fn resume(self: &Arc<Self>, caller: &CallerContext) -> Result<(), Fault> {
+        let reload = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            state.info.mode == StorageMode::Persistent
+                && (!state.history_loaded
+                    || state
+                        .block_reason
+                        .as_ref()
+                        .is_some_and(|fault| fault.kind() == FaultKind::SessionHistoryLoadFailed))
+        };
+        if reload {
+            return self.load(caller, true);
+        }
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
@@ -520,7 +558,7 @@ impl SessionController {
             if state.info.mode == StorageMode::Persistent {
                 return Err(Fault::new(
                     FaultKind::HostMethodUnavailable,
-                    "persistent configuration updates are not implemented in this foundation stage",
+                    "persistent configuration updates require the asynchronous owner entry",
                 ));
             }
             if state.info.config_revision != expected_revision {
@@ -630,20 +668,7 @@ impl SessionController {
         }
         Ok(result)
     }
-    pub(crate) fn close(&self, caller: &CallerContext) -> Result<(), Fault> {
-        if self.store.is_some() {
-            return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
-                "persistent close requires the asynchronous owner entry",
-            ));
-        }
-        let handle = self.access.accept(caller, || self.close_owned())?;
-        if let Some(handle) = handle {
-            handle.shutdown();
-        }
-        Ok(())
-    }
-    fn close_owned(&self) -> Result<Option<LoopHandle>, Fault> {
+    pub(super) fn close_owned(&self) -> Result<Option<LoopHandle>, Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.lifecycle == SessionLifecycle::Closed {
             return Ok(None);
@@ -658,7 +683,11 @@ impl SessionController {
         } else {
             None
         };
-        if state.active.is_none() && !state.preparing && !state.saving {
+        if state.info.mode == StorageMode::Memory
+            && state.active.is_none()
+            && !state.preparing
+            && !state.saving
+        {
             state.lifecycle = SessionLifecycle::Closed;
             state.residency = Residency::Unloaded;
             state.load_id = None;
@@ -670,7 +699,11 @@ impl SessionController {
         self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
-            if state.active.is_some() || state.preparing || state.saving {
+            if state.active.is_some()
+                || state.preparing
+                || state.saving
+                || state.record_work.as_ref().is_some_and(|work| work.running)
+            {
                 return Err(Fault::new(
                     FaultKind::SessionBusy,
                     "Session still owns execution or save work",
@@ -681,13 +714,19 @@ impl SessionController {
             }
             state.residency = Residency::Unloaded;
             state.load_id = None;
+            if state.info.mode == StorageMode::Persistent {
+                state.history_loaded = false;
+            }
             self.publish(&mut state);
             Ok(())
         })
     }
     pub(crate) fn is_quiescent_owned(&self) -> bool {
         let state = self.state.lock().expect("Session mutex poisoned");
-        state.active.is_none() && !state.preparing && !state.saving
+        state.active.is_none()
+            && !state.preparing
+            && !state.saving
+            && !state.record_work.as_ref().is_some_and(|work| work.running)
     }
     pub(crate) async fn wait_quiescent_owned(&self) {
         let mut snapshots = self.snapshots.subscribe();
@@ -815,6 +854,7 @@ impl SessionController {
     fn wake(self: &Arc<Self>) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.driver_running
+            || state.preparing
             || !Self::schedulable(&state)
             || (state.next_step.is_empty() && state.next_turn.is_empty())
         {
@@ -839,10 +879,12 @@ impl SessionController {
             let preparation = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 if !Self::schedulable(&state)
+                    || state.preparing
                     || state.active.is_some()
                     || (state.next_step.is_empty() && state.next_turn.is_empty())
                 {
                     if state.lifecycle == SessionLifecycle::Closing
+                        && state.info.mode == StorageMode::Memory
                         && state.active.is_none()
                         && !state.preparing
                         && !state.saving
@@ -867,7 +909,20 @@ impl SessionController {
                 .expect("Session mutex poisoned")
                 .history_loaded;
             if needs_load {
-                match self.backend.load().await {
+                {
+                    let mut state = self.state.lock().expect("Session mutex poisoned");
+                    state.residency = Residency::Loading;
+                    self.publish(&mut state);
+                }
+                match AssertUnwindSafe(self.backend.load())
+                    .catch_unwind()
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(Fault::new(
+                            FaultKind::SessionHistoryLoadFailed,
+                            "history loader failed unexpectedly",
+                        ))
+                    }) {
                     Ok(history) => {
                         let mut state = self.state.lock().expect("Session mutex poisoned");
                         state.history = history;
@@ -900,7 +955,9 @@ impl SessionController {
                     state.block_reason = Some(fault);
                     state.driver_running = false;
                     state.driver_task.take();
-                    if state.lifecycle == SessionLifecycle::Closing {
+                    if state.lifecycle == SessionLifecycle::Closing
+                        && state.info.mode == StorageMode::Memory
+                    {
                         state.lifecycle = SessionLifecycle::Closed;
                     }
                     self.publish(&mut state);
@@ -977,6 +1034,10 @@ impl SessionController {
     fn preparation_failed(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         state.preparing = false;
+        if fault.kind() == FaultKind::SessionHistoryLoadFailed {
+            state.residency = Residency::Unloaded;
+            state.load_id = None;
+        }
         state.block_reason = Some(fault);
         state.driver_running = false;
         state.driver_task.take();
@@ -1391,7 +1452,7 @@ impl SessionController {
         };
         state.completion_order.push(turn_id.clone());
         state.completed.insert(turn_id.clone(), result);
-        if state.lifecycle == SessionLifecycle::Closing {
+        if state.lifecycle == SessionLifecycle::Closing && state.info.mode == StorageMode::Memory {
             state.lifecycle = SessionLifecycle::Closed;
             state.residency = Residency::Unloaded;
             state.load_id = None;

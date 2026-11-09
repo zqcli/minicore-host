@@ -1,5 +1,5 @@
 use crate::session::{HistoryBackend, LoadFuture, SaveFuture};
-use minicore_host_protocol::{Fault, FaultKind, StorageMode};
+use minicore_host_protocol::{Fault, FaultDetails, FaultKind, HistoryLoadDetails, StorageMode};
 use minicore_host_storage::{HistoryEntry, SessionJournal, SessionStore};
 use std::sync::{Arc, Mutex};
 
@@ -27,9 +27,19 @@ impl HistoryBackend for JournalHistory {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
                 let mut current = journal.lock().expect("journal mutex poisoned");
-                if current.is_none() {
-                    *current = Some(store.open_journal().map_err(load_fault)?);
+                if current.as_ref().is_some_and(|value| {
+                    value.needs_reconciliation() || value.pending_range().is_some()
+                }) {
+                    return Err(Fault::new(
+                        FaultKind::SessionHistoryWriteFailed,
+                        "the original pending save must be reconciled before history can reload",
+                    ));
                 }
+                // loaded_records is an opening baseline, not a live history cache.
+                // Only a quiescent owner calls load, and this disk-only lock also
+                // excludes appends. Reopen and validate the actual complete file.
+                current.take();
+                *current = Some(store.open_journal().map_err(load_fault)?);
                 Ok(current
                     .as_ref()
                     .expect("opened journal")
@@ -71,7 +81,22 @@ impl HistoryBackend for JournalHistory {
     }
 }
 fn load_fault(error: minicore_host_storage::StorageError) -> Fault {
-    Fault::new(FaultKind::SessionHistoryLoadFailed, error.to_string())
+    let position = match &error {
+        minicore_host_storage::StorageError::InvalidHistory { position, .. } => Some(*position),
+        minicore_host_storage::StorageError::UnsupportedSchema { position, .. } => *position,
+        _ => None,
+    };
+    let fault = Fault::new(FaultKind::SessionHistoryLoadFailed, error.to_string());
+    if let Some(position) = position {
+        fault
+            .with_details(FaultDetails::HistoryLoad(HistoryLoadDetails {
+                line: Some(position.line),
+                byte_offset: Some(position.byte_offset),
+            }))
+            .expect("storage positions satisfy the history load schema")
+    } else {
+        fault
+    }
 }
 fn write_fault(error: minicore_host_storage::StorageError) -> Fault {
     Fault::new(FaultKind::SessionHistoryWriteFailed, error.to_string())
