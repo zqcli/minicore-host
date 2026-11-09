@@ -7,7 +7,7 @@ constructor capabilities. Tool JSON contains business arguments only.
 
 This crate provides execution and registration declarations. Production Host
 registry selection, Session persistence, public output/change projections, and
-finalization wiring are separate integration work, not claimed here.
+finalization wiring live in the core/tools/resources integration, not this crate.
 
 The Turn owner must retain `LocalTools` and await `finish()` after Runtime ends,
 including cancellation and deadlines. Runtime 0.10.0 drops port futures when
@@ -20,6 +20,13 @@ error, while a worker panic, failed group wait, unconfirmed process-group end,
 or unfinished pipe cleanup is unconfirmed. The integrating owner must keep
 unconfirmed work blocked in finalization rather than treating a returned
 diagnostic as proof of exit.
+
+The sink's per-call `complete` callback reports the same actual cleanup fact after
+all I/O and observations, even when Runtime has dropped its waiting future. A
+pre-worker rejection reports confirmed completion immediately. The production
+Session adapter uses this fact to close the invocation's output lease and expose
+its retained native result as finished. It does not wait for the whole Turn,
+synthesize a ToolResult, or replace the existing once-per-Turn collector.
 
 The recording sink is a short, nonblocking owner callback, not an observer or an
 external store call. Its owner supplies Session/Turn/Load identity, validates
@@ -57,9 +64,9 @@ clones share a dedicated mutation operation guard across all their LocalTools
 bindings, from source capture through replacement and authoritative after capture.
 This guard belongs to the actual blocking worker, not its caller's wait. It is
 not an owner-state lock. Separately opening the same path creates a different
-binding and does not share this guard. Production resource preparation currently
-opens a Workspace for each Turn; integration must retain and clone the selected
-binding wherever shared mutation ordering is needed. Shell writes, external
+binding and does not share this guard. The production resource builder reuses
+actual Workspace bindings through its owner-held weak map across Turns and
+resource publications, without retaining unused roots. Shell writes, external
 path/permission races and cross-process locking are outside this boundary.
 Parent-directory creation is not an atomic multi-directory transaction.
 `apply_patch` and other tools are absent.
