@@ -1,6 +1,6 @@
 # Public method implementation map
 
-Current executable source `70c17e7226bd90c7bb1e146ed141081f567e9d23` has 50 real shared routes; only agent.delete/session.delete are not yet integrated. The table below is explicitly the preserved older 76a7bfb checkpoint, not a current 37-route claim. The current contract audit has found bound-Turn configuration and query envelope/native-field projection gaps; see [the executable handoff](executable-review-handoff.md). A complete current matrix will accompany their fixed-source corrections.
+Current executable source `4187899ef9b7301ed5af4cf36b84b5825fb83bed` has all 52 real shared routes, including reviewed Agent/Session deletion. Route presence is not full contract acceptance: bound-Turn configuration, public query projections and original terminal revision corrections remain in their independent review stage. The table below is explicitly the preserved older 76a7bfb checkpoint, not the current implementation map. A complete current matrix will accompany the fixed query contracts; see [the executable handoff](executable-review-handoff.md).
 
 ## Historical 76a7bfb method map
 

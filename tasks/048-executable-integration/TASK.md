@@ -145,3 +145,11 @@ The normal complete combined gate now passes **779 unique tests and 4 doctests**
 `docs/executable-cold-history-verification.json`; the prior 761-case manifest and
 failed runs are not replaced. Query projections, deletion, provenance and full
 business diagnostics remain separate unfinished work.
+
+## Reviewed deletion composition and full gate
+
+The eleven task051 source commits through documentation-only `cf0e9e17187b7eada2cf367635dab2d024b7eef9` are integrated without conflicts at `4187899ef9b7301ed5af4cf36b84b5825fb83bed`. Independent review approved the fixed deletion scope after replaying both original P1 failures and ten unchanged probes. Its broader 488-pass/two-stale-adapter result is retained as such; the already-integrated adapter correction resolves those old expectations.
+
+At the combined source, `./scripts/check.sh` passes the normal whole-workspace gate, **811 unique tests and 4 doctests**. `cargo test --workspace --all-targets --locked -- --list` independently confirms 811 target/name pairs across 88 nonempty targets. `cargo metadata --format-version 1 --locked` confirms the sole Runtime `69faf9196991524b5549499d6208a1eaf567bf56`; SPEC hash is unchanged and `git diff --check main..HEAD` passes. Exact log/metadata hashes are in `docs/executable-deletion-verification.json`; logs are `/workspace/shared/minicore-host-validation/executable-deletion-4187899-full.log`, `executable-4187899-test-list.txt` and `executable-4187899-metadata.json`. Earlier failed probes and aggregate records are preserved.
+
+All 52 canonical methods now have shared real routes. Public query contracts, input provenance, complete business diagnostics and final performance/external review remain unfinished. No new remote publication, main merge, TUI edit or dependency change occurred.
