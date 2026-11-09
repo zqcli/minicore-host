@@ -17,3 +17,11 @@ Add `execution.approval` (`auto`, `ask`, `read_only`), default `ask` for omitted
 Initial implementation and protocol/policy/schema checks pass: `cargo test -p minicore-host-protocol --test approval_config -p minicore-host-resources --lib -p minicore-host-tools --test contracts --locked --offline` passed 26 cases (including 9 new approval/config/schema cases) after `cargo fmt --all`. The function/config/schema wiring is one commit; no intermediate config-only behavior is published. Real binary and registered-external-tool acceptance remain in progress.
 
 Existing non-approval ordinary/resource fixtures explicitly select Auto at their local constructors (`task042/support.rs`, inherited by task055 and task066; task023 probe setup; app tool_support). Their actual execution/counter/freeze assertions remain intact. The performance harness similarly explicitly selects Auto for its bash execution/cancel measurement, without changing measurement logic. Complete integrated stage gate and publication are owned by the parent; this topic does not push.
+
+### Production resource acceptance
+
+- Function/config/schema source commit: `6feca08` (`feat(resources): bind per-turn tool approval policy`).
+- `cargo test -p minicore-host-resources --locked --offline` passed **48 cases** and 0 doctests, including all existing ordinary-tool, input-provenance, credential and resource-freezing assertions plus four new registered-external cases.
+- The external fixture is statically registered through `ToolRegistry` and counts real `Tool::execute` calls. Its real production resolver/Host/HTTP/SSE/Runtime chain proves Ask waits at zero calls, AllowOnce executes once, Deny and ReadOnly execute zero times, and Auto executes. Original Turn/Load/interaction IDs, read-only caller rejection and crossed/stale answer rejection are checked against actual owners.
+- First integration compile used a nonexistent test-only Fault variant (`HostControlNotHeld`); corrected to the actual `HostAccessReadOnly` without production changes before the passing run.
+- `python3 -m unittest discover -s scripts -p '*_test.py'` passed **20** pure checks. Adapted `scripts/task058_perf.py` SHA-256 is `f332e227d6c6094d5f2856c6ee75d3685e6937a782490f00ade844c089080373`; task074's older hashes remain historical evidence, not rewritten. No new performance result is claimed.
