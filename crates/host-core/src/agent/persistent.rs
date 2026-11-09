@@ -56,7 +56,7 @@ impl AgentOwner {
         }
         Ok(owner)
     }
-    fn from_record(
+    pub(crate) fn from_record(
         record: AgentRecord,
         store: AgentStore,
         incarnation: HostIncarnation,
@@ -71,6 +71,7 @@ impl AgentOwner {
             resources,
             enabled: Arc::new(AtomicBool::new(true)),
             store: Some(store),
+            changed: tokio::sync::Notify::new(),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
                     id: record.id,
@@ -84,6 +85,11 @@ impl AgentOwner {
                 },
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
+                creations: BTreeMap::new(),
+                create_tasks: BTreeMap::new(),
+                creating: 0,
+                executor: tokio::runtime::Handle::try_current().ok(),
+                stop_task: None,
             }),
         })
     }

@@ -3,6 +3,7 @@ use crate::session::{HistoryBackend, MemoryHistory, ResourceResolver, SessionCon
 use crate::types::{AgentInfo, SessionLoadFailure};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
+mod create;
 mod persistent;
 use minicore_host_protocol::*;
 use std::collections::BTreeMap;
@@ -20,11 +21,17 @@ pub(crate) struct AgentOwner {
     state: Mutex<AgentState>,
     enabled: Arc<AtomicBool>,
     store: Option<AgentStore>,
+    changed: tokio::sync::Notify,
 }
 struct AgentState {
     info: AgentInfo,
     sessions: BTreeMap<SessionId, Arc<SessionController>>,
     load_failures: BTreeMap<SessionId, Fault>,
+    creations: BTreeMap<OperationId, SessionCreateReceipt>,
+    create_tasks: BTreeMap<OperationId, tokio::task::JoinHandle<()>>,
+    creating: usize,
+    executor: Option<tokio::runtime::Handle>,
+    stop_task: Option<tokio::task::JoinHandle<()>>,
 }
 impl AgentOwner {
     pub(crate) fn new(
@@ -44,6 +51,7 @@ impl AgentOwner {
             resources,
             enabled: Arc::new(AtomicBool::new(true)),
             store: None,
+            changed: tokio::sync::Notify::new(),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
                     id,
@@ -57,6 +65,11 @@ impl AgentOwner {
                 },
                 sessions: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
+                creations: BTreeMap::new(),
+                create_tasks: BTreeMap::new(),
+                creating: 0,
+                executor: tokio::runtime::Handle::try_current().ok(),
+                stop_task: None,
             }),
         })
     }
@@ -305,30 +318,62 @@ impl AgentOwner {
         if enabled {
             return Ok(());
         }
-        if children.iter().all(|child| child.is_quiescent_owned()) {
-            self.state
-                .lock()
-                .expect("Agent mutex poisoned")
-                .info
-                .lifecycle = AgentLifecycle::Stopped;
-        } else {
-            let owner = Arc::clone(self);
-            // This task owns the accepted Agent stop after its caller returns.
-            // Start is rejected until it has joined every direct child's work.
-            let executor = children
-                .iter()
-                .find_map(|child| child.executor())
-                .expect("active children have an execution runtime");
-            executor.spawn(async move {
+        let executor = self
+            .state
+            .lock()
+            .expect("Agent mutex poisoned")
+            .executor
+            .clone()
+            .or_else(|| children.iter().find_map(|child| child.executor()));
+        if self.stop_settled() {
+            return Ok(());
+        }
+        let executor = executor.expect("accepted child work has an execution runtime");
+        let owner = Arc::clone(self);
+        let task = executor.spawn(async move {
+            loop {
+                let notified = owner.changed.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                let children = owner
+                    .state
+                    .lock()
+                    .expect("Agent mutex poisoned")
+                    .sessions
+                    .values()
+                    .cloned()
+                    .collect::<Vec<_>>();
                 for child in children {
                     child.wait_quiescent_owned().await;
                 }
-                let mut state = owner.state.lock().expect("Agent mutex poisoned");
-                if state.info.lifecycle == AgentLifecycle::Stopping {
-                    state.info.lifecycle = AgentLifecycle::Stopped;
+                if owner.stop_settled() {
+                    return;
                 }
-            });
-        }
+                notified.await;
+            }
+        });
+        self.state.lock().expect("Agent mutex poisoned").stop_task = Some(task);
         Ok(())
+    }
+    fn stop_settled(&self) -> bool {
+        let children = {
+            let state = self.state.lock().expect("Agent mutex poisoned");
+            if state.creating != 0 {
+                return false;
+            }
+            state.sessions.values().cloned().collect::<Vec<_>>()
+        };
+        if !children.iter().all(|child| child.is_quiescent_owned()) {
+            return false;
+        }
+        let mut state = self.state.lock().expect("Agent mutex poisoned");
+        if state.creating != 0 {
+            return false;
+        }
+        if state.info.lifecycle == AgentLifecycle::Stopping {
+            state.info.lifecycle = AgentLifecycle::Stopped;
+        }
+        self.changed.notify_waiters();
+        true
     }
 }

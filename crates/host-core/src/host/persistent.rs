@@ -52,6 +52,7 @@ impl Host {
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
+                create_tasks: BTreeMap::new(),
             }),
         });
         let ids = disk(FaultKind::HostStorageUnavailable, move || {

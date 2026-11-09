@@ -6,6 +6,7 @@ use minicore_host_protocol::*;
 use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
 
+mod create;
 mod persistent;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -26,6 +27,7 @@ struct HostState {
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
     creations: BTreeMap<OperationId, AgentCreateReceipt>,
     load_failures: BTreeMap<AgentId, Fault>,
+    create_tasks: BTreeMap<OperationId, tokio::task::JoinHandle<()>>,
 }
 impl Host {
     pub fn memory(resources: Arc<dyn ResourceResolver>) -> Result<Arc<Self>, Fault> {
@@ -46,6 +48,7 @@ impl Host {
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
+                create_tasks: BTreeMap::new(),
             }),
         }))
     }

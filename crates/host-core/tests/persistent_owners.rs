@@ -386,3 +386,273 @@ async fn unsupported_host_settings_are_not_replaced_with_defaults() {
     );
     assert_eq!(std::fs::read(&path).unwrap(), original);
 }
+fn create_request(mode: StorageMode) -> AgentCreate {
+    AgentCreate {
+        operation_id: OperationId::new().unwrap(),
+        name: "created Agent".into(),
+        mode,
+        config: config(),
+        default_session: None,
+        initial_message: None,
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn persistent_creation_modes_reopen_and_real_partial_input_failure() {
+    let directory = tempfile::tempdir().unwrap();
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("test"), Arc::clone(&resources))
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut request = create_request(StorageMode::Persistent);
+    request.initial_message = Some(input(""));
+    let created = host.create_agent_async(&caller, request).await.unwrap();
+    created.validate_call_return().unwrap();
+    assert!(created.result.steps.agent.succeeded());
+    assert!(created.result.steps.session.succeeded());
+    assert!(matches!(
+        created.result.steps.message,
+        Some(CreateStep::Failed { .. })
+    ));
+    let target = AgentRef {
+        host_id: created.host_id.clone(),
+        agent_id: created.agent_id.clone().unwrap(),
+    };
+    let persistent = SessionRef {
+        agent_id: target.agent_id.clone(),
+        session_id: created.session_id.unwrap(),
+    };
+    let memory = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: target.clone(),
+                mode: Some(StorageMode::Memory),
+                overrides: None,
+                initial_message: Some(input("memory work")),
+            },
+        )
+        .await
+        .unwrap();
+    memory.validate_call_return().unwrap();
+    let memory_target = SessionRef {
+        agent_id: target.agent_id.clone(),
+        session_id: memory.session_id.unwrap(),
+    };
+    completed(&host, &caller, &memory_target).await;
+    assert!(
+        !directory
+            .path()
+            .join("agents")
+            .join(target.agent_id.as_str())
+            .join("sessions")
+            .join(memory_target.session_id.as_str())
+            .exists()
+    );
+    let transient = host
+        .create_agent_async(&caller, create_request(StorageMode::Memory))
+        .await
+        .unwrap();
+    assert!(
+        !directory
+            .path()
+            .join("agents")
+            .join(transient.agent_id.as_ref().unwrap().as_str())
+            .exists()
+    );
+    assert!(
+        host.create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: AgentRef {
+                    host_id: created.host_id,
+                    agent_id: transient.agent_id.unwrap()
+                },
+                mode: Some(StorageMode::Persistent),
+                overrides: None,
+                initial_message: None
+            }
+        )
+        .await
+        .is_err()
+    );
+    host.send(
+        &caller,
+        SendMessage::new(input("persistent work"), persistent.clone()),
+    )
+    .unwrap();
+    completed(&host, &caller, &persistent).await;
+    drop(connection);
+    drop(host);
+    let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
+        .await
+        .unwrap();
+    let connection = reopened.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(reopened.agents(&caller).unwrap().len(), 1);
+    assert_eq!(reopened.sessions(&caller, &target).unwrap().len(), 1);
+    assert_eq!(
+        reopened
+            .agent_info(&caller, &target)
+            .unwrap()
+            .default_session_id,
+        Some(persistent.session_id.clone())
+    );
+    assert!(reopened.turns(&caller, &persistent).unwrap().is_empty());
+    host_send_and_check_reopened(&reopened, &caller, &persistent).await;
+}
+async fn host_send_and_check_reopened(host: &Host, caller: &CallerContext, target: &SessionRef) {
+    host.send(
+        caller,
+        SendMessage::new(input("next incarnation"), target.clone()),
+    )
+    .unwrap();
+    let result = completed(host, caller, target).await;
+    assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        host.history(caller, target)
+            .unwrap()
+            .iter()
+            .filter(|item| matches!(item, HistoryItem::User(_)))
+            .count(),
+        2
+    );
+}
+struct GatedValidationFixture {
+    inner: Arc<dyn ResourceResolver>,
+    count: std::sync::atomic::AtomicUsize,
+    entered: tokio::sync::Notify,
+    released: (Mutex<bool>, std::sync::Condvar),
+}
+impl GatedValidationFixture {
+    fn release(&self) {
+        *self.released.0.lock().unwrap() = true;
+        self.released.1.notify_all();
+    }
+}
+impl ResourceResolver for GatedValidationFixture {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        if self.count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 1 {
+            self.entered.notify_one();
+            let mut released = self.released.0.lock().unwrap();
+            while !*released {
+                released = self.released.1.wait(released).unwrap();
+            }
+        }
+        self.inner.validate(config)
+    }
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
+        self.inner.resolve(config)
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn accepted_creation_survives_waiter_abort_and_connection_revocation() {
+    let directory = tempfile::tempdir().unwrap();
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut request = create_request(StorageMode::Persistent);
+    request.initial_message = Some(input("owned work"));
+    let operation = request.operation_id.clone();
+    let owner = Arc::clone(&host);
+    let task_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_agent_async(&task_caller, request).await });
+    gate.entered.notified().await;
+    let progress = host.receipt(&caller, &operation).unwrap();
+    assert!(progress.result.steps.agent.succeeded());
+    assert!(progress.result.steps.session.in_progress());
+    progress.validate().unwrap();
+    waiting.abort();
+    connection.close();
+    gate.release();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let value = host.receipt(&caller, &operation).unwrap();
+            if value.validate_call_return().is_ok() {
+                break value;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(receipt.result.steps.session.succeeded());
+    assert!(receipt.result.steps.message.unwrap().succeeded());
+    let target = SessionRef {
+        agent_id: receipt.agent_id.unwrap(),
+        session_id: receipt.session_id.unwrap(),
+    };
+    assert_eq!(
+        completed(&host, &caller, &target).await.info.persistence,
+        PersistenceState::Persisted
+    );
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn default_session_real_file_failure_keeps_published_agent_receipt() {
+    let directory = tempfile::tempdir().unwrap();
+    let (inner, _) = resources();
+    let gate = Arc::new(GatedValidationFixture {
+        inner,
+        count: std::sync::atomic::AtomicUsize::new(0),
+        entered: tokio::sync::Notify::new(),
+        released: (Mutex::new(false), std::sync::Condvar::new()),
+    });
+    let host = Host::open_persistent(directory.path(), settings("test"), gate.clone())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut request = create_request(StorageMode::Persistent);
+    request.initial_message = Some(input("not delivered"));
+    let operation = request.operation_id.clone();
+    let owner = Arc::clone(&host);
+    let task_caller = caller.clone();
+    let waiting =
+        tokio::spawn(async move { owner.create_agent_async(&task_caller, request).await });
+    gate.entered.notified().await;
+    let agent_id = host.receipt(&caller, &operation).unwrap().agent_id.unwrap();
+    std::fs::write(
+        directory
+            .path()
+            .join("agents")
+            .join(agent_id.as_str())
+            .join("sessions"),
+        b"not a directory",
+    )
+    .unwrap();
+    gate.release();
+    let receipt = waiting.await.unwrap().unwrap();
+    receipt.validate_call_return().unwrap();
+    assert_eq!(receipt.agent_id.as_ref(), Some(&agent_id));
+    assert!(receipt.session_id.is_none());
+    assert!(matches!(
+        receipt.result.steps.session,
+        CreateStep::Failed { .. }
+    ));
+    assert_eq!(receipt.result.steps.message, Some(CreateStep::NotAttempted));
+    assert!(receipt.message_id.is_some());
+    assert!(receipt.result.delivery.is_none());
+    assert!(
+        directory
+            .path()
+            .join("agents")
+            .join(agent_id.as_str())
+            .join("agent.json")
+            .exists()
+    );
+}

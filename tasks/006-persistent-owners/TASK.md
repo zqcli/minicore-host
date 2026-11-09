@@ -20,3 +20,12 @@ Commands and commit checkpoints are recorded below when run. Local validation us
 - Persistent mutating convenience methods explicitly reject until the asynchronous owner path is installed; no persistent operation silently uses MemoryHistory.
 
 Commands: `cargo fmt --all`, `cargo test -p minicore-host-core --test persistent_owners --offline` (5 passed), `cargo clippy -p minicore-host-core --all-targets --offline -- -D warnings` (passed). Full core tests at this checkpoint: 25 passed plus empty doc-test suite.
+
+## Accepted creation checkpoint
+
+- Added asynchronous creation entries for both modes over the existing owners and Runtime path. Host and Agent retain typed creation progress and the actual task handles; a caller abort or connection invalidation only ends its wait.
+- Persistent Agent publication follows its own confirmed save. Agent snapshots Session defaults at acceptance, saves Session files, confirms a reloadable default reference, then publishes the Session. Incomplete pre-publication files are retained on failure, not reported as published references or implicitly rolled back.
+- P/P, P/M and M/M use the proper backends; M/P is rejected. Agent stop includes accepted in-flight creation, and late publication stays disabled rather than starting new work.
+- Tests cover actual file failure after Agent publication, real partial initial-message rejection, restart without memory objects/old Turn state, and waiter abort plus connection revocation while accepted work continues through real Runtime/persisted output.
+
+Commands: `cargo fmt --all`; `cargo test -p minicore-host-core --offline` (28 passed: 4 unit, 8 persistent owners, 15 memory owners, 1 real HTTP integration); `cargo clippy -p minicore-host-core --all-targets --offline -- -D warnings` (passed).
