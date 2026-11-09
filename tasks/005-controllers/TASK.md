@@ -1,6 +1,6 @@
 # Implement Direct Owners
 
-Status: active foundation checkpoint, not full first-version completion.
+Status: memory-controller foundation and real Runtime integration complete; persistent controls continue in task 006. The full first version is not complete.
 
 ## Implemented
 
@@ -21,15 +21,15 @@ Status: active foundation checkpoint, not full first-version completion.
 
 These are real Host/Agent/SessionController/AgentLoop integration tests with explicitly scripted model fixtures, not live provider or TUI tests. Seven regressions were independently reviewed and then incorporated: preparation-close settlement, revocation, stop settlement, invalid config resources, failure pause, preparation panic, and synchronous execution context.
 
-## Local dependency constraint
+## Runtime dependency provenance
 
-The core requires the separately developed Runtime history/partial patch. Runtime publication has not been authorized. Local verification uses an ignored `.cargo/config.toml` patch pointing to `/workspace/shared/minicore-runtime-handoff`; the current root lock reflects that local patch. A clean remote checkout is not claimed reproducible until the final Runtime commit is reviewed/published and the Host dependency/lock is finalized. No bundle/bootstrap or copied Runtime source is part of this repository.
+Initial controller verification used an ignored Cargo patch to the then-unpublished Runtime history/partial worktree. After the owner approved publication through the GitHub interface, commit `f1ec37e` pinned the verified remote Runtime `18a6ac9b82d003330cd870275efca793cdcc9a96` in all manifests and the root lock. The patch and unused vendor symlink are removed. The complete Host gate also passed in a fresh local clone with an empty target directory at `d73b161`; see task 001 for exact commands and cache boundaries. No bundle/bootstrap or copied Runtime source is part of this repository.
 
 ## Not implemented / not claimed
 
-The public Host entry currently accepts memory entities only. Durable storage and JournalHistory exist, but persistent Host/Agent/Session startup and lifecycle composition are unfinished. Core controls still need complete typed receipt mapping for the canonical RPC service. Full 52-method coverage, stdio/WSS, DSH, tools/workspace/compaction and real TUI integration are unfinished. There is no implicit success handler for missing features.
+The initial checkpoint accepted memory entities only. Task 006 subsequently added persistent startup, accepted creation, confirmed metadata changes, load/resume, durable close/default ordering and associated owner-lifetime corrections. Core controls still need complete typed receipt mapping for the canonical RPC service. Full 52-method coverage, stdio/WSS, DSH, tools/workspace/compaction and real TUI integration are unfinished. There is no implicit success handler for missing features.
 
-Further work: complete persistent owner lifecycle and canonical service/transport stages. Real-file boundaries and combined-failure tests are completed below; final aggregate workspace gate follows final storage hardening.
+Further work: complete the remaining Host-level lifecycle and canonical service/transport stages. Real-file boundaries and combined-failure tests are completed below; aggregate gates and their fixed commits are recorded in task 001.
 
 ## Save and production-adapter integration checkpoint
 

@@ -12,7 +12,7 @@ Implement typed ownership contracts, durable object/history storage, connection 
 - `git clone https://github.com/zqcli/minicore-host.git` completed with the expected empty-repository warning.
 - Linux x86_64 with Git/C compiler/curl available; Rust/Cargo initially absent.
 - Official Rust installed from `https://sh.rustup.rs` into workspace-local Rust/Cargo homes. The toolchain is pinned to Rust/Cargo 1.90.0 with rustfmt and Clippy.
-- No remote writes, TUI changes or live external provider calls. Real Runtime and loopback HTTP integration results are recorded below.
+- Initial foundation work made no remote writes, TUI changes or live external provider calls. The later approved Runtime publication is recorded below; Host remains unpublished. Real Runtime and loopback HTTP integration results are recorded below.
 
 ## Acceptance priorities
 
