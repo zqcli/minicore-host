@@ -11,6 +11,8 @@ mod control;
 pub use collaboration::*;
 mod host;
 mod persistence;
+mod prompt_history;
+pub use prompt_history::prepare_prompt_history;
 mod session;
 mod types;
 
