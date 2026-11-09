@@ -6,7 +6,7 @@ The foundation contains strict contracts, Linux durable storage, a production HT
 
 ## Local checks
 
-Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed.
+Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed. Whitespace checks include committed changes and require full Git history; CI uses `fetch-depth: 0`.
 
 The required Runtime history/partial extension is pinned to published commit `18a6ac9b82d003330cd870275efca793cdcc9a96` on `zqcli/minicore-runtime:feat/host-history-handoff`. No local Runtime patch, copied source or bootstrap bundle is required. Runtime's push CI passed all seven checks; see [PROJECT.md](PROJECT.md) for verification boundaries and the exact source-tree mapping.
 

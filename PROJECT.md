@@ -34,6 +34,12 @@ All three Runtime dependencies and `Cargo.lock` now select the published revisio
 
 [Runtime push CI](https://github.com/zqcli/minicore-runtime/actions/runs/42598793185) completed successfully: Ubuntu quality gate, macOS and Windows tests, and all four package targets passed (7/7 checks). Runtime `dev` and `main` were not modified.
 
+## Active next stage and review correction
+
+The next stage implements controlled Host shutdown, original history-save continuation and memory entity retirement in separate ownership-scoped worktrees. The existing immutable storage/root references require explicit quiescent resource release; changing a lifecycle label alone cannot release directory ownership safely.
+
+A later independent review found a provider defect at `6d29cdc`: an HTTP 200 SSE first-frame `rate_limit_error` lost `Retry-After: 60`, allowing a second request within milliseconds. A real TCP/Runtime regression reproduces it; task 010 is fixing this separately. The 198-test historical pass did not cover this case and is not full foundation review approval. Task 011 also corrects two committed manifest EOF blank lines and expands the whitespace gate to committed changes.
+
 ## Remaining first-version work
 
 - Complete public Runtime history-save reconciliation, phased deletion, memory-object reclamation and Host-level lifecycle aggregation. Accepted creation, metadata/configuration publication, default/closed ordering and direct-owner discovery are implemented, not the whole lifecycle.

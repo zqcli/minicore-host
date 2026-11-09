@@ -49,3 +49,7 @@ The unchanged script ran, in order:
 - The workflow has not run on GitHub because Host has not been published. The checkout action and installation on a clean Ubuntu hosted runner have not been executed locally. No remote push, workflow dispatch, branch-protection change, or other remote write was made.
 - Host durable storage is Linux-only at this stage. This workflow does not validate Windows/macOS Host support, packaging, live external model providers, TUI integration, or the unfinished SPEC acceptance surface. Scripted model and loopback HTTP fixtures remain explicitly test fixtures.
 - After review and the owner's explicit approval to publish Host, inspect the first hosted run at the exact pushed commit. Report actual results and any runner/network failure; do not treat this local pass as remote CI evidence.
+
+## Committed-range whitespace correction
+
+A later independent review found that a clean checkout's unstaged diff cannot detect whitespace already in commits. Task 011 adds a committed baseline-to-HEAD check plus staged/unstaged checks. The CI checkout now uses `fetch-depth: 0`, retaining read-only permissions, the same pinned official action and disabled credential persistence. This full-history requirement is explicit; shallow checkouts fail rather than silently passing an incomplete comparison. Earlier exact-workflow validation above describes its original checkpoint.
