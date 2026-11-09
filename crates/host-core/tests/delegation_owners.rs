@@ -1189,6 +1189,448 @@ async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate()
     );
 }
 
+fn host_states(f: &Fixture) -> EventSubscription {
+    let info = f.host.info(&f.connection.caller()).unwrap();
+    f.host
+        .events_subscribe(
+            &f.connection.caller(),
+            SubscribeRequest {
+                scope: SubscriptionScope::Host {
+                    host_id: info.host_id,
+                },
+                categories: BTreeSet::from([EventCategory::State]),
+            },
+        )
+        .unwrap()
+}
+async fn await_stopped(f: &Fixture, mut events: EventSubscription) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while f.host.info(&f.connection.caller()).unwrap().lifecycle != HostLifecycle::Stopped {
+            events.recv().await.unwrap();
+        }
+    })
+    .await
+    .expect("actual Host shutdown must finish");
+}
+async fn publish_partial(f: &Fixture, child: &SessionRef, events: &Events) {
+    let mut output = f
+        .host
+        .events_subscribe(
+            &f.connection.caller(),
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: child.agent_id.clone(),
+                    session_id: child.session_id.clone(),
+                },
+                categories: BTreeSet::from([EventCategory::Output]),
+            },
+        )
+        .unwrap();
+    events
+        .send(ModelEvent::text_delta("real partial response"))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(ObservationNotification::Event(push)) = output.recv().await.unwrap()
+                && matches!(
+                    push.event,
+                    ObservationEvent::Activity(ActivityEvent::ModelOutput { .. })
+                )
+            {
+                break;
+            }
+        }
+    })
+    .await
+    .unwrap();
+}
+struct ClosingHooks {
+    members: Mutex<Vec<DelegationPermit>>,
+}
+impl ScopeHooks for ClosingHooks {
+    fn seal(&self) {}
+    fn root_closed(&self) {}
+    fn close_members(&self) -> OwnerFuture<'_, ()> {
+        Box::pin(async {
+            let members = std::mem::take(&mut *self.members.lock().unwrap());
+            for member in members {
+                member.close(OperationId::new().unwrap()).await?;
+                member.release(DelegationDisposition::ScopeClosed).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn draining_rejects_new_reused_session_delegation_but_accepts_registered_result() {
+    let mut f = setup(2, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    let other = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    let stopping = host_states(&f);
+    f.host
+        .shutdown(
+            &f.connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Graceful,
+            },
+        )
+        .unwrap();
+    let new_task = input(MessageMode::FollowUp);
+    let new_relation = registration(&cap, other, &new_task);
+    let (sink, _unused) = mpsc::unbounded_channel();
+    assert_eq!(
+        cap.prepare_delegation(new_relation, Arc::new(Sink(sink)))
+            .err()
+            .unwrap()
+            .kind(),
+        Some(FaultKind::HostLifecycleUnavailable)
+    );
+    complete(&f.events[1], "existing work completes during draining");
+    recv(&mut results).await;
+    let receipt = permit.notify(input(MessageMode::FollowUp)).await.unwrap();
+    assert_eq!(receipt.result.queue, InputQueue::NextStep);
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+    await_stopped(&f, stopping).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn force_joins_registered_partial_handoff_and_cleanup_without_new_parent_turn() {
+    let mut f = setup(2, None, false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let hooks = Arc::new(ClosingHooks {
+        members: Mutex::new(Vec::new()),
+    });
+    cap.prepare_scope(hooks.clone()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    hooks.members.lock().unwrap().push(permit.clone());
+    cap.send_delegated(&relation, task).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    publish_partial(&f, &child, &f.events[1]).await;
+    let stopping = host_states(&f);
+    f.host
+        .shutdown(
+            &f.connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
+    let result = recv(&mut results).await;
+    assert_eq!(result.results[0].info.outcome, Some(TurnOutcome::Cancelled));
+    assert!(!result.results[0].partials.is_empty());
+    assert!(permit.notify(input(MessageMode::Steer)).await.is_err());
+    await_stopped(&f, stopping).await;
+    assert!(f.starts.try_recv().is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn persistent_partial_cancel_with_preserved_inbox_waits_for_actual_next_turn() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut f = setup(3, None, false);
+    f.host = Host::open_persistent(
+        directory.path(),
+        HostSettings {
+            name: "partial save fixture".into(),
+        },
+        f.resources.clone(),
+    )
+    .await
+    .unwrap();
+    f.connection = f.host.connect().unwrap();
+    let parent = agent(&f);
+    let created = f
+        .host
+        .create_agent_async(
+            &f.connection.caller(),
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "persistent child".into(),
+                mode: StorageMode::Persistent,
+                config: AgentConfig::default(),
+                default_session: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let child = SessionRef {
+        agent_id: created.agent_id.unwrap(),
+        session_id: created.session_id.unwrap(),
+    };
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task).unwrap();
+    let first = recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    publish_partial(&f, &child, &f.events[1]).await;
+    let followup = input(MessageMode::FollowUp);
+    cap.send_delegated(&relation, followup.clone()).unwrap();
+    f.host.pause(&f.connection.caller(), &child).unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &child, true)
+        .unwrap();
+    finished(&f, &child, &first.source().turn.turn_id).await;
+    assert!(results.try_recv().is_err());
+    assert!(matches!(
+        f.host
+            .message(&f.connection.caller(), &child, &followup.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    f.host.resume(&f.connection.caller(), &child).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    complete(&f.events[2], "remaining input actually completed");
+    let result = recv(&mut results).await;
+    assert_eq!(result.results.len(), 2);
+    assert_eq!(result.results[0].info.outcome, Some(TurnOutcome::Cancelled));
+    assert!(!result.results[0].partials.is_empty());
+    assert!(
+        result
+            .results
+            .iter()
+            .all(|turn| turn.info.persistence == PersistenceState::Persisted)
+    );
+    assert_eq!(result.results[1].info.outcome, Some(TurnOutcome::Completed));
+    let path = directory
+        .path()
+        .join("agents")
+        .join(child.agent_id.as_str())
+        .join("sessions")
+        .join(child.session_id.as_str())
+        .join("history.jsonl");
+    let records: Vec<minicore_host_storage::HistoryRecord> = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert!(records.iter().any(|record| matches!(
+        record.entry,
+        minicore_host_storage::HistoryEntry::Partial { .. }
+    )));
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| matches!(
+                record.entry,
+                minicore_host_storage::HistoryEntry::TurnFinished { .. }
+            ))
+            .count(),
+        2
+    );
+    let receipt = permit.notify(input(MessageMode::Steer)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+    let stopping = host_states(&f);
+    f.host
+        .shutdown(
+            &f.connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Graceful,
+            },
+        )
+        .unwrap();
+    await_stopped(&f, stopping).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn grandchild_keeps_running_after_direct_parent_release_and_never_retargets_root() {
+    let mut f = setup(3, None, false);
+    let root = agent(&f);
+    let middle = agent(&f);
+    let grandchild = agent(&f);
+    send(&f, &root);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let middle_task = input(MessageMode::FollowUp);
+    let middle_relation = registration(&cap, middle.clone(), &middle_task);
+    let (sink, mut middle_results) = mpsc::unbounded_channel();
+    let middle_permit = cap
+        .prepare_delegation(middle_relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&middle_relation, middle_task).unwrap();
+    let middle_cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let task = input(MessageMode::FollowUp);
+    let mut relation = registration(&middle_cap, grandchild.clone(), &task);
+    relation.root = root.clone();
+    let (sink, mut grand_results) = mpsc::unbounded_channel();
+    let grand_permit = middle_cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    middle_cap.send_delegated(&relation, task).unwrap();
+    recv(&mut f.bindings).await;
+    recv(&mut f.starts).await;
+    middle_permit
+        .close(OperationId::new().unwrap())
+        .await
+        .unwrap();
+    recv(&mut middle_results).await;
+    let receipt = middle_permit
+        .notify(input(MessageMode::Steer))
+        .await
+        .unwrap();
+    middle_permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    assert!(
+        f.host
+            .session_info(&f.connection.caller(), &middle)
+            .is_err()
+    );
+    let queued_before = f
+        .host
+        .session_state(&f.connection.caller(), &root)
+        .unwrap()
+        .data
+        .next_step
+        .len();
+    complete(&f.events[2], "grandchild finishes independently");
+    recv(&mut grand_results).await;
+    let fault = grand_permit
+        .notify(input(MessageMode::Steer))
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        fault.kind(),
+        Some(FaultKind::AgentSessionNotFound | FaultKind::HostLifecycleUnavailable)
+    ));
+    assert_eq!(
+        f.host
+            .session_state(&f.connection.caller(), &root)
+            .unwrap()
+            .data
+            .next_step
+            .len(),
+        queued_before
+    );
+    grand_permit
+        .release(DelegationDisposition::NotificationFailed(fault))
+        .await
+        .unwrap();
+    f.host
+        .cancel_session(&f.connection.caller(), &root, false)
+        .unwrap();
+}
+struct FailOnceHooks {
+    attempts: std::sync::atomic::AtomicUsize,
+    entered: mpsc::UnboundedSender<()>,
+}
+impl ScopeHooks for FailOnceHooks {
+    fn seal(&self) {}
+    fn root_closed(&self) {}
+    fn close_members(&self) -> OwnerFuture<'_, ()> {
+        Box::pin(async {
+            let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+            self.entered.send(()).unwrap();
+            if attempt == 0 {
+                Err(Fault::new(
+                    FaultKind::SessionHistoryWriteFailed,
+                    "explicit cleanup failure fixture",
+                ))
+            } else {
+                Ok(())
+            }
+        })
+    }
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn force_cleanup_failure_only_continues_on_explicit_resume_without_business_restart() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let (entered, mut entering) = mpsc::unbounded_channel();
+    let hooks = Arc::new(FailOnceHooks {
+        attempts: std::sync::atomic::AtomicUsize::new(0),
+        entered,
+    });
+    cap.prepare_scope(hooks.clone()).unwrap();
+    let stopping = host_states(&f);
+    f.host
+        .shutdown(
+            &f.connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
+    recv(&mut entering).await;
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &parent)
+        .unwrap();
+    loop {
+        let state = states.snapshot().unwrap().data;
+        if state.metadata_fault.is_some() && state.active_turn_id.is_none() && !state.saving {
+            break;
+        }
+        states.changed().await.unwrap();
+    }
+    assert_eq!(hooks.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        f.host.info(&f.connection.caller()).unwrap().lifecycle,
+        HostLifecycle::Stopping
+    );
+    f.host.resume(&f.connection.caller(), &parent).unwrap();
+    recv(&mut entering).await;
+    await_stopped(&f, stopping).await;
+    assert_eq!(hooks.attempts.load(Ordering::SeqCst), 2);
+    assert!(f.starts.try_recv().is_err());
+}
+
 async fn close_during_preparation_hands_off_discarded_task(fail: bool) {
     let preparation = Arc::new(Semaphore::new(1));
     let mut f = setup(1, Some(preparation.clone()), false);

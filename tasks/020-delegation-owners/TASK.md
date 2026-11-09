@@ -28,11 +28,10 @@
 - `cargo test -p minicore-host-core --test delegation_owners --offline --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-unbounded"'`: 10 gate-ordered actual-owner tests passed, including real-file Tool fast-child handoff, shared consumed ranges, explicit unconsumed-input discard, and a dropped close waiter.
 - Gates use channels/semaphores, not timing sleeps. Models are explicitly scripted fixtures, while Host/Agent/Session/Runtime and the file tool are real. No live-provider or TUI claim is made.
 
-## Remaining
+## Integration follow-up
 
-- Rebase the later scoped-observation retry/interaction commits after preserving this independent checkpoint.
-- Add same-revision atomic metadata/config updates and persisted Session title.
-- Expand force/draining, preserved inbox/partial persistence, intermediate-parent release, and actual adapter integration tests. Run final workspace lint/tests/docs and report the exact `--list` unique count; focused counts are not workspace totals.
+- The core implementation and scoped-observation stage 2 are composed in this topic. The adapter and transport owners own their independent integration commits; this topic does not claim those worktrees' validation.
+- The integration owner applies the published Runtime pin and reruns combined gates. This topic's final gate below deliberately records the exact local command-line patch instead of claiming a remote dependency run.
 
 ## Close and cancellation review corrections
 
@@ -95,3 +94,13 @@ commands. It is not counted as a passing gate or retained in the repository.
 - Driver termination and preparation-failure exits now attempt the existing handoff outside the Session lock after preparation settles. Closed/retirement still waits for actual transfer, required saves, and owned cleanup.
 - Added two channel/semaphore-ordered Host/Runtime tests: successful and failed preparation after close both transfer only the discarded task fact, publish no Turn, and let the real close/retirement complete.
 - Focused delegation suite: 17/17 passed using the exact local Runtime `3cf57e3e1947b0464bd8843ed0508bfddfb2639a` patch described above. The adapter's separate integration is rerun by its owner; no fixture is represented as that adapter result.
+
+
+## Shutdown and retained-inbox verification
+
+- Preceding preparation-close fix: `04fc9b8543aeab40613c4ee9416dd15da9ed2f98`.
+- Added five gate-ordered actual Host/Runtime cases: draining rejects a new delegation to an existing Session but accepts a prior registered result; force joins actual partial-result handoff and cleanup without starting a notification Turn; persistent cancellation preserves a queued input and delays final handoff until its next real Turn and confirmed JSONL writes; a grandchild continues after its direct parent is reclaimed and never retargets the root; failed force cleanup runs once until an explicit resume continues only that cleanup.
+- These tests subscribe before shutdown and wait for actual model starts, output acceptance, cleanup entry, and owner states. They do not use sleeps, observer streams as result delivery, or fake save acknowledgement. The persistent test reads the actual history file and checks the partial entry and both terminal records.
+- Final topic gate at `04fc9b8` plus this test-only change: whitespace, fmt check, workspace all-target Clippy `-D warnings`, workspace all-target tests, workspace doctests, and rustdoc `-D warnings` all passed. Commands use `--locked --offline --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-retry-state"'` with exact local Runtime `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`.
+- Exact `cargo test --workspace --all-targets --locked --offline --config <same patch> -- --list` count: **354 unique test cases**, including **22 delegation cases**; **3 doctests** passed separately. The nested storage subprocess probe is not an additional case. This count is for this topic, not the parent's larger composed workspace.
+- Validation logs: `/workspace/shared/delegation-final-gates.log` and `/workspace/shared/delegation-final-list.log`. Temporary validation manifests/lock are not committed. No TUI or live-provider validation and no remote push occurred.
