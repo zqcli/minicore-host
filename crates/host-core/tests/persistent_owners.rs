@@ -3062,3 +3062,147 @@ async fn concurrent_parent_child_metadata_updates_keep_confirmed_records() {
         );
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_close_unrelated_pending_default_does_not_block_third_child() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(
+        directory.path(),
+        settings("close unrelated default"),
+        resources,
+    )
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let created = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: agent.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: created.session_id.unwrap(),
+    };
+    let path = agent_path(directory.path(), &agent_id);
+    std::fs::rename(path.join("agent.json"), path.join("saved-agent.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    assert!(
+        host.set_default_session_async(&caller, &agent, Some(ids[1].clone()))
+            .await
+            .is_err()
+    );
+    std::fs::remove_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(path.join("saved-agent.json"), path.join("agent.json")).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed || state.metadata_fault.is_some()
+    })
+    .await;
+    assert_eq!(state.lifecycle, SessionLifecycle::Closed);
+    assert!(
+        host.agent_info(&caller, &agent)
+            .unwrap()
+            .metadata_fault
+            .is_some()
+    );
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(ids[0].clone())
+    );
+    let reconciled = host.reconcile_agent_record(&caller, &agent).await.unwrap();
+    assert_eq!(reconciled.default_session_id, Some(ids[1].clone()));
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(ids[1].clone())
+    );
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_some()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn review_close_old_default_preserves_confirmed_new_default() {
+    let directory = tempfile::tempdir().unwrap();
+    let (host_id, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("close old default"), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id,
+        agent_id: agent_id.clone(),
+    };
+    let target = SessionRef {
+        agent_id: agent_id.clone(),
+        session_id: ids[0].clone(),
+    };
+    let path = agent_path(directory.path(), &agent_id);
+    std::fs::rename(path.join("agent.json"), path.join("saved-agent.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    assert!(
+        host.set_default_session_async(&caller, &agent, Some(ids[1].clone()))
+            .await
+            .is_err()
+    );
+    std::fs::remove_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(path.join("saved-agent.json"), path.join("agent.json")).unwrap();
+    host.close_session(&caller, &target).unwrap();
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.metadata_fault.is_some() || state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert_eq!(state.lifecycle, SessionLifecycle::Closing);
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_none()
+    );
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(ids[0].clone())
+    );
+    assert_eq!(
+        host.reconcile_agent_record(&caller, &agent)
+            .await
+            .unwrap()
+            .default_session_id,
+        Some(ids[1].clone())
+    );
+    host.close_session(&caller, &target).unwrap();
+    wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert_eq!(
+        read_agent(&path).data.default_session_id,
+        Some(ids[1].clone()),
+        "closing the former default must not clear the newly confirmed other target"
+    );
+    assert!(
+        read_session(&session_path(directory.path(), &target))
+            .data
+            .closed
+            .is_some()
+    );
+}

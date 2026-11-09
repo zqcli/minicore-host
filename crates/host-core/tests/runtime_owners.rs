@@ -924,3 +924,182 @@ fn review_send_outside_tokio_must_not_panic_after_acceptance() {
         "session state mutex became poisoned"
     );
 }
+
+#[test]
+fn review_memory_default_close_orders_remain_authoritative() {
+    let (host, connection, first, _) = setup(Vec::new());
+    let caller = connection.caller();
+    let agent = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: first.agent_id.clone(),
+    };
+    let make_child = || {
+        let receipt = host
+            .create_session(
+                &caller,
+                SessionCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    target: agent.clone(),
+                    mode: None,
+                    overrides: None,
+                    initial_message: None,
+                },
+            )
+            .unwrap();
+        SessionRef {
+            agent_id: first.agent_id.clone(),
+            session_id: receipt.session_id.unwrap(),
+        }
+    };
+    let set_first = make_child();
+    host.set_default_session(&caller, &agent, Some(set_first.session_id.clone()))
+        .unwrap();
+    host.close_session(&caller, &set_first).unwrap();
+    assert!(
+        host.agent_info(&caller, &agent)
+            .unwrap()
+            .default_session_id
+            .is_none()
+    );
+    assert_eq!(
+        host.set_default_session(&caller, &agent, Some(set_first.session_id))
+            .unwrap_err()
+            .kind(),
+        FaultKind::AgentDefaultSessionUnavailable
+    );
+
+    host.set_default_session(&caller, &agent, Some(first.session_id.clone()))
+        .unwrap();
+    let close_first = make_child();
+    host.close_session(&caller, &close_first).unwrap();
+    assert_eq!(
+        host.set_default_session(&caller, &agent, Some(close_first.session_id))
+            .unwrap_err()
+            .kind(),
+        FaultKind::AgentDefaultSessionUnavailable
+    );
+    assert_eq!(
+        host.agent_info(&caller, &agent).unwrap().default_session_id,
+        Some(first.session_id)
+    );
+}
+
+#[test]
+fn review_memory_default_close_race_preserves_actual_acceptance_order() {
+    for _ in 0..128 {
+        let (host, connection, first, _) = setup(Vec::new());
+        let caller = connection.caller();
+        let agent = AgentRef {
+            host_id: host.info(&caller).unwrap().host_id,
+            agent_id: first.agent_id.clone(),
+        };
+        let created = host
+            .create_session(
+                &caller,
+                SessionCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    target: agent.clone(),
+                    mode: None,
+                    overrides: None,
+                    initial_message: None,
+                },
+            )
+            .unwrap();
+        let target = SessionRef {
+            agent_id: first.agent_id,
+            session_id: created.session_id.unwrap(),
+        };
+        let start = std::sync::Barrier::new(3);
+        let set_result = std::thread::scope(|scope| {
+            let set = scope.spawn(|| {
+                start.wait();
+                host.set_default_session(&caller, &agent, Some(target.session_id.clone()))
+            });
+            let close = scope.spawn(|| {
+                start.wait();
+                host.close_session(&caller, &target)
+            });
+            start.wait();
+            let result = set.join().unwrap();
+            close.join().unwrap().unwrap();
+            result
+        });
+        let expected = if set_result.is_ok() {
+            None
+        } else {
+            assert_eq!(
+                set_result.unwrap_err().kind(),
+                FaultKind::AgentDefaultSessionUnavailable
+            );
+            Some(first.session_id)
+        };
+        assert_eq!(
+            host.agent_info(&caller, &agent).unwrap().default_session_id,
+            expected
+        );
+        assert_eq!(
+            host.session_state(&caller, &target).unwrap().data.lifecycle,
+            SessionLifecycle::Closed
+        );
+    }
+}
+
+#[test]
+fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
+    let (host, operator, first, _) = setup(Vec::new());
+    let caller = operator.caller();
+    let agent = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: first.agent_id.clone(),
+    };
+    let observer = host.connect().unwrap();
+    let created = host
+        .create_session(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: agent.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .unwrap();
+    let selected = created.session_id.unwrap();
+    assert_eq!(
+        host.set_default_session(&observer.caller(), &agent, Some(selected.clone()))
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessReadOnly
+    );
+    host.set_default_session(&caller, &agent, Some(selected.clone()))
+        .unwrap();
+    operator.close();
+    assert_eq!(
+        host.set_default_session(&caller, &agent, Some(first.session_id))
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessInvalid
+    );
+    assert_eq!(
+        host.set_default_session(&observer.caller(), &agent, None)
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessReadOnly
+    );
+    assert_eq!(
+        host.agent_info(&observer.caller(), &agent)
+            .unwrap()
+            .default_session_id,
+        Some(selected)
+    );
+    let replacement = host.connect().unwrap();
+    host.set_default_session(&replacement.caller(), &agent, None)
+        .unwrap();
+    assert!(
+        host.agent_info(&replacement.caller(), &agent)
+            .unwrap()
+            .default_session_id
+            .is_none()
+    );
+}

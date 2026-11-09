@@ -52,3 +52,9 @@ Independent targeted review re-ran the final non-Tokio regression and confirmed 
 - `cargo clippy -p minicore-host-core --all-targets --locked -- -D warnings` and formatting passed. No production source changes were needed.
 
 - Additional release-profile check at Host `4b8de50`: `cargo test -p minicore-host-core --release --test runtime_owners --locked` passed all 16 cases. This is not a performance benchmark.
+
+## Default selection and revocation review regressions
+
+The final review's memory default cases are now permanent tests: both set/close orders, 128 concurrent set/close races evaluated against the actual accepted result, accepted defaults surviving revocation, and old/read-only callers remaining unable to mutate. A unit fixture holds only the child's state lock while the real default precheck waits, proving that connection revocation remains available and the eventual old-caller acceptance fails. It covers the precheck move in `d2c41ca`; the Agent's closing-set check still owns the final publication boundary.
+
+The integrated complete gate passed 198 unit/integration tests and 2 doctests, including 19 memory-owner tests and 5 core unit tests. Formatting, workspace all-target Clippy and rustdoc with warnings denied passed. No production behavior was changed when these review tests were imported. Independent snapshot review remains separate from the user's required external review.

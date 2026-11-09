@@ -87,3 +87,9 @@ Both opposing default-reference cases pass, together with the review's root-rele
 Core commits before this handoff: `fc28786`, `dddd347`, `f703977`, `8277546`, `d7fe459`, `94e6029`, `2e65e94`. The parent owns integration-only documents, dependency pin/lock updates and any remote publication. No remote was pushed and no main branch was merged by this task.
 
 The limitations above remain real: especially controlled Host shutdown, complete Host resource configuration/reload, automatic memory-entity reclamation and directory deletion, owner-level history-save continuation, and the complete canonical/transport/tool/interaction surfaces. Scoped persistent-owner completion does not mean the entire first edition is finished.
+
+## Integrated default-reference regressions
+
+Two additional real-file review cases are retained in the public test suite. A failed A-to-B default candidate does not block closing an unrelated third child; the candidate remains queryable and can subsequently be reconciled. Closing old default A waits for the retained candidate, then preserves confirmed new default B rather than clearing it. These complement the earlier current-target and pending-target close tests.
+
+At the integrated test-only checkpoint following `8244ec1`, the full remote-pin workspace gate passed 198 unit/integration tests plus 2 doctests: core 67 (5 unit, 42 persistent owners, 19 memory owners, 1 HTTP), protocol 47, provider 27 and storage 57. The extra seventh review regression checks storage file-gate reacquisition. Formatting, Clippy and rustdoc warnings-as-errors passed. These integration results use the published Runtime Git source, unlike this task's original topic-worktree validation above.
