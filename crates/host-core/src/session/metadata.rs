@@ -26,7 +26,12 @@ impl SessionController {
         let load_id = LoadId::new()
             .map_err(|error| Fault::new(FaultKind::SessionInternalUnexpected, error.to_string()))?;
         Self::open(state)?;
-        if state.active.is_some() || state.preparing || state.saving {
+        if state.active.is_some()
+            || state.preparing
+            || state.saving
+            || state.compaction.is_some()
+            || state.history_work.is_some()
+        {
             return Err(Fault::new(
                 FaultKind::SessionBusy,
                 "Session still owns execution or history work",
@@ -65,11 +70,14 @@ impl SessionController {
             {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
                 state.preparing = false;
+                let result = result.and_then(|history| {
+                    if persistent {
+                        state.replace_history(&history)?;
+                    }
+                    Ok(())
+                });
                 match result {
-                    Ok(history) => {
-                        if persistent {
-                            state.replace_history(&history);
-                        }
+                    Ok(()) => {
                         state.history_loaded = true;
                         if state.block_reason.as_ref().is_some_and(|fault| {
                             fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)

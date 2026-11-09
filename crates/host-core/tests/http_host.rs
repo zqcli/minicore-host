@@ -142,6 +142,8 @@ fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, Sessio
     let mut config = AgentConfig::default();
     config.session_defaults.model = "fixture/chat".parse().unwrap();
     config.role.instructions = role.into();
+    // This fixture verifies verbatim large history, not utility summarization.
+    config.session_defaults.execution.compaction.enabled = false;
     let created = host
         .create_agent(
             &caller,

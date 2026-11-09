@@ -544,6 +544,7 @@ impl SessionController {
         if state.lifecycle == SessionLifecycle::Closing
             && state.info.mode == StorageMode::Memory
             && state.active.is_none()
+            && state.compaction.is_none()
             && !state.preparing
             && !state.saving
             && state.history_work.is_none()

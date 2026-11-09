@@ -149,6 +149,8 @@ impl SessionController {
                 SessionControlKind::Unload => {
                     Self::open(&state)?;
                     if state.active.is_some()
+                        || state.compaction.is_some()
+                        || state.history_work.is_some()
                         || state.preparing
                         || state.saving
                         || state.record_work.as_ref().is_some_and(|work| work.running)
@@ -245,6 +247,9 @@ impl SessionController {
                 }
                 _ => CancelStatus::NotActive,
             };
+            if status == CancelStatus::Claimed {
+                Self::cancel_compaction_locked(&mut state);
+            }
             let clear = !keep_inbox
                 && (status == CancelStatus::Claimed
                     || (target.is_none() && status == CancelStatus::NotActive));
@@ -318,6 +323,7 @@ impl SessionController {
             None
         } else {
             state.lifecycle = SessionLifecycle::Closing;
+            Self::cancel_compaction_locked(&mut state);
             clear_inbox(&mut state);
             let handle = state.active.as_mut().and_then(|active| {
                 if matches!(active.info.state, TurnState::Starting | TurnState::Running) {

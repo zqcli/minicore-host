@@ -379,6 +379,20 @@ impl ConfigurationOwner {
     }
 }
 impl ResourceResolver for ConfigurationOwner {
+    fn resolve_for_compaction(
+        self: Arc<Self>,
+        config: SessionConfig,
+    ) -> crate::CompactionResourceFuture {
+        let snapshot = self.snapshot();
+        Box::pin(async move {
+            // This accepted utility keeps the selected publication even if a
+            // later Host reload changes resources for future work.
+            Self::resources(&snapshot)?
+                .resolve_for_compaction(config)
+                .await
+        })
+    }
+
     fn bind_tool_output(
         &self,
         execution: &minicore_runtime::ExecutionConfig,

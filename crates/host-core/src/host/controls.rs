@@ -52,6 +52,23 @@ impl Host {
         self.session(caller, target)?
             .control(caller, request, SessionControlKind::Unload)
     }
+    pub fn session_compact(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: CompactRequest,
+    ) -> Result<CompactReceipt, Fault> {
+        self.session(caller, target)?.compact(caller, request)
+    }
+    pub fn session_compact_cancel(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: CompactCancelRequest,
+    ) -> Result<CompactCancelReceipt, Fault> {
+        self.session(caller, target)?
+            .compact_cancel(caller, request)
+    }
     pub fn turn_cancel(
         &self,
         caller: &CallerContext,

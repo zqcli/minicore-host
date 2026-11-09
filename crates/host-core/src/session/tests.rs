@@ -1501,3 +1501,5 @@ async fn terminal_claim_cancel_precedes_real_runtime_panic_report() {
         Some(FaultKind::TurnInternalUnexpected)
     );
 }
+
+mod compaction;

@@ -77,6 +77,7 @@ pub struct SessionStateData {
     pub next_step: Vec<InputSummary>,
     pub next_turn: Vec<InputSummary>,
     pub preparing: bool,
+    pub compaction: Option<Box<CompactionActivity>>,
     pub saving: bool,
     pub metadata_saving: bool,
     pub metadata_fault: Option<Fault>,
@@ -248,4 +249,32 @@ pub struct SessionHistorySnapshot {
     #[serde(flatten)]
     pub source: SessionIdentity,
     pub data: HistoryPageData<HistoryItemData>,
+}
+
+/// Utility calls are accounted separately from ordinary Turn responses.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompactionUsage {
+    pub request_index: u32,
+    pub usage: Option<minicore_runtime::model::Usage>,
+    pub completed: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CompactionSource {
+    Manual {
+        operation_id: OperationId,
+    },
+    Automatic {
+        turn_id: TurnId,
+        load_id: LoadId,
+        loop_id: minicore_runtime::LoopId,
+        request_index: u32,
+    },
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompactionActivity {
+    pub source: CompactionSource,
+    pub state: CompactionState,
+    pub cancellation_requested: bool,
+    pub utility_usage: Vec<CompactionUsage>,
 }

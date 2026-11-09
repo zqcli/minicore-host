@@ -5,6 +5,8 @@ use minicore_host_protocol::*;
 use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
 
 mod collaboration;
+mod compaction;
+pub use compaction::{BoundCompactionResources, CompactionResourceFuture};
 mod controls;
 mod history;
 mod history_read;
@@ -84,6 +86,30 @@ pub trait ResourceResolver: Send + Sync + 'static {
         _binding: crate::PreparedTurnBinding,
     ) -> ResourceFuture<'a> {
         self.resolve(config)
+    }
+    /// Prepare model, fixed prompt and selected schemas without a Turn or tool
+    /// execution authority. The returned future owns its immutable resource view.
+    fn resolve_for_compaction(self: Arc<Self>, config: SessionConfig) -> CompactionResourceFuture {
+        Box::pin(async move {
+            let bound = self.resolve(&config).await?;
+            let names = config
+                .tools
+                .iter()
+                .map(|tool| tool.name.parse())
+                .collect::<Result<_, _>>()
+                .map_err(|_| {
+                    Fault::new(
+                        FaultKind::SessionConfigInvalid,
+                        "invalid selected tool name",
+                    )
+                })?;
+            Ok(BoundCompactionResources {
+                model: bound.execution.model().clone(),
+                reasoning: bound.execution.reasoning(),
+                tools: bound.execution.tools().specs_for(&names),
+                prompt: bound.execution.prompt().clone(),
+            })
+        })
     }
     /// Attach only the original Turn's output sink to already-prepared tools.
     /// This infallible, non-I/O step must not select resources or prepare business authority.
@@ -174,6 +200,7 @@ struct ActiveTurn {
     response_base: u64,
     bound_pending: VecDeque<QueuedInput>,
     start_history: usize,
+    raw_base_len: usize,
     partials: Vec<PartialResult>,
     report: Option<Arc<LoopReport>>,
     partial_accepted: bool,
@@ -237,6 +264,11 @@ struct SessionState {
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
     history: Vec<HistoryItem>,
+    history_position: u64,
+    projection: Option<minicore_host_storage::CompactionProjection>,
+    compaction: Option<compaction::CompactionWork>,
+    compaction_task: Option<tokio::task::JoinHandle<()>>,
+    last_compaction: Option<CompactionActivity>,
     // Accepted content in original order, not model context or save confirmation.
     // None until loaded; retained on unload and released with the Session body.
     readable_history: Option<Vec<HistoryItemData>>,
@@ -334,7 +366,12 @@ impl SessionController {
             completed: BTreeMap::new(),
             controls: BTreeMap::new(),
             completion_order: Vec::new(),
+            history_position: history.len() as u64,
             history,
+            projection: None,
+            compaction: None,
+            compaction_task: None,
+            last_compaction: None,
             readable_history,
             output: BTreeMap::new(),
             closed_published: false,
@@ -417,6 +454,12 @@ impl SessionController {
                 next_step: state.next_step.iter().map(QueuedInput::summary).collect(),
                 next_turn: state.next_turn.iter().map(QueuedInput::summary).collect(),
                 preparing: state.preparing,
+                compaction: state
+                    .compaction
+                    .as_ref()
+                    .map(|work| work.activity.clone())
+                    .or_else(|| state.last_compaction.clone())
+                    .map(Box::new),
                 saving: state.saving,
                 metadata_saving: state.record_work.as_ref().is_some_and(|work| work.running),
                 metadata_fault: state
@@ -441,6 +484,7 @@ impl SessionController {
             .runner_revision
             .checked_add(1)
             .expect("runner revision exhausted");
+        Self::refresh_compact_receipt(state);
         let snapshot = Self::make_snapshot(
             state,
             &self.host_id,
@@ -513,6 +557,7 @@ impl SessionController {
                 .as_ref()
                 .is_some_and(|scope| scope.sealed.load(Ordering::SeqCst))
             && !state.paused
+            && state.compaction.is_none()
             && !state.failure_paused
             && !state.unloaded_with_input
             && state.agent_enabled.load(Ordering::SeqCst)
@@ -852,6 +897,7 @@ impl SessionController {
             && !state.preparing
             && !state.saving
             && !state.driver_running
+            && state.compaction.is_none()
             && state.history_work.is_none()
             && state.record_work.is_none()
             && !state.scope_cleanup_pending
@@ -873,6 +919,9 @@ impl SessionController {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if state.releasing || state.released || state.reclaimed {
                 return;
+            }
+            if !enabled {
+                Self::cancel_compaction_locked(&mut state);
             }
             let handle = if !enabled {
                 state.active.as_mut().and_then(|active| {
@@ -1058,7 +1107,11 @@ impl SessionController {
                     }) {
                     Ok(history) => {
                         let mut state = self.state.lock().expect("Session mutex poisoned");
-                        state.replace_history(&history);
+                        if let Err(fault) = state.replace_history(&history) {
+                            drop(state);
+                            self.preparation_failed(fault);
+                            return;
+                        }
                         state.history_loaded = true;
                         // Validated history is Controller-owned; no Runner has
                         // been bound yet. Do not leave a completed load stuck
@@ -1109,6 +1162,11 @@ impl SessionController {
                             "resource preparation panicked; accepted inputs remain queued",
                         ))
                     });
+            let resources = resources.and_then(|mut resources| {
+                resources.execution =
+                    self.bind_compaction_prompt(&turn_id, &preparation.0, &resources.execution)?;
+                Ok(resources)
+            });
             let resources = match resources {
                 Ok(resources) => resources,
                 Err(fault) => {
@@ -1186,6 +1244,7 @@ impl SessionController {
                     response_base: 0,
                     bound_pending: VecDeque::new(),
                     start_history,
+                    raw_base_len: start_history,
                     partials: Vec::new(),
                     report: None,
                     partial_accepted: false,
@@ -1261,7 +1320,9 @@ impl SessionController {
                     });
                     let mut options = resources.options.clone();
                     options.history = Some(callback);
+                    let raw_base_len = state.history.len();
                     let active = state.active.as_mut().expect("checked active Turn");
+                    active.raw_base_len = raw_base_len;
                     active.report = None;
                     active.partial_accepted = false;
                     active.bound_pending.push_back(first.clone());

@@ -9,13 +9,18 @@ enum Boundary {
     Terminal,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct Binding {
+pub(super) struct Binding {
     turn_id: TurnId,
     load_id: LoadId,
     boundary: Boundary,
 }
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum SaveBinding {
+    Turn(Binding),
+    Compaction(compaction::CompactionBinding),
+}
 pub(super) struct HistorySaveWork {
-    binding: Binding,
+    binding: SaveBinding,
     running: bool,
     pub(super) fault: Option<Fault>,
 }
@@ -110,6 +115,7 @@ impl SessionController {
         offset: usize,
         items: &[HistoryItem],
     ) -> Result<(), Fault> {
+        self.wait_compaction_boundary().await?;
         let entries = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let active = state.active.as_mut().ok_or_else(|| {
@@ -232,6 +238,8 @@ impl SessionController {
             if self.backend.mode() == StorageMode::Persistent {
                 active.info.persistence = PersistenceState::Pending;
             }
+            let binding = SaveBinding::Turn(binding);
+            state.history_position += entries.len() as u64;
             state.history_work = Some(HistorySaveWork {
                 binding: binding.clone(),
                 running: true,
@@ -244,9 +252,24 @@ impl SessionController {
         let result = checked_save(async { self.backend.append(entries).await }).await;
         self.settle_save(&binding, result)
     }
-    fn settle_save(
+    pub(super) fn register_compaction_save(
         &self,
-        binding: &Binding,
+        state: &mut SessionState,
+        binding: compaction::CompactionBinding,
+    ) -> SaveBinding {
+        let binding = SaveBinding::Compaction(binding);
+        state.history_position += 1;
+        state.history_work = Some(HistorySaveWork {
+            binding: binding.clone(),
+            running: true,
+            fault: None,
+        });
+        state.saving = true;
+        binding
+    }
+    pub(super) fn settle_save(
+        &self,
+        binding: &SaveBinding,
         result: Result<PersistenceState, Fault>,
     ) -> Result<(), Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
@@ -254,65 +277,111 @@ impl SessionController {
             .history_work
             .as_ref()
             .is_none_or(|work| &work.binding != binding)
-            || state.active.as_ref().is_none_or(|active| {
-                active.info.id != binding.turn_id || active.info.load_id != binding.load_id
-            })
         {
             return Err(stale_history());
         }
-        state.saving = false;
-        let active = state.active.as_mut().expect("checked original Turn");
-        let result = match result {
-            Ok(persistence)
-                if persistence
-                    == match self.backend.mode() {
-                        StorageMode::Persistent => PersistenceState::Persisted,
-                        StorageMode::Memory => PersistenceState::NotApplicable,
-                    } =>
+        match binding {
+            SaveBinding::Turn(binding)
+                if state.active.as_ref().is_none_or(|active| {
+                    active.info.id != binding.turn_id || active.info.load_id != binding.load_id
+                }) =>
             {
-                active.info.persistence = if persistence == PersistenceState::Persisted
-                    && active.info.state == TurnState::Finalizing
-                    && binding.boundary != Boundary::Terminal
-                {
-                    // The original range is confirmed, but this already-returned
-                    // Turn still owns a report suffix/partial/terminal handoff.
-                    PersistenceState::Pending
-                } else {
-                    persistence
-                };
-                active.info.persistence_fault = None;
+                return Err(stale_history());
+            }
+            SaveBinding::Compaction(binding)
+                if state
+                    .compaction
+                    .as_ref()
+                    .is_none_or(|work| &work.binding != binding) =>
+            {
+                return Err(stale_history());
+            }
+            _ => {}
+        }
+        let result = result.and_then(|persistence| {
+            if persistence
+                == match self.backend.mode() {
+                    StorageMode::Persistent => PersistenceState::Persisted,
+                    StorageMode::Memory => PersistenceState::NotApplicable,
+                }
+            {
+                Ok(persistence)
+            } else {
+                Err(Fault::new(
+                    FaultKind::SessionHistoryWriteFailed,
+                    "history backend did not confirm the required save",
+                ))
+            }
+        });
+        state.saving = false;
+        match &result {
+            Ok(_) => {
                 state.history_work = None;
                 if state
                     .block_reason
                     .as_ref()
-                    .is_some_and(|f| f.kind() == Some(FaultKind::SessionHistoryWriteFailed))
+                    .is_some_and(|fault| fault.kind() == Some(FaultKind::SessionHistoryWriteFailed))
                 {
                     state.block_reason = state
                         .active
                         .as_ref()
                         .and_then(|active| active.tool_cleanup.fault.clone());
                 }
-                Ok(())
             }
-            other => {
-                let fault = match other {
-                    Err(fault) => fault,
-                    Ok(_) => Fault::new(
-                        FaultKind::SessionHistoryWriteFailed,
-                        "history backend did not confirm the required save",
-                    ),
-                };
-                active.info.persistence = PersistenceState::Failed;
-                active.info.persistence_fault = Some(fault.clone());
+            Err(fault) => {
                 let work = state.history_work.as_mut().expect("original save retained");
                 work.running = false;
                 work.fault = Some(fault.clone());
                 state.block_reason = Some(fault.clone());
-                Err(fault)
             }
-        };
+        }
+        match binding {
+            SaveBinding::Turn(binding) => {
+                let active = state.active.as_mut().expect("checked Turn");
+                match &result {
+                    Ok(persistence) => {
+                        active.info.persistence = if *persistence == PersistenceState::Persisted
+                            && active.info.state == TurnState::Finalizing
+                            && binding.boundary != Boundary::Terminal
+                        {
+                            PersistenceState::Pending
+                        } else {
+                            *persistence
+                        };
+                        active.info.persistence_fault = None;
+                    }
+                    Err(fault) => {
+                        active.info.persistence = PersistenceState::Failed;
+                        active.info.persistence_fault = Some(fault.clone());
+                    }
+                }
+            }
+            SaveBinding::Compaction(binding) => {
+                // Automatic utility persistence has its own facts, while a
+                // failed boundary still blocks the owning Turn's final handoff.
+                if let Some(turn_id) = binding.turn_id()
+                    && let Some(active) = state
+                        .active
+                        .as_mut()
+                        .filter(|active| &active.info.id == turn_id)
+                {
+                    if let Err(fault) = &result {
+                        active.info.persistence = PersistenceState::Failed;
+                        active.info.persistence_fault = Some(fault.clone());
+                    } else {
+                        active.info.persistence_fault = None;
+                        active.info.persistence = if self.backend.mode() == StorageMode::Memory {
+                            PersistenceState::NotApplicable
+                        } else {
+                            PersistenceState::Pending
+                        };
+                    }
+                }
+                self.settle_compaction_save(&mut state, binding, &result)?;
+            }
+        }
         self.publish(&mut state);
-        result
+        result.map(|_| ())
     }
     pub(super) async fn finalize(
         &self,
@@ -502,71 +571,103 @@ impl SessionController {
         if state.reclaimed || state.released || state.releasing {
             return Err(stale_history());
         }
-        let active = state.active.as_ref().ok_or_else(stale_history)?;
         let work = state.history_work.as_ref().ok_or_else(|| {
             Fault::new(
                 FaultKind::SessionBusy,
                 "there is no original history save to continue",
             )
         })?;
-        if work.running || state.saving || active.info.state != TurnState::Finalizing {
+        if work.running || state.saving || state.driver_running {
             return Err(Fault::new(
                 FaultKind::SessionBusy,
                 "original execution or save is still returning",
             ));
         }
         let binding = work.binding.clone();
-        if binding.turn_id != active.info.id || binding.load_id != active.info.load_id {
-            return Err(stale_history());
-        }
-        let outcome = active.info.outcome.ok_or_else(stale_history)?;
-        let fault = active.info.fault.clone();
-        let report = active.report.clone();
-        state
-            .history_work
-            .as_mut()
-            .expect("checked original save")
-            .running = true;
+        let turn_id = match &binding {
+            SaveBinding::Turn(binding) => {
+                let active = state
+                    .active
+                    .as_ref()
+                    .filter(|active| {
+                        active.info.id == binding.turn_id && active.info.load_id == binding.load_id
+                    })
+                    .ok_or_else(stale_history)?;
+                if active.info.state != TurnState::Finalizing {
+                    return Err(stale_history());
+                }
+                Some(binding.turn_id.clone())
+            }
+            SaveBinding::Compaction(binding) => {
+                if state
+                    .compaction
+                    .as_ref()
+                    .is_none_or(|work| &work.binding != binding)
+                {
+                    return Err(stale_history());
+                }
+                binding.turn_id().cloned()
+            }
+        };
+        let terminal = turn_id
+            .as_ref()
+            .map(|id| {
+                let active = state
+                    .active
+                    .as_ref()
+                    .filter(|active| {
+                        &active.info.id == id && active.info.state == TurnState::Finalizing
+                    })
+                    .ok_or_else(stale_history)?;
+                Ok((
+                    id.clone(),
+                    active.info.outcome.ok_or_else(stale_history)?,
+                    active.info.fault.clone(),
+                    active.report.clone(),
+                ))
+            })
+            .transpose()?;
+        state.history_work.as_mut().expect("original save").running = true;
         state.saving = true;
         let previous = state.history_task.take();
+        let compaction = state.compaction_task.take();
         let driver = state.driver_task.take();
         let owner = Arc::clone(self);
         state.history_task = Some(state.executor.as_ref().expect("checked runtime").spawn(
             async move {
-                if let Some(previous) = previous {
-                    let _ = previous.await;
-                }
-                if let Some(driver) = driver
-                    && driver.await.is_err()
-                {
-                    let _ = owner.settle_save(
-                        &binding,
-                        Err(Fault::new(
-                            FaultKind::SessionHistoryWriteFailed,
-                            "original execution owner did not retire normally",
-                        )),
-                    );
-                    return;
+                // No active driver is allowed at admission. In particular, never
+                // wait on a Runtime join whose terminal callback awaits this save.
+                for task in [previous, compaction, driver].into_iter().flatten() {
+                    if task.await.is_err() {
+                        let _ = owner.settle_save(
+                            &binding,
+                            Err(Fault::new(
+                                FaultKind::SessionHistoryWriteFailed,
+                                "original execution owner did not retire normally",
+                            )),
+                        );
+                        return;
+                    }
                 }
                 let result = checked_save(async { owner.backend.reconcile().await }).await;
                 if owner.settle_save(&binding, result).is_err() {
                     return;
                 }
-                if let Some(report) = report
-                    && owner
-                        .reconcile_report(&binding.turn_id, &report)
-                        .await
-                        .is_err()
-                {
-                    return;
+                if let Some((turn_id, outcome, fault, report)) = terminal {
+                    if let Some(report) = report
+                        && owner.reconcile_report(&turn_id, &report).await.is_err()
+                    {
+                        return;
+                    }
+                    owner.finalize(&turn_id, outcome, fault).await;
                 }
-                owner.finalize(&binding.turn_id, outcome, fault).await;
                 {
                     let mut state = owner.state.lock().expect("Session mutex poisoned");
                     if owner.finish_save_resume(&mut state) {
                         owner.publish(&mut state);
                     }
                 }
+                owner.handoff_delegation_owned();
                 owner.wake();
             },
         ));
@@ -574,7 +675,7 @@ impl SessionController {
         Ok(())
     }
 }
-async fn checked_save(
+pub(super) async fn checked_save(
     future: impl Future<Output = Result<PersistenceState, Fault>>,
 ) -> Result<PersistenceState, Fault> {
     AssertUnwindSafe(future)
@@ -617,21 +718,24 @@ mod tests {
             .unwrap()
             .binding
             .clone();
+        let SaveBinding::Turn(original_turn) = &original else {
+            panic!("expected Turn save")
+        };
         let mut bindings = Vec::new();
-        let mut wrong_turn = original.clone();
+        let mut wrong_turn = original_turn.clone();
         wrong_turn.turn_id = TurnId::new().unwrap();
         bindings.push(wrong_turn);
-        let mut wrong_load = original.clone();
+        let mut wrong_load = original_turn.clone();
         wrong_load.load_id = LoadId::new().unwrap();
         bindings.push(wrong_load);
-        let mut wrong_range = original.clone();
+        let mut wrong_range = original_turn.clone();
         wrong_range.boundary = Boundary::Terminal;
         bindings.push(wrong_range);
         for stale in bindings {
             assert!(
                 fixture
                     .session
-                    .settle_save(&stale, Ok(PersistenceState::Persisted))
+                    .settle_save(&SaveBinding::Turn(stale), Ok(PersistenceState::Persisted))
                     .is_err()
             );
             let state = fixture.session.state.lock().unwrap();

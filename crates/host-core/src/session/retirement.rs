@@ -72,6 +72,7 @@ impl SessionController {
             state.host_draining = true;
             state.host_stopping |= force;
             if force {
+                Self::cancel_compaction_locked(&mut state);
                 self.start_scope_cleanup_locked(&mut state, false);
             }
             let handle = if state.host_stopping {
@@ -126,6 +127,7 @@ impl SessionController {
     }
     fn work_settled(state: &SessionState) -> bool {
         state.active.is_none()
+            && state.compaction.is_none()
             && !state.preparing
             && !state.saving
             && !state.driver_running
@@ -167,6 +169,7 @@ impl SessionController {
                     &state.load_task,
                     &state.record_task,
                     &state.history_task,
+                    &state.compaction_task,
                     &state.scope_task,
                 ]
                 .into_iter()
@@ -180,6 +183,7 @@ impl SessionController {
                 state.load_task.take(),
                 state.record_task.take(),
                 state.history_task.take(),
+                state.compaction_task.take(),
                 state.scope_task.take(),
             ]
         };
@@ -259,6 +263,8 @@ impl SessionController {
                 std::mem::take(&mut state.completed),
                 std::mem::take(&mut state.completion_order),
             );
+            state.projection = None;
+            state.last_compaction = None;
             state.history_loaded = false;
             self.publish(&mut state);
             retired
@@ -319,6 +325,7 @@ impl SessionController {
                 state.load_task.take(),
                 state.record_task.take(),
                 state.history_task.take(),
+                state.compaction_task.take(),
                 state.scope_task.take(),
             ]
         };

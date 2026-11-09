@@ -4,8 +4,9 @@
 //! or process-wide cwd changes occur during preparation. Each candidate builds
 //! new immutable provider clients; each Turn binds one actual selected ToolSet.
 use minicore_host_core::{
-    BoundResources, HostConfig, HostConfigurationFuture, HostConfigurationPreparer,
-    PreparedHostConfiguration, PreparedTurnBinding, ResourceFuture, ResourceResolver,
+    BoundCompactionResources, BoundResources, CompactionResourceFuture, HostConfig,
+    HostConfigurationFuture, HostConfigurationPreparer, PreparedHostConfiguration,
+    PreparedTurnBinding, ResourceFuture, ResourceResolver,
 };
 use minicore_host_protocol::{Fault, FaultKind, ReasoningPreference, SessionConfig};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
@@ -225,6 +226,44 @@ impl ProductionResources {
     }
 }
 impl ResourceResolver for ProductionResources {
+    fn resolve_for_compaction(self: Arc<Self>, config: SessionConfig) -> CompactionResourceFuture {
+        Box::pin(async move {
+            self.validate(&config)?;
+            let workspace = match &config.workspace {
+                Some(selection) => {
+                    Some(Workspace::bind(Some(selection)).await.map_err(|error| {
+                        session_invalid(format!("workspace binding failed: {error}"))
+                    })?)
+                }
+                None => None,
+            };
+            let specs = self.tools.specs();
+            let tools = config
+                .tools
+                .iter()
+                .map(|selection| {
+                    specs
+                        .iter()
+                        .find(|spec| spec.name().as_str() == selection.name)
+                        .cloned()
+                        .ok_or_else(|| {
+                            missing(format!("tool {} is not registered", selection.name))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(BoundCompactionResources {
+                model: self.models[&config.model].clone(),
+                reasoning: reasoning(config.reasoning),
+                tools,
+                prompt: Arc::new(BoundPrompt {
+                    framework: Text::new(&self.framework),
+                    role: Text::new(&config.role.instructions),
+                    workspace,
+                }),
+            })
+        })
+    }
+
     fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
         config
             .validate()
@@ -257,13 +296,6 @@ impl ResourceResolver for ProductionResources {
             && !Path::new(&workspace.path).is_absolute()
         {
             return Err(session_invalid("workspace path must be absolute"));
-        }
-        // Compaction is Session-owned and is not an AgentLoop option. Until that
-        // owner is integrated, reject rather than silently ignoring this flag.
-        if config.execution.compaction.enabled {
-            return Err(session_invalid(
-                "automatic compaction is not implemented by this resource assembler; explicitly disable it",
-            ));
         }
         Ok(())
     }

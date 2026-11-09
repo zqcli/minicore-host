@@ -21,17 +21,45 @@ impl HistoryItemData {
     }
 }
 impl SessionState {
-    pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) {
-        self.history = entries
-            .iter()
-            .filter_map(HistoryEntry::runtime_item)
-            .collect();
+    pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) -> Result<(), Fault> {
+        let mut raw = Vec::new();
+        let mut projection: Option<minicore_host_storage::CompactionProjection> = None;
+        for (position, entry) in entries.iter().enumerate() {
+            if let HistoryEntry::Compaction {
+                source_position,
+                covered_items,
+                summary,
+            } = entry
+            {
+                let candidate = minicore_host_storage::CompactionProjection::new(
+                    *source_position,
+                    *covered_items,
+                    summary.clone(),
+                );
+                candidate
+                    .validate(
+                        &raw,
+                        position as u64,
+                        projection.as_ref().map_or(0, |value| value.covered_items),
+                    )
+                    .map_err(|error| {
+                        Fault::new(FaultKind::SessionHistoryLoadFailed, error.to_string())
+                    })?;
+                projection = Some(candidate);
+            } else if let Some(item) = entry.runtime_item() {
+                raw.push(item);
+            }
+        }
+        self.history = raw;
+        self.history_position = entries.len() as u64;
+        self.projection = projection;
         self.readable_history = Some(
             entries
                 .iter()
                 .filter_map(HistoryItemData::from_entry)
                 .collect(),
         );
+        Ok(())
     }
 }
 

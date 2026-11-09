@@ -737,17 +737,15 @@ async fn persistent_config_uses_one_record_and_rebuilds_private_resources() {
 }
 
 #[tokio::test]
-async fn unsupported_compaction_and_reasoning_are_explicit() {
+async fn owned_compaction_is_available_and_unsupported_reasoning_is_explicit() {
     let builder = HostResourceBuilder::builtins().unwrap();
     let initial = config("http://127.0.0.1:1/v1/chat/completions");
     let host = Host::memory_configured(prepare(&builder, initial, "old-key").await).unwrap();
     let connection = host.connect().unwrap();
     let mut request = request(vec![], None);
     request.config.session_defaults.execution.compaction.enabled = true;
-    let fault = host
-        .create_agent(&connection.caller(), request.clone())
-        .unwrap_err();
-    assert_eq!(fault.kind(), Some(FaultKind::SessionConfigInvalid));
+    host.create_agent(&connection.caller(), request.clone())
+        .unwrap();
     request.config.session_defaults.execution.compaction.enabled = false;
     request.config.session_defaults.reasoning = ReasoningPreference::Ultra;
     assert_eq!(
@@ -902,3 +900,6 @@ async fn production_builder_binds_reload_preparer_at_initialization_without_an_e
         "Assembled reload"
     );
 }
+
+#[path = "task023/compaction.rs"]
+mod compaction;
