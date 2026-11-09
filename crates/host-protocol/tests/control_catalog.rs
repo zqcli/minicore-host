@@ -237,7 +237,7 @@ fn unavailable_methods_are_staged_and_never_fake_success() {
         require_implemented(Method::MessageSend, &empty)
             .unwrap_err()
             .kind(),
-        FaultKind::HostMethodUnavailable
+        Some(FaultKind::HostMethodUnavailable)
     );
     let real = BTreeSet::from([Method::MessageSend]);
     assert!(require_implemented(Method::MessageSend, &real).is_ok());

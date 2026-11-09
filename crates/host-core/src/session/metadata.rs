@@ -33,7 +33,7 @@ impl SessionController {
             ));
         }
         if let Some(fault) = &state.block_reason
-            && fault.kind() == FaultKind::SessionHistoryWriteFailed
+            && fault.kind() == Some(FaultKind::SessionHistoryWriteFailed)
         {
             return Err(fault.clone());
         }
@@ -73,7 +73,7 @@ impl SessionController {
                         state.history = history;
                         state.history_loaded = true;
                         if state.block_reason.as_ref().is_some_and(|fault| {
-                            fault.kind() == FaultKind::SessionHistoryLoadFailed
+                            fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
                         }) {
                             state.block_reason = None;
                         }
@@ -271,11 +271,9 @@ impl SessionController {
                         state.residency = Residency::Unloaded;
                         state.load_id = None;
                     }
-                    if state
-                        .block_reason
-                        .as_ref()
-                        .is_some_and(|fault| fault.kind() == FaultKind::SessionResourceMissing)
-                    {
+                    if state.block_reason.as_ref().is_some_and(|fault| {
+                        fault.kind() == Some(FaultKind::SessionResourceMissing)
+                    }) {
                         state.block_reason = None;
                     }
                     state.record_work = None;

@@ -26,13 +26,13 @@ impl SessionController {
             block_reason: state.block_reason.as_ref().map(|fault| BlockReason {
                 message: fault.message().to_owned(),
                 resolution: match fault.kind() {
-                    FaultKind::SessionHistoryWriteFailed => {
+                    Some(FaultKind::SessionHistoryWriteFailed) => {
                         "Explicitly resume to confirm the original save before continuing"
                     }
-                    FaultKind::SessionHistoryLoadFailed => {
+                    Some(FaultKind::SessionHistoryLoadFailed) => {
                         "Restore valid history, then explicitly load or resume to validate it"
                     }
-                    FaultKind::SessionResourceMissing => {
+                    Some(FaultKind::SessionResourceMissing) => {
                         "Correct the Session resource configuration before resuming"
                     }
                     _ => "Resolve the reported dependency or execution fault before resuming",
@@ -109,7 +109,7 @@ impl SessionController {
                         } else if state.info.mode == StorageMode::Persistent
                             && (!state.history_loaded
                                 || state.block_reason.as_ref().is_some_and(|fault| {
-                                    fault.kind() == FaultKind::SessionHistoryLoadFailed
+                                    fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
                                 }))
                         {
                             self.start_load_owned(&mut state, true)?;

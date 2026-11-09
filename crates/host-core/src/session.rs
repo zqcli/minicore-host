@@ -630,7 +630,7 @@ impl SessionController {
             if state
                 .block_reason
                 .as_ref()
-                .is_some_and(|fault| fault.kind() == FaultKind::SessionResourceMissing)
+                .is_some_and(|fault| fault.kind() == Some(FaultKind::SessionResourceMissing))
             {
                 state.block_reason = None;
             }
@@ -1017,7 +1017,7 @@ impl SessionController {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         state.preparing = false;
         state.resume_after_load = None;
-        if fault.kind() == FaultKind::SessionHistoryLoadFailed {
+        if fault.kind() == Some(FaultKind::SessionHistoryLoadFailed) {
             state.residency = Residency::Unloaded;
             state.load_id = None;
         }

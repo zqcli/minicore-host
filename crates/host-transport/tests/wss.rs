@@ -19,7 +19,7 @@ async fn network_is_opt_in_and_invalid_setup_never_falls_back_to_anonymous() {
     let (tls, _) = wss_common::certificates();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     assert!(
-        matches!(serve_wss(host.clone(), listener, tls).await, Err(CallError::Business(fault)) if fault.kind() == FaultKind::HostAccessInvalid)
+        matches!(serve_wss(host.clone(), listener, tls).await, Err(CallError::Business(fault)) if fault.kind() == Some(FaultKind::HostAccessInvalid))
     );
     for key in ["", " \t\n"] {
         assert!(host.configure_network_access(Some(key.into())).is_err());
@@ -92,7 +92,7 @@ async fn first_initialized_connection_operates_and_observers_do_not_promote() {
     assert!(!second.initial_info().can_operate);
     assert!(second.info(options(500)).await.is_ok());
     assert!(
-        matches!(second.create_agent(create_request(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == FaultKind::HostAccessReadOnly)
+        matches!(second.create_agent(create_request(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == Some(FaultKind::HostAccessReadOnly))
     );
     first.close();
     tokio::time::timeout(Duration::from_secs(3), async {
@@ -103,7 +103,7 @@ async fn first_initialized_connection_operates_and_observers_do_not_promote() {
     .await
     .unwrap();
     assert!(
-        matches!(second.create_agent(create_request(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == FaultKind::HostAccessReadOnly)
+        matches!(second.create_agent(create_request(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == Some(FaultKind::HostAccessReadOnly))
     );
     let replacement = server.client(FIRST).await.unwrap();
     assert!(replacement.initial_info().can_operate);
@@ -141,7 +141,7 @@ async fn key_publication_closes_network_peers_but_preserves_local_stdio_operator
     host.configure_network_access(Some(SECOND.into())).unwrap();
     old.assert_disconnected().await;
     assert!(
-        matches!(server.client(FIRST).await, Err(CallError::Business(fault)) if fault.kind() == FaultKind::HostAccessInvalid)
+        matches!(server.client(FIRST).await, Err(CallError::Business(fault)) if fault.kind() == Some(FaultKind::HostAccessInvalid))
     );
     let new = server.client(SECOND).await.unwrap();
     assert!(!new.initial_info().can_operate);
@@ -335,7 +335,7 @@ async fn wss_receipts_results_and_business_faults_match_typed_and_stdio_reads() 
             "same owner receipt"
         );
         assert!(
-            matches!(other_session.pause(control(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == FaultKind::HostAccessReadOnly)
+            matches!(other_session.pause(control(), options(500)).await, Err(CallError::Business(fault)) if fault.kind() == Some(FaultKind::HostAccessReadOnly))
         );
     }
     resources.resolve_failure.store(true, Ordering::SeqCst);

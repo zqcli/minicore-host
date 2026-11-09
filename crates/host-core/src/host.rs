@@ -351,9 +351,11 @@ impl Host {
             Err(error)
                 if matches!(
                     error.kind(),
-                    FaultKind::HostLifecycleUnavailable
-                        | FaultKind::HostAccessInvalid
-                        | FaultKind::HostAccessReadOnly
+                    Some(
+                        FaultKind::HostLifecycleUnavailable
+                            | FaultKind::HostAccessInvalid
+                            | FaultKind::HostAccessReadOnly
+                    )
                 ) =>
             {
                 return Err(error);

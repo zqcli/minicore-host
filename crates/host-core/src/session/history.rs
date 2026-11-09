@@ -267,7 +267,7 @@ impl SessionController {
                 if state
                     .block_reason
                     .as_ref()
-                    .is_some_and(|fault| fault.kind() == FaultKind::SessionHistoryWriteFailed)
+                    .is_some_and(|f| f.kind() == Some(FaultKind::SessionHistoryWriteFailed))
                 {
                     state.block_reason = None;
                 }
@@ -546,7 +546,7 @@ async fn checked_save(
             ))
         })
         .map_err(|fault| {
-            if fault.kind() == FaultKind::SessionHistoryWriteFailed {
+            if fault.kind() == Some(FaultKind::SessionHistoryWriteFailed) {
                 fault
             } else {
                 Fault::new(FaultKind::SessionHistoryWriteFailed, fault.message())

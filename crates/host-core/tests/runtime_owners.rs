@@ -260,7 +260,7 @@ async fn wait_reclaimed(host: &Host, caller: &CallerContext, target: &SessionRef
                 Err(fault) => {
                     assert!(matches!(
                         fault.kind(),
-                        FaultKind::AgentSessionNotFound | FaultKind::HostAgentNotFound
+                        Some(FaultKind::AgentSessionNotFound | FaultKind::HostAgentNotFound)
                     ));
                     return;
                 }
@@ -461,16 +461,16 @@ async fn connection_lifetime_not_a_caller_clone_controls_operation_rights() {
     assert!(!observer.initial_info().can_operate);
     assert_eq!(
         host.pause(&observer.caller(), &target).unwrap_err().kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     operator.close();
     assert_eq!(
         host.pause(&old, &target).unwrap_err().kind(),
-        FaultKind::HostAccessInvalid
+        Some(FaultKind::HostAccessInvalid)
     );
     assert_eq!(
         host.pause(&observer.caller(), &target).unwrap_err().kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     let new = host.connect().unwrap();
     assert!(new.initial_info().can_operate);
@@ -645,11 +645,11 @@ async fn close_clears_default_and_unload_preserves_memory_history() {
         )
         .unwrap_err()
         .kind(),
-        FaultKind::AgentDefaultSessionUnavailable
+        Some(FaultKind::AgentDefaultSessionUnavailable)
     );
     assert_eq!(
         host.resume(&caller, &target).unwrap_err().kind(),
-        FaultKind::AgentSessionNotFound
+        Some(FaultKind::AgentSessionNotFound)
     );
     assert_eq!(
         host.session_state(
@@ -1012,7 +1012,7 @@ fn review_memory_default_close_orders_remain_authoritative() {
         host.set_default_session(&caller, &agent, Some(set_first.session_id))
             .unwrap_err()
             .kind(),
-        FaultKind::AgentSessionNotFound
+        Some(FaultKind::AgentSessionNotFound)
     );
 
     host.set_default_session(&caller, &agent, Some(first.session_id.clone()))
@@ -1023,7 +1023,7 @@ fn review_memory_default_close_orders_remain_authoritative() {
         host.set_default_session(&caller, &agent, Some(close_first.session_id))
             .unwrap_err()
             .kind(),
-        FaultKind::AgentSessionNotFound
+        Some(FaultKind::AgentSessionNotFound)
     );
     assert_eq!(
         host.agent_info(&caller, &agent).unwrap().default_session_id,
@@ -1076,7 +1076,7 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
         } else {
             assert!(matches!(
                 set_result.unwrap_err().kind(),
-                FaultKind::AgentDefaultSessionUnavailable | FaultKind::AgentSessionNotFound
+                Some(FaultKind::AgentDefaultSessionUnavailable | FaultKind::AgentSessionNotFound)
             ));
             Some(first.session_id)
         };
@@ -1086,7 +1086,7 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
         );
         assert_eq!(
             host.session_state(&caller, &target).unwrap_err().kind(),
-            FaultKind::AgentSessionNotFound
+            Some(FaultKind::AgentSessionNotFound)
         );
     }
 }
@@ -1117,7 +1117,7 @@ fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
         host.set_default_session(&observer.caller(), &agent, Some(selected.clone()))
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     host.set_default_session(&caller, &agent, Some(selected.clone()))
         .unwrap();
@@ -1126,13 +1126,13 @@ fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
         host.set_default_session(&caller, &agent, Some(first.session_id))
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessInvalid
+        Some(FaultKind::HostAccessInvalid)
     );
     assert_eq!(
         host.set_default_session(&observer.caller(), &agent, None)
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     assert_eq!(
         host.agent_info(&observer.caller(), &agent)
@@ -1249,7 +1249,7 @@ async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
         host.receipt_get(&caller, &request.operation_id)
             .unwrap_err()
             .kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
     let agent_ref = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
@@ -1273,7 +1273,7 @@ async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
         host.receipt_get(&caller, &request.operation_id)
             .unwrap_err()
             .kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
 }
 
@@ -1401,7 +1401,7 @@ async fn canonical_turn_cancellation_never_retargets_or_clears_later_input() {
             },
         )
         .unwrap_err();
-    assert_eq!(missing.kind(), FaultKind::SessionTurnNotFound);
+    assert_eq!(missing.kind(), Some(FaultKind::SessionTurnNotFound));
     for receipt in [cancel, repeated, stale] {
         assert_receipt(&host, &caller, Receipt::TurnCancel(receipt));
     }
@@ -1524,7 +1524,7 @@ async fn canonical_close_returns_accepted_facts_even_when_memory_is_reclaimed() 
         host.receipt_get(&caller, &receipt.operation_id)
             .unwrap_err()
             .kind(),
-        FaultKind::HostReceiptNotFound
+        Some(FaultKind::HostReceiptNotFound)
     );
     assert!(host.agents(&caller).unwrap().is_empty());
 }
@@ -1597,7 +1597,7 @@ async fn canonical_receipts_require_live_read_authority_and_current_write_author
         host.session_pause(&observer.caller(), &target, request.clone())
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     assert!(
         host.receipts(&observer.caller(), &request.operation_id)
@@ -1610,13 +1610,13 @@ async fn canonical_receipts_require_live_read_authority_and_current_write_author
         host.session_pause(&old, &target, request.clone())
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessInvalid
+        Some(FaultKind::HostAccessInvalid)
     );
     assert_eq!(
         host.receipts(&old, &request.operation_id)
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessInvalid
+        Some(FaultKind::HostAccessInvalid)
     );
     let new = host.connect().unwrap();
     let receipt = host.session_pause(&new.caller(), &target, request).unwrap();
@@ -1662,7 +1662,7 @@ async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
     );
     assert_eq!(
         host.receipt_get(&caller, &operation).unwrap_err().kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while host.info(&caller).unwrap().lifecycle != HostLifecycle::Stopped {
@@ -1689,7 +1689,7 @@ fn canonical_receipt_lookup_distinguishes_absence_ambiguity_and_unavailable_meth
         host.session_creation_receipt(&caller, &agent, &operation)
             .unwrap_err(),
     ] {
-        assert_eq!(missing.kind(), FaultKind::HostReceiptNotFound);
+        assert_eq!(missing.kind(), Some(FaultKind::HostReceiptNotFound));
         assert_eq!(missing.code(), 1202);
     }
     let request = SessionControlRequest {
@@ -1704,10 +1704,10 @@ fn canonical_receipt_lookup_distinguishes_absence_ambiguity_and_unavailable_meth
     );
     host.session_pause(&caller, &target, request).unwrap();
     let ambiguous = host.receipt_get(&caller, &operation).unwrap_err();
-    assert_eq!(ambiguous.kind(), FaultKind::HostReceiptAmbiguous);
+    assert_eq!(ambiguous.kind(), Some(FaultKind::HostReceiptAmbiguous));
     assert_eq!(ambiguous.code(), 1203);
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
     let unsupported = require_implemented(Method::HostReceiptGet, &BTreeSet::new()).unwrap_err();
-    assert_eq!(unsupported.kind(), FaultKind::HostMethodUnavailable);
+    assert_eq!(unsupported.kind(), Some(FaultKind::HostMethodUnavailable));
     assert_eq!(unsupported.code(), 1401);
 }

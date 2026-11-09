@@ -14,7 +14,7 @@ pub(crate) fn creation_save_fault(step: &CreateStep) -> Option<Fault> {
         CreateStep::Failed { error }
             if matches!(
                 error.kind(),
-                FaultKind::HostStorageUnavailable | FaultKind::SessionHistoryWriteFailed
+                Some(FaultKind::HostStorageUnavailable | FaultKind::SessionHistoryWriteFailed)
             ) =>
         {
             Some(error.clone())

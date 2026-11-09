@@ -440,11 +440,11 @@ async fn failed_save_retains_report_and_primary_failure_without_reappend_or_succ
     assert_eq!(active.info.persistence, PersistenceState::Failed);
     assert_eq!(
         active.info.fault.as_ref().unwrap().kind(),
-        FaultKind::TurnModelStreamInterrupted
+        Some(FaultKind::TurnModelStreamInterrupted)
     );
     assert_eq!(
         active.info.persistence_fault.as_ref().unwrap().kind(),
-        FaultKind::SessionHistoryWriteFailed
+        Some(FaultKind::SessionHistoryWriteFailed)
     );
     assert!(active.report.as_ref().unwrap().partial.is_some());
     assert!(active.report.as_ref().unwrap().history_failure.is_some());
@@ -571,7 +571,10 @@ fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
         revoked_during_precheck,
         "child precheck must not block connection revocation"
     );
-    assert_eq!(result.unwrap_err().kind(), FaultKind::HostAccessInvalid);
+    assert_eq!(
+        result.unwrap_err().kind(),
+        Some(FaultKind::HostAccessInvalid)
+    );
     let replacement = access.connect().unwrap();
     assert_eq!(
         agent
@@ -786,7 +789,7 @@ async fn report_partial_and_terminal_each_continue_once_and_keep_primary_failure
     let original = blocked(&fixture).await;
     assert_eq!(
         original.fault.as_ref().unwrap().kind(),
-        FaultKind::TurnModelStreamInterrupted
+        Some(FaultKind::TurnModelStreamInterrupted)
     );
     for expected_appends in [2, 3] {
         fixture
@@ -870,7 +873,7 @@ async fn terminal_save_continuation_preserves_completed_claim_despite_force() {
             .resume(&fixture.connection.caller())
             .unwrap_err()
             .kind(),
-        FaultKind::HostLifecycleUnavailable
+        Some(FaultKind::HostLifecycleUnavailable)
     );
 }
 #[tokio::test]
@@ -901,7 +904,7 @@ async fn abandoned_waiter_revoked_connection_and_force_do_not_drop_original_cont
             .resume(&fixture.connection.caller())
             .unwrap_err()
             .kind(),
-        FaultKind::SessionBusy
+        Some(FaultKind::SessionBusy)
     );
     waiter.abort();
     assert!(waiter.await.unwrap_err().is_cancelled());
@@ -1152,11 +1155,11 @@ fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
     assert!(session.retire_closed_immediately_owned().unwrap());
     assert_eq!(
         observer.snapshot().unwrap_err().kind(),
-        FaultKind::AgentSessionNotFound
+        Some(FaultKind::AgentSessionNotFound)
     );
     assert_eq!(
         retained.history(&connection.caller()).unwrap_err().kind(),
-        FaultKind::AgentSessionNotFound
+        Some(FaultKind::AgentSessionNotFound)
     );
     assert!(retained.state.lock().unwrap().history.is_empty());
     let reopened = DataRoot::acquire(dir.path().join("root")).unwrap();
@@ -1249,7 +1252,7 @@ async fn save_acknowledgement_does_not_replace_actual_worker_retirement() {
     assert!(DataRoot::acquire(&root_path).is_err());
     assert_eq!(
         session.pause(&connection.caller()).unwrap_err().kind(),
-        FaultKind::HostLifecycleUnavailable
+        Some(FaultKind::HostLifecycleUnavailable)
     );
     gate.add_permits(1);
     release.await.unwrap().unwrap();

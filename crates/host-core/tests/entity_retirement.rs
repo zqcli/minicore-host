@@ -386,7 +386,7 @@ async fn last_close_races_new_session_admission_at_the_agent_boundary() {
             }
             Err(fault) => assert!(matches!(
                 fault.kind(),
-                FaultKind::HostAgentNotFound | FaultKind::AgentLifecycleUnavailable
+                Some(FaultKind::HostAgentNotFound | FaultKind::AgentLifecycleUnavailable)
             )),
         }
         until(|| host.agents(&caller).unwrap().is_empty().then_some(())).await;

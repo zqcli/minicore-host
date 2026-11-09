@@ -210,7 +210,7 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
         .expect("original save remains blocked until confirmed");
     assert_eq!(
         blocked.fault.as_ref().unwrap().kind(),
-        FaultKind::SessionHistoryWriteFailed
+        Some(FaultKind::SessionHistoryWriteFailed)
     );
     assert!(!blocked.resolution.is_empty());
     let result = tokio::time::timeout(
@@ -545,7 +545,7 @@ async fn resume_can_finish_original_closure_record_without_reopening_session() {
     .await;
     assert_eq!(
         host.resume(&caller, &target).unwrap_err().kind(),
-        FaultKind::SessionLifecycleClosed
+        Some(FaultKind::SessionLifecycleClosed)
     );
     let saved: minicore_host_storage::SessionRecord =
         serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

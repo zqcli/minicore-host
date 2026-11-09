@@ -467,7 +467,7 @@ mod network_tests {
         for caller in [operator.caller(), observer.caller()] {
             assert_eq!(
                 registry.read(&caller, || Ok(())).unwrap_err().kind(),
-                FaultKind::HostAccessInvalid
+                Some(FaultKind::HostAccessInvalid)
             );
         }
         let control = registry.snapshot(&local.caller()).unwrap();
@@ -486,7 +486,7 @@ mod network_tests {
                 .accept(&local.caller(), || Ok(()))
                 .unwrap_err()
                 .kind(),
-            FaultKind::HostAccessReadOnly
+            Some(FaultKind::HostAccessReadOnly)
         );
     }
 
@@ -507,7 +507,7 @@ mod network_tests {
                 })
                 .unwrap_err()
                 .kind(),
-            FaultKind::HostAccessReadOnly
+            Some(FaultKind::HostAccessReadOnly)
         );
         assert!(!called);
         registry
@@ -566,7 +566,7 @@ mod network_tests {
                 .accept(&network.caller(), || Ok(()))
                 .unwrap_err()
                 .kind(),
-            FaultKind::HostAccessInvalid
+            Some(FaultKind::HostAccessInvalid)
         );
     }
 }

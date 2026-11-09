@@ -74,7 +74,9 @@ async fn typed_service_runtime_and_stdio_query_parity() {
         .send(input("observer"), options(2_000))
         .await
         .unwrap_err();
-    assert!(matches!(denied, CallError::Business(f) if f.kind() == FaultKind::HostAccessReadOnly));
+    assert!(
+        matches!(denied, CallError::Business(f) if f.kind() == Some(FaultKind::HostAccessReadOnly))
+    );
     remote.close();
     server.await.unwrap().unwrap();
 }
@@ -346,12 +348,12 @@ async fn malformed_initialization_and_json_claims_never_acquire_authority() {
         -32602
     );
     assert!(
-        matches!(observer.session(target.clone()).send(input("read only"), options(500)).await, Err(CallError::Business(f)) if f.kind() == FaultKind::HostAccessReadOnly)
+        matches!(observer.session(target.clone()).send(input("read only"), options(500)).await, Err(CallError::Business(f)) if f.kind() == Some(FaultKind::HostAccessReadOnly))
     );
     drop(first);
     first_server.await.unwrap().unwrap();
     assert!(
-        matches!(observer.session(target.clone()).pause(control(), options(500)).await, Err(CallError::Business(f)) if f.kind() == FaultKind::HostAccessReadOnly)
+        matches!(observer.session(target.clone()).pause(control(), options(500)).await, Err(CallError::Business(f)) if f.kind() == Some(FaultKind::HostAccessReadOnly))
     );
     let (replacement, replacement_server) = stdio(host).await;
     assert!(replacement.initial_info().can_operate);

@@ -665,7 +665,7 @@ async fn shutdown_rechecks_operator_and_reports_current_facts_for_old_requests()
         host.shutdown(&reader.caller(), old.clone())
             .unwrap_err()
             .kind(),
-        FaultKind::HostAccessReadOnly
+        Some(FaultKind::HostAccessReadOnly)
     );
     let accepted = host.shutdown(&caller, old.clone()).unwrap();
     assert_eq!(accepted.operation_id, old.operation_id);
@@ -679,7 +679,7 @@ async fn shutdown_rechecks_operator_and_reports_current_facts_for_old_requests()
     operator.close();
     assert_eq!(
         host.shutdown(&caller, old.clone()).unwrap_err().kind(),
-        FaultKind::HostAccessInvalid
+        Some(FaultKind::HostAccessInvalid)
     );
     let replacement = host.connect().unwrap();
     let latest = host.shutdown(&replacement.caller(), old).unwrap();

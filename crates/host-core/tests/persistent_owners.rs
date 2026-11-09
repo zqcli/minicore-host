@@ -301,7 +301,7 @@ async fn corrupt_history_blocks_only_that_session_and_preserves_the_file() {
     let state = host.session_state(&caller, &broken).unwrap().data;
     assert_eq!(
         state.block_reason.unwrap().fault.unwrap().kind(),
-        FaultKind::SessionHistoryLoadFailed
+        Some(FaultKind::SessionHistoryLoadFailed)
     );
     assert_eq!(state.next_turn.len(), 1);
     assert!(state.active_turn_id.is_none());
@@ -346,7 +346,7 @@ async fn damaged_default_metadata_does_not_hide_healthy_sibling() {
             .await
             .unwrap_err()
             .kind(),
-        FaultKind::AgentDefaultSessionUnavailable
+        Some(FaultKind::AgentDefaultSessionUnavailable)
     );
     assert_eq!(
         read_agent(&agent_path(directory.path(), &agent_id))
@@ -367,7 +367,7 @@ async fn damaged_default_metadata_does_not_hide_healthy_sibling() {
         )
         .unwrap_err()
         .kind(),
-        FaultKind::AgentDefaultSessionUnavailable
+        Some(FaultKind::AgentDefaultSessionUnavailable)
     );
     let good = SessionRef {
         agent_id,
@@ -1169,7 +1169,7 @@ async fn close_persists_default_clear_before_closed_and_survives_restart() {
     );
     assert_eq!(
         reopened.resume(&caller, &target).unwrap_err().kind(),
-        FaultKind::SessionLifecycleClosed
+        Some(FaultKind::SessionLifecycleClosed)
     );
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1320,13 +1320,13 @@ async fn review_check_closed_session_cannot_reopen_or_write() {
     );
     assert_eq!(
         host.resume(&caller, &target).unwrap_err().kind(),
-        FaultKind::SessionLifecycleClosed
+        Some(FaultKind::SessionLifecycleClosed)
     );
     assert_eq!(
         host.send(&caller, SendMessage::new(input("do not execute"), target))
             .unwrap_err()
             .kind(),
-        FaultKind::SessionLifecycleClosed
+        Some(FaultKind::SessionLifecycleClosed)
     );
     assert!(seen.lock().unwrap().is_empty());
     assert_eq!(std::fs::read(&path).unwrap(), original);
@@ -1441,7 +1441,7 @@ async fn review_check_real_save_failure_preserves_completed_outcome() {
                 assert!(turn.fault.is_none());
                 assert_eq!(
                     turn.persistence_fault.as_ref().unwrap().kind(),
-                    FaultKind::SessionHistoryWriteFailed
+                    Some(FaultKind::SessionHistoryWriteFailed)
                 );
                 break;
             }
@@ -1783,7 +1783,7 @@ async fn review_create_reused_operation_does_not_mix_owner_or_message() {
     assert!(retained.contains(&second_receipt));
     assert_eq!(
         host.receipt(&caller, &operation).unwrap_err().kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
 
     assert_ne!(first_agent, second_receipt.agent_id.clone().unwrap());
@@ -2141,7 +2141,7 @@ async fn review_create_reused_session_operation_keeps_actual_message() {
         host.session_creation_receipt(&caller, &target, &operation)
             .unwrap_err()
             .kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
 
     assert_ne!(first_receipt.session_id, second_receipt.session_id);
@@ -3330,7 +3330,7 @@ async fn canonical_creation_lookup_excludes_nested_steps_but_keeps_colliding_inv
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
     assert_eq!(
         host.receipt_get(&caller, &operation).unwrap_err().kind(),
-        FaultKind::HostReceiptAmbiguous
+        Some(FaultKind::HostReceiptAmbiguous)
     );
     assert!(
         host.receipts(&caller, &operation)
