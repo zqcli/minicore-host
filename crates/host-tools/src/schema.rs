@@ -175,9 +175,39 @@ fn schema() -> Value {
         } else {
             json!({"const":false})
         };
-        alternatives.push(branch("inspect", properties, &["target"]));
+        let mut rules = Vec::new();
+        if kind == "session" {
+            properties["history_page"] = reference("history_page");
+            rules.push(json!({"if":{"required":["history_page"]},"then":{"required":["include_output"],"properties":{"include_output":{"const":true}}}}));
+        }
+        if kind == "turn" || kind == "toolcall" {
+            properties["output_range"] = reference("output_range");
+            rules.push(json!({"if":{"required":["output_range"]},"then":{"required":["include_output"],"properties":{"include_output":{"const":true}}}}));
+        }
+        if kind == "turn" {
+            properties["response_index"] = json!({"type":"integer","minimum":0});
+            rules.push(
+                json!({"if":{"required":["output_range"]},"then":{"required":["response_index"]}}),
+            );
+            rules.push(
+                json!({"if":{"required":["response_index"]},"then":{"required":["output_range"]}}),
+            );
+        }
+        let mut inspect = branch("inspect", properties, &["target"]);
+        if !rules.is_empty() {
+            inspect["allOf"] = json!(rules);
+        }
+        alternatives.push(inspect);
     }
     // The delegate flag cannot resolve an Agent default as a delegation target.
     alternatives[2]["allOf"] = json!([{"if":{"properties":{"delegate":{"const":true}},"required":["delegate"]},"then":{"properties":{"target":target("session", &["agent_id","session_id"])}}}]);
-    json!({"type":"object","oneOf":alternatives,"$defs":{"host_target":host,"agent_ref":agent,"session_ref":session,"mode":{"enum":["persistent","memory"]},"settings":object(settings_properties, &[])}})
+    let output_range = object(
+        json!({"channel":{"type":"string","minLength":1},"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0},"max_bytes":positive}),
+        &["channel", "start", "end", "max_bytes"],
+    );
+    let history_page = object(
+        json!({"cursor":{"type":["string","null"]},"limit":positive}),
+        &["limit"],
+    );
+    json!({"type":"object","oneOf":alternatives,"$defs":{"host_target":host,"agent_ref":agent,"session_ref":session,"mode":{"enum":["persistent","memory"]},"settings":object(settings_properties, &[]),"output_range":output_range,"history_page":history_page}})
 }

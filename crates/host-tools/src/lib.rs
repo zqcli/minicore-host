@@ -6,6 +6,7 @@
 
 mod action;
 mod config;
+mod core_adapter;
 mod ports;
 mod registry;
 mod schema;
@@ -14,6 +15,7 @@ mod tool;
 
 pub use action::*;
 pub use config::*;
+pub use core_adapter::CoreTurnPort;
 pub use ports::*;
 pub use registry::{AgentToolFactory, ToolFactory, ToolRegistry};
 pub use schema::agent_tool_spec;

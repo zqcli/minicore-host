@@ -169,3 +169,54 @@ fn actual_runtime_spec_has_only_six_actions_and_strict_objects() {
         assert_eq!(branch["additionalProperties"], false);
     }
 }
+
+#[test]
+fn inspect_ranges_and_pages_reuse_authoritative_read_contracts() {
+    let turn = json!({"action":"inspect","target":{"kind":"turn","agent_id":id(),"session_id":id(),"turn_id":id()},"include_output":true,"response_index":0,"output_range":{"channel":"text","start":0,"end":12,"max_bytes":6}});
+    AgentAction::parse(turn.clone()).unwrap();
+    let mut tool = turn.clone();
+    tool["target"]["kind"] = json!("toolcall");
+    tool["target"]["tool_call_id"] = json!("upstream");
+    tool.as_object_mut().unwrap().remove("response_index");
+    AgentAction::parse(tool.clone()).unwrap();
+    let session = json!({"action":"inspect","target":{"kind":"session","agent_id":id(),"session_id":id()},"include_output":true,"history_page":{"cursor":null,"limit":2}});
+    AgentAction::parse(session.clone()).unwrap();
+    for original in [turn.clone(), tool.clone(), session.clone()] {
+        let mut input = original.clone();
+        input["include_output"] = json!(false);
+        assert!(AgentAction::parse(input).is_err());
+    }
+    for (field, value) in [
+        ("start", json!(13)),
+        ("max_bytes", json!(0)),
+        ("channel", json!("")),
+    ] {
+        let mut input = turn.clone();
+        input["output_range"][field] = value;
+        assert!(AgentAction::parse(input).is_err());
+    }
+    for input in [
+        {
+            let mut x = turn.clone();
+            x.as_object_mut().unwrap().remove("response_index");
+            x
+        },
+        {
+            let mut x = turn.clone();
+            x["output_range"] = Value::Null;
+            x
+        },
+        {
+            let mut x = tool;
+            x["response_index"] = json!(0);
+            x
+        },
+        {
+            let mut x = session;
+            x["history_page"]["limit"] = json!(0);
+            x
+        },
+    ] {
+        assert!(AgentAction::parse(input).is_err());
+    }
+}

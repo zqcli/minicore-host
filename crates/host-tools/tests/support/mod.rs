@@ -481,6 +481,9 @@ pub fn completion(
         persistence: PersistenceState::NotApplicable,
         requests: 1,
         tool_rounds: 0,
+        phase: None,
+        model_retry: None,
+        model_attempts: vec![1],
         fault: None,
         persistence_fault: None,
     };

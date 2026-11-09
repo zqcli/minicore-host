@@ -557,3 +557,39 @@ async fn cleanup_failure_is_not_retried_until_an_explicit_later_close() {
         2
     );
 }
+
+#[tokio::test]
+async fn cancellation_after_real_input_binding_does_not_report_not_executed() {
+    let port = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let child = session();
+    scopes
+        .send(
+            port.port(),
+            origin(&port),
+            child.clone(),
+            input(),
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+    let relation = port
+        .state
+        .relations
+        .lock()
+        .unwrap()
+        .get(&child)
+        .cloned()
+        .unwrap();
+    let mut actual = completion(&relation.registration, TurnOutcome::Cancelled);
+    actual.results[0].info.requests = 0;
+    actual.results[0].info.model_attempts.clear();
+    relation.sink.handoff(actual).unwrap();
+    released(&port.state, 1).await;
+    let notifications = port.state.notifications.lock().unwrap();
+    let text: serde_json::Value = serde_json::from_str(&notifications[0].1.text).unwrap();
+    assert_eq!(text["status"], "ended");
+    assert_eq!(text["results"][0]["outcome"], "cancelled");
+    assert_eq!(text["discarded_inputs"], serde_json::json!([]));
+}

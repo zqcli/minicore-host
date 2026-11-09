@@ -557,7 +557,7 @@ impl DelegationSink for Sink {
         if !consumed && !discarded {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,
-                "completion includes neither actual consumption nor explicit removal of its task input",
+                "completion includes neither a real Turn input binding nor explicit removal of its task input",
             ));
         }
         if (consumed && completion.results.is_empty())
@@ -568,7 +568,7 @@ impl DelegationSink for Sink {
         {
             return Err(Fault::new(
                 FaultKind::SessionInputInvalid,
-                "only actually consumed tasks can report settled Turn results",
+                "only tasks bound to a real Turn can report settled Turn results",
             ));
         }
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
@@ -634,7 +634,7 @@ fn notification_text(
                 .collect::<Vec<_>>();
             serde_json::json!({"turn_id":result.info.id,"outcome":result.info.outcome,
             "persistence":result.info.persistence,"fault":result.info.fault,
-            "output":output,"partials":partials})
+            "persistence_fault":result.info.persistence_fault,"output":output,"partials":partials})
         })
         .collect::<Vec<_>>();
     serde_json::to_string(&serde_json::json!({

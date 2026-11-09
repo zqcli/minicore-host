@@ -131,6 +131,24 @@ pub struct InspectAction {
     pub include_output: bool,
     #[serde(default)]
     pub include_config: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub output_range: Option<TextReadRequest>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub response_index: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub history_page: Option<HistoryReadRequest>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -227,6 +245,40 @@ impl InspectAction {
             return Err(invalid(
                 "include_output requires Session, Turn, ToolCall or Message",
             ));
+        }
+        if let Some(range) = &self.output_range {
+            if !self.include_output
+                || !matches!(
+                    self.target,
+                    InspectTarget::Turn { .. } | InspectTarget::Toolcall { .. }
+                )
+            {
+                return Err(invalid(
+                    "output_range requires Turn or ToolCall with include_output:true",
+                ));
+            }
+            range
+                .validate()
+                .map_err(|error| invalid(error.to_string()))?;
+            if matches!(self.target, InspectTarget::Turn { .. }) && self.response_index.is_none() {
+                return Err(invalid("Turn output_range requires response_index"));
+            }
+        }
+        if self.response_index.is_some()
+            && (self.output_range.is_none() || !matches!(self.target, InspectTarget::Turn { .. }))
+        {
+            return Err(invalid(
+                "response_index is only valid with a Turn output_range",
+            ));
+        }
+        if let Some(page) = &self.history_page {
+            if !self.include_output || !matches!(self.target, InspectTarget::Session { .. }) {
+                return Err(invalid(
+                    "history_page requires Session with include_output:true",
+                ));
+            }
+            page.validate()
+                .map_err(|error| invalid(error.to_string()))?;
         }
         Ok(())
     }

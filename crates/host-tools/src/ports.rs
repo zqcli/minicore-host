@@ -155,6 +155,8 @@ pub struct DelegationCompletion {
     /// Actual results for the input range, including failed/cancelled facts.
     /// Reuses the owner result and Runtime history; no fabricated final text.
     pub results: Vec<minicore_host_core::TurnResult>,
+    /// Real Turn input ranges. Normally consumed inputs; a task bound before
+    /// cancellation of the first model request also belongs to that real Turn.
     pub inputs: Vec<DelegationInputRange>,
     pub discarded_inputs: Vec<MessageId>,
 }

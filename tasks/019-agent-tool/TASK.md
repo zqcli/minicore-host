@@ -39,15 +39,10 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 
 ## Remaining integration
 
-- Core admitted-Turn internal operation capability and registered delegation result handoff are being implemented by the assigned sole owner. The observation output hook runs after claim and must not be used for fallible business preparation.
-- Bind selected tool implementations before consuming initial input; preserve the frozen ToolSet across all internal loops.
-- Connect the implemented scope/notification/Runtime adapter to the real core capability implementation.
-- Add real owner adapter and Host end-to-end tests once core capabilities land. Do not present fixture tests as real Host delegation.
-- Incorporate the observation owner's actual output/page request types rather than invent a parallel read protocol.
-- Metadata updates require atomic owner name/title plus config revision commits; bridge to core once that owner publishes the implementation.
-- Stage 2 code commit: `b9066a5`; its additional root-lock-only test dependency commit is `c8a51f0`.
-- Integrated parent baseline `275110695551c30582d1302e6b01ab23a3aad536` with local merge `8ca9ab9`. The tool crate now uses the actual published Runtime `59ee8ce668f72a21d408e6247d3ce075b260db14`, exact version `=0.10.0`, matching every other Host consumer. No local patch/path/vendor dependency is committed.
-- Re-ran all 27 tool tests on Runtime 0.10.0. Added explicit root/self delegation rejection (including an already registered member sending delegate:true to itself), without imposing an idle or capacity limit. Full integrated workspace gates remain pending the real core bridge stage.
+- Finish the final published Runtime retry pin, full integrated workspace gates,
+  unique test count and independent review. No remote push is authorized here.
+- Production owner integration is now implemented and verified below; fixture
+  coverage remains identified separately and no live provider/TUI claim is made.
 
 ## Owner-interface refinements
 
@@ -56,3 +51,41 @@ Environment: `RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/
 - Scope cleanup retains failures as actual blockers, caches only success, and permits a later explicit close to continue original owner cleanup. The first close does not automatically retry it.
 - Runtime 0.10 focused gate: `cargo test -p minicore-host-tools --locked` has 29 passing tests; `cargo clippy -p minicore-host-tools --all-targets --locked -- -D warnings` and formatting pass.
 - A production `core_adapter.rs` and actual Host/Runtime integration tests are being prepared against the sole core owner's capability API. They are not included in the verified build until the corresponding integrated core and observation commits are available.
+
+## Stage 3: production owner bridge
+
+- Merged the parent's isolated observation/delegation integration at `46c90e8`
+  (`d06fde3` locally), then metadata `5e41795` (`722aabc`), paged-history
+  capability `ec31cda` (`6cf223c`) and preparation handoff fix `04fc9b8`
+  (`8d87a4a`). No existing owner/transport files were edited by this task.
+- `CoreTurnPort` now uses core-minted active Turn capabilities and independent
+  creation, delegation and root cleanup permits. Scope hooks are weak back
+  references to avoid a scope/permit/hook reference cycle.
+- Inspect maps all six target kinds to actual owner reads. Agent summaries use
+  real Session states. Session history uses the authoritative pager; Turn and
+  ToolCall text reuse `TextReadRequest`. The strict model schema and runtime
+  parser reject invalid page/range combinations and null optional read inputs.
+- Public body projection removes provider replay and Loop metadata. Structured
+  ToolResults remain structured, and a selected text range does not also return
+  the entire tool output. Notifications distinguish discarded tasks from a
+  real bound-but-cancelled Turn with zero model requests.
+- Four production Host/Runtime tests now pass: all six actions in one Turn;
+  child handoff/notification after parent completion and client disconnect;
+  missing real factory leaves the message queued with no candidate Turn
+  publication; root `close_scope` closes and reclaims actual owners without
+  joining its own ToolCall.
+- The scope-close regression initially exposed a core preparation-exit gap:
+  an accepted task discarded while preparation settled could leave the child
+  Closing with no result handoff. The sole core owner fixed this in `04fc9b8`;
+  the same test now completes actual close/join/reclaim without loosening the
+  lifecycle assertion or extending the test deadline. The current Turn may
+  reach a model request boundary before the independent close cancellation.
+- Temporary verification only: `cargo test -p minicore-host-tools --offline
+  --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-retry-state"'`:
+  **35/35** pass (4 real Host/Runtime, 1 Runtime with port fixtures, 30 contract
+  and owner-port fixture tests), with Runtime source fixed at `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`.
+- Focused Clippy `--all-targets -- -D warnings`, format and whitespace checks
+  pass. This temporary patch is not a deliverable dependency and is not
+  committed. Final no-patch integration gates remain required.
+- Logs: `/workspace/shared/minicore-host-agent-tool-core-integration.log`,
+  `/workspace/shared/minicore-host-agent-tool-close-scope-red.log`.

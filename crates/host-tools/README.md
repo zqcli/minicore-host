@@ -11,7 +11,23 @@ not a copied client `CallerContext`. Delegation permits and result sinks have
 independent lifetimes, matching the registered scope and direct parent. The
 adapter must receive necessary actual results before a memory child releases.
 
-## Current stage
+## Owner integration
+
+`CoreTurnPort::prepared` consumes the core-minted `PreparedTurnBinding` during
+`ResourceResolver::resolve_for_turn`. Pass that port to `ToolRegistry::bind`
+with the selected `SessionConfig.tools`, then use the resulting real `ToolSet`
+in the returned `ExecutionConfig`. Binding is fallible before Session claims
+input. The capability remains inactive until the owner's matching claim and
+expires when that public Turn ends. All internal loops keep that frozen set.
+The later `bind_tool_output` hook is only for infallible output wrapping.
+
+The production bridge forwards operations to core capabilities. It never
+creates a connection or CallerContext. Metadata and config candidates come
+from one owner snapshot with its original revision. Inspect uses authoritative
+Agent/Session state, paged history, model/tool text ranges, messages and
+receipts. Output projections exclude Runtime loop and provider replay metadata.
+`history_page`, `output_range`, and model `response_index` use the shared read
+contracts; an omitted range/page requests the currently retained body.
 
 The strict actions, snapshot configuration mapping, standard Runtime Tool,
 selected ToolSet factory, ephemeral root scopes, pre-delivery registration,
@@ -19,10 +35,13 @@ independent completion delivery, and root cleanup coordination are implemented.
 Startup composition retains its own continuation so dropping a timed-out tool
 wait does not discard cleanup of an already created temporary Session.
 
-Tests use explicitly named owner-port fixtures, including one real Runtime
-AgentLoop with a scripted model. They do not claim real Host delegation or a
-live provider. The pending core adapter must implement these ports using the
-new opaque internal owner capabilities, not a client connection.
+Tests distinguish explicit owner-port fixtures from production owner tests.
+`host_integration.rs` runs actual Host -> Agent -> Session -> Runtime -> agent
+tool paths with only the model scripted: all six actions, independent completion
+after the parent Turn and connection end, binding failure before input claim,
+and scope close from the root's running tool. These are not live-provider or
+TUI tests. Scope and contract tests separately cover forbidden targets, precise
+config/range shapes, one-notification ownership and explicit cleanup retry.
 
 The completion transfer reuses real owner TurnResult values. Notifications
 select the last response's actual public text plus marked partial text and
