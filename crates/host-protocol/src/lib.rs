@@ -82,3 +82,13 @@ pub use control::*;
 
 mod catalog;
 pub use catalog::*;
+
+mod rpc;
+pub use rpc::*;
+
+// Option-valued fields that must be present (with null when no value exists).
+pub(crate) fn nullable<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    <Option<T> as serde::Deserialize>::deserialize(deserializer)
+}

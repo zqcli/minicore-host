@@ -263,3 +263,79 @@ fn typed_fault_details_and_wait_hints_are_not_retry_authorization() {
             .is_err()
     );
 }
+
+#[test]
+fn fault_optional_fields_are_absent_not_null_and_details_rules_are_registered() {
+    for key in ["diagnostic_id", "details", "retry_after_ms"] {
+        let mut wire = json!({"type":"SESSION_LIFECYCLE_CLOSED","code":3101,"message":"closed"});
+        wire[key] = Value::Null;
+        assert!(serde_json::from_value::<Fault>(wire).is_err(), "{key}");
+    }
+    assert_eq!(
+        FaultKind::SessionHistoryWriteFailed.details_schema(),
+        FaultDetailsSchema::HistoryWrite
+    );
+    assert_eq!(
+        FaultKind::SessionHistoryLoadFailed.details_schema(),
+        FaultDetailsSchema::HistoryLoad
+    );
+    assert_eq!(
+        FaultKind::TurnModelUpstreamRateLimited.details_schema(),
+        FaultDetailsSchema::Upstream
+    );
+    assert!(FaultKind::TurnModelUpstreamRateLimited.allows_retry_after_ms());
+    assert!(!FaultKind::TurnModelUpstreamQuotaExhausted.allows_retry_after_ms());
+}
+
+#[test]
+fn real_owner_resource_validation_does_not_substitute_or_mutate_config() {
+    // A named test double only. No live provider or filesystem access occurs.
+    struct TestResources;
+    impl ConfigResources for TestResources {
+        fn validate_model(
+            &self,
+            model: &ModelRef,
+            _: ReasoningPreference,
+        ) -> Result<(), ValidationError> {
+            if model.as_str() == "configured/model" {
+                Ok(())
+            } else {
+                Err(ValidationError("model is not configured".into()))
+            }
+        }
+        fn validate_tool(&self, tool: &ToolBinding) -> Result<(), ValidationError> {
+            if tool.name == "read" {
+                Ok(())
+            } else {
+                Err(ValidationError("tool is not registered".into()))
+            }
+        }
+        fn validate_workspace(&self, workspace: &WorkspaceRef) -> Result<(), ValidationError> {
+            if workspace.path == "/bound" {
+                Ok(())
+            } else {
+                Err(ValidationError("workspace cannot be bound".into()))
+            }
+        }
+    }
+    let original = SessionConfig::default();
+    assert!(original.validate_resources(&TestResources).is_err());
+    assert_eq!(original.model.as_str(), "default");
+    let configured = SessionConfig {
+        model: "configured/model".parse().unwrap(),
+        tools: vec![ToolBinding {
+            name: "read".into(),
+        }],
+        workspace: Some(WorkspaceRef {
+            path: "/bound".into(),
+        }),
+        ..original.clone()
+    };
+    configured.validate_resources(&TestResources).unwrap();
+    let mut invalid = configured.clone();
+    invalid.tools.push(ToolBinding {
+        name: "missing".into(),
+    });
+    assert!(invalid.validate_resources(&TestResources).is_err());
+    assert_eq!(configured.tools.len(), 1);
+}

@@ -278,3 +278,11 @@ fn invalid_in_process_config_is_not_serialized_as_valid() {
     config.role.name = "".into();
     assert!(serde_json::to_value(config).is_err());
 }
+
+#[test]
+fn snapshot_absent_block_is_explicit_null_not_a_partial_update() {
+    let mut wire = control_facts();
+    wire.as_object_mut().unwrap().remove("block_reason");
+    assert!(serde_json::from_value::<SessionControlFacts>(wire).is_err());
+    assert!(serde_json::from_value::<SessionControlFacts>(control_facts()).is_ok());
+}

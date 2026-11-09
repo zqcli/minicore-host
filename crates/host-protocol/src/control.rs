@@ -255,6 +255,7 @@ impl BlockReason {
 crate::validated_dto!(SessionControlFacts, SessionControlFactsWire, "SessionControlFactsWire" {
     scheduling: Scheduling,
     pause_reasons: Vec<PauseReason>,
+    #[serde(deserialize_with = "crate::nullable")]
     block_reason: Option<BlockReason>,
     residency: Residency,
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::present")]

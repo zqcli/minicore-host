@@ -24,10 +24,19 @@ pub enum FaultClass {
     TurnModelStream,
 }
 
-/// One registry owns the public type names, stable numeric codes, and explicit
-/// classification ancestry. Underscores do not invent hierarchy nodes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FaultDetailsSchema {
+    None,
+    HistoryWrite,
+    HistoryLoad,
+    Upstream,
+}
+
+/// One registry owns names, codes, explicit ancestry, permitted details and wait
+/// hints. Underscores do not invent hierarchy nodes. Details are optional, but
+/// when present must follow the selected typed schema's required fields.
 macro_rules! fault_registry {
-    ($($variant:ident = $code:literal, $name:literal, [$($parent:ident),+];)+) => {
+    ($($variant:ident = $code:literal, $name:literal, [$($parent:ident),+], $details:ident, $retry:literal;)+) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
         pub enum FaultKind { $(#[serde(rename = $name)] $variant,)+ }
         impl FaultKind {
@@ -37,47 +46,49 @@ macro_rules! fault_registry {
                 match self { $(Self::$variant => &[$(FaultClass::$parent),+],)+ }
             }
             pub fn is_a(self, class: FaultClass) -> bool { self.classes().contains(&class) }
+            pub const fn details_schema(self) -> FaultDetailsSchema { match self { $(Self::$variant => FaultDetailsSchema::$details,)+ } }
+            pub const fn allows_retry_after_ms(self) -> bool { match self { $(Self::$variant => $retry,)+ } }
         }
         pub const FAULT_KINDS: &[FaultKind] = &[$(FaultKind::$variant,)+];
     };
 }
 fault_registry! {
-    HostAccessInvalid = 1001, "HOST_ACCESS_INVALID", [Host, HostAccess];
-    HostAccessReadOnly = 1002, "HOST_ACCESS_READ_ONLY", [Host, HostAccess];
-    HostOwnershipMismatch = 1003, "HOST_OWNERSHIP_MISMATCH", [Host];
-    HostStorageUnavailable = 1101, "HOST_STORAGE_UNAVAILABLE", [Host, HostStorage];
-    HostAgentNotFound = 1201, "HOST_AGENT_NOT_FOUND", [Host, HostLookup];
-    HostLifecycleUnavailable = 1301, "HOST_LIFECYCLE_UNAVAILABLE", [Host];
-    HostMethodUnavailable = 1401, "HOST_METHOD_UNAVAILABLE", [Host];
-    HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host];
-    AgentConfigInvalid = 2101, "AGENT_CONFIG_INVALID", [Agent, AgentConfig];
-    AgentConfigConflict = 2102, "AGENT_CONFIG_CONFLICT", [Agent, AgentConfig];
-    AgentLifecycleUnavailable = 2201, "AGENT_LIFECYCLE_UNAVAILABLE", [Agent, AgentLifecycle];
-    AgentSessionNotFound = 2202, "AGENT_SESSION_NOT_FOUND", [Agent, AgentLookup];
-    AgentDefaultSessionUnavailable = 2203, "AGENT_DEFAULT_SESSION_UNAVAILABLE", [Agent, AgentLookup];
-    AgentOwnershipMismatch = 2204, "AGENT_OWNERSHIP_MISMATCH", [Agent];
-    AgentInternalUnexpected = 2999, "AGENT_INTERNAL_UNEXPECTED", [Agent];
-    SessionLifecycleClosed = 3101, "SESSION_LIFECYCLE_CLOSED", [Session, SessionLifecycle];
-    SessionLifecycleClosing = 3102, "SESSION_LIFECYCLE_CLOSING", [Session, SessionLifecycle];
-    SessionBusy = 3103, "SESSION_BUSY", [Session];
-    SessionTurnNotFound = 3201, "SESSION_TURN_NOT_FOUND", [Session, SessionLookup];
-    SessionInputNotFound = 3202, "SESSION_INPUT_NOT_FOUND", [Session, SessionInput];
-    SessionInputAlreadyBound = 3203, "SESSION_INPUT_ALREADY_BOUND", [Session, SessionInput];
-    SessionInputInvalid = 3204, "SESSION_INPUT_INVALID", [Session, SessionInput];
-    SessionOwnershipMismatch = 3205, "SESSION_OWNERSHIP_MISMATCH", [Session];
-    SessionHistoryWriteFailed = 3301, "SESSION_HISTORY_WRITE_FAILED", [Session, SessionHistory];
-    SessionHistoryLoadFailed = 3302, "SESSION_HISTORY_LOAD_FAILED", [Session, SessionHistory];
-    SessionConfigInvalid = 3401, "SESSION_CONFIG_INVALID", [Session, SessionConfig];
-    SessionConfigConflict = 3402, "SESSION_CONFIG_CONFLICT", [Session, SessionConfig];
-    SessionResourceMissing = 3403, "SESSION_RESOURCE_MISSING", [Session, SessionConfig];
-    SessionInternalUnexpected = 3999, "SESSION_INTERNAL_UNEXPECTED", [Session];
-    TurnModelUpstreamRateLimited = 4201, "TURN_MODEL_UPSTREAM_RATE_LIMITED", [Turn, TurnModel, TurnModelUpstream];
-    TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream];
-    TurnModelUpstreamQuotaExhausted = 4203, "TURN_MODEL_UPSTREAM_QUOTA_EXHAUSTED", [Turn, TurnModel, TurnModelUpstream];
-    TurnModelUpstreamAuthenticationFailed = 4204, "TURN_MODEL_UPSTREAM_AUTHENTICATION_FAILED", [Turn, TurnModel, TurnModelUpstream];
-    TurnModelStreamInterrupted = 4210, "TURN_MODEL_STREAM_INTERRUPTED", [Turn, TurnModel, TurnModelStream];
-    TurnModelUpstreamUnclassified = 4299, "TURN_MODEL_UPSTREAM_UNCLASSIFIED", [Turn, TurnModel, TurnModelUpstream];
-    TurnInternalUnexpected = 4999, "TURN_INTERNAL_UNEXPECTED", [Turn];
+    HostAccessInvalid = 1001, "HOST_ACCESS_INVALID", [Host, HostAccess], None, false;
+    HostAccessReadOnly = 1002, "HOST_ACCESS_READ_ONLY", [Host, HostAccess], None, false;
+    HostOwnershipMismatch = 1003, "HOST_OWNERSHIP_MISMATCH", [Host], None, false;
+    HostStorageUnavailable = 1101, "HOST_STORAGE_UNAVAILABLE", [Host, HostStorage], None, false;
+    HostAgentNotFound = 1201, "HOST_AGENT_NOT_FOUND", [Host, HostLookup], None, false;
+    HostLifecycleUnavailable = 1301, "HOST_LIFECYCLE_UNAVAILABLE", [Host], None, false;
+    HostMethodUnavailable = 1401, "HOST_METHOD_UNAVAILABLE", [Host], None, false;
+    HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host], None, false;
+    AgentConfigInvalid = 2101, "AGENT_CONFIG_INVALID", [Agent, AgentConfig], None, false;
+    AgentConfigConflict = 2102, "AGENT_CONFIG_CONFLICT", [Agent, AgentConfig], None, false;
+    AgentLifecycleUnavailable = 2201, "AGENT_LIFECYCLE_UNAVAILABLE", [Agent, AgentLifecycle], None, false;
+    AgentSessionNotFound = 2202, "AGENT_SESSION_NOT_FOUND", [Agent, AgentLookup], None, false;
+    AgentDefaultSessionUnavailable = 2203, "AGENT_DEFAULT_SESSION_UNAVAILABLE", [Agent, AgentLookup], None, false;
+    AgentOwnershipMismatch = 2204, "AGENT_OWNERSHIP_MISMATCH", [Agent], None, false;
+    AgentInternalUnexpected = 2999, "AGENT_INTERNAL_UNEXPECTED", [Agent], None, false;
+    SessionLifecycleClosed = 3101, "SESSION_LIFECYCLE_CLOSED", [Session, SessionLifecycle], None, false;
+    SessionLifecycleClosing = 3102, "SESSION_LIFECYCLE_CLOSING", [Session, SessionLifecycle], None, false;
+    SessionBusy = 3103, "SESSION_BUSY", [Session], None, false;
+    SessionTurnNotFound = 3201, "SESSION_TURN_NOT_FOUND", [Session, SessionLookup], None, false;
+    SessionInputNotFound = 3202, "SESSION_INPUT_NOT_FOUND", [Session, SessionInput], None, false;
+    SessionInputAlreadyBound = 3203, "SESSION_INPUT_ALREADY_BOUND", [Session, SessionInput], None, false;
+    SessionInputInvalid = 3204, "SESSION_INPUT_INVALID", [Session, SessionInput], None, false;
+    SessionOwnershipMismatch = 3205, "SESSION_OWNERSHIP_MISMATCH", [Session], None, false;
+    SessionHistoryWriteFailed = 3301, "SESSION_HISTORY_WRITE_FAILED", [Session, SessionHistory], HistoryWrite, false;
+    SessionHistoryLoadFailed = 3302, "SESSION_HISTORY_LOAD_FAILED", [Session, SessionHistory], HistoryLoad, false;
+    SessionConfigInvalid = 3401, "SESSION_CONFIG_INVALID", [Session, SessionConfig], None, false;
+    SessionConfigConflict = 3402, "SESSION_CONFIG_CONFLICT", [Session, SessionConfig], None, false;
+    SessionResourceMissing = 3403, "SESSION_RESOURCE_MISSING", [Session, SessionConfig], None, false;
+    SessionInternalUnexpected = 3999, "SESSION_INTERNAL_UNEXPECTED", [Session], None, false;
+    TurnModelUpstreamRateLimited = 4201, "TURN_MODEL_UPSTREAM_RATE_LIMITED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
+    TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
+    TurnModelUpstreamQuotaExhausted = 4203, "TURN_MODEL_UPSTREAM_QUOTA_EXHAUSTED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
+    TurnModelUpstreamAuthenticationFailed = 4204, "TURN_MODEL_UPSTREAM_AUTHENTICATION_FAILED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
+    TurnModelStreamInterrupted = 4210, "TURN_MODEL_STREAM_INTERRUPTED", [Turn, TurnModel, TurnModelStream], None, false;
+    TurnModelUpstreamUnclassified = 4299, "TURN_MODEL_UPSTREAM_UNCLASSIFIED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
+    TurnInternalUnexpected = 4999, "TURN_INTERNAL_UNEXPECTED", [Turn], None, false;
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -172,12 +183,7 @@ impl Fault {
         Ok(self)
     }
     pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.retry_after_ms.is_some()
-            && !matches!(
-                self.kind,
-                FaultKind::TurnModelUpstreamRateLimited | FaultKind::TurnModelUpstreamOverloaded
-            )
-        {
+        if self.retry_after_ms.is_some() && !self.kind.allows_retry_after_ms() {
             return Err(invalid(
                 "retry_after_ms is only registered for temporary upstream faults",
             ));
@@ -185,15 +191,16 @@ impl Fault {
         match &self.details {
             None => {}
             Some(FaultDetails::HistoryWrite(_))
-                if self.kind == FaultKind::SessionHistoryWriteFailed => {}
+                if self.kind.details_schema() == FaultDetailsSchema::HistoryWrite => {}
             Some(FaultDetails::HistoryLoad(location))
-                if self.kind == FaultKind::SessionHistoryLoadFailed =>
+                if self.kind.details_schema() == FaultDetailsSchema::HistoryLoad =>
             {
                 if location.line == Some(0) {
                     return Err(invalid("history location line is one-based"));
                 }
             }
-            Some(FaultDetails::Upstream(_)) if self.kind.is_a(FaultClass::TurnModelUpstream) => {}
+            Some(FaultDetails::Upstream(_))
+                if self.kind.details_schema() == FaultDetailsSchema::Upstream => {}
             Some(_) => return Err(invalid("details do not match the registered fault type")),
         }
         Ok(())
@@ -241,8 +248,11 @@ struct FaultWire {
     kind: FaultKind,
     code: u16,
     message: String,
+    #[serde(default, deserialize_with = "crate::present")]
     diagnostic_id: Option<String>,
+    #[serde(default, deserialize_with = "crate::present")]
     details: Option<serde_json::Value>,
+    #[serde(default, deserialize_with = "crate::present")]
     retry_after_ms: Option<u64>,
 }
 impl<'de> Deserialize<'de> for Fault {
@@ -256,17 +266,17 @@ impl<'de> Deserialize<'de> for Fault {
         let details = wire
             .details
             .map(|value| {
-                match wire.kind {
-                    FaultKind::SessionHistoryWriteFailed => {
+                match wire.kind.details_schema() {
+                    FaultDetailsSchema::HistoryWrite => {
                         serde_json::from_value(value).map(FaultDetails::HistoryWrite)
                     }
-                    FaultKind::SessionHistoryLoadFailed => {
+                    FaultDetailsSchema::HistoryLoad => {
                         serde_json::from_value(value).map(FaultDetails::HistoryLoad)
                     }
-                    kind if kind.is_a(FaultClass::TurnModelUpstream) => {
+                    FaultDetailsSchema::Upstream => {
                         serde_json::from_value(value).map(FaultDetails::Upstream)
                     }
-                    _ => {
+                    FaultDetailsSchema::None => {
                         return Err(serde::de::Error::custom(
                             "this fault type has no registered details",
                         ));
