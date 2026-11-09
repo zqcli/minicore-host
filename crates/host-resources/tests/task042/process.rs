@@ -672,14 +672,14 @@ async fn persistent_reopen_keeps_native_history_but_not_old_edit_or_process_obse
             )
             .unwrap_err()
             .kind(),
-        Some(FaultKind::SessionOutputNotFound)
+        Some(FaultKind::SessionChangeSourceUnavailable)
     );
     assert_eq!(
         reopened
             .session_change_record(&caller, &target, &reference)
             .unwrap_err()
             .kind(),
-        Some(FaultKind::SessionOutputNotFound)
+        Some(FaultKind::SessionChangeNotFound)
     );
     assert!(
         read_output(

@@ -24,7 +24,7 @@ mod types;
 
 pub use backend::JournalHistory;
 pub use control::{CallerContext, ConnectionHandle};
-pub use host::{Host, HostProcessControl, HostProcessSnapshot};
+pub use host::{Host, HostProcessControl, HostProcessSnapshot, WorkspaceSnapshot};
 pub use session::{
     ApprovalAnswer, BoundCompactionResources, BoundResources, CompactionResourceFuture,
     HistoryBackend, InteractionAnswerData, LoadFuture, MemoryHistory, ResourceFuture,

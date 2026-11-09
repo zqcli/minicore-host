@@ -23,6 +23,7 @@ mod tool_edits;
 mod workspace;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
+pub use workspace::WorkspaceSnapshot;
 
 /// In-process entry point. Persistent initialization and memory construction
 /// share the same direct owners, input queues and Runtime execution path.

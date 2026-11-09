@@ -47,7 +47,7 @@ impl SessionController {
             let state = self.state.lock().expect("Session mutex poisoned");
             retained(&state)?;
             if request.scope == minicore_host_workspace::ChangeScope::Session && !state.edits_complete {
-                return Err(Fault::new(FaultKind::SessionOutputNotFound,
+                return Err(Fault::new(FaultKind::SessionChangeSourceUnavailable,
                     "prior Session edit observations were not retained across restart; current retained Turns can be queried separately"));
             }
             if let minicore_host_workspace::ChangeScope::Turn { turn_id } = &request.scope
@@ -78,8 +78,10 @@ impl SessionController {
 
 fn query_fault(error: WorkspaceError) -> Fault {
     let kind = match error {
-        WorkspaceError::ChangeNotFound => FaultKind::SessionOutputNotFound,
-        _ => FaultKind::SessionOutputRangeInvalid,
+        WorkspaceError::ChangeNotFound => FaultKind::SessionChangeNotFound,
+        WorkspaceError::InvalidCursor => FaultKind::SessionWorkspaceCursorInvalid,
+        WorkspaceError::InvalidRange => FaultKind::SessionWorkspaceRangeInvalid,
+        _ => FaultKind::SessionInternalUnexpected,
     };
     Fault::new(kind, error.to_string())
 }
