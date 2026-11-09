@@ -7,6 +7,8 @@ rust-version = "1.90"
 description = "Session-bound agent tool and ephemeral delegation scopes for MiniCore Host"
 
 [dependencies]
+minicore-host-local-tools = { path = "../host-local-tools", version = "0.1.0" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
 minicore-host-core = { path = "../host-core", version = "0.1.0" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }

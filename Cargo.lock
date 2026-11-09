@@ -906,7 +906,9 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "minicore-host-core",
+ "minicore-host-local-tools",
  "minicore-host-protocol",
+ "minicore-host-workspace",
  "minicore-runtime",
  "serde",
  "serde_json",
