@@ -2,9 +2,9 @@
 
 ## Review target
 
-The reproducible code checkpoint is local `275110695551c30582d1302e6b01ab23a3aad536`, followed only by handoff documentation. This is the current `dev` foundation, **not a complete v4.93 release**. Read `AGENTS.md`, complete `SPEC.md`, `PROJECT.md` and `docs/method-coverage.md`. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+Review the published `dev` commit [`82583b31ac9091164da5f6dcfee6bb23e05137e5`](https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5), compared with `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. It reproduces local `797622fa9d663db01fad0d8b800a51a181ddc150`, whose code checkpoint is `275110695551c30582d1302e6b01ab23a3aad536`, followed only by handoff documentation. This is the current `dev` foundation, **not a complete v4.93 release**. Read `AGENTS.md`, complete `SPEC.md`, `PROJECT.md` and `docs/method-coverage.md`. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
 
-The owner authorized the dev handoff. Remote `main` is the README-only `b341b163e14543bfbe7f8d392ea243b4a123cdf7`; it will remain unchanged and become an ancestor of the reconstructed dev history. Local source SHAs in task records need the publication mapping because GitHub recreates commits with new identities. No main merge is authorized by this handoff. External independent review and required gates remain prerequisites.
+The owner authorized the dev handoff. Remote `main` remains the README-only `b341b163e14543bfbe7f8d392ea243b4a123cdf7`, preserved as an ancestor of the published dev history. The [complete 101-commit publication mapping](host-publication.json) translates local source SHAs in task records to available GitHub commits. Each original tree and raw message was verified; default GitHub commit authors and committers are `zqcli`, with no co-author trailers. No main merge is authorized by this handoff. External independent review and required gates remain prerequisites.
 
 Review must not depend on another conversation, an unpublished Runtime worktree, hidden test data or a prior review's conclusion. The 52-method catalog describes contracts, not 52 finished handlers; 25 primitive routes currently share typed/stdio/WSS dispatch.
 
@@ -37,7 +37,7 @@ cargo test --workspace --all-targets --locked -- --list
 sha256sum SPEC.md
 ```
 
-At code checkpoint `2751106`, the full gate passes **340 unique tests and 3 doctests**, committed/staged/working whitespace, formatting, all-target Clippy and rustdoc with warnings denied. Count one `: test` line per listed test; nested storage subprocess output is not another case. The same gate is configured for Ubuntu CI, which remains pending initial Host publication. Cached Cargo downloads do not change the fixed Git dependency identity.
+At code checkpoint `2751106`, the full gate passes **340 unique tests and 3 doctests**, committed/staged/working whitespace, formatting, all-target Clippy and rustdoc with warnings denied. Count one `: test` line per listed test; nested storage subprocess output is not another case. The same complete gate passed on Ubuntu in [exact-head CI run 42629644954](https://github.com/zqcli/minicore-host/actions/runs/42629644954) for the published commit. Cached Cargo downloads do not change the fixed Git dependency identity.
 
 Evidence boundaries:
 

@@ -1,0 +1,832 @@
+{
+  "repository": "zqcli/minicore-host",
+  "branch": "dev",
+  "branch_url": "https://github.com/zqcli/minicore-host/tree/dev",
+  "commit_url": "https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5",
+  "published_head": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+  "source_head": "797622fa9d663db01fad0d8b800a51a181ddc150",
+  "source_tree": "c71200b696b861e08ecb29309fdd0ffc7f48a236",
+  "remote_refs": {
+    "refs/heads/dev": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+    "refs/heads/main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7"
+  },
+  "remote_default": "main",
+  "main_unchanged": true,
+  "other_refs_unchanged": true,
+  "no_force": true,
+  "no_tag_or_pr": true,
+  "api_refs_verified": true,
+  "independent_git_ls_remote_verified": true,
+  "verified_at": "2026-11-09T13:55:53.455Z",
+  "actual_authors": [
+    "zqcli <276883664+zqcli@users.noreply.github.com>"
+  ],
+  "actual_committers": [
+    "zqcli <276883664+zqcli@users.noreply.github.com>"
+  ],
+  "verification": {
+    "raw_commits": 101,
+    "raw_message_bytes_identical": true,
+    "trees_and_recursive_entries_identical": true,
+    "all_blob_bytes_identical": true,
+    "verified_blobs": 511,
+    "single_parent_chain_verified": true,
+    "complete_source_history_preserved": true,
+    "remote_readme_ancestor_preserved": true,
+    "coauthor_absent": true,
+    "spec_sha256_identical": true,
+    "local_main_unchanged": true,
+    "api_identity_matches_raw": true,
+    "complete_frozen_history_preserved": true,
+    "frozen_commit_total": 101
+  },
+  "commits": [
+    {
+      "old_sha": "98621c924dcd516d238060fd908dfd14456f133f",
+      "new_sha": "436bf7a24b9339348a85e2a094f87544603873e1",
+      "tree": "1352ae0ccb6fdcbe8be95efde3a8a74771387447",
+      "parent": "b341b163e14543bfbe7f8d392ea243b4a123cdf7",
+      "message": "docs: establish host v4.93 implementation baseline\n"
+    },
+    {
+      "old_sha": "86dc6cd89e153f085d3936ccee2aeab6e4198a19",
+      "new_sha": "889e70c8b95c51e132a03180a948912494d4d038",
+      "tree": "79bbd5814261886956e30b8466ec9b0b1fc0e089",
+      "parent": "436bf7a24b9339348a85e2a094f87544603873e1",
+      "message": "feat(protocol): add strict identity configuration and fault contracts\n"
+    },
+    {
+      "old_sha": "6a725aa8829e455079b9aeac60238b468f376908",
+      "new_sha": "281bbbe03fd125e0f3a522fdf7467f23230b677b",
+      "tree": "ec5c1124d5efdc2e48a0ce361cae798734de9cdc",
+      "parent": "889e70c8b95c51e132a03180a948912494d4d038",
+      "message": "feat(protocol): enforce text requests and typed creation receipts\n"
+    },
+    {
+      "old_sha": "8c80b4ed35d981e0df54c2d68c02d1af9e01ce0c",
+      "new_sha": "33dfe2dae200bb59013fb07f489c5a6662ea6d2b",
+      "tree": "66d9f9c237f6112b03b3539e09d127def06cdd4e",
+      "parent": "281bbbe03fd125e0f3a522fdf7467f23230b677b",
+      "message": "feat(protocol): define control facts and staged method catalog\n"
+    },
+    {
+      "old_sha": "263860f3ffec2a6fe70c725f08aa25fe43b14385",
+      "new_sha": "8c8824d0940ea2dafbbc86013761151fd71ca77d",
+      "tree": "75d7833683666727cdbcfe5421baedb9d9910c8b",
+      "parent": "33dfe2dae200bb59013fb07f489c5a6662ea6d2b",
+      "message": "feat(provider): implement OpenAI chat HTTP and SSE transport\n"
+    },
+    {
+      "old_sha": "6ff9607f6ad53660c76540a099bb483cb9087779",
+      "new_sha": "d81d776d81f67785ab25aa0e815d812ca5ad26b8",
+      "tree": "48b963281c5eb8b1608f30bc3c58a1eda9e18e29",
+      "parent": "8c8824d0940ea2dafbbc86013761151fd71ca77d",
+      "message": "feat(protocol): verify rpc envelopes and document contract boundaries\n"
+    },
+    {
+      "old_sha": "d43ef8a9267fa1c18d897bb3df16db03dccd918a",
+      "new_sha": "274c0cce19c8663c8d6c34bc6c3532707978a518",
+      "tree": "1bf006fbdb3a19a6b1f31c84bb95c704acb1d687",
+      "parent": "d81d776d81f67785ab25aa0e815d812ca5ad26b8",
+      "message": "docs(tasks): record protocol contracts validation and handoff\n"
+    },
+    {
+      "old_sha": "13c04b321b8eeab33cea48a37721654bca4c84db",
+      "new_sha": "3d6b83f3e552b87a33722b7a83e32a8620a417b7",
+      "tree": "27af4592f7b2c9143ea33dc24ac0eb091d4f04f3",
+      "parent": "274c0cce19c8663c8d6c34bc6c3532707978a518",
+      "message": "test(provider): verify real HTTP SSE through Runtime loops\n"
+    },
+    {
+      "old_sha": "ac347b7e1a6758ed857b35d678f4e7a28d67fb25",
+      "new_sha": "828854957a1c6f340980667d8eacc96c2dfa94a0",
+      "tree": "e919965fbb57c2439a62b7875a51808ed11973da",
+      "parent": "3d6b83f3e552b87a33722b7a83e32a8620a417b7",
+      "message": "docs(provider): record validated adapter handoff\n"
+    },
+    {
+      "old_sha": "7164725267a0f28705d33a74d213b7f8e894b316",
+      "new_sha": "b5249593960aa3901f4e0993268d2b07022a91c5",
+      "tree": "b72a60ebbfa79ad4496a730dcbb038f62544091a",
+      "parent": "828854957a1c6f340980667d8eacc96c2dfa94a0",
+      "message": "feat(storage): add durable owner-scoped object and history storage\n"
+    },
+    {
+      "old_sha": "75f6dd646b894eaa3fb94a3db58b17f5a78c9adb",
+      "new_sha": "54c9bfbfd20572f14ca0cfa13d978f33540e0f7d",
+      "tree": "4adfa74b30c8cb0fcc28946957c2140fd484416e",
+      "parent": "b5249593960aa3901f4e0993268d2b07022a91c5",
+      "message": "feat(core): implement direct owners and real Runtime turn scheduling\n"
+    },
+    {
+      "old_sha": "66548fc014edb397542f5774e39590cce9298acc",
+      "new_sha": "a6434ceb754b3cdf40560a7c9731a1b916a58627",
+      "tree": "c7ec626e0f8d10775d51058b34153cc0b372b11f",
+      "parent": "54c9bfbfd20572f14ca0cfa13d978f33540e0f7d",
+      "message": "test(core): verify durable Runtime handoff and real HTTP integration\n"
+    },
+    {
+      "old_sha": "2c3a3aa587afee5a12aa3fe7c382e31fe96a45b2",
+      "new_sha": "e7bb1aeb14939a64c9cddd486fe619237b3cc24a",
+      "tree": "71100c5cf1c078cb24d7e064061f8b28c9cf579b",
+      "parent": "a6434ceb754b3cdf40560a7c9731a1b916a58627",
+      "message": "fix(storage): reject lossy native records and verify real write failures\n"
+    },
+    {
+      "old_sha": "eba211af4adee33cb02449b7b240eb7efdc34ba6",
+      "new_sha": "bccd416844eee771e1064ae54282d8de98ae737f",
+      "tree": "a98f20c44ccc3c7a7726d5170566c13654d14734",
+      "parent": "e7bb1aeb14939a64c9cddd486fe619237b3cc24a",
+      "message": "docs: record real Runtime foundation validation and remaining scope\n"
+    },
+    {
+      "old_sha": "dcc1fc6aee625822061a3748367d109ed61b4be0",
+      "new_sha": "40df29b7f6a73084266f3d24b6880749ae2f0682",
+      "tree": "f52ca5d0f385aca36f408f7a6507d11ca668c603",
+      "parent": "bccd416844eee771e1064ae54282d8de98ae737f",
+      "message": "fix(storage): confirm retry durability and validate incremental history safely\n"
+    },
+    {
+      "old_sha": "9291f0d421a8d9bb6d03e1b49f9796d84f5ad602",
+      "new_sha": "16560d3ea74cfa34f27e341eb8dc5f088e1e110d",
+      "tree": "24636ed790ade84be3b095bf139ba995370d3da0",
+      "parent": "40df29b7f6a73084266f3d24b6880749ae2f0682",
+      "message": "fix(storage): isolate agent initialization from broken default sessions\n"
+    },
+    {
+      "old_sha": "f70ae2e985fb90db092c89ed52480017844b1b95",
+      "new_sha": "a1eae24cb88c4253dd0a9c1f946305f7954bdb51",
+      "tree": "c154363c2269ed0231092d83e2b037cba363d5ee",
+      "parent": "16560d3ea74cfa34f27e341eb8dc5f088e1e110d",
+      "message": "test(core): verify owner scheduling across multiple runtime threads\n"
+    },
+    {
+      "old_sha": "7308ae9bb706b2a8ec13a3777030f623878ef827",
+      "new_sha": "94d6e61b730e2d52398a707e2066015a931fd06a",
+      "tree": "251bb1118d2dc9146721f8d723a286856a337390",
+      "parent": "a1eae24cb88c4253dd0a9c1f946305f7954bdb51",
+      "message": "docs(storage): document schema guarantees and verification limits\n"
+    },
+    {
+      "old_sha": "394548872234a0c9de3c6f9bca8721344aaae67a",
+      "new_sha": "a67a9e5d316903dec806b3cd27e5340fb75b7048",
+      "tree": "4814c08b85318336f2ad83f019b8f8d87e1974c4",
+      "parent": "94d6e61b730e2d52398a707e2066015a931fd06a",
+      "message": "feat(core): initialize persistent direct owners with stable identity\n"
+    },
+    {
+      "old_sha": "4b8de5005404e64ba997fd15864098b6419aa647",
+      "new_sha": "5bd85b352bbd8eb0ee111112ab1bf3ba0dc493e1",
+      "tree": "ab5d5f8c70c70516cca19fec14fbed923ab8db8d",
+      "parent": "a67a9e5d316903dec806b3cd27e5340fb75b7048",
+      "message": "docs: checkpoint persistent initialization and publication blocker\n"
+    },
+    {
+      "old_sha": "c5e6aca05ea88962905c72b526534c9ba07ab76b",
+      "new_sha": "ac00cb0ecfba8f2429368bb1cbdd48b48e953bc0",
+      "tree": "c998bb2a5f137a6c4459384049bc89f70f8db72b",
+      "parent": "5bd85b352bbd8eb0ee111112ab1bf3ba0dc493e1",
+      "message": "feat(core): own asynchronous persistent creation beyond caller waits\n"
+    },
+    {
+      "old_sha": "470f136a31f63d528a2d8bf772bcc4a0e33e1c45",
+      "new_sha": "6cb7520347e128240153476237807a22482f729b",
+      "tree": "a1de5f755d21a068a797cdf7d776052cd6f38ebf",
+      "parent": "ac00cb0ecfba8f2429368bb1cbdd48b48e953bc0",
+      "message": "fix(storage): isolate unsafe child entries during owner enumeration\n"
+    },
+    {
+      "old_sha": "df9109bdf3117d9364e4d6126333a3d4226892e6",
+      "new_sha": "cfe848d6be709f4cb6573886079833c63b7e349b",
+      "tree": "a3aaa4269f83b782d4bdd56ed18933c024b573e7",
+      "parent": "6cb7520347e128240153476237807a22482f729b",
+      "message": "docs: map public methods to tested owner primitives\n"
+    },
+    {
+      "old_sha": "d2302d783f019020cb44cdbdcd74883dcfb99def",
+      "new_sha": "2a56507cae34b7e16d596f025d849d5374d3cda3",
+      "tree": "ac9f9aea5319bec9eed7bcfbfb09b332eca2c4c7",
+      "parent": "cfe848d6be709f4cb6573886079833c63b7e349b",
+      "message": "fix(core): retain root lease for accepted memory descendant work\n"
+    },
+    {
+      "old_sha": "95864729fe42eb5b7422cde966787c938d693119",
+      "new_sha": "4a9a9d781937f2364ed66af48d1fa1e44fed51a9",
+      "tree": "35bdf07b35979e85d11b78ddd3ed67dade0af539",
+      "parent": "2a56507cae34b7e16d596f025d849d5374d3cda3",
+      "message": "feat(core): confirm persistent metadata and lifecycle transitions\n"
+    },
+    {
+      "old_sha": "fa5172f680cacd8df934193eac744b5bb3bd513b",
+      "new_sha": "29b20067279a557e8061c31172135e95760e78d2",
+      "tree": "6d88a834ea308fcae3dd896b2322f0e5c022fb8f",
+      "parent": "4a9a9d781937f2364ed66af48d1fa1e44fed51a9",
+      "message": "fix(core): isolate creation work and retire owners before replies\n"
+    },
+    {
+      "old_sha": "30c588c2c8bb190fb579e30fb30274e80bac5587",
+      "new_sha": "4dfe7d173e31708ad38779ee63d31f8ad7e0630a",
+      "tree": "308d555e2fe5d32f26fa23ca46e1ab011e8d0835",
+      "parent": "29b20067279a557e8061c31172135e95760e78d2",
+      "message": "fix(core): wake stop aggregation and fence unfinished creation\n"
+    },
+    {
+      "old_sha": "f1ec37e8bc04da6f11a2c834173737fd74337c99",
+      "new_sha": "40d1737cf1ef133386f6a8032cd6595da73513ec",
+      "tree": "ea2bde4aea8e6be98dda3bb63cb83379e75c2532",
+      "parent": "4dfe7d173e31708ad38779ee63d31f8ad7e0630a",
+      "message": "build: pin published runtime history handoff revision\n"
+    },
+    {
+      "old_sha": "a088b00591820a07503e767b8d7c0ba27894ee81",
+      "new_sha": "9427d89538710f388feaea27d02d66c74d228adb",
+      "tree": "e719e836c8155f75690a520d42dda9886b3e569f",
+      "parent": "40d1737cf1ef133386f6a8032cd6595da73513ec",
+      "message": "fix(storage): coordinate metadata snapshots with atomic publication\n"
+    },
+    {
+      "old_sha": "d73b161e8d84d77a19aecd92125d11063192be05",
+      "new_sha": "4bf9e62d9bc20893856711403ab9ab0b61b12919",
+      "tree": "04a46723eac17761e48fc785d295efbef585ea62",
+      "parent": "9427d89538710f388feaea27d02d66c74d228adb",
+      "message": "fix(core): limit close dependencies to actual default references\n"
+    },
+    {
+      "old_sha": "1b0bba0d0afc07431f8c5eb2a6e425d968df55f4",
+      "new_sha": "903f6699b8d389e608c843fbdd470f5481e36d2f",
+      "tree": "85b8af29674945b166a9faba4a373f18884bc874",
+      "parent": "4bf9e62d9bc20893856711403ab9ab0b61b12919",
+      "message": "docs: record durable owner checks and clean-source build\n"
+    },
+    {
+      "old_sha": "cf36530cb67378e927a8e63c063a829ff0337d6f",
+      "new_sha": "40bf519b103a78bb08be49b235eb04e13ec1511d",
+      "tree": "8107780e3223b7c37288dea700bb6a89dc31fb08",
+      "parent": "903f6699b8d389e608c843fbdd470f5481e36d2f",
+      "message": "docs: reconcile controller provenance with published dependency\n"
+    },
+    {
+      "old_sha": "d2c41ca82b13f3d4733892773fd894cb76e50173",
+      "new_sha": "6a44c61bb3e3c7401ff451d2b8d8896c50a8a17a",
+      "tree": "33961a4bdff4b9d4c64772ee494895b1b762927c",
+      "parent": "40bf519b103a78bb08be49b235eb04e13ec1511d",
+      "message": "test(core): verify concurrent metadata and document owner contracts\n"
+    },
+    {
+      "old_sha": "603405a160e0b7d36532fa0f70471ddd135d7a0c",
+      "new_sha": "1aca7d376b76584cc441b77bed59dca6e7f95425",
+      "tree": "a7756135aee10746d2a12ef53badd8d867d4005f",
+      "parent": "6a44c61bb3e3c7401ff451d2b8d8896c50a8a17a",
+      "message": "ci: run the Linux foundation quality gate\n"
+    },
+    {
+      "old_sha": "e2f9ad7f1c2820a90d1a15da17d884e6ae12e2fd",
+      "new_sha": "1da6480854b6527af75fcc251b1ee1f3cb799110",
+      "tree": "676b3a82ca28ef00487e3553683e0c6968a21607",
+      "parent": "1aca7d376b76584cc441b77bed59dca6e7f95425",
+      "message": "docs: record Linux CI verification and limits\n"
+    },
+    {
+      "old_sha": "8244ec11990266ff0098c16133811333490d6772",
+      "new_sha": "85ae64de6e0efd3c126f53ab0b8a5951666fd841",
+      "tree": "4ac312b58201c1287fe4b3fc572464379272299b",
+      "parent": "1da6480854b6527af75fcc251b1ee1f3cb799110",
+      "message": "build: keep one workspace dependency lock\n"
+    },
+    {
+      "old_sha": "6e6d43a51de25c6b33e4e67167114b0f96f6637c",
+      "new_sha": "f6f97b3524f275e3c821edfa3cce347cd3edad89",
+      "tree": "add0ffe84888c69d9fc451fa11b1041e59353cac",
+      "parent": "85ae64de6e0efd3c126f53ab0b8a5951666fd841",
+      "message": "test(core): retain default selection and revocation regressions\n"
+    },
+    {
+      "old_sha": "0b9b390750233f7b11ad006563da697014f162e2",
+      "new_sha": "0f2f9deae2dee75def3077f6bfbdd778e6390d37",
+      "tree": "50a6c50f2fd84465b58154dae2945331ee848ac9",
+      "parent": "f6f97b3524f275e3c821edfa3cce347cd3edad89",
+      "message": "test(storage): verify metadata gate reacquisition and retirement\n"
+    },
+    {
+      "old_sha": "6d29cdca4c265c3f1eaee906d97f7855c9d74545",
+      "new_sha": "83fea06b869487937b5154b966ea55c8ccf31e69",
+      "tree": "1b85a0ce4de7351ce54b67cb0916809ea13f2b68",
+      "parent": "0f2f9deae2dee75def3077f6bfbdd778e6390d37",
+      "message": "docs: prepare verified foundation review handoff\n"
+    },
+    {
+      "old_sha": "5ac4d084e5916bf5abb0f303f4c5ec32db79b139",
+      "new_sha": "c89beeac223b4eea4c7393680db8e97c53a1a7be",
+      "tree": "8af6a4fec35468324b7d1c971d23c04cea725f77",
+      "parent": "83fea06b869487937b5154b966ea55c8ccf31e69",
+      "message": "fix(ci): check committed whitespace across project history\n"
+    },
+    {
+      "old_sha": "d97eccd324987bb430ac463e43f7ad6191ff30b5",
+      "new_sha": "734aef47fea12e5542a7605839cf0b68755bfa45",
+      "tree": "a2de3766ac1780baba186cdd22cc2a29533e3b9b",
+      "parent": "c89beeac223b4eea4c7393680db8e97c53a1a7be",
+      "message": "test(provider): cover Retry-After on streamed rejections\n"
+    },
+    {
+      "old_sha": "7b24ca23ffc8dd6901b6beac292d1e391b81eb56",
+      "new_sha": "c752ca73b3b53f45aaf615526b4bac6662aec20d",
+      "tree": "ddfb004618aed6c20e1eff41f36a55fb284921df",
+      "parent": "734aef47fea12e5542a7605839cf0b68755bfa45",
+      "message": "fix(provider): preserve Retry-After for SSE rejections\n"
+    },
+    {
+      "old_sha": "38991d37bc4980fc31a3312e943a62a060ce635a",
+      "new_sha": "c8adfb6387c5e413c0631799f0d7b0dcdcf06e25",
+      "tree": "f138e2b9e60f7455c73ccdec9baccbb4c13d6e8f",
+      "parent": "c752ca73b3b53f45aaf615526b4bac6662aec20d",
+      "message": "docs(provider): record streamed retry regression validation\n"
+    },
+    {
+      "old_sha": "052fa7902b8d8da838371385164d5183401f853d",
+      "new_sha": "9f0cdea5a8047cf2d9214a59131749bf02beb59e",
+      "tree": "326f3d9612b51213333817f4dd7378eb4577a93e",
+      "parent": "c8adfb6387c5e413c0631799f0d7b0dcdcf06e25",
+      "message": "docs: record retry-header correction and stronger quality gate\n"
+    },
+    {
+      "old_sha": "f273ec51222d8706eb96ad3ad094788b2ca4e396",
+      "new_sha": "87e8dfe4495d1c2cc7ce2e8c1baa36e3d5889996",
+      "tree": "d464af9a64b177da378a942d811be1d1b9c7b4c5",
+      "parent": "9f0cdea5a8047cf2d9214a59131749bf02beb59e",
+      "message": "feat(core): add Host admission and execution fences\n"
+    },
+    {
+      "old_sha": "afc49aeb9e7a88e8e240bc4e79a463fb8b020381",
+      "new_sha": "8e3c11c74e9a95b39002d4062f5e8d2fc4c7552d",
+      "tree": "80aba748bd9dcbd6910606d1187f15b20d415ee6",
+      "parent": "87e8dfe4495d1c2cc7ce2e8c1baa36e3d5889996",
+      "message": "feat(core): retain and continue original history saves\n"
+    },
+    {
+      "old_sha": "2734eb9bf6509ab0ecba7e37abfb8cd095da4c04",
+      "new_sha": "fadfacaf0581249caa166c6218c36d7f1945be22",
+      "tree": "007902f0c57676a3479992df649158e2226654b1",
+      "parent": "8e3c11c74e9a95b39002d4062f5e8d2fc4c7552d",
+      "message": "feat(core): own graceful and force Host shutdown\n"
+    },
+    {
+      "old_sha": "754d31879e5994222176fb450627230513d1ce63",
+      "new_sha": "3a16986ea2e2203ee5bf9223075fce6015fe2a75",
+      "tree": "f014394ddcde539c375ab7dcdefcfa5e3fa0a73f",
+      "parent": "fadfacaf0581249caa166c6218c36d7f1945be22",
+      "message": "test(core): exercise original save continuation boundaries\n"
+    },
+    {
+      "old_sha": "9966daec27885779b95ef436e858a951253dfdd4",
+      "new_sha": "a8b95d99548e76c50b3fc4872d98d52d31cba9e7",
+      "tree": "b8cb25a64cb9bb83c029af3edc177ba4bd0541e4",
+      "parent": "3a16986ea2e2203ee5bf9223075fce6015fe2a75",
+      "message": "fix(core): distinguish save confirmation from resource retirement\n"
+    },
+    {
+      "old_sha": "a26dda7a3abf1a4adc634f428072f42baa704ece",
+      "new_sha": "79326a9d9f0217a800d1e81e9ea9a6031d318cb8",
+      "tree": "ef2881258f3b288332525dbe07b3622057f5709e",
+      "parent": "a8b95d99548e76c50b3fc4872d98d52d31cba9e7",
+      "message": "feat(core): retire closed memory owners after cleanup\n"
+    },
+    {
+      "old_sha": "2a7ffa969b5399d3ae7791f05042a2d8c71bbb9d",
+      "new_sha": "2441c38f1479f30b1c252ea8074d76fe25cc9048",
+      "tree": "7f85375da0878b2d1ce6fe1c566b5bcac920dde7",
+      "parent": "79326a9d9f0217a800d1e81e9ea9a6031d318cb8",
+      "message": "feat(core): reconcile Session metadata through resume\n"
+    },
+    {
+      "old_sha": "2ed6d295ca687a2f7d7e70606ff8e38c87c109a9",
+      "new_sha": "ad94faba418b70b3926e10c377958250077dab8a",
+      "tree": "8576659e42ad11fca42e0acd983c13347183a05b",
+      "parent": "2441c38f1479f30b1c252ea8074d76fe25cc9048",
+      "message": "fix(core): route stopping resume through original Session saves\n"
+    },
+    {
+      "old_sha": "b9c385884cf2dc52fec0a18502a0746bf7795ebb",
+      "new_sha": "eaa42b963ad1013b6d3057357c634210837e0a2d",
+      "tree": "3e99e2d8ac3653a05f9e548f2860faf4eb015472",
+      "parent": "ad94faba418b70b3926e10c377958250077dab8a",
+      "message": "fix(core): serialize close and retirement watcher handoff\n"
+    },
+    {
+      "old_sha": "ab0e589de150fb99dfa085034677cd9340cf309e",
+      "new_sha": "dd8eb68b66ea7b3117e5244b9f21f24439937635",
+      "tree": "f267c778a6193352541c5e91bb88133fee1385ac",
+      "parent": "eaa42b963ad1013b6d3057357c634210837e0a2d",
+      "message": "fix(core): gate resumed work on all original Session saves\n"
+    },
+    {
+      "old_sha": "7fc69342bcd5fbc68b54854be8baf4102aabe4a7",
+      "new_sha": "624ac68d31ead5a92b70106dd33ee4b70c90f29e",
+      "tree": "8211eff9901f9248d81a7829ff36547696dcea87",
+      "parent": "dd8eb68b66ea7b3117e5244b9f21f24439937635",
+      "message": "test(core): assert reclaimed memory owner boundaries\n"
+    },
+    {
+      "old_sha": "413916cac0730d291e5c8163cdc3d59e5dbedcd1",
+      "new_sha": "5cc4ceaa37f9367e4fc22d7d276bc9a11c7ef6ba",
+      "tree": "779dd2238c3864229aed56fc2d769e073b193bd5",
+      "parent": "624ac68d31ead5a92b70106dd33ee4b70c90f29e",
+      "message": "docs(core): finalize shutdown and retirement validation scope\n"
+    },
+    {
+      "old_sha": "3874e9abcceafdaeebbd3db62205052fbecb6fee",
+      "new_sha": "c0953c127351804b9d1b5bd4b269c96a47f61111",
+      "tree": "29009dedfd7408fbeea771000e0a0cd4de3c571c",
+      "parent": "5cc4ceaa37f9367e4fc22d7d276bc9a11c7ef6ba",
+      "message": "docs(core): finalize history continuation verification\n"
+    },
+    {
+      "old_sha": "f38fbebc6c66363e56301f0ad795a8ebc69884b4",
+      "new_sha": "5204b4895c067c09d5673b79db96b54fb03ed28e",
+      "tree": "390103c5ba623d47bb437bcf29aeca384f3e31fe",
+      "parent": "c0953c127351804b9d1b5bd4b269c96a47f61111",
+      "message": "docs: record controlled lifecycle integration and scope\n"
+    },
+    {
+      "old_sha": "19008cb321cee1f6ad280acb48828e33b70648a2",
+      "new_sha": "49d715a4bb20e1d94fba860df1bfcaf25924e2bd",
+      "tree": "9aa5a051fedbb68d014e4bbe95368c0b6e524d99",
+      "parent": "5204b4895c067c09d5673b79db96b54fb03ed28e",
+      "message": "feat(protocol): define canonical receipt lookup variants\n"
+    },
+    {
+      "old_sha": "71973669cc967ef277d2e4f6f8644be4f602283d",
+      "new_sha": "009fa76caed7730ed956bc13b8d553834bdeeee7",
+      "tree": "95fcf6a9778e12242f8e99845c1aa5b2f8446394",
+      "parent": "49d715a4bb20e1d94fba860df1bfcaf25924e2bd",
+      "message": "feat(core): form control receipts at direct-owner acceptance\n"
+    },
+    {
+      "old_sha": "12efa6a6bb9d096bceb36bf24556090602a092e9",
+      "new_sha": "cfb108b364ef1aed796d603c6b9fce8409fa27fe",
+      "tree": "da67c34dbd87ca7c68d29f374e61e899868d696b",
+      "parent": "009fa76caed7730ed956bc13b8d553834bdeeee7",
+      "message": "test(core): verify canonical control acceptance and retention\n"
+    },
+    {
+      "old_sha": "deb14d8c69952c18fe13055122bf463406d43035",
+      "new_sha": "17ba8db6edd61de334d4902a2e5ac494b6e514db",
+      "tree": "5e822fdbba0ad61b793f0aac11c8dd8dec0c24e3",
+      "parent": "cfb108b364ef1aed796d603c6b9fce8409fa27fe",
+      "message": "docs(tasks): record canonical controls validation checkpoint\n"
+    },
+    {
+      "old_sha": "b961f9f45ea31def2e215fa07368c05893cdf6fa",
+      "new_sha": "91cf829442237d4af5b8d1f91d3bd4a80f8b4495",
+      "tree": "860b0ebb5cd34ff3f8f34b2b0599773156d3e2d4",
+      "parent": "17ba8db6edd61de334d4902a2e5ac494b6e514db",
+      "message": "fix(core): distinguish retained receipt lookup failures\n"
+    },
+    {
+      "old_sha": "f6e5d99c3e27eebcfd67ef246ad41e06eea81031",
+      "new_sha": "57f9abecbdefeb49e10bc26e44236a39e86e8a1a",
+      "tree": "79c961a589ded21775a6c7f01c427462a875dca2",
+      "parent": "91cf829442237d4af5b8d1f91d3bd4a80f8b4495",
+      "message": "docs: record canonical controls and lookup correction\n"
+    },
+    {
+      "old_sha": "bf05b06c648cde8ccfe574800aefdb8bd6439508",
+      "new_sha": "cb7441bf652a18a9583e5e26de14539d0e4fc824",
+      "tree": "c4cc27e7699dfa32cd36531d1214a90cde454f7e",
+      "parent": "57f9abecbdefeb49e10bc26e44236a39e86e8a1a",
+      "message": "docs: record independent canonical control recheck\n"
+    },
+    {
+      "old_sha": "a48201f174b15e2778883a2fb14e6b6fdda3e003",
+      "new_sha": "99d1d4f23c19738b4475654527bf7d04fa67e77b",
+      "tree": "ccfc3d1b702ba8a24f5df9afea85cf0bbd90b0e2",
+      "parent": "cb7441bf652a18a9583e5e26de14539d0e4fc824",
+      "message": "build(workspace): register fixed workspace query dependencies\n"
+    },
+    {
+      "old_sha": "d27575d3639f850ef9062599dfb3fb4d8c61dce1",
+      "new_sha": "b039ed06fa31f1010a55941b0b6c854fccabf354",
+      "tree": "036ce1183f1835688081bc5ebf724f8f03c8674f",
+      "parent": "99d1d4f23c19738b4475654527bf7d04fa67e77b",
+      "message": "feat(workspace): read bound files and real change sources\n"
+    },
+    {
+      "old_sha": "b0fdbfb4680faeccec8020e3e264b955576daa0a",
+      "new_sha": "5237c58d77b47b47c959e4e60ab3bc575cb8ea12",
+      "tree": "4220af0aa00448d514972bb30a6db94ba52254a0",
+      "parent": "b039ed06fa31f1010a55941b0b6c854fccabf354",
+      "message": "test(workspace): verify real files git states and edit snapshots\n"
+    },
+    {
+      "old_sha": "53b9a9f0e604e2c582746bea92ec7f40f4c1defe",
+      "new_sha": "824afbbeb1292e83880a33b39e7bdae0f462e3f6",
+      "tree": "7516f6fc8c646a12e4573e0123a0f5e07a630771",
+      "parent": "5237c58d77b47b47c959e4e60ab3bc575cb8ea12",
+      "message": "docs(workspace): record full validation and integration boundary\n"
+    },
+    {
+      "old_sha": "ae9b133db5e3bdf286b148633dddf9250a92e778",
+      "new_sha": "07cf83a7f30510a2ddfbd9bad1988026e705188d",
+      "tree": "7668f93cd594de0f168869e2b3e6002027936d70",
+      "parent": "824afbbeb1292e83880a33b39e7bdae0f462e3f6",
+      "message": "docs: record workspace backend integration boundaries\n"
+    },
+    {
+      "old_sha": "7b113d8e275533f76e497678c066004856666feb",
+      "new_sha": "0492a723563dccd73c2aada7a572769860474cb5",
+      "tree": "57f6d156a1eb7b6af87454e7e1bed8373c32a6d8",
+      "parent": "07cf83a7f30510a2ddfbd9bad1988026e705188d",
+      "message": "build(transport): add typed stdio adapter crate\n"
+    },
+    {
+      "old_sha": "cf0761545d653d28244d37052bc5ae61ec79c41b",
+      "new_sha": "a60facfb6751a1755fc3cf632187fc98b71cba78",
+      "tree": "59cfc1c868f31d37b9eb087e79b5df125bfcda29",
+      "parent": "0492a723563dccd73c2aada7a572769860474cb5",
+      "message": "build(transport): keep only exercised pipe test dependencies\n"
+    },
+    {
+      "old_sha": "774c884693a01337976f5250e8ab19b1e07f4416",
+      "new_sha": "dc09be83bd5e622a958b605d804d570bf1fb8734",
+      "tree": "7af6a84f8f303e53a329039baebf3f01d8866527",
+      "parent": "a60facfb6751a1755fc3cf632187fc98b71cba78",
+      "message": "feat(transport): add direct typed and multiplexed stdio clients\n"
+    },
+    {
+      "old_sha": "84700ce2d263a4f981f2bb4f69dd9fec9dd925b1",
+      "new_sha": "200e05d9779e086ff595022db5172c1935bb325c",
+      "tree": "7247540ba1c1dd3f4f0cf2e52870208892fecf7c",
+      "parent": "dc09be83bd5e622a958b605d804d570bf1fb8734",
+      "message": "test(transport): verify owner facts, pipe IO and one wait budget\n"
+    },
+    {
+      "old_sha": "8079970d3d7b35912ae4b45118d8e980d5f3e749",
+      "new_sha": "9f3cd2e74cf86529b3746b2f2a49a6396f3333a2",
+      "tree": "36a0cda39f8c378fe2d3c7510b520a15f85d6fa4",
+      "parent": "200e05d9779e086ff595022db5172c1935bb325c",
+      "message": "docs(tasks): record typed stdio validation and exact test counts\n"
+    },
+    {
+      "old_sha": "d4c3f66655509a926502604b0f6c84ebb2133958",
+      "new_sha": "15fdf35d7332bbc84526aeab76419178f0997e08",
+      "tree": "8e686631990aae55b19139f67e81b24f757a0dc3",
+      "parent": "9f3cd2e74cf86529b3746b2f2a49a6396f3333a2",
+      "message": "docs(project): record integrated adapter gates and open review findings\n"
+    },
+    {
+      "old_sha": "e140048027a43f9e90b8cbd0bad21e54e66d2265",
+      "new_sha": "66a2a849676c704cf45e111e4e70e4500ae09c1a",
+      "tree": "b218e1793ca2efd3ed7d7ee216c81ad318b7ceeb",
+      "parent": "15fdf35d7332bbc84526aeab76419178f0997e08",
+      "message": "docs(protocol): separate routed methods from complete contracts\n"
+    },
+    {
+      "old_sha": "34cb9591fd5d7cd3242facbc43a122b99ef3c6c5",
+      "new_sha": "3525c47fad221c11b64cc2afb669c59400cf5b61",
+      "tree": "92381e8e968e3c896b6c596de701a5b7dcb9fa52",
+      "parent": "66a2a849676c704cf45e111e4e70e4500ae09c1a",
+      "message": "fix(workspace): distinguish damaged repositories from plain directories\n"
+    },
+    {
+      "old_sha": "d154377cb7651a39649bad91db419946a59c1a0b",
+      "new_sha": "be72d3b434836d062f4505fcf8fa3d55fb2b1ebb",
+      "tree": "3467ec11577af93d5a9b3fa7c6e7d0a152d681ff",
+      "parent": "3525c47fad221c11b64cc2afb669c59400cf5b61",
+      "message": "fix(workspace): reject executable Git filters before read queries\n"
+    },
+    {
+      "old_sha": "775235a9e9f7031ba654b6b83ddc73ecf9a5da6a",
+      "new_sha": "072db4504df513969c461a958301fbbbcde3a4ec",
+      "tree": "281b7d7ac374d550bf1e56f58e9d11f81b6890fc",
+      "parent": "be72d3b434836d062f4505fcf8fa3d55fb2b1ebb",
+      "message": "docs(workspace): record review fixes and exact validation results\n"
+    },
+    {
+      "old_sha": "2b4a0ac1b54c303d55b047432305165e491e38cd",
+      "new_sha": "45e98d0d9b09b7c6ee8907aa31f0ca2df40c32ab",
+      "tree": "8d970e8ef167e4925d3f998147a7d54a69e3e0cc",
+      "parent": "072db4504df513969c461a958301fbbbcde3a4ec",
+      "message": "docs(workspace): record scoped review and concurrent configuration limits\n"
+    },
+    {
+      "old_sha": "3309659583a1fec0e8314a6278467b55f7002b50",
+      "new_sha": "8392bc2719116657df3552943846383e0508502e",
+      "tree": "45f2875b5599156ad41bcdfcaa8d68de704cf67b",
+      "parent": "45e98d0d9b09b7c6ee8907aa31f0ca2df40c32ab",
+      "message": "refactor(core): reserve Host network access module\n"
+    },
+    {
+      "old_sha": "502b38a04405f6d385095208805ade13729a2411",
+      "new_sha": "367027412fe8e905bbe9b33056bf3e5ae90f45e1",
+      "tree": "fefd3190adfcd83eab4e6322158cc28d117fc534",
+      "parent": "8392bc2719116657df3552943846383e0508502e",
+      "message": "build(transport): pin TLS and WebSocket dependencies\n"
+    },
+    {
+      "old_sha": "c5634f450f8c5528c9d644cf0dbfa461755bc9ff",
+      "new_sha": "79085be817cd74f47dc33f43e3b92ee0ab0d282e",
+      "tree": "66b14a6f3f1c701de7b1ce157c02d01914a9da3a",
+      "parent": "367027412fe8e905bbe9b33056bf3e5ae90f45e1",
+      "message": "feat(core): authenticate network connections at the Host boundary\n"
+    },
+    {
+      "old_sha": "bd8bf2f5f9306d8d229f1907435cc22e849583d1",
+      "new_sha": "1644b338ca3653afc301cc97f707b0459a827d65",
+      "tree": "04ef8107d0b007b42ae5ded82106ca99d5d92d14",
+      "parent": "79085be817cd74f47dc33f43e3b92ee0ab0d282e",
+      "message": "feat(transport): serve authenticated TLS WebSocket RPC\n"
+    },
+    {
+      "old_sha": "30d62868e7c9fb5823f948deec64cc7a5c854aa7",
+      "new_sha": "502b43bd4ffa676ca2881afe173dec2f5d8b495f",
+      "tree": "897b58259197fdc216fa5330ed6f61b1904a121d",
+      "parent": "1644b338ca3653afc301cc97f707b0459a827d65",
+      "message": "docs(transport): record integrated WSS gates and review boundaries\n"
+    },
+    {
+      "old_sha": "967cc7a569d1e1b2fbfc476fc041c91502419a1d",
+      "new_sha": "f2b19a412ef9d767c13f4feabe370ccd62e7db10",
+      "tree": "0e13a0a9a87d983d6445e8895cd1b83ae12e0283",
+      "parent": "502b43bd4ffa676ca2881afe173dec2f5d8b495f",
+      "message": "fix(protocol): preserve unrecognized business fault leaves\n"
+    },
+    {
+      "old_sha": "0e0f628e0a902b22ef0304ba5ed06cf3c1038eb8",
+      "new_sha": "45265908d9033b5ddf5e7bae547f59a4c3599de4",
+      "tree": "8b52f3f1cf4f578f0c96ec896d1d8d1f94f5fe8b",
+      "parent": "f2b19a412ef9d767c13f4feabe370ccd62e7db10",
+      "message": "refactor: handle optional registered fault classification\n"
+    },
+    {
+      "old_sha": "ee14e47763277aaa06294af89e56d5ecf575be87",
+      "new_sha": "88ecbcf1c2ec1f56ed554e40d12c5fced5027c27",
+      "tree": "511bea97c9fa00de38cb3d2a6fa44bacb92a7272",
+      "parent": "45265908d9033b5ddf5e7bae547f59a4c3599de4",
+      "message": "refactor(protocol): keep optional fault details compact\n"
+    },
+    {
+      "old_sha": "e308de2d83132baf7b0a815252b8ed384ca52e83",
+      "new_sha": "7141c0c3efa81c96d7b3144d885671e319ee9efa",
+      "tree": "ecbf31454be44fe1f6c021656393d5fdcbb1d875",
+      "parent": "88ecbcf1c2ec1f56ed554e40d12c5fced5027c27",
+      "message": "test(transport): retain unfamiliar faults and accepted facts\n"
+    },
+    {
+      "old_sha": "bb750cf5500079f76c60a2c863f3bb2743dca2bc",
+      "new_sha": "b80926b14ae7db1230fe65207c1a35687ad045ec",
+      "tree": "e007b27c09ca2bf71b657232622f2d821c02aa0a",
+      "parent": "7141c0c3efa81c96d7b3144d885671e319ee9efa",
+      "message": "fix(core): isolate creation validation from caller deadlines\n"
+    },
+    {
+      "old_sha": "7fa744707e7e00d165cff6cac174557a33233bbb",
+      "new_sha": "06c42c5036ebb18c34344fbe7995b8d7ec4f3a09",
+      "tree": "ad28ebe91cec1fefca9aab432e2fb3d7ccd1bd62",
+      "parent": "b80926b14ae7db1230fe65207c1a35687ad045ec",
+      "message": "test(core): gate creation IO after asynchronous validation\n"
+    },
+    {
+      "old_sha": "5921c72ca5deb69865cca6c1fc3f48f1def70ed1",
+      "new_sha": "8493f46bab64a56589f76ce51342e5f9c421ef85",
+      "tree": "955d8fc7584bfc309c0bb683abaccb10e3341730",
+      "parent": "06c42c5036ebb18c34344fbe7995b8d7ec4f3a09",
+      "message": "docs: record WSS and transport review validation\n"
+    },
+    {
+      "old_sha": "f0531ab239fa356ed916b92f93cd43c74d5e05b4",
+      "new_sha": "e485052cdb6ce7f4f6dec85df1ab26ec6fd892df",
+      "tree": "a8572cb6926d8da6262f9dacd5f40cdef44ca8a4",
+      "parent": "8493f46bab64a56589f76ce51342e5f9c421ef85",
+      "message": "refactor(runtime): adopt infallible text and model event APIs\n"
+    },
+    {
+      "old_sha": "8657f8588dd0a6b93a15fead72ae9578f311ca6f",
+      "new_sha": "2ddb45154bc3f798a8f6de3724862e5322370ae6",
+      "tree": "2b4cf7ce763cd3282c3cf5213c71c20da5d7b066",
+      "parent": "e485052cdb6ce7f4f6dec85df1ab26ec6fd892df",
+      "message": "fix(provider): remove obsolete payload quotas and delta splitting\n"
+    },
+    {
+      "old_sha": "0bc0e2688dafc443737d4ad5270df46e5d7aa154",
+      "new_sha": "8b8e2d92083fac3971970fddb80f40377ef3420f",
+      "tree": "6ef3266ff5bf6c48c48dbc9a633c24d31bd06a6e",
+      "parent": "2ddb45154bc3f798a8f6de3724862e5322370ae6",
+      "message": "fix(core): describe input validity without removed text quotas\n"
+    },
+    {
+      "old_sha": "c955c4426f2b0b2d62be7bfc8887a07414cf30f7",
+      "new_sha": "a0873c881172f3050ee9468a92e402fc8f3bcbef",
+      "tree": "0ebe7c4b95064a7b7edd29024cfdf97f04cd3aa0",
+      "parent": "8b8e2d92083fac3971970fddb80f40377ef3420f",
+      "message": "test(runtime): cover quota-free HTTP payloads and Host ownership\n"
+    },
+    {
+      "old_sha": "bb3e0d2910aed65847e4a276398f834b3bf1f465",
+      "new_sha": "cff0c2d9635ced7b2e25503c53cae550517cda60",
+      "tree": "ec985242f3628598ce4f1f4444ea70d6807f8a75",
+      "parent": "a0873c881172f3050ee9468a92e402fc8f3bcbef",
+      "message": "test(provider): compare streamed payloads without cloning\n"
+    },
+    {
+      "old_sha": "a1d62240496b5ee3ad2bb93075d3545ac24bcf72",
+      "new_sha": "d514ec8a46d68607407aa15b3d2af56d7351055b",
+      "tree": "d76718760df930fdd4959e96fe451f1c5fd3955d",
+      "parent": "cff0c2d9635ced7b2e25503c53cae550517cda60",
+      "message": "docs(runtime): record local API migration and regression evidence\n"
+    },
+    {
+      "old_sha": "275110695551c30582d1302e6b01ab23a3aad536",
+      "new_sha": "c4b5f340000dc1f072461026a4930d5c6368d9ca",
+      "tree": "25832b2a149fa7f12e99fc19cfffdc845df42803",
+      "parent": "d514ec8a46d68607407aa15b3d2af56d7351055b",
+      "message": "build(runtime): pin verified Runtime 0.10.0 publication\n"
+    },
+    {
+      "old_sha": "797622fa9d663db01fad0d8b800a51a181ddc150",
+      "new_sha": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+      "tree": "c71200b696b861e08ecb29309fdd0ffc7f48a236",
+      "parent": "c4b5f340000dc1f072461026a4930d5c6368d9ca",
+      "message": "docs(handoff): record verified Runtime 0.10 and client corrections\n"
+    }
+  ],
+  "ci": {
+    "head_sha": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+    "observed_at": "2026-11-09T13:58:07.209Z",
+    "runs": [
+      {
+        "id": 42629644954,
+        "name": "Linux foundation CI",
+        "event": "push",
+        "head_sha": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/42629644954"
+      }
+    ],
+    "checks": [
+      {
+        "id": 129202312323,
+        "name": "Quality gate (Linux, Rust 1.90.0)",
+        "head_sha": "82583b31ac9091164da5f6dcfee6bb23e05137e5",
+        "status": "completed",
+        "conclusion": "success",
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/42629644954/job/129202312323"
+      }
+    ],
+    "jobs": [
+      {
+        "id": 129202312323,
+        "name": "Quality gate (Linux, Rust 1.90.0)",
+        "status": "completed",
+        "conclusion": "success",
+        "run_id": 42629644954,
+        "logs_url": null,
+        "steps": [
+          {
+            "name": "Set up job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 1
+          },
+          {
+            "name": "Check out source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 2
+          },
+          {
+            "name": "Install pinned Rust toolchain",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 3
+          },
+          {
+            "name": "Run the full foundation quality gate",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 4
+          },
+          {
+            "name": "Post Check out source",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 8
+          },
+          {
+            "name": "Complete job",
+            "status": "completed",
+            "conclusion": "success",
+            "number": 9
+          }
+        ]
+      }
+    ],
+    "log_sha256": "c1cd7aba3c08a660e01dcf33d84dc61908760b5ea57275aab678443a51bf5ce7",
+    "non_blocking_warnings": [
+      "The pinned actions/checkout commit targets deprecated Node.js 20; GitHub forced Node.js 24 and the workflow completed successfully."
+    ]
+  },
+  "ci_passed": true,
+  "completed_at": "2026-11-09T13:58:51.966078+00:00",
+  "final_refs_verified_at": "2026-11-09T14:00:00.385319+00:00"
+}

@@ -1,6 +1,6 @@
 # MiniCore Host
 
-Implementation of the complete v4.93 design in `SPEC.md`. The first version as a whole is **not complete or release-ready**. The current reproducible code checkpoint is `275110695551c30582d1302e6b01ab23a3aad536`; documentation-only commits may follow it.
+Implementation of the complete v4.93 design in `SPEC.md`. The first version as a whole is **not complete or release-ready**. The published foundation review checkpoint is [`82583b31ac9091164da5f6dcfee6bb23e05137e5`](https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5) on `dev`, compared with remote `main` `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. It reproduces local source `797622fa9d663db01fad0d8b800a51a181ddc150`, whose code checkpoint was `275110695551c30582d1302e6b01ab23a3aad536`. [All source-to-published commit identities](docs/host-publication.json) are included for historical task records.
 
 ## Fixed baselines
 
@@ -52,8 +52,8 @@ This retains the earlier authoritative history handoff, partial reports and sepa
 
 ## CI and GitHub handoff
 
-The Ubuntu 24.04 workflow uses pinned Rust 1.90.0, an immutable official checkout action, full history, read-only contents access and no persisted checkout credentials. It calls the same gate. Hosted Host CI remains pending the initial dev publication; local success is not hosted success. Actionlint/yamllint/shellcheck were unavailable and not run.
+The Ubuntu 24.04 workflow uses pinned Rust 1.90.0, an immutable official checkout action, full history, read-only contents access and no persisted checkout credentials. It calls the same gate. The published checkpoint passed the exact-head [Host CI run 42629644954](https://github.com/zqcli/minicore-host/actions/runs/42629644954), including the complete `./scripts/check.sh` gate. This is distinct from local test evidence. Actionlint/yamllint/shellcheck were unavailable and not run.
 
-Local development uses topic worktrees and integrates onto `dev`. Local `main` remains `98621c9`. The verified remote `main` is the README-only `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. The owner has authorized the current Host dev handoff; its publication will preserve that README as an ancestor, reconstruct the reviewable local commit sequence and verify each tree, message and actual author. It will not modify remote `main`, other refs or force-push. New GitHub commit identities will be mapped to local source checkpoints. The requested independent review and required tests still precede any main merge.
+Local development uses topic worktrees and integrates onto `dev`. Local `main` remains `98621c9`. The verified remote `main` is the README-only `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. The authorized Host dev publication preserved that README as an ancestor and reconstructed all 101 local commits in order. Every raw commit message, tree and 511 referenced blob contents were verified; actual authors and committers are `zqcli <276883664+zqcli@users.noreply.github.com>`, without co-author trailers. GitHub API and independent `git ls-remote` agree on the published head. Remote `main` and other refs were unchanged; there was no force-push, tag or PR. [Task 028](tasks/028-host-publication/TASK.md) records the fixed handoff, mapping and hosted verification. The requested independent review and required tests still precede any main merge.
 
 Workers were requested with `gpt-6-astra` and `max`. No independent runtime-model/effort attestation is exposed; the requested configuration is not claimed as proven actual identity.
