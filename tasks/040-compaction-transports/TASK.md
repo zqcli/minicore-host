@@ -29,7 +29,7 @@ Consulted minicore-agent code reference `f36a87366d8e2fe0a1c8216463887902e471c73
 ## Validation progress
 
 - Nine new focused integration tests pass with real Host, Runtime, production resource assembly and provider HTTP/SSE on a local scripted endpoint. The first focused run had a test expectation error: public history reads append the genuine summary item, rather than remaining byte-identical. The corrected test verifies every original item is unchanged and exactly one real summary is appended. No production change masked that test error.
-- Full workspace gate is running. Exact implementation/test hashes, final gate results and unique test inventory will be recorded after the source is fixed.
+- Production route/client checkpoint: `57ab6bd` (`feat(transport): expose owned session compaction controls`). Full workspace gate is running. The test checkpoint, final gate results and unique inventory will be recorded after the source is fixed.
 - Independent review and integration remain the coordinator's responsibility.
 
 ## Coverage and limits
