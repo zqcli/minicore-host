@@ -320,3 +320,52 @@ impl SessionControlReceipt {
         }
     }
 }
+
+crate::validated_dto!(SessionCancelResult, SessionCancelResultWire, "SessionCancelResultWire" {
+    cancel_claimed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::present")]
+    turn_state: Option<TurnState>,
+    controller_revision: Revision,
+});
+impl SessionCancelResult {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        match self.turn_state {
+            Some(turn_state) => TurnCancelResult {
+                cancel_claimed: self.cancel_claimed,
+                turn_state,
+                controller_revision: self.controller_revision,
+            }
+            .validate(),
+            None if !self.cancel_claimed => Ok(()),
+            None => Err(invalid("an idle Session cannot claim a Turn cancellation")),
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SessionCancelKind {
+    #[serde(rename = "session.cancel")]
+    SessionCancel,
+}
+crate::validated_dto!(SessionCancelReceipt, SessionCancelReceiptWire, "SessionCancelReceiptWire" {
+    kind: SessionCancelKind,
+    host_id: HostId,
+    host_incarnation: HostIncarnation,
+    operation_id: OperationId,
+    agent_id: AgentId,
+    session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::present")]
+    turn_id: Option<TurnId>,
+    result: SessionCancelResult,
+});
+impl SessionCancelReceipt {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        self.result.validate()?;
+        if self.turn_id.is_some() != self.result.turn_state.is_some() {
+            Err(invalid(
+                "Session cancellation identifies exactly its observed Turn",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}

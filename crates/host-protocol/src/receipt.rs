@@ -339,3 +339,32 @@ impl SessionCreateReceipt {
         }
     }
 }
+
+/// Existing owner-held creation progress or formed control facts. Serialization
+/// preserves the original method's receipt; this is not an Operation entity.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Receipt {
+    AgentCreate(AgentCreateReceipt),
+    SessionCreate(SessionCreateReceipt),
+    HostShutdown(crate::HostShutdownReceipt),
+    AgentStop(crate::AgentStopReceipt),
+    SessionControl(crate::SessionControlReceipt),
+    SessionClose(crate::SessionCloseReceipt),
+    TurnCancel(crate::TurnCancelReceipt),
+    SessionCancel(crate::SessionCancelReceipt),
+}
+impl Receipt {
+    pub fn operation_id(&self) -> &OperationId {
+        match self {
+            Self::AgentCreate(receipt) => &receipt.operation_id,
+            Self::SessionCreate(receipt) => &receipt.operation_id,
+            Self::HostShutdown(receipt) => &receipt.operation_id,
+            Self::AgentStop(receipt) => &receipt.operation_id,
+            Self::SessionControl(receipt) => &receipt.operation_id,
+            Self::SessionClose(receipt) => &receipt.operation_id,
+            Self::TurnCancel(receipt) => &receipt.operation_id,
+            Self::SessionCancel(receipt) => &receipt.operation_id,
+        }
+    }
+}

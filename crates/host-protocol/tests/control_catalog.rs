@@ -286,3 +286,34 @@ fn snapshot_absent_block_is_explicit_null_not_a_partial_update() {
     assert!(serde_json::from_value::<SessionControlFacts>(wire).is_err());
     assert!(serde_json::from_value::<SessionControlFacts>(control_facts()).is_ok());
 }
+
+#[test]
+fn session_cancel_receipt_correlates_only_an_actually_observed_turn() {
+    let idle = json!({"kind":"session.cancel","host_id":ID,"host_incarnation":ID,"operation_id":ID,"agent_id":ID,"session_id":ID,"result":{"cancel_claimed":false,"controller_revision":3}});
+    let receipt: SessionCancelReceipt = serde_json::from_value(idle.clone()).unwrap();
+    assert_eq!(serde_json::to_value(receipt).unwrap(), idle);
+    let mut active = idle.clone();
+    active["turn_id"] = json!(ID);
+    active["result"]["turn_state"] = json!("cancelling");
+    active["result"]["cancel_claimed"] = json!(true);
+    let receipt: Receipt = serde_json::from_value(active.clone()).unwrap();
+    assert_eq!(serde_json::to_value(receipt).unwrap(), active);
+    let mut unknown = active.clone();
+    unknown["kind"] = json!("arbitrary.control");
+    assert!(serde_json::from_value::<Receipt>(unknown).is_err());
+    let mut invalid = idle.clone();
+    invalid["result"]["cancel_claimed"] = json!(true);
+    assert!(serde_json::from_value::<SessionCancelReceipt>(invalid).is_err());
+    let mut invalid = idle.clone();
+    invalid["turn_id"] = json!(ID);
+    assert!(serde_json::from_value::<SessionCancelReceipt>(invalid).is_err());
+    let mut invalid = idle;
+    invalid["result"]["turn_state"] = json!("finished");
+    assert!(serde_json::from_value::<SessionCancelReceipt>(invalid).is_err());
+    let mut invalid = active.clone();
+    invalid["result"]["turn_state"] = json!("running");
+    assert!(serde_json::from_value::<SessionCancelReceipt>(invalid).is_err());
+    let mut invalid = active;
+    invalid["turn_id"] = Value::Null;
+    assert!(serde_json::from_value::<SessionCancelReceipt>(invalid).is_err());
+}
