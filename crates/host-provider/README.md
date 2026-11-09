@@ -55,6 +55,13 @@ Runtime alone retries a model call. The adapter sends exactly one request per
 temporary rejection has a retry hint. Role-only output already counts as
 Started. Cancellation/deadline while sending have Unknown delivery; cancellation,
 timeout or errors after provider events have Started delivery and never retry.
+Recognized pre-event SSE rejections preserve the response HTTP status and the
+same parsed `Retry-After` / `Retry-After-ms` lower bound as HTTP error responses.
+The absolute hint is captured when headers arrive, so parsing the body does not
+restart its clock. Runtime stops if the remaining wait exceeds its 30-second
+limit or does not fit the original deadline; the adapter never clamps the hint,
+waits or resends. A header does not make Unknown, Started, quota or authentication
+failures retryable.
 
 ## Validation baseline
 
@@ -64,10 +71,14 @@ reporting and retains complete Unknown responses before failing them. The earlie
 isolated-crate checks used a local handoff patch; that is historical provenance,
 not a current build prerequisite. No local Runtime patch is required now.
 
-The provider's 27 unit/integration tests and compiling doctest pass with the
-published Runtime source as part of the full workspace gate. Real loopback
-HTTP/SSE and Runtime are exercised, not a live external provider. Run checks
-from the workspace root; the obsolete isolated provider lock has been removed.
+Focused provider validation passes 5 unit tests, 31 HTTP/SSE integration tests
+and 1 compiling doctest with the published Runtime source. The added streamed
+rejection regressions first failed against Host `6d29cdc`, despite the earlier
+workspace gate passing. They exercise real loopback TCP requests and Runtime,
+including measured retry lower bounds and controlled retry-wait cancellation
+and deadlines. These focused checks are not a whole-foundation review pass or
+live external provider validation. Run checks from the workspace root; the
+obsolete isolated provider lock has been removed.
 
 ## Explicit remaining scope
 
@@ -78,4 +89,5 @@ from the workspace root; the obsolete isolated provider lock has been removed.
 - Live authorized endpoint validation and unchanged TUI integration. Loopback
   fixtures validate real transport and Runtime, not live model quality/access.
 
-See `PROVENANCE.md` and `../../tasks/004-provider/TASK.md` for source and tests.
+See `PROVENANCE.md`, `../../tasks/004-provider/TASK.md` and
+`../../tasks/010-provider-retry/TASK.md` for source, regression and test provenance.
