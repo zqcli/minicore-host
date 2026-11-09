@@ -255,13 +255,13 @@ operations! {
     GetAgent, "agent.get", AgentTarget => AgentInfo, |h, c, p| { h.agent_info(&c, &p.target) };
     ListAgents, "agent.list", Empty => Vec<AgentInfo>, |h, c, _p| { h.agents(&c) };
     StartAgent, "agent.start", AgentOperation => AgentStartReceipt, |h, c, p| { h.agent_start(&c, &p.target, AgentStartRequest { operation_id: p.operation_id }) };
-    UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }) };
+    UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     SetDefaultSession, "agent.set_default_session", SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
     StopAgent, "agent.stop", AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
     CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
     GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
     ListSessions, "session.list", AgentTarget => Vec<SessionInfo>, |h, c, p| { h.sessions(&c, &p.target) };
-    UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }) };
+    UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     ListInputs, "input.list", SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
     RemoveInput, "input.remove", RemoveInputParams => InputRemoveReceipt, |h, c, p| { h.input_remove(&c, &p.target, InputRemoveRequest { operation_id: p.operation_id, message_id: p.message_id, expected_controller_revision: p.expected_controller_revision }) };
     SessionState, "session.state", SessionTarget => SessionSnapshot, |h, c, p| { h.session_state(&c, &p.target) };

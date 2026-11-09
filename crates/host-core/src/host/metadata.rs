@@ -1,6 +1,6 @@
 use super::*;
 impl Host {
-    pub fn agent_update(
+    pub async fn agent_update(
         &self,
         caller: &CallerContext,
         target: &AgentRef,
@@ -9,8 +9,9 @@ impl Host {
         self.check_host(&target.host_id)?;
         self.agent(caller, &target.agent_id)?
             .update_control(caller, request)
+            .await
     }
-    pub fn session_update(
+    pub async fn session_update(
         &self,
         caller: &CallerContext,
         target: &SessionRef,
@@ -18,6 +19,7 @@ impl Host {
     ) -> Result<SessionUpdateReceipt, Fault> {
         self.session(caller, target)?
             .update_control(caller, request)
+            .await
     }
     pub fn agent_set_default_session(
         &self,

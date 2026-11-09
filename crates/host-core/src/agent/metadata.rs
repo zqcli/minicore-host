@@ -417,7 +417,7 @@ impl AgentOwner {
 }
 
 impl AgentOwner {
-    fn accept_update_candidate<T>(
+    fn accept_prepared_update_candidate<T>(
         self: &Arc<Self>,
         caller: &CallerContext,
         expected: u64,
@@ -438,10 +438,6 @@ impl AgentOwner {
                 "Agent configuration revision changed",
             ));
         }
-        self.resources_owned()?.validate(
-            &SessionConfig::from_agent(&config, &SessionOverrides::default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-        )?;
         let persistent_default = if self.store().is_some() {
             self.persisted_default(&original.default_session_id)?
         } else {
@@ -487,7 +483,12 @@ impl AgentOwner {
         config: AgentConfig,
         name: String,
     ) -> Result<AgentInfo, Fault> {
-        let (_, receiver) = self.accept_update_candidate(caller, expected, config, name, |_| ())?;
+        self.resources_owned()?.validate(
+            &SessionConfig::from_agent(&config, &SessionOverrides::default())
+                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
+        )?;
+        let (_, receiver) =
+            self.accept_prepared_update_candidate(caller, expected, config, name, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
@@ -495,7 +496,7 @@ impl AgentOwner {
             )
         })?
     }
-    pub(crate) fn update_control(
+    pub(crate) async fn update_control(
         self: &Arc<Self>,
         caller: &CallerContext,
         request: AgentUpdateRequest,
@@ -516,7 +517,28 @@ impl AgentOwner {
             .apply_patch(&request.changes.config)
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
         let name = request.changes.name.unwrap_or(original.name);
-        let (receipt, _) = self.accept_update_candidate(
+        let resources = self.resources_owned()?;
+        let candidate = SessionConfig::from_agent(&config, &SessionOverrides::default())
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
+            Fault::new(
+                FaultKind::AgentLifecycleUnavailable,
+                "configuration validation requires a live Tokio runtime",
+            )
+        })?;
+        // Pure preparation must not pin the caller's async poll. Dropping this
+        // wait leaves no accepted mutation; only the owner boundary below may
+        // publish the candidate or retain its original receipt.
+        runtime
+            .spawn_blocking(move || resources.validate(&candidate))
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "configuration validation task ended unexpectedly",
+                )
+            })??;
+        let (receipt, _) = self.accept_prepared_update_candidate(
             caller,
             request.expected_config_revision,
             config,

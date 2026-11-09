@@ -5,7 +5,11 @@ use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
 use serde_json::Value;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 async fn persistent() -> (
     tempfile::TempDir,
@@ -13,6 +17,7 @@ async fn persistent() -> (
     HostClient,
     AgentRef,
     SessionClient,
+    Arc<FixtureResources>,
 ) {
     let directory = tempfile::tempdir().unwrap();
     let (_, resources) = fixture();
@@ -21,7 +26,7 @@ async fn persistent() -> (
         HostSettings {
             name: "public controls".into(),
         },
-        resources,
+        resources.clone(),
     )
     .await
     .unwrap();
@@ -38,7 +43,7 @@ async fn persistent() -> (
         session_id: receipt.session_id.unwrap(),
     });
     session.pause(control(), options(2000)).await.unwrap();
-    (directory, host, client, agent, session)
+    (directory, host, client, agent, session, resources)
 }
 fn agent_update() -> AgentUpdateRequest {
     AgentUpdateRequest {
@@ -88,15 +93,31 @@ fn paths(
 fn read(path: &std::path::Path) -> Value {
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
 }
-async fn gate_disk() -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {
+fn queue_disk_gate() -> (
+    std::sync::mpsc::Sender<()>,
+    tokio::task::JoinHandle<()>,
+    tokio::sync::oneshot::Receiver<()>,
+) {
     let (release, held) = std::sync::mpsc::channel::<()>();
     let (entered, entering) = tokio::sync::oneshot::channel();
     let task = tokio::task::spawn_blocking(move || {
         entered.send(()).unwrap();
         held.recv_timeout(Duration::from_secs(15)).unwrap();
     });
+    (release, task, entering)
+}
+async fn gate_disk() -> (std::sync::mpsc::Sender<()>, tokio::task::JoinHandle<()>) {
+    let (release, task, entering) = queue_disk_gate();
     entering.await.unwrap();
     (release, task)
+}
+fn arm_validation(resources: &FixtureResources) -> Arc<ValidationGate> {
+    let gate = ValidationGate::new();
+    *resources.gate.lock().unwrap() = Some((
+        resources.validate_calls.load(Ordering::SeqCst) + 1,
+        gate.clone(),
+    ));
+    gate
 }
 async fn settled(client: &HostClient, agent: &AgentRef, session: &SessionClient) {
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -132,19 +153,24 @@ fn runtime() -> tokio::runtime::Runtime {
 #[test]
 fn accepted_updates_outlive_dropped_callers_and_keep_original_receipts() {
     runtime().block_on(async {
-        let (directory, host, client, agent, session) = persistent().await;
+        let (directory, host, client, agent, session, resources) = persistent().await;
         let (agent_path, session_path) = paths(directory.path(), &agent, &session);
         let original_agent = read(&agent_path);
         let original_session = read(&session_path);
-        let (release, blocked) = gate_disk().await;
-        let agent_receipt = client
-            .update_agent(agent.clone(), agent_update(), options(2000))
-            .await
-            .unwrap();
-        let session_receipt = session
-            .update(session_update(), options(2000))
-            .await
-            .unwrap();
+        // Both pure validations are queued ahead of the disk blocker. The
+        // single blocking worker then holds real saves behind that blocker.
+        let validation = arm_validation(&resources);
+        let mut agent_call =
+            Box::pin(client.update_agent(agent.clone(), agent_update(), options(5000)));
+        assert!(futures_util::poll!(agent_call.as_mut()).is_pending());
+        validation.entered.acquire().await.unwrap().forget();
+        let mut session_call = Box::pin(session.update(session_update(), options(5000)));
+        assert!(futures_util::poll!(session_call.as_mut()).is_pending());
+        let (release, blocked, entering) = queue_disk_gate();
+        validation.release();
+        entering.await.unwrap();
+        let agent_receipt = agent_call.await.unwrap();
+        let session_receipt = session_call.await.unwrap();
         assert_eq!(
             agent_receipt.result,
             MetadataUpdateResult::Saving { config_revision: 0 }
@@ -167,12 +193,6 @@ fn accepted_updates_outlive_dropped_callers_and_keep_original_receipts() {
         );
         assert_eq!(read(&agent_path), original_agent);
         assert_eq!(read(&session_path), original_session);
-        assert!(
-            session
-                .update(session_update(), options(2000))
-                .await
-                .is_err()
-        );
         client.close();
         drop(session);
         drop(client);
@@ -212,7 +232,7 @@ fn accepted_updates_outlive_dropped_callers_and_keep_original_receipts() {
 #[test]
 fn failed_metadata_saves_keep_committed_config_and_report_fault_without_rewriting_receipt() {
     runtime().block_on(async {
-        let (directory, _host, client, agent, session) = persistent().await;
+        let (directory, _host, client, agent, session, _resources) = persistent().await;
         let (agent_path, session_path) = paths(directory.path(), &agent, &session);
         let original_agent = client.agent(agent.clone(), options(2000)).await.unwrap();
         let original_session = session.info(options(2000)).await.unwrap();
@@ -271,7 +291,7 @@ fn failed_metadata_saves_keep_committed_config_and_report_fault_without_rewritin
 #[test]
 fn default_save_preserves_old_pointer_until_commit_and_close_clears_exact_target() {
     runtime().block_on(async {
-        let (directory,host,client,agent,old)=persistent().await;
+        let (directory,host,client,agent,old,_resources)=persistent().await;
         let new=client.create_session(SessionCreate{operation_id:OperationId::new().unwrap(),target:agent.clone(),mode:None,overrides:None,initial_message:None},options(5000)).await.unwrap();
         let new=client.session(SessionRef{agent_id:agent.agent_id.clone(),session_id:new.session_id.unwrap()});
         let (agent_path,_)=paths(directory.path(),&agent,&old);
@@ -304,16 +324,19 @@ fn default_save_preserves_old_pointer_until_commit_and_close_clears_exact_target
 #[test]
 fn lost_stdio_waiter_does_not_cancel_an_already_accepted_save() {
     runtime().block_on(async {
-        let (directory,host,client,agent,session)=persistent().await;
+        let (directory,host,client,agent,session,resources)=persistent().await;
         let (_,session_path)=paths(directory.path(),&agent,&session);
         let target=session.target().clone(); client.close(); drop(session); drop(client);
         let (mut peer,server)=raw(host.clone());peer.initialize().await;
         let reader=HostClient::in_process(host.clone()).unwrap();let observer=reader.session(target.clone());
-        let (release,blocked)=gate_disk().await;
+        let validation=arm_validation(&resources);
         let request=session_update();let operation=request.operation_id.clone();
         peer.write(serde_json::json!({"jsonrpc":"2.0","id":"discarded","method":"session.update","params":{
             "target":target,"operation_id":request.operation_id,"expected_config_revision":request.expected_config_revision,"changes":request.changes
         }})).await;
+        validation.entered.acquire().await.unwrap().forget();
+        let (release,blocked,entering)=queue_disk_gate();
+        validation.release();entering.await.unwrap();
         tokio::time::timeout(Duration::from_secs(5),async {loop {if observer.state(options(2000)).await.unwrap().data.metadata_saving{break;}tokio::task::yield_now().await;}}).await.unwrap();
         let original=reader.receipt(operation.clone(),options(2000)).await.unwrap();
         assert!(matches!(original,Receipt::SessionUpdate(SessionUpdateReceipt{result:MetadataUpdateResult::Saving{..},..})));

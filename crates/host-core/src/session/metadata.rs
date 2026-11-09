@@ -359,7 +359,7 @@ impl SessionController {
 }
 
 impl SessionController {
-    fn accept_update_candidate<T>(
+    fn accept_prepared_update_candidate<T>(
         self: &Arc<Self>,
         caller: &CallerContext,
         expected: u64,
@@ -379,7 +379,6 @@ impl SessionController {
         config
             .validate()
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.resources_owned()?.validate(&config)?;
         self.ensure_executor()?;
         let (sender, receiver) = oneshot::channel();
         let result = self.access.accept_execution(caller, || {
@@ -440,8 +439,9 @@ impl SessionController {
         config: SessionConfig,
         title: Option<String>,
     ) -> Result<SessionInfo, Fault> {
+        self.resources_owned()?.validate(&config)?;
         let (_, receiver) =
-            self.accept_update_candidate(caller, expected, config, title, |_| ())?;
+            self.accept_prepared_update_candidate(caller, expected, config, title, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::SessionInternalUnexpected,
@@ -449,7 +449,7 @@ impl SessionController {
             )
         })?
     }
-    pub(crate) fn update_control(
+    pub(crate) async fn update_control(
         self: &Arc<Self>,
         caller: &CallerContext,
         request: SessionUpdateRequest,
@@ -474,7 +474,20 @@ impl SessionController {
             NullablePatch::Set(title) => Some(title),
             NullablePatch::Clear => None,
         };
-        let (receipt, _) = self.accept_update_candidate(
+        self.ensure_executor()?;
+        let resources = self.resources_owned()?;
+        let candidate = config.clone();
+        self.executor()
+            .expect("checked runtime")
+            .spawn_blocking(move || resources.validate(&candidate))
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::SessionInternalUnexpected,
+                    "configuration validation task ended unexpectedly",
+                )
+            })??;
+        let (receipt, _) = self.accept_prepared_update_candidate(
             caller,
             request.expected_config_revision,
             config,
