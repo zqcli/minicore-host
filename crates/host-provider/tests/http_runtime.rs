@@ -1322,8 +1322,11 @@ async fn large_text_and_reasoning_deltas_reach_runtime_without_adapter_splitting
             _ => {}
         }
     }
-    assert_eq!(text_deltas, [text.clone()]);
-    assert_eq!(reasoning_deltas, [reasoning.clone()]);
+    assert_eq!(text_deltas.as_slice(), std::slice::from_ref(&text));
+    assert_eq!(
+        reasoning_deltas.as_slice(),
+        std::slice::from_ref(&reasoning)
+    );
 
     let report = finish(start(model, ToolSet::default())).await;
     assert_eq!(report.outcome, LoopOutcome::Completed);
