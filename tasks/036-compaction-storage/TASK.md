@@ -1,7 +1,8 @@
 # Persist cumulative compaction coverage
 
-Status: storage implementation and focused tests pass. Session manual/automatic
-ownership, cancellation and resource/routing integration remain separate work.
+Status: storage implementation, focused checks and the full workspace gate pass
+at the fixed checkpoint recorded below. Independent review and Session manual/
+automatic ownership, cancellation and resource/routing integration remain separate.
 No push was made.
 
 ## Fixed inputs and ownership
@@ -102,7 +103,41 @@ partials/finish/markers excluded from native counts, rejected-batch rollback of
 validation only, memory no-files, zero/full-before-sync/partial writes, original
 prefix changes and confirmation without duplicate marker append.
 
-Final fixed-commit checks and the workspace gate are recorded in the next update.
-The workspace gate requires the coordinator's core exhaustive arm. This task does
-not claim manual/automatic Session compaction, public routing, utility calls,
-Runtime cancellation races, lifecycle acceptance, live providers or TUI tests.
+## Fixed checkpoint and full gate
+
+- Storage implementation: `6d1d41cd64555d94e9a3ea8b1bfab5daf380a93b`
+  (`feat(storage): persist cumulative compaction coverage`).
+- Coordinator's sole core exhaustive arm:
+  `2847547aabe000c3f58351d1f9fa8a7ce00c9fe2`, cherry-picked locally as
+  `32623acce16d949eb001823c0ceab1bea01ed7ce`. No other core source was changed.
+- The complete gate ran at `32623acce16d949eb001823c0ceab1bea01ed7ce`:
+
+```sh
+./scripts/check.sh
+cargo test --workspace --all-targets --locked -- --list
+cargo metadata --locked --offline --format-version 1
+sha256sum SPEC.md
+```
+
+All checks passed: whitespace, formatting, strict all-target workspace Clippy,
+**584 unique target/test cases**, **3 workspace doctests**, and strict workspace
+rustdoc. Storage contributes 76 cases, including the 19 new compaction tests.
+The known task024 subprocess-lock flake did not occur; the separate test-helper
+fix was not included in this checkpoint. No production lock was weakened.
+
+Metadata confirms exactly one Runtime `0.10.0` at
+`69faf9196991524b5549499d6208a1eaf567bf56`, without a patch. SPEC SHA-256 remains
+`f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+No manifests or lockfile changed. The final target measured about 1.5 GiB, and
+8.5 GiB free was reported at gate completion. This task deleted no other target.
+
+Reproducibility logs are in the sibling
+`minicore-host-compaction-storage-validation` directory: `focused-tests.log`,
+`focused-clippy.log`, `storage-test-list.txt`, `storage-doc-format.log`,
+`full-gate.log`, `workspace-test-list.txt` and `metadata.json`. The enumeration
+counts test cases once by target and name, never nested subprocess output.
+
+This gate does not establish manual/automatic Session compaction, public routing,
+utility generation through Session, Runtime cancellation races or compaction
+lifecycle acceptance. Those remain the Session owner's integration work. Live
+providers, credentials and TUI were not exercised or claimed by this task.
