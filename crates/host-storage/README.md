@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Storage schema **1**, implementing the persistence boundaries of SPEC v4.93.
+Object schema **1** and history schema **2**, implementing the persistence boundaries of SPEC v4.93.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 ## Supported platform and root ownership
@@ -103,7 +103,7 @@ Memory Agent plus persistent Session is rejected; modes never silently change.
 
 Every record has exactly these outer fields:
 
-- `schema_version`: 1.
+- `schema_version`: 2 for newly written records. Exact original version-1 branches remain readable; the compaction branch requires version 2. Unsupported versions fail without rewriting.
 - `session_id`: this Session's stable ID.
 - `position`: zero-based contiguous Session-local position, not a public cursor.
 - `entry`: `{kind,data}` with one of the branches below.
@@ -115,6 +115,7 @@ Every record has exactly these outer fields:
 | `partial` | `turn_id,loop_id,response_index,partial` |
 | `turn_finished` | `turn_id,outcome,reason` |
 | `summary` | `summary` |
+| `compaction` | `source_position,covered_items,summary` (version 2 only) |
 
 Input `user` is the exact Runtime `UserHistory`; text exists only in its native
 `input`, alongside the message's consumed provenance. Queued-but-unconsumed
@@ -125,8 +126,14 @@ zero-based logical response within the Host Turn, across internal Loops.
 `partial` is authoritative Runtime `ModelPartial`, not an assistant response and
 not a projection reconstructed from observation events. `loop_id` preserves its
 internal association. Finish facts preserve actual outcome independently of save
-confirmation. A standalone native summary does not imply prefix replacement;
-actual compaction replacement requires an explicit owner-level commit contract.
+confirmation. A standalone native summary does not imply prefix replacement.
+An explicit compaction marker records its actual log position and advancing
+cumulative coverage in original native items. Its cut must preserve tool-exchange
+associations. Original JSONL and raw native history remain append-only; the latest
+valid marker supplies only the model-context projection of summary plus uncovered
+suffix. Partial, finish and compaction records do not count as native items.
+Session ownership installs a generated projection only after its required save
+confirmation; the storage helper alone does not implement manual/automatic work.
 
 JSON object key order and insignificant whitespace are not significant. Optional
 fields use the native serializers' representations: a field omitted for None
