@@ -1,10 +1,10 @@
 # MiniCore Host
 
-## Current executable composition
+## Current executable checkpoint
 
-Local staging code `78d1fe24d46ce355409e0899dd7b96e957a558f8` on `stage/executable-next` composes the separately reviewed production ordinary-tool/output/edit binding, actual Host process and canonical workspace routes over the execution checkpoint below. The original 26 source commits remain granular and mapped in [task 048](tasks/048-executable-integration/TASK.md) and [the source map](docs/executable-source-map.json). Both workspace-source and tool-completion P1 fixes are included. All-target compilation and 610 unique cases excluding the two known-blocked packages passed at `78d1fe2`. Seven independently reviewed canonical-control commits are subsequently integrated through `f98af86`, giving 33 mapped source commits and 49 shared routes; their combined gate remains pending.
+Fixed local code `70c17e7226bd90c7bb1e146ed141081f567e9d23` on `stage/executable-next` passes the complete gate: **761 unique tests and 4 doctests**, strict Clippy/rustdoc, formatting and committed whitespace. It combines production read/write/edit/bash, actual Host process, six workspace queries, the remaining canonical controls and context, plus independently reviewed diagnostic/storage lease corrections. Real binary tool acceptance also passed independent review. There are **50 actual shared routes**, not 52 completed contracts. [The fixed executable handoff](docs/executable-review-handoff.md), [task 048](tasks/048-executable-integration/TASK.md), [48-topic-commit source map](docs/executable-source-map.json) and [verification manifest](docs/executable-verification.json) preserve scope and exact evidence.
 
-**Publication is held:** diagnostics and storage have reproducible close/reopen lock failures in later aggregate tests. Dedicated corrections are being developed without weakening ownership or replacing failures with retries. Real ordinary-tool acceptance through the Host executable, final combined gates and review remain required. This local composition is not a remote handoff and does not change the current published dev `a84e36f`.
+This code is **local, not yet published or release-ready**. The last verified remote `dev` remains `a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f`. Follow-up contract probes found missing bound Turn configuration and missing/overly raw query projections; they are tracked for correction rather than hidden by the green aggregate. Cold history.read/load coordination and the two deletion methods are separate fixes under review. Business diagnostics/health and ordinary input source/reply projection remain active work. The original lease failures and their deterministic fixes are preserved in tasks 047 and 049; they no longer block this fixed composition.
 
 ## Earlier execution integration checkpoint
 
@@ -31,18 +31,18 @@ The earlier foundation is available on `dev` at [82583b31ac9091164da5f6dcfee6bb2
 - Linux durable object/native-history storage, inode ownership, exact accepted versus persisted ranges, corruption rejection and original-save continuation. Memory objects create no files.
 - Production OpenAI-compatible HTTP/SSE model adapter, conservative retry classification and Retry-After, authoritative partial data, actual model constraints and safe credential handling.
 - Host/Agent/Session owners, independent input queues, real Runtime, same-Turn continuation, frozen execution binding, canonical controls, accepted task lifetime, save barriers, monotonic shutdown and memory reclamation.
-- Scoped observation with fixed ranges, UTF-8 catch-up, cold full history including authoritative partial records, real tool invocation reads and retry state. Typed clients, real stdio and authenticated WSS now share 37 actual routes, including subscriptions, standard interaction answers, canonical reload and compaction controls. Original interaction settlement follows actual answer, cancel or deadline facts. This is an embedding library, not yet a production process.
+- Scoped observation with fixed ranges, UTF-8 catch-up, cold full history including authoritative partial records, real tool invocation reads and retry state. Typed clients, real stdio and authenticated WSS now share 50 actual routes, including subscriptions, standard interaction answers, canonical reload, compaction, context and workspace reads. Original interaction settlement follows actual answer, cancel or deadline facts. The actual process is assembled and covered by loopback provider and binary tool tests; query-shape corrections remain open.
 - Standard six-action `agent` tool with owner-bound capabilities, early registered independent delegation results, shared input ranges, notifications through the same queues, wait and scope-close cleanup. Metadata updates support actual Agent name/Session title with durable publication.
-- Real configured workspace file/search/Git backends and edit snapshots. Canonical workspace routes and production ordinary-tool binding remain separate; the independently validated read/write/edit/bash module is included but not advertised as production-bound.
+- Real configured workspace file/search/Git backends, six canonical query routes and Session-owned edit snapshots. Production read/write/edit/bash share the actual frozen workspace and original per-call output/cleanup leases; no no-op sink is enabled.
 - Production resource assembly from a single HostConfig: actual provider clients, static tool declarations, workspace binding, frozen Role/framework/context and versioned Host-owned reload publication. Host configuration/model/tool queries share canonical typed/stdio/WSS routes; canonical reload uses owned preparation, immutable receipts and operator-checked typed/stdio/WSS routes. Credentials are private inputs, not returned configuration.
 - Per-request legacy tool-history projection is wired into the production BoundPrompt. Complete exchanges retain their content and associations; absent old results become historical facts only in the request. Native history/JSONL are not rewritten and old tools are not re-executed.
 
 - Manual and automatic compaction use the real utility model, frozen resource binding, append-only coverage records and owner-controlled save/cancel barriers. Estimates remain estimates; reported provider usage is not invented. Same original control receipt facts are retained.
-- Shared structured diagnostics provides sanitized errors, stderr/file sinks and bounded flush observation. The actual file writer retains its own OS lease until it exits, even if waiting times out. Production application installation and full business-event instrumentation are not part of this checkpoint.
+- Shared structured diagnostics provides sanitized errors, stderr/file sinks and bounded flush observation. The actual file writer retains its own OS lease until it exits, even if waiting times out. Production application installation is included; full business-event instrumentation and Host health reporting remain separate active work.
 
 ## Validation and review
 
-At exactly `76a7bfbe7f70d7f707d48cc38190829d14c137f2`, `./scripts/check.sh` passes committed/worktree whitespace, rustfmt, strict all-target Clippy, **650 unique tests**, **4 doctests** and strict rustdoc. The independent `--list` inventory and offline Cargo metadata confirm the case count and sole published Runtime pin. Exact commands and per-component independent review findings are in the execution handoff. They are scoped implementation reviews, not the requested final external review.
+At exactly `70c17e7226bd90c7bb1e146ed141081f567e9d23`, `./scripts/check.sh` passes committed/worktree whitespace, rustfmt, strict all-target Clippy, **761 unique tests**, **4 doctests** and strict rustdoc. `cargo test --workspace --all-targets --locked -- --list` verifies 761 unique target/test-name pairs across 84 nonempty targets. Locked Cargo metadata confirms the sole published Runtime pin. [The executable handoff](docs/executable-review-handoff.md) records exact commands, hashes, independent reviews and known query-contract findings. The older 650/4 checkpoint remains preserved in its own handoff; neither count substitutes for the requested final external review.
 
 ### Earlier owner/resource validation
 
@@ -62,11 +62,11 @@ Further real-Runtime probes found a terminal-claim window: a returned failure wa
 
 ## Remaining first-version work
 
-1. Complete metadata/input/start/default command routes, persistent deletion, context queries and the remaining canonical contracts. A route count does not mean each full SPEC result schema is complete.
-2. Integrate production read/write/edit/bash binding, actual per-call output completion and Session edit retention, shared Workspace reuse and canonical workspace queries after their fixed-source reviews. No no-op sink or reconstructed output may become the production path.
-3. Assemble the actual Host executable, configuration startup, TLS and diagnostics installation, then verify ordinary tools through the real process. Full business diagnostics and Host health reporting remain unfinished.
-4. Expose full model input source/association context. Stored message provenance is retained, but Runtime UserHistory alone does not expose all of it to the production prompt.
-5. Finish process-level acceptance, authorized live-provider checks, performance/resource measurements and the requested external review. TUI remains unchanged this round.
+1. Complete and independently review persistent deletion, the cold history.read/load correction, and the confirmed public-query configuration/envelope/projection gaps. A route count alone is not contract acceptance.
+2. Finish actual business diagnostics and Host health reporting without coupling logging failure to business outcomes.
+3. Expose ordinary input source and reply association in model and compaction requests from actual accepted metadata. Standard independent completion notifications already carry their required task/source/result context and must not be rewritten unnecessarily.
+4. Complete the current 52-method contract audit, combined fixed-source gates, process-level acceptance, authorized live-provider checks and measured performance/resource evidence. No live-provider or capacity claim is made from fixtures/test counts.
+5. Publish only the authorized, explicitly identified Host dev checkpoint with preserved history, source mapping and exact remote CI, then obtain the requested external review. TUI remains unchanged this round.
 
 ## Scope constraints
 
@@ -74,9 +74,11 @@ Necessary save failures cannot become successful stopped shutdown. Repeated shut
 
 Development stays on isolated topics and integrates into `dev`. Publication must preserve existing remote history and use the owner's current explicit authorization; no force update or main merge occurs. Independent review and required checks remain prerequisites for main. Workers were requested with `gpt-6-astra` and `max`; no separate runtime configuration attestation is available.
 
-minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. The standalone ordinary-tool module and its process-group/shared-binding fixes have passed scoped independent review and are included here. Production registry, output and edit-owner integration remains separately staged.
+minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. The standalone ordinary-tool module and its process-group/shared-binding fixes have passed scoped independent review and are included here. Production registry, output and edit-owner integration is now included in the fixed executable checkpoint above.
 
-## Tool cleanup ownership topic
+## Historical tool cleanup ownership topic
+
+The following records the earlier task progression; its then-pending production pieces are included in the current executable checkpoint.
 
 [Task 033](tasks/033-turn-tool-cleanup/TASK.md) adds a narrow prepared-to-active Turn cleanup registration and actual-worker finalization barrier on top of `04ba5bc`. Real Host/Runtime and child-process tests distinguish Runtime future cancellation from actual child wait, including force shutdown, memory retirement, same-Turn continuation and blocked history saves. Independent cleanup diagnostics do not overwrite business outcomes. Ordinary tool production wiring, durable edit recording and output lease integration are still pending; this topic is not a complete first-version claim.
 

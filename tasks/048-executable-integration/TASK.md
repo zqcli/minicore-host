@@ -120,3 +120,16 @@ integration fix passes `false`; it does not change production behavior or weaken
 an assertion. The failed log is
 `/workspace/shared/minicore-host-validation/executable-context-process-f7ee4a1-full.log`.
 A fresh complete gate will be run after this explicit fixture correction.
+
+## Fixed combined gate
+
+At `70c17e7226bd90c7bb1e146ed141081f567e9d23`, the complete `./scripts/check.sh` passed
+with **761 unique cases and 4 doctests**. The locked `--list` inventory confirms
+761 distinct target/name pairs over 84 nonempty targets. Metadata confirms only
+published Runtime 69faf919 at 0.10.0; SPEC and lock remain unchanged. Exact log and
+metadata hashes are in `docs/executable-verification.json`; current scope and open
+query-contract findings are in `docs/executable-review-handoff.md`. The new green
+aggregate does not close the independently discovered query projection gaps or
+claim deletion, cold-read corrections, provenance or business diagnostics are
+integrated. Earlier failed runs and checkpoints are preserved. No remote publish
+or main merge has occurred for this stage.

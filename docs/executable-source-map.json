@@ -136,8 +136,67 @@
     {
       "source": "cef0c189e7972d5607d61e0303d8ee7e8ed1c0ff",
       "integrated": "f98af861d1bf618c99b8c28688ee1fb5122dacd5"
+    },
+    {
+      "source": "fd23ff828c35a38f047568c80df9fc8c103cedb0",
+      "integrated": "110441774477ddc597d15dd911d5d5ace12cc452"
+    },
+    {
+      "source": "8fc7db845c642507941c339eb67c83ae6f35a7a6",
+      "integrated": "08478dd067ce357fddc780da3375966690f6aa98"
+    },
+    {
+      "source": "5773894798b51398c6477173388bf18e51567e47",
+      "integrated": "252e41c1461bf4c17a57a0107abf2f0e684d7094"
+    },
+    {
+      "source": "9fc1fb2ba625c94d91d18ae7f85fe92f896363d3",
+      "integrated": "63c4c3069fef84cdc9839164a2922bf813cc87e2"
+    },
+    {
+      "source": "9dd9f7c251506ceeeb1cabebde56a2f58682ec67",
+      "integrated": "4c7b27a1a1e5060259043279f21b0e0198c19c97"
+    },
+    {
+      "source": "5e6c0cd234e148129078e4e5d4d1cf134bf14489",
+      "integrated": "ab80412910489d6d9f0bc9dc77c8f6ab047a4d97"
+    },
+    {
+      "source": "a412d7fbac03c4e810d38ae7b6f34a8be279b0bc",
+      "integrated": "600a4bdd99137c6d59983aabccc61f59237754f5"
+    },
+    {
+      "source": "96b98e8a502601e01b3981be0c0fd9e6ba2b39d7",
+      "integrated": "27441488ae61915d92c892b5ac9a7a0e28a76023"
+    },
+    {
+      "source": "01e5946d8bd5655d717e0a1a81110089fe2875f8",
+      "integrated": "031fbf9b654606d1a797890dc86a9c02e851da55"
+    },
+    {
+      "source": "2d54ee249c8e68bf8533a2e89f1b548d6e8540a3",
+      "integrated": "e0d2e61864a725424ac7e158f9db7b7d25cd47c6"
+    },
+    {
+      "source": "8257f3a89099dcab9454f1799fe221b660ec6352",
+      "integrated": "1c84db2fada8255955243ce191a1db12c1c259f6"
+    },
+    {
+      "source": "955f07e051a576fdf6f0711bb6193e8a86b58507",
+      "integrated": "2e88121bb242f3970581382ac8b3d91dc483e6c7",
+      "adjustment": "Adjacent import conflict only: retained both SessionContextSnapshot and WorkspaceSnapshot; handler logic unchanged."
+    },
+    {
+      "source": "203dd5842550e584dfa69030eda34f5386037af1",
+      "integrated": "2c78839c004b69f323dcaf74f105c9a31ad6c6e5"
+    },
+    {
+      "source": "f74d793bb46f0e5ac274c0c102cd3d41d055985d",
+      "integrated": "418a15eda321a68391a6d6cbff23cb7b76216d72"
+    },
+    {
+      "source": "be8633f430f37f56182ce09074115f5c46fffedf",
+      "integrated": "f7ee4a1f8650ab2fb0aced250ea43e89932b1b93"
     }
-  ],
-  "head": "f98af861d1bf618c99b8c28688ee1fb5122dacd5",
-  "status": "Local composition; known storage and diagnostics lease corrections remain separate. Not published."
+  ]
 }

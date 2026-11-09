@@ -1,5 +1,9 @@
 # Public method implementation map
 
+Current executable source `70c17e7226bd90c7bb1e146ed141081f567e9d23` has 50 real shared routes; only agent.delete/session.delete are not yet integrated. The table below is explicitly the preserved older 76a7bfb checkpoint, not a current 37-route claim. The current contract audit has found bound-Turn configuration and query envelope/native-field projection gaps; see [the executable handoff](executable-review-handoff.md). A complete current matrix will accompany their fixed-source corrections.
+
+## Historical 76a7bfb method map
+
 This checkpoint describes local Host code/test checkpoint `76a7bfbe7f70d7f707d48cc38190829d14c137f2` (published Runtime `69faf9196991524b5549499d6208a1eaf567bf56`, version `0.10.0`), not the full v4.93 release. The 52 names come from `host-protocol::METHOD_CATALOG`; a DTO or catalog entry is not an implemented handler.
 
 `Partial` means a real in-process owner primitive or reusable backend exists, with the stated limits. It does **not** claim a complete canonical typed/RPC method. Thirty-seven actual primitives now share typed/stdio/WSS routing, shown separately below; production process assembly is not yet integrated. Routing alone does not complete a primitive's remaining SPEC contract. `Not implemented` means there is no business implementation to advertise. There are no fake-success handlers for staged methods.
