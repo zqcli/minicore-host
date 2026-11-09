@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 description = "OpenAI-compatible HTTP/SSE Model adapter for MiniCore Host"
 
 [dependencies]
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "59ee8ce668f72a21d408e6247d3ce075b260db14", version = "=0.10.0" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
 bytes = "=1.12.1"
 futures-util = "=0.3.34"
 httpdate = "=1.0.3"
