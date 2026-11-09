@@ -1,7 +1,7 @@
 # Task 017: Authenticated WSS transport
 
-Status: WSS authentication/library stage validated; follow-up review fixes and
-observation integration remain in progress. Implements the library access/connection slice of SPEC §§2,
+Status: Completed for the authenticated WSS library and assigned transport
+review fixes. Scoped observation integration remains a separate task. Implements the library access/connection slice of SPEC §§2,
 10–11, not Host process/config assembly or production CLI/TUI completion.
 
 ## Scope and ownership
@@ -24,6 +24,9 @@ observation integration remain in progress. Implements the library access/connec
 - `22bd2da` preserves unknown Fault leaves and registers the observation worker's seven leaves.
 - `48d06a0` mechanically migrates registered-kind callers to explicit `Some` checks.
 - `ab4a56b` boxes optional detail payloads to keep ordinary Fault results compact.
+- `c3f7c3c` covers forward-compatible faults across shared RPC results/errors.
+- `895b530` isolates the two synchronous creation-validation callbacks and adds
+  current-thread/multi-thread deadline regressions.
 
 ## Validation
 
@@ -102,3 +105,51 @@ current-thread preacceptance timeout, and current-thread accepted child creation
 All three fail against `ab4a56b` before the fix and pass with the narrow change;
 independent fixture fallback release bounds the negative run. Focused command:
 `cargo test -p minicore-host-transport --test typed_validation_budget --locked`.
+
+`ba608ea` updates only the existing accepted-creation-I/O shutdown fixture: first
+poll creation to queue its validation, then occupy the single blocking worker
+before owner storage I/O can run. This preserves the original accepted-work,
+force shutdown, no-model-call and data-root-release assertions. The earlier
+full-suite attempt exposed the fixture's old assumption that preacceptance
+validation did not share the blocking executor; it was not reported as a pass.
+
+## Final verification of this branch
+
+With Runtime still pinned to `18a6ac9b82d003330cd870275efca793cdcc9a96` (0.9.2):
+
+- `cargo fmt --all --check`: passed.
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --locked`: passed.
+- `cargo test --workspace --all-targets --locked -- --list`: **322 unique cases**,
+  excluding duplicated subprocess probe output. Temporary reviewer probe files
+  are in isolated validation worktrees and are not included in this count.
+- `cargo test --workspace --doc --locked`: **3 doctests passed**.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked`: passed.
+- Original independent reviewer function
+  `in_process_budget_returns_before_synchronous_owner_preparation_finishes`,
+  copied without changing its body: failed at `ab4a56b`, passed at `895b530`.
+  The three committed validation-budget regressions likewise failed before and
+  passed after the fix.
+
+Execution used `RUSTUP_HOME=/workspace/shared/rustup`,
+`CARGO_HOME=/workspace/shared/cargo`,
+`TMPDIR=/workspace/shared/minicore-host-tmp`, and
+`CARGO_TARGET_DIR=/workspace/shared/minicore-host-wss-target`.
+Local logs are `/tmp/wss-review-fixes-{tests,doctests,docs,clippy,list}.log`,
+`/tmp/typed-validation-red.log`, and
+`/tmp/original-deadline-probe-{red,green}.log`.
+
+## Integration handoff and limits
+
+The separate bridge commits `1a87f53` and `0eeb57b` add only connection-scoped
+observation cleanup/identity and a control snapshot helper. They require the
+observation owner's module and are intentionally not on this independently
+validated WSS branch. Parent integration must test them with that module.
+
+No `events.subscribe`/`events.unsubscribe` RPC routes or wire notifications are
+claimed by this increment: preauthentication event attempts are denied, and
+network revocation cleanup is ready for the scoped observation integration.
+Host process/config loading, actual `host.reload`, CLI/TUI validation and live
+provider checks remain out of scope. Runtime 0.10 adoption and its >16 MiB business
+text integration are owned by the parent migration; no Runtime pin or permanent
+path override was changed here. No remote was pushed and no main branch merged.
