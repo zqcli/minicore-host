@@ -90,7 +90,10 @@ validated ID format. `message.send`, `agent.create`, `session.create` and
 replace `MessageId` or `OperationId`. `result` contains the whole actual receipt,
 including accepted/start-error and partial-create facts, without an extra local
 `Result` wrapper. A business rejection uses JSON-RPC `-32000`, with the complete
-registered Fault in `error.data`. Unknown methods use `-32601`, malformed requests
+Fault in `error.data`. Registered leaves keep strict type/code/details checks;
+newer unknown leaves retain their original type, code, message and opaque details
+inside errors, receipts and queries. `Fault::kind()` is `None` for those leaves,
+never a guessed known class. Unknown methods use `-32601`, malformed requests
 `-32600`, malformed JSON `-32700`, and invalid parameters `-32602`. Canonical
 methods without an adapter return `HOST_METHOD_UNAVAILABLE` (1401). Missing or
 ambiguous retained receipts instead retain 1202/1203. Notifications are ignored

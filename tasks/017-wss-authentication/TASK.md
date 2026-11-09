@@ -19,6 +19,11 @@ observation integration remain in progress. Implements the library access/connec
 
 - `795b233` reserves the Host network module and releases shared `host.rs`.
 - `37e40c2` pins TLS/WebSocket/test-certificate dependencies and isolates lock changes.
+- `587f239` implements Host-owned authentication and atomic key publication.
+- `1d00fe7` implements shared framed RPC plus actual WSS client/server and loopback tests.
+- `22bd2da` preserves unknown Fault leaves and registers the observation worker's seven leaves.
+- `48d06a0` mechanically migrates registered-kind callers to explicit `Some` checks.
+- `ab4a56b` boxes optional detail payloads to keep ordinary Fault results compact.
 
 ## Validation
 
@@ -77,3 +82,10 @@ The owner approved a first-version API correction: `Fault::kind()` returns
 retain unknown wire facts. Registered mappings and detail schemas stay strict.
 The API change and required mechanical callers are separate adjacent commits;
 whole-workspace checks require both. Three new protocol regressions pass.
+
+Unknown-fault regressions now cover protocol round trips, strict known mapping
+rejection, stdio top-level errors with unrelated concurrent queries, accepted
+message/start-error receipts, real partial Agent creation, and WSS error/result
+frames. Focused protocol/transport tests and whole-workspace clippy with warnings
+denied passed after the compatibility change. No transport-specific business
+error fallback or duplicate fault registry was introduced.

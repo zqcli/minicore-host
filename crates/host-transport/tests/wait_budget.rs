@@ -177,3 +177,131 @@ async fn malformed_response_and_disconnect_keep_actual_error_provenance() {
         Err(CallError::Connection { .. })
     ));
 }
+
+fn unknown_fault() -> Value {
+    json!({"type":"HOST_FUTURE_FIXTURE_LEAF","code":1499,"message":"future fixture failure","details":{"new_field":[1,"retained"]}})
+}
+
+#[tokio::test]
+async fn unrecognized_business_fault_preserves_facts_without_failing_another_call() {
+    let (host, _) = fixture();
+    let handle = host.connect().unwrap();
+    let (client, mut peer) = delayed_peer(handle.initial_info().clone()).await;
+    let failing = {
+        let client = client.clone();
+        tokio::spawn(async move { client.info(options(1_000)).await })
+    };
+    let failed_request = peer.read().await;
+    let other = {
+        let client = client.clone();
+        tokio::spawn(async move { client.info(options(1_000)).await })
+    };
+    let other_request = peer.read().await;
+    peer.write(json!({"jsonrpc":"2.0","id":failed_request["id"],"error":{"code":-32000,"message":"Business operation failed","data":unknown_fault()}})).await;
+    peer.write(json!({"jsonrpc":"2.0","id":other_request["id"],"result":host.info(&handle.caller()).unwrap()})).await;
+    let CallError::Business(fault) = failing.await.unwrap().unwrap_err() else {
+        panic!("business provenance was lost");
+    };
+    assert_eq!(fault.kind(), None);
+    assert_eq!(value(fault), unknown_fault());
+    assert!(other.await.unwrap().is_ok());
+}
+
+#[tokio::test]
+async fn unrecognized_start_error_does_not_discard_the_real_accepted_receipt() {
+    let (host, _) = fixture();
+    let handle = host.connect().unwrap();
+    let created = host
+        .create_agent_async(&handle.caller(), create_request())
+        .await
+        .unwrap();
+    let target = SessionRef {
+        agent_id: created.agent_id.unwrap(),
+        session_id: created.session_id.unwrap(),
+    };
+    host.session_pause(&handle.caller(), &target, control())
+        .unwrap();
+    let (client, mut peer) = delayed_peer(handle.initial_info().clone()).await;
+    let calling = {
+        let session = client.session(target.clone());
+        tokio::spawn(async move {
+            session
+                .send(
+                    input("real accepted input, future wire fault"),
+                    options(1_000),
+                )
+                .await
+        })
+    };
+    let request = peer.read().await;
+    let accepted = host
+        .send(
+            &handle.caller(),
+            serde_json::from_value(request["params"].clone()).unwrap(),
+        )
+        .unwrap();
+    let mut wire = value(accepted.clone());
+    // This version-compatibility fixture changes only the returned error leaf;
+    // delivery itself was accepted by the real Host, not fabricated by a peer.
+    wire["result"]["start_error"] = unknown_fault();
+    peer.write(json!({"jsonrpc":"2.0","id":request["id"],"result":wire}))
+        .await;
+    let received = calling.await.unwrap().unwrap();
+    assert_eq!(received.message_id, accepted.message_id);
+    assert_eq!(received.result.delivery, Delivery::Accepted);
+    assert_eq!(value(received.result.start_error.unwrap()), unknown_fault());
+    assert_eq!(
+        host.session_state(&handle.caller(), &target)
+            .unwrap()
+            .data
+            .next_turn
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn unknown_partial_create_fault_retains_committed_agent_and_failed_session() {
+    let (host, _) = fixture();
+    let handle = host.connect().unwrap();
+    let (client, mut peer) = delayed_peer(handle.initial_info().clone()).await;
+    let mut request = create_request();
+    let mut overrides = SessionOverrides::default();
+    overrides.0.model = Some("missing/model".parse().unwrap());
+    request.default_session = Some(SessionOptions {
+        mode: None,
+        overrides: Some(overrides),
+    });
+    let calling = {
+        let client = client.clone();
+        tokio::spawn(async move { client.create_agent(request, options(1_000)).await })
+    };
+    let request = peer.read().await;
+    let partial = host
+        .create_agent_async(
+            &handle.caller(),
+            serde_json::from_value(request["params"].clone()).unwrap(),
+        )
+        .await
+        .unwrap();
+    let mut wire = value(partial.clone());
+    wire["result"]["steps"]["session"]["error"] = unknown_fault();
+    peer.write(json!({"jsonrpc":"2.0","id":request["id"],"result":wire}))
+        .await;
+    let received = calling.await.unwrap().unwrap();
+    assert_eq!(received.agent_id, partial.agent_id);
+    assert!(received.agent_id.is_some());
+    assert!(received.session_id.is_none());
+    assert_eq!(received.result.steps.agent, CreateStep::Succeeded);
+    let CreateStep::Failed { error } = received.result.steps.session else {
+        panic!("partial failure was lost");
+    };
+    assert_eq!(value(error), unknown_fault());
+    assert_eq!(
+        value(
+            host.receipt_get(&handle.caller(), &partial.operation_id)
+                .unwrap()
+        ),
+        value(partial)
+    );
+}

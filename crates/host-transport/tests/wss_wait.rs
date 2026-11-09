@@ -264,3 +264,68 @@ async fn long_turn_wait_and_waiter_cancellation_leave_real_runtime_and_connectio
     );
     assert_eq!(client.info(options(500)).await.unwrap().control.revision, 1);
 }
+
+#[tokio::test]
+async fn wss_preserves_unrecognized_faults_in_errors_and_accepted_results() {
+    let (host, _) = fixture();
+    let (client, mut peer) = delayed_peer(host.clone()).await;
+    let unknown = json!({"type":"SESSION_FUTURE_WSS_FIXTURE","code":3599,"message":"retain actual receipt","details":{"future":true}});
+    let failing = {
+        let client = client.clone();
+        tokio::spawn(async move { client.info(options(1_000)).await })
+    };
+    let failed_request = peer.read().await;
+    let other = {
+        let client = client.clone();
+        tokio::spawn(async move { client.info(options(1_000)).await })
+    };
+    let other_request = peer.read().await;
+    peer.response(json!({"jsonrpc":"2.0","id":failed_request["id"],"error":{"code":-32000,"message":"Business operation failed","data":unknown}})).await;
+    peer.response(json!({"jsonrpc":"2.0","id":other_request["id"],"result":host.info(&peer.handle.caller()).unwrap()})).await;
+    let CallError::Business(fault) = failing.await.unwrap().unwrap_err() else {
+        panic!("wrong error provenance");
+    };
+    assert_eq!(value(fault), unknown);
+    assert!(other.await.unwrap().is_ok());
+    let created = host
+        .create_agent_async(&peer.handle.caller(), create_request())
+        .await
+        .unwrap();
+    let target = SessionRef {
+        agent_id: created.agent_id.unwrap(),
+        session_id: created.session_id.unwrap(),
+    };
+    host.session_pause(&peer.handle.caller(), &target, control())
+        .unwrap();
+    let sending = {
+        let session = client.session(target.clone());
+        tokio::spawn(async move {
+            session
+                .send(input("accepted WSS input"), options(1_000))
+                .await
+        })
+    };
+    let request = peer.read().await;
+    let accepted = host
+        .send(
+            &peer.handle.caller(),
+            serde_json::from_value(request["params"].clone()).unwrap(),
+        )
+        .unwrap();
+    let mut receipt = value(accepted.clone());
+    receipt["result"]["start_error"] = unknown.clone();
+    peer.response(json!({"jsonrpc":"2.0","id":request["id"],"result":receipt}))
+        .await;
+    let received = sending.await.unwrap().unwrap();
+    assert_eq!(received.message_id, accepted.message_id);
+    assert_eq!(received.result.delivery, Delivery::Accepted);
+    assert_eq!(value(received.result.start_error.unwrap()), unknown);
+    assert_eq!(
+        host.session_state(&peer.handle.caller(), &target)
+            .unwrap()
+            .data
+            .next_turn
+            .len(),
+        1
+    );
+}
