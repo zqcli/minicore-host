@@ -582,3 +582,351 @@ fn root_and_object_initialization_failure_release_lock() {
     assert!(new_root.load_host::<HostConfig>().is_err());
     assert_eq!(fs::read(root_path.join("host.json")).unwrap(), b"broken");
 }
+
+fn tool_response(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
+    use minicore_runtime::{ToolCallId, model::ToolCall};
+    let mut entry = response(turn_id, loop_id);
+    if let HistoryEntry::Runtime {
+        item: HistoryItem::Assistant(item),
+        ..
+    } = &mut entry
+    {
+        item.content = vec![AssistantPart::ToolCall(
+            ToolCall::new(
+                ToolCallId::new("native-call").unwrap(),
+                "read_file".parse().unwrap(),
+                serde_json::json!({"path":"file.txt"}),
+                0,
+            )
+            .unwrap(),
+        )];
+        item.finish_reason = ModelFinishReason::ToolCalls;
+    }
+    entry
+}
+fn tool_result(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
+    use minicore_runtime::{
+        ToolCallId,
+        history::ToolResultHistory,
+        tools::{ToolOutput, ToolResultOutcome},
+    };
+    HistoryEntry::Runtime {
+        turn_id,
+        response_index: 0,
+        item: HistoryItem::ToolResult(ToolResultHistory {
+            loop_id,
+            request_index: 0,
+            call_id: ToolCallId::new("native-call").unwrap(),
+            tool_name: "read_file".parse().unwrap(),
+            outcome: ToolResultOutcome::Success,
+            output: ToolOutput::new("actual file result").unwrap(),
+        }),
+    }
+}
+#[test]
+fn native_tool_history_and_unclosed_old_calls_are_valid_without_recovery() {
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let entries = vec![
+        input(turn.clone(), loop_id),
+        tool_response(turn.clone(), loop_id),
+    ];
+    let bytes = record_bytes(&f.session, entries.clone());
+    fs::write(f.history_path(), &bytes).unwrap();
+    let loaded = f.session.read_history().unwrap();
+    assert_eq!(loaded.records.len(), 2);
+    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    let mut writer = f.session.open_journal().unwrap();
+    writer.accept(vec![tool_result(turn, loop_id)]).unwrap();
+    writer.persist_pending().unwrap();
+    drop(writer);
+    let full = f.session.read_history().unwrap();
+    assert_eq!(full.runtime_history().len(), 3);
+    assert!(matches!(
+        full.runtime_history().last(),
+        Some(HistoryItem::ToolResult(_))
+    ));
+    // Reopening only loads the records. No queue, task, tool executor, receipt,
+    // invented result, or recovery operation is created by storage.
+    let reopened = f.session.open_journal().unwrap();
+    assert_eq!(
+        reopened.positions(),
+        SavePositions {
+            accepted: 3,
+            persisted: Some(3)
+        }
+    );
+}
+#[test]
+fn orphan_mismatched_duplicate_tool_results_and_response_gaps_are_invalid() {
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let mut wrong = tool_result(turn.clone(), loop_id);
+    if let HistoryEntry::Runtime {
+        item: HistoryItem::ToolResult(result),
+        ..
+    } = &mut wrong
+    {
+        result.tool_name = "different_tool".parse().unwrap();
+    }
+    let mut gap = response(turn.clone(), loop_id);
+    if let HistoryEntry::Runtime { response_index, .. } = &mut gap {
+        *response_index = 3;
+    }
+    let cases = vec![
+        vec![tool_result(turn.clone(), loop_id)],
+        vec![tool_response(turn.clone(), loop_id), wrong],
+        vec![
+            tool_response(turn.clone(), loop_id),
+            tool_result(turn.clone(), loop_id),
+            tool_result(turn.clone(), loop_id),
+        ],
+        vec![gap],
+    ];
+    for entries in cases {
+        let bytes = record_bytes(&f.session, entries);
+        fs::write(f.history_path(), &bytes).unwrap();
+        assert!(f.session.read_history().is_err());
+        assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    }
+}
+#[test]
+fn partial_model_fragments_are_distinct_and_never_projected_as_complete_assistant() {
+    use minicore_runtime::{
+        ToolCallId,
+        model::{IncompleteToolCall, ModelPartial},
+    };
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let partial = HistoryEntry::Partial {
+        turn_id: turn.clone(),
+        loop_id,
+        response_index: 0,
+        partial: ModelPartial {
+            request_index: 0,
+            content: vec![AssistantPart::Text("unfinished ".into())],
+            incomplete_tool_calls: vec![IncompleteToolCall {
+                part_index: 1,
+                call_index: 0,
+                tool_call_id: ToolCallId::new("incomplete-call").unwrap(),
+                tool_name: "read_file".parse().unwrap(),
+                arguments_text: "{\"path\":\"".into(),
+            }],
+            usage: None,
+            provider_replay: None,
+        },
+    };
+    let mut journal = f.session.open_journal().unwrap();
+    journal
+        .accept(vec![
+            input(turn.clone(), loop_id),
+            partial.clone(),
+            HistoryEntry::TurnFinished {
+                turn_id: turn.clone(),
+                outcome: TurnOutcome::Cancelled,
+                reason: Some("cancelled while receiving model output".into()),
+            },
+        ])
+        .unwrap();
+    journal.persist_pending().unwrap();
+    drop(journal);
+    let loaded = f.session.read_history().unwrap();
+    assert_eq!(loaded.records[1].entry, partial);
+    assert_eq!(loaded.runtime_history().len(), 1);
+    assert!(matches!(loaded.runtime_history()[0], HistoryItem::User(_)));
+    let complete_then_partial = record_bytes(&f.session, vec![response(turn, loop_id), partial]);
+    fs::write(f.history_path(), &complete_then_partial).unwrap();
+    assert!(f.session.read_history().is_err());
+    assert_eq!(fs::read(f.history_path()).unwrap(), complete_then_partial);
+}
+#[test]
+fn native_record_unknown_null_empty_input_and_content_normalization_are_rejected() {
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let input_bytes = record_bytes(&f.session, vec![input(turn.clone(), loop_id)]);
+    let response_bytes = record_bytes(&f.session, vec![response(turn, loop_id)]);
+    let mut unknown_null: serde_json::Value = serde_json::from_slice(&input_bytes).unwrap();
+    unknown_null["entry"]["data"]["user"]["provider_replay"] = serde_json::Value::Null;
+    let mut empty_input: serde_json::Value = serde_json::from_slice(&input_bytes).unwrap();
+    empty_input["entry"]["data"]["user"]["input"]["text"] = serde_json::json!("");
+    let mut normalized: serde_json::Value = serde_json::from_slice(&response_bytes).unwrap();
+    normalized["entry"]["data"]["item"]["data"]["content"][0]["data"] =
+        serde_json::json!("line\r\nchanged");
+    for (case, value) in [unknown_null, empty_input, normalized]
+        .into_iter()
+        .enumerate()
+    {
+        let bytes = serde_json::to_vec(&value).unwrap();
+        fs::write(f.history_path(), &bytes).unwrap();
+        assert!(
+            f.session.read_history().is_err(),
+            "invalid native payload case {case} was accepted"
+        );
+        assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    }
+}
+#[test]
+fn moved_session_directory_blocks_original_writer() {
+    let f = Fixture::new();
+    let mut journal = f.session.open_journal().unwrap();
+    journal
+        .accept(vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())])
+        .unwrap();
+    let original = f.session.canonical_path();
+    let moved = original.with_extension("moved");
+    fs::rename(&original, &moved).unwrap();
+    fs::create_dir(&original).unwrap();
+    fs::write(original.join("history.jsonl"), b"replacement").unwrap();
+    assert!(journal.persist_pending().is_err());
+    assert_eq!(fs::read(moved.join("history.jsonl")).unwrap(), b"");
+    assert_eq!(
+        fs::read(original.join("history.jsonl")).unwrap(),
+        b"replacement"
+    );
+}
+#[test]
+fn deletion_waits_for_existing_history_writer() {
+    let f = Fixture::new();
+    let journal = f.session.open_journal().unwrap();
+    let mut record = f.session.load().unwrap();
+    record.data.closed = Some(SessionClosure {
+        reason: "explicit".into(),
+    });
+    f.session.save(&record).unwrap();
+    assert!(matches!(
+        f.session.delete_closed(),
+        Err(StorageError::HistoryInUse)
+    ));
+    assert!(f.history_path().exists());
+    drop(journal);
+    f.session.delete_closed().unwrap();
+}
+#[test]
+fn object_write_failure_probe() {
+    let Ok(path) = std::env::var("MINICORE_STORAGE_FAILURE_PROBE") else {
+        return;
+    };
+    let root = DataRoot::acquire(&path).unwrap();
+    let mut record: HostRecord<HostConfig> = root.load_host().unwrap().unwrap();
+    let host = root.host(record.id.clone());
+    record.data.config.label = "large object under OS file-size limit".repeat(1024);
+    record.data.config_revision += 1;
+    assert!(matches!(
+        host.save_host(&record),
+        Err(StorageError::Io {
+            operation: "write object temporary file",
+            ..
+        })
+    ));
+}
+#[test]
+fn atomic_object_save_keeps_original_on_real_os_write_failure() {
+    let f = Fixture::new();
+    let root_path = f.root.canonical_path().to_owned();
+    let original = fs::read(root_path.join("host.json")).unwrap();
+    drop(f.session);
+    drop(f.agent);
+    drop(f.host);
+    drop(f.root);
+    // SIGXFSZ is ignored only in this subprocess, so write(2) returns EFBIG.
+    // This is a real kernel file write failure, not a production capacity rule.
+    let status = Command::new("sh")
+        .args(["-c", "trap '' 25; ulimit -f 1; exec \"$@\"", "storage-test"])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "object_write_failure_probe", "--nocapture"])
+        .env("MINICORE_STORAGE_FAILURE_PROBE", &root_path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_eq!(fs::read(root_path.join("host.json")).unwrap(), original);
+    assert!(fs::read_dir(&root_path).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".tmp")
+    }));
+    DataRoot::acquire(&root_path).unwrap();
+}
+#[test]
+fn journal_write_failure_probe() {
+    let Ok(path) = std::env::var("MINICORE_STORAGE_JOURNAL_FAILURE_PROBE") else {
+        return;
+    };
+    let root = DataRoot::acquire(path).unwrap();
+    let host = root.host(root.load_host::<HostConfig>().unwrap().unwrap().id);
+    let agent = host.agent(
+        host.list_agents().unwrap().remove(0),
+        StorageMode::Persistent,
+    );
+    let session = agent
+        .session(
+            agent.list_sessions().unwrap().remove(0),
+            StorageMode::Persistent,
+        )
+        .unwrap();
+    let mut journal = session.open_journal().unwrap();
+    journal
+        .accept(vec![HistoryEntry::Summary {
+            summary: minicore_runtime::history::SummaryHistory {
+                content: minicore_runtime::BoundedText::new("large append".repeat(3000)).unwrap(),
+            },
+        }])
+        .unwrap();
+    assert!(matches!(
+        journal.persist_pending(),
+        Err(StorageError::Io {
+            operation: "append history",
+            ..
+        })
+    ));
+    assert_eq!(
+        journal.positions(),
+        SavePositions {
+            accepted: 1,
+            persisted: Some(0)
+        }
+    );
+    assert!(matches!(
+        journal.reconcile_pending(),
+        Err(StorageError::UncertainWrite)
+    ));
+}
+#[test]
+fn real_os_partial_history_write_remains_blocked_without_repair() {
+    let f = Fixture::new();
+    let root_path = f.root.canonical_path().to_owned();
+    let history_path = f.history_path();
+    drop(f.session);
+    drop(f.agent);
+    drop(f.host);
+    drop(f.root);
+    let status = Command::new("sh")
+        .args(["-c", "trap '' 25; ulimit -f 4; exec \"$@\"", "storage-test"])
+        .arg(std::env::current_exe().unwrap())
+        .args(["--exact", "journal_write_failure_probe", "--nocapture"])
+        .env("MINICORE_STORAGE_JOURNAL_FAILURE_PROBE", &root_path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let partial = fs::read(&history_path).unwrap();
+    assert!(!partial.is_empty());
+    let root = DataRoot::acquire(root_path).unwrap();
+    let host = root.host(root.load_host::<HostConfig>().unwrap().unwrap().id);
+    let agent = host.agent(
+        host.list_agents().unwrap().remove(0),
+        StorageMode::Persistent,
+    );
+    let session = agent
+        .session(
+            agent.list_sessions().unwrap().remove(0),
+            StorageMode::Persistent,
+        )
+        .unwrap();
+    assert!(session.read_history().is_err());
+    assert_eq!(fs::read(history_path).unwrap(), partial);
+}

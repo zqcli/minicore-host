@@ -25,3 +25,11 @@ Independent-worktree commands use the actual Runtime patch through:
 - First Clippy run identified a large enum variant and a copy-type clone; both corrected. Final lint run follows.
 
 The local protocol symlink is test scaffolding, not committed. Root workspace/Cargo.lock integration belongs to the parent. No remote writes, live provider execution, TUI validation, power-loss experiment, or cross-platform validation has been performed.
+
+## Hardening milestone
+
+- First implementation commit: `0c32443` (`feat(storage): add durable owner-scoped object and history storage`).
+- Added actual kernel `EFBIG` subprocess tests for atomic object-save failure and partial JSONL append. Existing object bytes survive; partial history remains blocked and unchanged after reopening.
+- Added full native tool-call/result association, missing-result history, authoritative partial roundtrip, moved-directory, active-writer deletion, and lossy/native unknown-null rejection tests.
+- The tests found that serde callbacks can miss fields buffered inside tagged enums. Removed that dependency and made the lossless decode check reject every discarded field, including null; no stored text is silently normalized.
+- Latest checks: 4 unit tests + 27 integration tests passed; Clippy `--all-targets -- -D warnings` passed; rustdoc with `RUSTDOCFLAGS='-D warnings'` passed. Final format and task handoff follow.

@@ -72,13 +72,7 @@ pub(crate) fn value(bytes: &[u8]) -> Result<Value, String> {
 }
 
 pub(crate) fn decode<T: DeserializeOwned + Serialize>(original: Value) -> Result<T, String> {
-    let mut ignored = Vec::new();
-    let decoded: T =
-        serde_ignored::deserialize(original.clone(), |path| ignored.push(path.to_string()))
-            .map_err(|e| e.to_string())?;
-    if !ignored.is_empty() {
-        return Err(format!("unknown field: {}", ignored.join(", ")));
-    }
+    let decoded: T = serde_json::from_value(original.clone()).map_err(|e| e.to_string())?;
     let encoded = serde_json::to_value(&decoded).map_err(|e| e.to_string())?;
     preserve(&original, &encoded)?;
     Ok(decoded)
@@ -90,12 +84,10 @@ fn preserve(original: &Value, encoded: &Value) -> Result<(), String> {
     match (original, encoded) {
         (Value::Object(a), Value::Object(b)) => {
             for (key, value) in a {
-                if value.is_null() && !b.contains_key(key) {
-                    continue;
-                }
                 preserve(
                     value,
-                    b.get(key).ok_or_else(|| format!("unknown field: {key}"))?,
+                    b.get(key)
+                        .ok_or_else(|| format!("unsupported or discarded field: {key}"))?,
                 )?;
             }
         }
