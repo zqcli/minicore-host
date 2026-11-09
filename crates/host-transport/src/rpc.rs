@@ -700,7 +700,6 @@ impl RpcClient {
             sent: false,
         };
         let bytes = encode_request(id, method, params)?;
-        diagnostic.encoded(&bytes);
         let span = diagnostic.span();
         async {
             self.outgoing

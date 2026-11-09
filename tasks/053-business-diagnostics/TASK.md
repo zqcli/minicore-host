@@ -337,3 +337,26 @@ unchanged review probe) passed. All-target transport strict Clippy, strict
 transport rustdoc, formatting and diff checks passed. The temporary copied review
 executable is retained outside the repository, not as a duplicate permanent test.
 No full workspace gate or independent re-approval is claimed here.
+
+### Remove redundant client diagnostic parsing
+
+Review identified that the transport-local `tracing::enabled!` guard never
+matches the installed diagnostics layer's record-module filter. The guarded
+encoded-request metadata parse therefore contributed no production metadata.
+Every private RpcClient entrance is already called with the outer typed Call:
+Operation callbacks supply the actual scalar fields, subscription supplies its
+typed scope, and initialization has no message/operation entity to extract.
+The real installed-layer client tests already exercise this direct route.
+
+The redundant byte parser, its guard, Deserialize derives used only by that path,
+and its invocation after the original business encoding are removed. Server
+metadata still reads each known leaf independently from the existing borrowed
+parameters. There is no new filter API, request serialization or Operation change.
+Two parser-only unit cases are replaced by direct typed metadata cases checking
+original creation message links and tool target IDs without invented local
+identity. An initial new unit fixture mistakenly included session_id in ToolCallRef
+(which owns only Turn/tool leaves); its compile failure is retained in
+`task053-remove-diagnostic-parse-tests.log` and the fixture was corrected without
+changing production protocol types. Final 13 focused cases and all-target
+transport strict Clippy passed (`task053-remove-diagnostic-parse-tests-fixed.log`
+and `task053-remove-diagnostic-parse-clippy.log`); formatting and diff checks pass.

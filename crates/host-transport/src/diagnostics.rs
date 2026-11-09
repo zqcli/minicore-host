@@ -5,21 +5,18 @@ use minicore_host_protocol::{
     MessageId, MessageInput, MessageTarget, Method, OperationId, RpcError, SendMessage, SessionId,
     SessionRef, SubscriptionScope, ToolCallId, ToolCallRef, TurnId,
 };
-use serde::Deserialize;
 use serde_json::Value;
 use std::time::Instant;
 use tracing::Level;
 
-// Only typed identity leaves are deserialized. Unknown payload/configuration
-// fields are skipped, not retained as a Value tree or copied into diagnostics.
-#[derive(Default, Deserialize)]
-#[serde(default)]
+// Only known identity leaves are read. The server borrows its existing parsed
+// parameters; typed clients pass fields directly without any diagnostic parse.
+#[derive(Default)]
 struct MessageCorrelation {
     message_id: Option<MessageId>,
     in_reply_to: Option<MessageId>,
 }
-#[derive(Default, Deserialize)]
-#[serde(default)]
+#[derive(Default)]
 struct Target {
     host_id: Option<HostId>,
     agent_id: Option<AgentId>,
@@ -28,15 +25,13 @@ struct Target {
     tool_call_id: Option<ToolCallId>,
     load_id: Option<LoadId>,
 }
-#[derive(Default, Deserialize)]
-#[serde(default)]
+#[derive(Default)]
 struct RequestCorrelation {
     operation_id: Option<OperationId>,
     turn_id: Option<TurnId>,
     load_id: Option<LoadId>,
 }
-#[derive(Default, Deserialize)]
-#[serde(default)]
+#[derive(Default)]
 pub(crate) struct Correlation {
     operation_id: Option<OperationId>,
     target_operation_id: Option<OperationId>,
@@ -93,20 +88,6 @@ impl Correlation {
                 load_id: identity(request.get("load_id")),
             }),
         }
-    }
-}
-
-impl Correlation {
-    /// Inspect only existing wire bytes. Encoding a request solely for logging
-    /// is forbidden; a failed extraction leaves the business call unchanged.
-    fn from_encoded(bytes: &[u8]) -> Option<Self> {
-        #[derive(Deserialize)]
-        struct Envelope {
-            params: Correlation,
-        }
-        serde_json::from_slice::<Envelope>(bytes)
-            .ok()
-            .map(|envelope| envelope.params)
     }
 }
 
@@ -301,16 +282,6 @@ impl Call {
             .or(request.turn_id);
         self.entities.tool_call_id = self.entities.tool_call_id.take().or(tool.tool_call_id);
         self.entities.load_id = self.entities.load_id.take().or(request.load_id);
-    }
-    pub(crate) fn encoded(&mut self, bytes: &[u8]) {
-        // This is the existing wire encoding, not an extra serialization of the
-        // business request. Invalid diagnostic metadata never alters the call.
-        if !tracing::enabled!(target: "minicore_diagnostics", Level::DEBUG) {
-            return;
-        }
-        if let Some(correlation) = Correlation::from_encoded(bytes) {
-            self.correlate(correlation);
-        }
     }
     pub(crate) fn connected(&mut self, info: &ConnectionInfo) {
         if self.client {

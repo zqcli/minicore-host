@@ -107,41 +107,47 @@ fn malformed_correlations_are_absent_not_replaced_by_new_ids() {
 }
 
 #[test]
-fn existing_encoded_request_retains_only_typed_identity_leaves() {
-    // The production API accepts the bytes an RPC request already encoded;
-    // this fixture construction is not additional production serialization.
-    let bytes = serde_json::to_vec(&json!({
-        "jsonrpc": "2.0", "id": 1, "method": "agent.create",
-        "params": {
-            "operation_id": OPERATION,
-            "target": {"host_id": HOST, "agent_id": AGENT, "session_id": SESSION},
-            "initial_message": {
-                "message_id": MESSAGE, "in_reply_to": REPLY,
-                "text": {"large": ["PRIVATE_BODY", {"nested": "PRIVATE_TEXT"}]}
-            },
-            "settings": {"role": "PRIVATE_ROLE", "keys": ["PRIVATE_KEY"]}
-        }
-    }))
-    .unwrap();
-    let correlation = Correlation::from_encoded(&bytes).unwrap();
+fn typed_creation_passes_original_message_links_without_publishing_entities() {
+    let message = MessageInput {
+        message_id: MESSAGE.parse().unwrap(),
+        mode: minicore_host_protocol::MessageMode::FollowUp,
+        text: "PRIVATE_BODY".into(),
+        in_reply_to: Some(REPLY.parse().unwrap()),
+    };
+    let correlation = Correlation::default()
+        .operation(&OPERATION.parse().unwrap())
+        .initial_message(Some(&message));
     assert_eq!(correlation.operation_id.unwrap().as_str(), OPERATION);
-    let target = correlation.target.unwrap();
-    assert_eq!(target.host_id.unwrap().as_str(), HOST);
-    assert_eq!(target.agent_id.unwrap().as_str(), AGENT);
-    assert_eq!(target.session_id.unwrap().as_str(), SESSION);
-    let message = correlation.initial_message.unwrap();
-    assert_eq!(message.message_id.unwrap().as_str(), MESSAGE);
-    assert_eq!(message.in_reply_to.unwrap().as_str(), REPLY);
+    assert_eq!(correlation.message_id.unwrap(), message.message_id);
+    assert_eq!(correlation.in_reply_to, message.in_reply_to);
+    assert!(correlation.target.is_none());
+    assert!(correlation.session_id.is_none());
+    assert!(correlation.turn_id.is_none());
+    assert_eq!(message.text, "PRIVATE_BODY");
 }
 
 #[test]
-fn unextractable_encoded_metadata_has_no_business_error_or_fallback_identity() {
-    assert!(Correlation::from_encoded(b"not-json").is_none());
-    assert!(Correlation::from_encoded(br#"{"params":{"message_id":7}}"#).is_none());
-    let empty = Correlation::from_encoded(br#"{"params":{"access_key":"PRIVATE_KEY"}}"#).unwrap();
-    assert!(empty.operation_id.is_none());
-    assert!(empty.message_id.is_none());
-    assert!(empty.target.is_none());
+fn typed_tools_pass_actual_target_leaves_and_unknown_metadata_stays_absent() {
+    let target = SessionRef {
+        agent_id: AGENT.parse().unwrap(),
+        session_id: SESSION.parse().unwrap(),
+    };
+    let tool = ToolCallRef {
+        turn_id: TURN.parse().unwrap(),
+        tool_call_id: ToolCallId("provider-original-tool-id".into()),
+    };
+    let call = Call::client(
+        None,
+        "toolcall.get",
+        Correlation::session(&target).tool(&tool),
+    );
+    assert_eq!(call.entities.agent_id, Some(target.agent_id));
+    assert_eq!(call.entities.session_id, Some(target.session_id));
+    assert_eq!(call.entities.turn_id, Some(tool.turn_id));
+    assert_eq!(call.entities.tool_call_id, Some(tool.tool_call_id));
+    assert!(call.peer.is_none());
+    assert!(call.context.host_id.is_none());
+    assert!(call.context.message_id.is_none());
 }
 
 #[test]
