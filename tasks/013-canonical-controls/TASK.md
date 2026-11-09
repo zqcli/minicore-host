@@ -41,7 +41,7 @@ Tests use actual Host/Agent/Session owners and pinned Runtime with explicit mode
 
 ## Final regression checkpoint
 
-The `test(core): verify canonical control acceptance and retention` checkpoint adds 12 core regressions (eight Runtime-owner tests and four persistent-owner tests), plus the protocol regression from `881624b`. Existing accepted-creation and original-save tests now also assert canonical lookup facts.
+The `8a68edb` (`test(core): verify canonical control acceptance and retention`) checkpoint adds 12 core regressions (eight Runtime-owner tests and four persistent-owner tests), plus the protocol regression from `881624b`. Existing accepted-creation and original-save tests now also assert canonical lookup facts.
 
 Coverage includes immutable load/pause/unload/resume receipts; unload-specific pause reasons; duplicate operation IDs within and across owners; precise T1 cancellation after T2 starts; no repeated inbox clear; idle/current Session cancellation; Agent stop preserving queued work and reporting actual stopping/stopped facts; immediate memory close returning its accepted receipt despite reclamation; persistent closing facts remaining unchanged after closed; authority changes and observation; graceful-to-force shutdown facts; public creation lookup excluding nested creation steps; and real asynchronous load/save completion after caller revocation without rewrites or reruns.
 
