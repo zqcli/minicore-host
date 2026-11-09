@@ -163,3 +163,7 @@ impl SessionController {
         Ok(index)
     }
 }
+
+#[cfg(test)]
+#[path = "tests/task052_history_read.rs"]
+mod task052;
