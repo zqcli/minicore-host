@@ -93,3 +93,10 @@ all-target Clippy/rustdoc and committed whitespace. Log:
 `minicore-host-validation/canonical-integrated.log`. Independent correction
 verification is in progress; the earlier P2 is not called reviewed merely because
 this gate passed.
+
+Independent final recheck at the exact `b961f9f` correction passed all 161
+core/protocol tests and formatting in a newly materialized archive with its own
+build target. The P2 is closed and no other actionable scoped finding remained.
+Report: `controls-review-b961f9f-sbHF6S-REPORT.md`; complete log:
+`controls-review-b961f9f-sbHF6S-validation.log` in the engineering workspace.
+This is scoped local review, not the requested full external review or push approval.
