@@ -16,6 +16,9 @@ pub struct CallerContext {
     identity: Arc<ConnectionIdentity>,
 }
 impl CallerContext {
+    pub(crate) fn connection_number(&self) -> u64 {
+        self.identity.number
+    }
     pub(crate) fn revocation(&self) -> tokio::sync::watch::Receiver<bool> {
         self.identity.validity.subscribe()
     }
@@ -99,6 +102,7 @@ struct RegistryState {
 }
 
 pub(crate) struct ConnectionRegistry {
+    pub(crate) observation: Arc<crate::observation::ObservationHub>,
     host_id: HostId,
     incarnation: HostIncarnation,
     state: Mutex<RegistryState>,
@@ -109,6 +113,7 @@ pub(crate) struct ConnectionRegistry {
 impl ConnectionRegistry {
     pub(crate) fn new(host_id: HostId, incarnation: HostIncarnation) -> Arc<Self> {
         Arc::new(Self {
+            observation: crate::observation::ObservationHub::new(),
             host_id,
             incarnation,
             host_phase: AtomicU8::new(0),
@@ -183,6 +188,7 @@ impl ConnectionRegistry {
                         return true;
                     }
                     identity.validity.send_replace(false);
+                    self.observation.close_connection(identity.number);
                 }
                 released_operator |= operator == Some(*number);
                 false
@@ -252,6 +258,7 @@ impl ConnectionRegistry {
             return;
         }
         identity.validity.send_replace(false);
+        self.observation.close_connection(identity.number);
         state.connections.remove(&identity.number);
         if state.operator == Some(identity.number) {
             state.operator = None;
