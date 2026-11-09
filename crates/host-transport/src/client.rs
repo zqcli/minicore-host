@@ -1,11 +1,12 @@
-use crate::{deadline::Deadline, operations::*, rpc::RpcClient};
+use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
-    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostInfo,
-    InteractionAnswerData, MessageRecord, ModelTextSnapshot, ObservationNotification,
-    SessionHistorySnapshot, SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot,
-    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
+    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfigSnapshot,
+    HostInfo, InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
+    ObservationNotification, SessionHistorySnapshot, SessionInfo, SessionSnapshot, StateEvent,
+    ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
+use minicore_runtime::tools::ToolSpec;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 
@@ -172,6 +173,24 @@ impl HostClient {
     }
     pub async fn info(&self, options: CallOptions) -> Result<HostInfo, CallError> {
         self.call(Info(Empty {}), options).await
+    }
+    /// Read committed values and credential source names, never private keys
+    /// or executable resource handles. Available to read-only connections.
+    pub async fn config(&self, options: CallOptions) -> Result<HostConfigSnapshot, CallError> {
+        self.call(GetConfig(Empty {}), options).await
+    }
+    /// List configured models by their full reference in lexical order.
+    pub async fn models(&self, options: CallOptions) -> Result<Vec<ModelDescription>, CallError> {
+        self.call(ListModels(Empty {}), options).await
+    }
+    /// List the Host's available tools or an explicit owner's enabled set.
+    /// Missing targets or selected resources preserve the owner's Fault.
+    pub async fn tools(
+        &self,
+        request: ToolListRequest,
+        options: CallOptions,
+    ) -> Result<Vec<ToolSpec>, CallError> {
+        self.call(ListTools(request), options).await
     }
     pub async fn receipt(
         &self,

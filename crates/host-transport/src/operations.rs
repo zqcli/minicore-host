@@ -1,10 +1,12 @@
 //! One typed operation table drives direct calls and RPC dispatch.
+use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
-    AgentInfo, CallerContext, Host, HostInfo, InteractionAnswerData, MessageRecord,
-    ModelTextSnapshot, SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot,
-    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
+    AgentInfo, CallerContext, Host, HostConfigSnapshot, HostInfo, InteractionAnswerData,
+    MessageRecord, ModelDescription, ModelTextSnapshot, SessionHistorySnapshot, SessionInfo,
+    SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
+use minicore_runtime::tools::ToolSpec;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{future::Future, sync::Arc};
@@ -146,6 +148,15 @@ macro_rules! operations {
 
 operations! {
     Info, "host.info", Empty => HostInfo, |h, c, _p| { h.info(&c) };
+    GetConfig, "host.config.get", Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
+    ListModels, "model.list", Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
+    ListTools, "tool.list", ToolListRequest => Vec<ToolSpec>, |h, c, p| {
+        match p.target {
+            None => h.tool_list(&c),
+            Some(ToolListTarget::Agent(target)) => h.tool_list_for_agent(&c, &target),
+            Some(ToolListTarget::Session(target)) => h.tool_list_for_session(&c, &target),
+        }
+    };
     ReceiptGet, "host.receipt.get", OperationTarget => Receipt, |h, c, p| { h.receipt_get(&c, &p.operation_id) };
     Shutdown, "host.shutdown", HostShutdownRequest => HostShutdownReceipt, |h, c, p| { h.shutdown(&c, p) };
     CreateAgent, "agent.create", AgentCreate => AgentCreateReceipt, |h, c, p| { h.create_agent_async(&c, p).await };

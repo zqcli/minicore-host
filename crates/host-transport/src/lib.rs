@@ -22,12 +22,14 @@ mod client;
 mod deadline;
 mod operations;
 mod output;
+mod resources;
 mod rpc;
 mod wss;
 
 pub use client::{ClientSubscription, HostClient, HostService, SessionClient};
 pub use operations::SUPPORTED_METHODS;
 pub use output::OutputBuffer;
+pub use resources::{ToolListRequest, ToolListTarget};
 pub use rpc::serve_stdio;
 pub use tokio_rustls::rustls as tls;
 pub use wss::serve_wss;
