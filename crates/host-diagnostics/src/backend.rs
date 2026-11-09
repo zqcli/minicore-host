@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     io::{self, Write},
     sync::{
@@ -11,7 +11,7 @@ use std::{
 };
 
 /// This snapshot covers the whole process pipeline, not one Host or Session.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LoggingStatus {
     pub status: LoggingState,
     /// Known rejected records. Omitted after a timeout: the pending tail's loss
@@ -23,7 +23,7 @@ pub struct LoggingStatus {
     pub write_failures: Option<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoggingState {
     Ok,

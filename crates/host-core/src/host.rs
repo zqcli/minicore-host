@@ -13,6 +13,7 @@ mod context;
 mod controls;
 mod create;
 mod deletion;
+mod diagnostics;
 mod discovery;
 mod metadata;
 mod network;
@@ -41,6 +42,7 @@ pub struct Host {
     changed: Arc<tokio::sync::Notify>,
     process_changed: tokio::sync::Notify,
     pub(crate) configuration: Arc<ConfigurationOwner>,
+    logging_health: std::sync::OnceLock<minicore_host_diagnostics::Health>,
 }
 struct HostState {
     lifecycle: HostLifecycle,
@@ -97,6 +99,7 @@ impl Host {
             changed: Arc::new(tokio::sync::Notify::new()),
             process_changed: tokio::sync::Notify::new(),
             configuration,
+            logging_health: std::sync::OnceLock::new(),
             state: Mutex::new(HostState {
                 lifecycle,
                 shutdown_strategy: None,
@@ -158,6 +161,7 @@ impl Host {
             shutdown_strategy: state.shutdown_strategy,
             shutdown_fault: state.shutdown_fault.clone(),
             control,
+            logging: self.logging_status(),
         })
     }
     fn agent(&self, caller: &CallerContext, id: &AgentId) -> Result<Arc<AgentOwner>, Fault> {

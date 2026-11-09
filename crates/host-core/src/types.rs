@@ -15,6 +15,8 @@ pub struct HostInfo {
     pub shutdown_strategy: Option<HostShutdownStrategy>,
     pub shutdown_fault: Option<Fault>,
     pub control: ControlStateData,
+    /// Read-only health of the shared process pipeline, not per-Host counters.
+    pub logging: minicore_host_diagnostics::LoggingStatus,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

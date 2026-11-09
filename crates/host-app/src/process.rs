@@ -49,6 +49,11 @@ pub async fn run(
             "Host initialization failed; check config, credentials and exclusive data-root access",
         )
     })?;
+    if let Some(diagnostics) = diagnostics.as_ref() {
+        // This fresh Host has no binding. It receives only a read-only handle;
+        // neither binding nor its later shutdown owns the process writer.
+        let _ = host.bind_logging_health(diagnostics.health());
+    }
     let control = host.process_control();
     let mut current = control
         .snapshot()

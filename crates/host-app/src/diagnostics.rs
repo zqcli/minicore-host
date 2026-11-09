@@ -1,5 +1,7 @@
 use minicore_host_core::{LogLevel, LogOutput, LogSettings};
-use minicore_host_diagnostics::{Context, EventData, EventSpec, Guard, Options, Output, Scope};
+use minicore_host_diagnostics::{
+    Context, EventData, EventSpec, Guard, Health, Options, Output, Scope,
+};
 use minicore_host_protocol::Fault;
 use std::{
     path::Path,
@@ -36,6 +38,9 @@ impl Diagnostics {
             .map_err(|_| "cannot initialize configured diagnostics")?;
         INSTALLED.store(true, Ordering::Relaxed);
         Ok(Self { guard })
+    }
+    pub fn health(&self) -> Health {
+        self.guard.health()
     }
     pub fn finish(self) {
         let Self { guard } = self;

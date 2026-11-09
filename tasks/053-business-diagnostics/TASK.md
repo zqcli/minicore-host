@@ -155,3 +155,40 @@ returned error classification. Server summaries are forwarding metadata, not
 another principal business ERROR. Client targets are target_* attributes, not
 an invented local owner chain. Shared Operation machinery will not acquire a
 generic logging framework and local calls will not serialize business requests.
+
+## Shared-owner reconstruction checkpoint
+
+The coordinator released the reviewed task066/070/071 production paths on fixed
+`f0900a7083f9f6ddddbe978cd6ba55f4b1405c50`. A new isolated worktree continues from
+that source. It already contains the provider slice; only metadata preparation
+`a723c84f3130b609ee91abdaa9f06fcb9440a68e` was cherry-picked, as `9d3c377`.
+Task054 fixtures remain outside this worker's ownership.
+
+### Read-only process health
+
+The first shared-owner slice adds only the planned Host OnceLock binding,
+HostInfo logging snapshot, application Health getter/binding and Deserialize on
+the public status value/enum. Health itself is not deserializable. The health
+helper's first impl is restored from the saved complete Host diagnostic source;
+the current shared declarations, app wiring and tests are new implementations.
+Task071 discovery fields and task066 configuration/publication remain intact.
+
+New actual tests cover three production-resource Hosts, bound versus unbound
+counter knowledge, a real read-only stdio connection, Host shutdown/drop without
+releasing the process writer's actual file lease, explicit application shutdown
+of that writer, and refusal to replace a Host's first binding. A real application
+child verifies host.info health through stdout RPC and preserves protocol-only
+stdout plus safe stderr. These are health/ownership tests, not invented business
+events or a claim of real disk exhaustion. The snapshot is obtained only from
+existing atomics and never emits, flushes, takes writer locks or requires output.
+
+Fresh health validation passed:
+
+- `cargo test -p minicore-host-transport -p minicore-host --test diagnostic_health --locked --offline`:
+  2 actual integration cases.
+- The same two focused targets under strict Clippy (`-- -D warnings`).
+- `cargo test -p minicore-host-diagnostics --all-targets --locked --offline`:
+  21 unique backend/pipeline cases. Their fault-injection and subprocess fixtures
+  keep their existing provenance; they are not claimed as new owner-path tests.
+- Strict rustdoc for `minicore-host-core` and `minicore-host-diagnostics`, formatting
+  and diff checks. Whole-workspace and independent review remain pending.
