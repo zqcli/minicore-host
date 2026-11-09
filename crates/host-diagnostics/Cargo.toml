@@ -8,7 +8,7 @@ description = "Process-owned structured diagnostics for MiniCore Host"
 
 [dependencies]
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
-tracing = "=0.1.44"
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["registry", "std"] }
 time = { version = "=0.3.55", features = ["formatting"] }
 serde = { version = "=1.0.229", features = ["derive"] }
