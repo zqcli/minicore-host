@@ -29,6 +29,15 @@ Environment: source `/workspace/shared/minicore-host-resource-resume-evidence/en
 - `cargo test -p minicore-host-resources --test task023 session_resource_resume --locked -- --nocapture`: baseline **4 failed**, then **4 passed** after the fix. Evidence: `red-production-confirmed.log`, `green-production.log`. An earlier incorrect child-module path caused only a compile error (`red-production.log`), then was corrected before reproduction.
 - `cargo test -p minicore-host-core --lib real_host_revision_conflict_clears_after_session_update --locked -- --nocapture`: **failed** with just the synchronous update fix reversed, then **passed** with that fix restored. The test gates actual Host resource preparation, publishes a newer Host revision, observes the real `SessionConfigConflict` and queued input, then commits a valid Session update. It does not inject that conflict. Evidence: `red-real-conflict.log` and the recorded patch.
 - `cargo test -p minicore-host-core --lib resource_resume --locked -- --nocapture`: **9 passed**. All 13 new permanent tests now pass. Evidence: `green-core-final.log` and `green-production.log`.
-- Full workspace gate, exact unique target/test count, and final validation commit: pending.
+- `./scripts/check.sh`: **passed** on production/test checkpoint `4f9739d01d30003faf978d53ff32ed16269251c4`, including whitespace, formatting, Clippy with `-D warnings`, all workspace targets, doctests and rustdoc with `-D warnings`. Evidence: `full-gate.log` (`FULL_GATE_EXIT=0`).
+- `cargo test --workspace --all-targets --locked -- --list`: **464 unique target/test cases**, including this task's **13** new tests. Target/test pairs were deduplicated; nested storage subprocess output is not counted. Evidence: `test-list.log`, `test-count.txt`.
+- **3 doctests passed**. No check was skipped or blocked. SPEC checksum remains `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`; manifests and lock are unchanged after the two declared task023 dependencies.
+
+## Delivery (2026-11-09 UTC)
+
+- Implementation and permanent tests: `4f9739d01d30003faf978d53ff32ed16269251c4` (`fix(core): revalidate session startup faults after repair`).
+- A following documentation-only commit records the completed validation above.
+- Only the implementation and documentation commits belong to this task; the parent should not replay the two dependency cherry-picks.
+- Parent integration and independent review remain separate steps. No remote push was attempted.
 
 Evidence directory: `/workspace/shared/minicore-host-resource-resume-evidence`.
