@@ -140,7 +140,16 @@ impl Host {
             _ => None,
         };
         for session in sessions {
-            let (initial, positions) = session.observation_baseline(turn, states, outputs)?;
+            let (initial, positions) = descendant_baseline(
+                &session,
+                turn,
+                states,
+                outputs,
+                matches!(
+                    scope,
+                    SubscriptionScope::Host { .. } | SubscriptionScope::Agent { .. }
+                ),
+            )?;
             subscription.result.initial_states.extend(initial);
             subscription.result.output_positions.extend(positions);
         }
@@ -213,5 +222,99 @@ impl Host {
             self.session(caller, target)?
                 .tool_get(caller, &tool.turn_id, &tool.tool_call_id)?;
         Ok(ToolCallSnapshot { source, data })
+    }
+}
+
+// Broad live scopes may race a descendant leaving after enumeration. A direct
+// Session/Turn target still reports its actual missing source, and every other
+// failure (including access revocation) remains a failure.
+fn descendant_baseline(
+    session: &crate::session::SessionController,
+    turn: Option<&TurnId>,
+    states: bool,
+    outputs: bool,
+    broad: bool,
+) -> Result<(Vec<StateEvent>, Vec<OutputPosition>), Fault> {
+    match session.observation_baseline(turn, states, outputs) {
+        Err(fault) if broad && fault.kind() == Some(FaultKind::AgentSessionNotFound) => {
+            Ok((Vec::new(), Vec::new()))
+        }
+        result => result,
+    }
+}
+
+#[cfg(test)]
+mod baseline_race_tests {
+    use super::*;
+    struct UnusedResources;
+    impl crate::ResourceResolver for UnusedResources {
+        fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
+            Ok(())
+        }
+        fn resolve<'a>(&'a self, _: &'a SessionConfig) -> crate::ResourceFuture<'a> {
+            Box::pin(async {
+                Err(Fault::new(
+                    FaultKind::SessionResourceMissing,
+                    "no execution requested by baseline race test",
+                ))
+            })
+        }
+    }
+    #[tokio::test]
+    async fn enumerated_descendant_reclaimed_before_baseline_does_not_fail_a_broad_scope() {
+        let host = Host::memory(Arc::new(UnusedResources)).unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let receipt = host
+            .create_agent(
+                &caller,
+                AgentCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    name: "baseline fixture".into(),
+                    mode: StorageMode::Memory,
+                    config: AgentConfig::default(),
+                    default_session: None,
+                    initial_message: None,
+                },
+            )
+            .unwrap();
+        let target = SessionRef {
+            agent_id: receipt.agent_id.unwrap(),
+            session_id: receipt.session_id.unwrap(),
+        };
+        // This is exactly the retained Arc from a completed enumeration.
+        let enumerated = host.session(&caller, &target).unwrap();
+        let mut state = enumerated.subscribe_state(&caller).unwrap();
+        host.close_session(&caller, &target).unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            while state.snapshot().is_ok() {
+                if state.changed().await.is_err() {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let (states, positions) = descendant_baseline(&enumerated, None, true, true, true).unwrap();
+        assert!(states.is_empty() && positions.is_empty());
+        assert_eq!(
+            descendant_baseline(&enumerated, None, true, true, false)
+                .unwrap_err()
+                .kind(),
+            Some(FaultKind::AgentSessionNotFound)
+        );
+        assert!(
+            host.events_subscribe(
+                &caller,
+                SubscribeRequest {
+                    scope: SubscriptionScope::Session {
+                        agent_id: target.agent_id,
+                        session_id: target.session_id
+                    },
+                    categories: [EventCategory::State].into_iter().collect()
+                }
+            )
+            .is_err()
+        );
     }
 }

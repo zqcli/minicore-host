@@ -123,3 +123,17 @@ Failure/timeout does not claim remote completion and is not retried.
 --offline` (same explicit Runtime patch) passed after the two-line fix. The test
 is retained permanently. This review correction is separate from the pending
 interaction source changes.
+
+## Broad-scope reclamation race
+
+A Session may be reclaimed between Host/Agent descendant enumeration and its
+baseline read. Only those broad live scopes now skip the owner's explicit
+`AgentSessionNotFound` result for that descendant. Exact Session/Turn subscriptions
+still fail, other errors are unchanged, and the final connection-read check is
+retained. The focused test holds an actual enumerated Session Arc, closes and
+waits for real memory reclamation, then checks both scope behaviors. No source
+cache, lifetime extension or fabricated empty exact-source result is introduced.
+
+`cargo test -p minicore-host-core enumerated_descendant_reclaimed_before_baseline
+--locked --offline` passed with the explicit Runtime patch. This correction is
+independent of interaction answer routing.
