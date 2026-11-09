@@ -46,7 +46,8 @@ pub(crate) fn present<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'d
 
 // Cross-field validated DTOs reject invalid combinations in both directions.
 macro_rules! validated_dto {
-    ($name:ident, $wire:ident, $wire_name:literal { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
+    ($(#[$meta:meta])* $name:ident, $wire:ident, $wire_name:literal { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
+        $(#[$meta])*
         #[derive(Clone, Debug, Eq, PartialEq)]
         pub struct $name { $(pub $field: $ty),* }
         #[derive(serde::Serialize, serde::Deserialize)]
@@ -75,3 +76,9 @@ pub use message::*;
 
 mod receipt;
 pub use receipt::*;
+
+mod control;
+pub use control::*;
+
+mod catalog;
+pub use catalog::*;

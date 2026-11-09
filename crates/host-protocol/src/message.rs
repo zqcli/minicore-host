@@ -108,11 +108,37 @@ impl SendMessage {
 
 /// Historical provenance only, populated by a trusted owner at acceptance.
 /// Deserializing persisted provenance never grants live internal authority.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MessageSource {
     User,
     Agent { source: SessionRef },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MessageSourceKind {
+    User,
+    Agent,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MessageSourceWire {
+    kind: MessageSourceKind,
+    #[serde(default, deserialize_with = "crate::present")]
+    source: Option<SessionRef>,
+}
+impl<'de> Deserialize<'de> for MessageSource {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let wire = MessageSourceWire::deserialize(d)?;
+        match (wire.kind, wire.source) {
+            (MessageSourceKind::User, None) => Ok(Self::User),
+            (MessageSourceKind::Agent, Some(source)) => Ok(Self::Agent { source }),
+            _ => Err(serde::de::Error::custom(
+                "Agent provenance requires its source; user provenance cannot claim one",
+            )),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -262,4 +288,25 @@ impl SessionCreate {
     pub fn resolved_mode(&self, owner_mode: StorageMode) -> Result<StorageMode, ValidationError> {
         owner_mode.session_mode(self.mode)
     }
+}
+
+/// A service receives trusted context separately from business JSON. `Caller`
+/// is the Host's non-deserializable registered handle, not a public DTO. This
+/// trait does not construct that context or bypass direct-owner acceptance.
+pub trait MessageService<Caller> {
+    fn send(
+        &self,
+        caller: Caller,
+        request: SendMessage,
+    ) -> impl std::future::Future<Output = Result<MessageAccepted, Fault>> + Send;
+}
+
+/// The client owns the single monotonic wait deadline; options are never
+/// forwarded as RPC params or reset at Host/Agent/Session boundaries.
+pub trait MessageClient {
+    fn send(
+        &self,
+        request: SendMessage,
+        options: crate::CallOptions,
+    ) -> impl std::future::Future<Output = Result<MessageAccepted, crate::CallError>> + Send;
 }

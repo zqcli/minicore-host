@@ -63,12 +63,18 @@ pub enum ReasoningPreference {
 macro_rules! checked_struct {
     ($(#[$meta:meta])* $name:ident, $wire:ident, $wire_name:literal { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
         $(#[$meta])*
-        #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+        #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
         #[serde(try_from = $wire_name)]
         pub struct $name { $($(#[$attr])* pub $field: $ty),* }
-        #[derive(Deserialize)]
+        #[derive(Serialize, Deserialize)]
         #[serde(deny_unknown_fields)]
         struct $wire { $($(#[$attr])* $field: $ty),* }
+        impl Serialize for $name {
+            fn serialize<S: Serializer>(&self, serializer:S) -> Result<S::Ok,S::Error> {
+                self.validate().map_err(serde::ser::Error::custom)?;
+                $wire { $($field:self.$field.clone()),* }.serialize(serializer)
+            }
+        }
         impl TryFrom<$wire> for $name {
             type Error = ValidationError;
             fn try_from(wire: $wire) -> Result<Self, Self::Error> {

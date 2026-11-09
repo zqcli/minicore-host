@@ -35,3 +35,13 @@ Strict text requests and typed receipts, connection/control facts, exact 52-meth
 - Typed message.send acceptance retains actual queue and optional known startup Fault without asserting execution or persistence.
 - Agent/Session creation requests and complete/partial/progress receipts enforce publication IDs, requested-message presence, prerequisite order and acceptance facts in both serialization directions. Ordinary create-call return validation is distinct from pending/running progress queries.
 - Added 12 positive/negative message/creation tests. Initial test exposed serde's unknown-field handling for tagged unit variants; CreateStep now has explicit strict wire validation. Final 26 total tests and clippy passed using the commands above.
+
+## Milestone 3: control facts and canonical catalog
+
+- Milestone 2 commit: `83f9a575a75ce11870a86d6ce4f016cbb53b8f66`.
+- ConnectionInfo and shared control state retain distinct meanings; explicit positive CallOptions defaults to 30000 ms and remains caller-side.
+- Shutdown/control requests and receipts enforce force-versus-draining, actual cancellation/close progress, effective pause and consistent residency facts. Manual compaction request association is represented without inventing a new operation lifecycle or unfinished result schema.
+- Canonical 52-method enum/catalog is tested against SPEC §8 in exact order; real services supply explicit implemented-method sets. All other methods remain staged and unavailable, with no fake-success handlers.
+- Typed MessageClient/MessageService templates separate request, trusted owner context and waiting options.
+- Configuration serialization validates direct Rust candidates; strict provenance rejects user/Agent-source contradictions, including tagged-unit serde edge cases.
+- 39 total tests and clippy passed. First-version endpoints, transports, live Runtime and TUI are not claimed by contract-only coverage.
