@@ -34,6 +34,7 @@ struct HostState {
     shutdown_task: Option<tokio::task::JoinHandle<()>>,
     creating: usize,
     retirement_watch: Option<tokio::task::JoinHandle<()>>,
+    retirement_epoch: u64,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
     // The generated object identity distinguishes accepted invocations. The
     // caller's operation_id is correlation data, never an idempotency key.
@@ -64,6 +65,7 @@ impl Host {
                 shutdown_task: None,
                 creating: 0,
                 retirement_watch: None,
+                retirement_epoch: 0,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),

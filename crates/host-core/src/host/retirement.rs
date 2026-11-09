@@ -6,14 +6,23 @@ impl Host {
             return;
         };
         let mut state = self.state.lock().expect("Host mutex poisoned");
+        if matches!(
+            state.lifecycle,
+            HostLifecycle::Stopping | HostLifecycle::Stopped
+        ) {
+            return;
+        }
+        // Close registration and the watcher's final exit claim share this
+        // boundary. A close cannot notify a worker that has already relinquished
+        // responsibility while its JoinHandle still reports running.
+        state.retirement_epoch = state
+            .retirement_epoch
+            .checked_add(1)
+            .expect("retirement generation exhausted");
         if state
             .retirement_watch
             .as_ref()
             .is_some_and(|task| !task.is_finished())
-            || matches!(
-                state.lifecycle,
-                HostLifecycle::Stopping | HostLifecycle::Stopped
-            )
         {
             return;
         }
@@ -27,7 +36,7 @@ impl Host {
                 let Some(host) = owner.upgrade() else {
                     return;
                 };
-                let agents = {
+                let (agents, epoch) = {
                     let state = host.state.lock().expect("Host mutex poisoned");
                     if matches!(
                         state.lifecycle,
@@ -35,7 +44,10 @@ impl Host {
                     ) {
                         return;
                     } else {
-                        state.agents.values().cloned().collect::<Vec<_>>()
+                        (
+                            state.agents.values().cloned().collect::<Vec<_>>(),
+                            state.retirement_epoch,
+                        )
                     }
                 };
                 for agent in &agents {
@@ -46,6 +58,14 @@ impl Host {
                     .iter()
                     .any(|agent| agent.memory_retirement_pending_owned())
                 {
+                    let task = {
+                        let mut state = host.state.lock().expect("Host mutex poisoned");
+                        if state.retirement_epoch != epoch {
+                            continue;
+                        }
+                        state.retirement_watch.take()
+                    };
+                    drop(task);
                     return;
                 }
                 drop(agents);

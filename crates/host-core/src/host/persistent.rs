@@ -56,6 +56,7 @@ impl Host {
                 shutdown_task: None,
                 creating: 0,
                 retirement_watch: None,
+                retirement_epoch: 0,
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 load_failures: BTreeMap::new(),

@@ -538,3 +538,72 @@ async fn host_end_reclaims_memory_bodies_without_closing_persistent_sessions() {
     );
     assert!(minicore_host_storage::DataRoot::acquire(directory.path()).is_ok());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn concurrent_async_closes_do_not_lose_retirement_handoffs() {
+    let directory = tempfile::tempdir().unwrap();
+    let (resources, entered, _, calls) = resources();
+    let host = Host::open_persistent(directory.path(), settings(), resources)
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let original = create(&host, &caller, StorageMode::Persistent).await;
+    let agent = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: original.agent_id,
+    };
+    let mut observations = Vec::new();
+    let mut targets = Vec::new();
+    for _ in 0..16 {
+        let receipt = host
+            .create_session_async(
+                &caller,
+                SessionCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    target: agent.clone(),
+                    mode: Some(StorageMode::Memory),
+                    overrides: None,
+                    initial_message: None,
+                },
+            )
+            .await
+            .unwrap();
+        let target = SessionRef {
+            agent_id: agent.agent_id.clone(),
+            session_id: receipt.session_id.unwrap(),
+        };
+        observations.push(host.session_states(&caller, &target).unwrap());
+        host.send(
+            &caller,
+            SendMessage::new(input("ordinary active memory work"), target.clone()),
+        )
+        .unwrap();
+        entered.acquire().await.unwrap().forget();
+        targets.push(target);
+    }
+    let mut closes = Vec::new();
+    for target in targets {
+        let host = host.clone();
+        let caller = caller.clone();
+        closes.push(tokio::spawn(
+            async move { host.close_session(&caller, &target) },
+        ));
+        tokio::task::yield_now().await;
+    }
+    for close in closes {
+        close.await.unwrap().unwrap();
+    }
+    until(|| {
+        host.sessions(&caller, &agent)
+            .ok()
+            .filter(|sessions| sessions.len() == 1)
+    })
+    .await;
+    assert!(
+        observations
+            .iter()
+            .all(|observer| observer.snapshot().is_err())
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 16);
+}
