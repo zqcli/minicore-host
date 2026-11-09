@@ -7,6 +7,8 @@ rust-version = "1.90"
 description = "Direct-owner Host, Agent, and Session controllers for MiniCore"
 
 [dependencies]
+minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.1.0" }
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 minicore-host-compaction = { path = "../host-compaction", version = "0.1.0" }
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
 minicore-host-storage = { path = "../host-storage", version = "0.1.0" }

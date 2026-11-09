@@ -7,6 +7,8 @@ rust-version.workspace = true
 description = "Typed in-process, stdio and authenticated WSS clients for the MiniCore Host"
 
 [dependencies]
+minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.1.0" }
+tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 minicore-host-core = { path = "../host-core", version = "0.1.0" }
 minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }

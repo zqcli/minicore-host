@@ -816,6 +816,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "minicore-host-compaction",
+ "minicore-host-diagnostics",
  "minicore-host-protocol",
  "minicore-host-provider",
  "minicore-host-storage",
@@ -829,6 +830,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -879,6 +881,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "httpdate",
+ "minicore-host-diagnostics",
  "minicore-runtime",
  "reqwest",
  "serde",
@@ -886,6 +889,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -939,6 +943,7 @@ version = "0.1.0"
 dependencies = [
  "futures-util",
  "minicore-host-core",
+ "minicore-host-diagnostics",
  "minicore-host-protocol",
  "minicore-host-provider",
  "minicore-host-resources",
@@ -951,6 +956,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tokio-tungstenite",
+ "tracing",
 ]
 
 [[package]]
