@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 //! Production HTTP/SSE transport for the Runtime `Model` capability.
 //!
 //! This crate owns neither sessions nor retries. One `start` sends one HTTP

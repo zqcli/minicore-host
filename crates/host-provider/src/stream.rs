@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{error, sse::Parser};
 
 pub(crate) const REPLAY_FORMAT: &str = "minicore-host.openai-chat.v1";
+const PARTIAL_REPLAY_FORMAT: &str = "minicore-host.openai-chat.partial.v1";
 type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
 pub(crate) struct State {
@@ -27,6 +28,7 @@ pub(crate) struct State {
     offset: usize,
     parser: Parser,
     pending: VecDeque<ModelEvent>,
+    pending_error: Option<ModelError>,
     cancellation: CancellationToken,
     deadline: Instant,
     done: bool,
@@ -58,6 +60,7 @@ impl State {
             offset: 0,
             parser: Parser::new(),
             pending: VecDeque::new(),
+            pending_error: None,
             cancellation,
             deadline,
             done: false,
@@ -75,6 +78,39 @@ impl State {
         error::stream(ModelErrorKind::InvalidProviderResponse, self.seen)
     }
 
+    fn fail(&mut self, error: ModelError) -> Result<ModelEvent, ModelError> {
+        self.pending.clear();
+        self.done = true;
+        // Runtime's typed ToolCallStart requires a valid, complete ID/name.
+        // Preserve provider fragments that cannot form one in its existing
+        // opaque partial metadata, never by inventing an executable call.
+        let headers: Vec<_> = self.tools.iter().enumerate()
+            .filter(|(_, tool)| !tool.started && (!tool.id.is_empty() || !tool.name.is_empty() || !tool.arguments.is_empty()))
+            .map(|(index, tool)| json!({"index":index, "id_fragment":tool.id, "name_fragment":tool.name, "arguments_fragment":tool.arguments}))
+            .collect();
+        if headers.is_empty() && self.finish.is_none() && self.raw_usage.is_none() {
+            return Err(error);
+        }
+        let mut metadata = json!({});
+        if !headers.is_empty() {
+            metadata["incomplete_tool_headers"] = json!(headers);
+        }
+        if let Some(reason) = &self.finish {
+            metadata["finish_reason"] = json!(reason);
+        }
+        if let Some(usage) = &self.raw_usage {
+            metadata["usage"] = usage.clone();
+        }
+        match ProviderReplay::new(PARTIAL_REPLAY_FORMAT, metadata) {
+            Ok(replay) => {
+                self.pending_error = Some(error);
+                Ok(ModelEvent::ProviderReplay { replay })
+            }
+            // Runtime's pre-existing replay structural bound is not bypassed.
+            Err(_) => Err(error),
+        }
+    }
+
     fn handle(&mut self, frame: &[u8]) -> Result<(), ModelError> {
         if frame == b"[DONE]" {
             return self.complete();
@@ -83,7 +119,6 @@ impl State {
         if value.get("error").is_some_and(|error| !error.is_null()) {
             return Err(error::provider(&value, self.seen));
         }
-        let raw_usage = value.get("usage").filter(|usage| !usage.is_null()).cloned();
         let chunk: Chunk = serde_json::from_value(value).map_err(|_| self.malformed())?;
         // Receiving a provider choice, including its role-only header, proves
         // the generation has started even before text reaches Runtime.
@@ -99,16 +134,18 @@ impl State {
             }
             self.response_id = Some(id);
         }
+        let reported_usage = chunk.usage.is_some();
         if let Some(usage) = chunk.usage {
             self.raw_usage = Some(serde_json::to_value(&usage).map_err(|_| self.malformed())?);
             let usage = usage.runtime().map_err(|_| self.malformed())?;
             if self.usage.replace(usage).is_some() {
                 return Err(self.malformed());
             }
+            self.pending.push_back(ModelEvent::Usage { usage });
         }
         if chunk.choices.is_empty() {
             // OpenAI's usage trailer is the only empty-choice data frame.
-            if self.finish.is_none() || self.usage.is_none() {
+            if self.finish.is_none() || !reported_usage {
                 return Err(self.malformed());
             }
             return Ok(());
@@ -205,6 +242,15 @@ impl State {
             return Err(self.malformed());
         }
         if let Some(arguments) = function.arguments {
+            if tool
+                .arguments
+                .len()
+                .checked_add(arguments.len())
+                .is_none_or(|size| size > MAX_JSON_BYTES)
+            {
+                return Err(self.malformed());
+            }
+            tool.arguments.push_str(&arguments);
             if !tool.started {
                 let id = ToolCallId::new(&tool.id)
                     .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
@@ -219,15 +265,6 @@ impl State {
                     tool_name: name,
                 });
             }
-            if tool
-                .arguments
-                .len()
-                .checked_add(arguments.len())
-                .is_none_or(|size| size > MAX_JSON_BYTES)
-            {
-                return Err(self.malformed());
-            }
-            tool.arguments.push_str(&arguments);
             let id = ToolCallId::new(&tool.id)
                 .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
             for part in text_chunks(&arguments) {
@@ -267,11 +304,7 @@ impl State {
             "refusal" | "refused" => ModelFinishReason::Refused,
             _ => ModelFinishReason::Unknown,
         };
-        if (!self.tools.is_empty()
-            && !matches!(
-                reason,
-                ModelFinishReason::ToolCalls | ModelFinishReason::Unknown
-            ))
+        if (!self.tools.is_empty() && reason != ModelFinishReason::ToolCalls)
             || (self.tools.is_empty() && reason == ModelFinishReason::ToolCalls)
         {
             return Err(self.malformed());
@@ -286,9 +319,6 @@ impl State {
             self.pending.push_back(ModelEvent::ToolCallEnd {
                 tool_call_id: ToolCallId::new(&tool.id).map_err(|_| self.malformed())?,
             });
-        }
-        if let Some(usage) = self.usage {
-            self.pending.push_back(ModelEvent::Usage { usage });
         }
         // Preserve the provider's exact finish reason, including future reasons
         // that map to Runtime's Unknown. No endpoint or secret belongs here.
@@ -312,6 +342,9 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
         if let Some(event) = state.pending.pop_front() {
             return Some((Ok(event), state));
         }
+        if let Some(error) = state.pending_error.take() {
+            return Some((Err(error), state));
+        }
         if state.done {
             return None;
         }
@@ -323,20 +356,26 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
             None
         };
         if let Some(error) = failure {
-            state.done = true;
-            return Some((Err(error), state));
+            let result = state.fail(error);
+            return Some((result, state));
         }
         if state.offset < state.chunk.len() {
-            let byte = state.chunk[state.offset];
-            state.offset += 1;
-            if let Some(frame) = state.parser.push(byte) {
-                if let Err(error) = state.handle(&frame) {
-                    // Never emit a fabricated Finish or partial tool end when a
-                    // frame is invalid. Earlier valid frames remain observed.
-                    state.pending.clear();
-                    state.done = true;
-                    return Some((Err(error), state));
+            let mut frame = None;
+            while state.offset < state.chunk.len() {
+                let byte = state.chunk[state.offset];
+                state.offset += 1;
+                if let Some(value) = state.parser.push(byte) {
+                    frame = Some(value);
+                    break;
                 }
+            }
+            if let Some(frame) = frame
+                && let Err(error) = state.handle(&frame)
+            {
+                // Never emit a fabricated Finish or partial tool end when a
+                // frame is invalid. Earlier valid frames remain observed.
+                let result = state.fail(error);
+                return Some((result, state));
             }
             continue;
         }
@@ -357,8 +396,8 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
                 state.offset = 0;
             }
             Err(error) => {
-                state.done = true;
-                return Some((Err(error), state));
+                let result = state.fail(error);
+                return Some((result, state));
             }
         }
     }
@@ -472,10 +511,9 @@ impl ProviderUsage {
             self.prompt_tokens,
             self.completion_tokens,
             self.total_tokens,
-        ) {
-            if input.checked_add(output) != Some(total) {
-                return Err(());
-            }
+        ) && input.checked_add(output) != Some(total)
+        {
+            return Err(());
         }
         Ok(Usage::from_optional(input, output, reasoning)
             .with_cache_read_tokens(cached)

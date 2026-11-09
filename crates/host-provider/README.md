@@ -39,19 +39,33 @@ refusal text, parallel function calls with original provider IDs, assistant/tool
 history, explicit reasoning effort, request-supplied output token limit, usage
 and finish metadata. Usage categories are normalized to Runtime's disjoint
 input/output/reasoning/cache counts; missing details remain unknown. Raw
-provider counts and the exact finish reason are retained in bounded replay
+provider numeric counts and the exact finish reason are retained in bounded replay
 metadata, including unknown future finish reasons.
 
 The adapter requires both a provider `finish_reason` and SSE `[DONE]`. EOF,
 malformed frames, incomplete tool arguments, mismatched indices and unsupported
 content fail explicitly. It never synthesizes empty success or missing tool
-arguments. Fully received frames produce partial progress before later failure.
+arguments. Fully received frames produce partial progress before later failure. Tool
+ID/name fragments that are not yet a valid Runtime ToolCallStart are retained
+in ModelPartial.provider_replay under `minicore-host.openai-chat.partial.v1` on
+failure, never made executable. An unknown finish cannot authorize tools.
 
 Runtime alone retries a model call. The adapter sends exactly one request per
 `start`; only verified connection-before-send failure or recognized pre-start
 temporary rejection has a retry hint. Role-only output already counts as
 Started. Cancellation/deadline while sending have Unknown delivery; cancellation,
 timeout or errors after provider events have Started delivery and never retry.
+
+## Validation baseline
+
+The production manifest names Runtime's original fixed API baseline. Local
+integration tests use the real Runtime handoff branch at
+`5e61c22da4b88891249902ed88184b1eca334504` via a command-line path patch. This
+adds authoritative history/partial reporting and preserves complete Unknown
+responses before failing them. The workspace integrator must carry this actual
+Runtime change; a build against the older API alone is not equivalent coverage.
+The isolated crate lock reflects that temporary patch. The final root workspace
+lock and published Runtime pin are owned by the integrator.
 
 ## Explicit remaining scope
 

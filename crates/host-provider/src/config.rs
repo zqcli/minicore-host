@@ -87,6 +87,9 @@ impl SecretApiKey {
     }
 
     pub fn from_env(name: &str) -> Result<Self, ProviderConfigError> {
+        if name.is_empty() || name.contains(['=', '\0']) {
+            return Err(ProviderConfigError::MissingCredential);
+        }
         let value = std::env::var(name).map_err(|_| ProviderConfigError::MissingCredential)?;
         Self::new(value)
     }

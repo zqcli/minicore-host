@@ -23,6 +23,28 @@ The isolated crate lock was seeded from the pinned Agent lock because crates.io 
 
 - `cargo test --locked --lib` with the same manifest and path patch: PASS, 4 tests.
 
-## Pending
+## Milestone 2: real transport and Runtime integration
 
-Real loopback HTTP/SSE integration through AgentLoop, adversarial stream/retry/cancel tests, lint/docs, and final review. Live provider, all-provider parity, and TUI integration are not claimed by this adapter milestone.
+Milestone 1 code commit: `67b89ad5c53260df177df267b076724658b82ac8`.
+
+Implemented loopback TCP HTTP/SSE fixtures that call the real `OpenAiChatModel` and actual `AgentLoop`. Coverage includes request/system/user/tool-history encoding; fragmented ID/name/arguments; parallel tools and one-time execution; text/reasoning and Unicode event splitting; disjoint usage plus exact provider counts; missing/invalid usage; all actual finish mappings; truncated/malformed stream failure; cancellation and actual socket close; no SDK retries; recognized pre-start rejection versus post-role/output errors; Retry-After; redirects; bad content type; unsupported reasoning history; and pre-cancelled no-send.
+
+Added partial preservation using Runtime's real report: incomplete tool arguments remain non-executable; ID/name fragments before a valid ToolCallStart are kept only in existing ModelPartial.provider_replay; reported usage and actual finish metadata survive later truncation. Unknown tool finish reasons never authorize tool execution.
+
+Integration discovered that original Runtime discarded a complete Unknown/no-tools response. The Runtime owner fixed this at `5e61c22da4b88891249902ed88184b1eca334504`, preserving complete AssistantHistory and callback before Failed(InvalidModelResponse). The provider's new end-to-end regression passes against that exact real Runtime revision. This is not a fake Runtime or adapter rewrite to Stop.
+
+Validation, using the same manifest and command-line Runtime path patch shown above:
+
+- `cargo fmt --check`: PASS.
+- `cargo test --locked`: PASS, 5 unit tests, 22 HTTP/SSE integration tests, 1 compiling documentation example.
+- `cargo clippy --locked --all-targets -- -D warnings`: PASS.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --locked --no-deps`: PASS.
+- `git diff --check`: PASS.
+
+## Integration handoff and limits
+
+The public constructor takes exact endpoint, provider model, actual ModelDescriptor and a nonserializable secret (or its environment-variable name). No application output cap is defaulted. Bind the resulting `Arc<dyn Model>` in the core resource resolver; do not copy credentials into public model/session values.
+
+The isolated crate manifest pins the original Runtime API baseline; its local lock reflects the command-line handoff patch. The root integrator must carry Runtime `5e61c22da4b88891249902ed88184b1eca334504` and own the final workspace dependency/lock strategy. Integration tests using ModelPartial are not claimed to compile against the unmodified earlier Runtime.
+
+Remaining beyond this assigned adapter scope: full Host→Agent→Session→provider integration (owned by parent), independent review, authorized live provider testing, Responses/all-provider parity, multimedia and opaque provider reasoning support, and unchanged TUI integration. No remote push was made.

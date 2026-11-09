@@ -201,6 +201,11 @@ pub(crate) async fn http(
             DeliveryState::NotStarted,
             true,
         ),
+        (429, _) => (
+            ModelErrorKind::ProviderUnavailable,
+            DeliveryState::Unknown,
+            false,
+        ),
         (408, _) => (ModelErrorKind::Timeout, DeliveryState::Unknown, false),
         (400..=499, _) => (
             recognized.unwrap_or(ModelErrorKind::InvalidRequest),
@@ -243,4 +248,39 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Instant> {
             })
         })?;
     now.checked_add(duration)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::header::HeaderMap;
+
+    #[test]
+    fn retry_after_honors_milliseconds_seconds_and_http_dates() {
+        for (name, value) in [("retry-after-ms", "2500"), ("retry-after", "2.5")] {
+            let mut headers = HeaderMap::new();
+            headers.insert(name, value.parse().unwrap());
+            let delay = retry_after(&headers)
+                .unwrap()
+                .checked_duration_since(Instant::now())
+                .unwrap();
+            assert!(delay > Duration::from_secs(2) && delay <= Duration::from_millis(2500));
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "retry-after",
+            httpdate::fmt_http_date(SystemTime::now() + Duration::from_secs(60))
+                .parse()
+                .unwrap(),
+        );
+        let delay = retry_after(&headers)
+            .unwrap()
+            .checked_duration_since(Instant::now())
+            .unwrap();
+        assert!(delay > Duration::from_secs(58) && delay <= Duration::from_secs(60));
+        headers.insert("retry-after", "-1".parse().unwrap());
+        assert!(retry_after(&headers).is_none());
+        headers.insert("retry-after", "NaN".parse().unwrap());
+        assert!(retry_after(&headers).is_none());
+    }
 }
