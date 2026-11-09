@@ -775,6 +775,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicore-host-resources"
+version = "0.1.0"
+dependencies = [
+ "minicore-host-core",
+ "minicore-host-protocol",
+ "minicore-host-provider",
+ "minicore-host-tools",
+ "minicore-host-workspace",
+ "minicore-runtime",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "minicore-host-storage"
 version = "0.1.0"
 dependencies = [

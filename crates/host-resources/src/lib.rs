@@ -1,0 +1,1 @@
+//! Production Host resource assembly.
