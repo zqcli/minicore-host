@@ -159,6 +159,54 @@ pub(crate) struct AnswerParams {
     pub request: InteractionAnswerRequest<InteractionAnswerData>,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UpdateAgentParams {
+    pub target: AgentRef,
+    pub operation_id: OperationId,
+    pub expected_config_revision: ConfigRevision,
+    pub changes: AgentUpdateChanges,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct UpdateSessionParams {
+    pub target: SessionRef,
+    pub operation_id: OperationId,
+    pub expected_config_revision: ConfigRevision,
+    pub changes: SessionUpdateChanges,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SetDefaultSessionParams {
+    pub target: AgentRef,
+    pub operation_id: OperationId,
+    #[serde(deserialize_with = "required_nullable")]
+    pub session_id: Option<SessionId>,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RemoveInputParams {
+    pub target: SessionRef,
+    pub operation_id: OperationId,
+    pub message_id: MessageId,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub expected_controller_revision: Option<ControllerRevision>,
+}
+fn required_nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(d)
+}
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
 macro_rules! operations {
     ($($name:ident, $method:literal, $params:ty => $output:ty, |$host:ident, $caller:ident, $p:ident| $body:block;)+) => {
         $(#[derive(Serialize, Deserialize)]
@@ -206,10 +254,16 @@ operations! {
     CreateAgent, "agent.create", AgentCreate => AgentCreateReceipt, |h, c, p| { h.create_agent_async(&c, p).await };
     GetAgent, "agent.get", AgentTarget => AgentInfo, |h, c, p| { h.agent_info(&c, &p.target) };
     ListAgents, "agent.list", Empty => Vec<AgentInfo>, |h, c, _p| { h.agents(&c) };
+    StartAgent, "agent.start", AgentOperation => AgentStartReceipt, |h, c, p| { h.agent_start(&c, &p.target, AgentStartRequest { operation_id: p.operation_id }) };
+    UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }) };
+    SetDefaultSession, "agent.set_default_session", SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
     StopAgent, "agent.stop", AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
     CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
     GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
     ListSessions, "session.list", AgentTarget => Vec<SessionInfo>, |h, c, p| { h.sessions(&c, &p.target) };
+    UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }) };
+    ListInputs, "input.list", SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
+    RemoveInput, "input.remove", RemoveInputParams => InputRemoveReceipt, |h, c, p| { h.input_remove(&c, &p.target, InputRemoveRequest { operation_id: p.operation_id, message_id: p.message_id, expected_controller_revision: p.expected_controller_revision }) };
     SessionState, "session.state", SessionTarget => SessionSnapshot, |h, c, p| { h.session_state(&c, &p.target) };
     LoadSession, "session.load", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_load(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
     UnloadSession, "session.unload", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_unload(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };

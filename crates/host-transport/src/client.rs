@@ -254,6 +254,57 @@ impl HostClient {
         )
         .await
     }
+    /// Enable only this Agent's scheduling. Explicit child pauses remain intact.
+    pub async fn start_agent(
+        &self,
+        target: AgentRef,
+        request: AgentStartRequest,
+        options: CallOptions,
+    ) -> Result<AgentStartReceipt, CallError> {
+        self.call(
+            StartAgent(AgentOperation {
+                target,
+                operation_id: request.operation_id,
+            }),
+            options,
+        )
+        .await
+    }
+    /// Persistent metadata is accepted as saving, not yet committed. Inspect
+    /// agent.get for completion; the original receipt stays unchanged.
+    pub async fn update_agent(
+        &self,
+        target: AgentRef,
+        request: AgentUpdateRequest,
+        options: CallOptions,
+    ) -> Result<AgentUpdateReceipt, CallError> {
+        self.call(
+            UpdateAgent(UpdateAgentParams {
+                target,
+                operation_id: request.operation_id,
+                expected_config_revision: request.expected_config_revision,
+                changes: request.changes,
+            }),
+            options,
+        )
+        .await
+    }
+    pub async fn set_default_session(
+        &self,
+        target: AgentRef,
+        request: AgentSetDefaultSessionRequest,
+        options: CallOptions,
+    ) -> Result<AgentSetDefaultSessionReceipt, CallError> {
+        self.call(
+            SetDefaultSession(SetDefaultSessionParams {
+                target,
+                operation_id: request.operation_id,
+                session_id: request.session_id,
+            }),
+            options,
+        )
+        .await
+    }
     pub async fn create_session(
         &self,
         request: SessionCreate,
@@ -319,6 +370,51 @@ impl SessionClient {
             .call(
                 GetSession(SessionTarget {
                     target: self.target.clone(),
+                }),
+                options,
+            )
+            .await
+    }
+    /// Changes commit as one candidate. A running Turn keeps its old binding.
+    pub async fn update(
+        &self,
+        request: SessionUpdateRequest,
+        options: CallOptions,
+    ) -> Result<SessionUpdateReceipt, CallError> {
+        self.client
+            .call(
+                UpdateSession(UpdateSessionParams {
+                    target: self.target.clone(),
+                    operation_id: request.operation_id,
+                    expected_config_revision: request.expected_config_revision,
+                    changes: request.changes,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn inputs(&self, options: CallOptions) -> Result<InputList, CallError> {
+        self.client
+            .call(
+                ListInputs(SessionTarget {
+                    target: self.target.clone(),
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn remove_input(
+        &self,
+        request: InputRemoveRequest,
+        options: CallOptions,
+    ) -> Result<InputRemoveReceipt, CallError> {
+        self.client
+            .call(
+                RemoveInput(RemoveInputParams {
+                    target: self.target.clone(),
+                    operation_id: request.operation_id,
+                    message_id: request.message_id,
+                    expected_controller_revision: request.expected_controller_revision,
                 }),
                 options,
             )
