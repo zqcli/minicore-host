@@ -31,7 +31,7 @@ impl Model for ScriptedModel {
         self.seen.lock().unwrap().push(request);
         Box::pin(async {
             Ok(Box::pin(stream::iter([
-                Ok(ModelEvent::text_delta("fixture response").unwrap()),
+                Ok(ModelEvent::text_delta("fixture response")),
                 Ok(ModelEvent::Finish {
                     reason: ModelFinishReason::Stop,
                 }),
@@ -731,7 +731,7 @@ impl Model for ReviewGateModel {
             self.finished
                 .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(Box::pin(stream::iter([
-                Ok(ModelEvent::text_delta("gate fixture finished").unwrap()),
+                Ok(ModelEvent::text_delta("gate fixture finished")),
                 Ok(ModelEvent::Finish {
                     reason: ModelFinishReason::Stop,
                 }),

@@ -211,7 +211,7 @@ impl State {
             } else {
                 ModelEvent::text_delta(chunk)
             };
-            self.pending.push_back(event.map_err(|_| self.malformed())?);
+            self.pending.push_back(event);
         }
         Ok(())
     }
@@ -282,11 +282,8 @@ impl State {
             let id = ToolCallId::new(&tool.id)
                 .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
             for part in text_chunks(&arguments) {
-                self.pending.push_back(
-                    ModelEvent::tool_call_arguments_delta(id.clone(), part).map_err(|_| {
-                        error::stream(ModelErrorKind::InvalidProviderResponse, true)
-                    })?,
-                );
+                self.pending
+                    .push_back(ModelEvent::tool_call_arguments_delta(id.clone(), part));
             }
         }
         if self.tools.iter().enumerate().any(|(other, tool)| {

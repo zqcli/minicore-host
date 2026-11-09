@@ -877,7 +877,7 @@ fn journal_write_failure_probe() {
     journal
         .accept(vec![HistoryEntry::Summary {
             summary: minicore_runtime::history::SummaryHistory {
-                content: minicore_runtime::BoundedText::new("large append".repeat(3000)).unwrap(),
+                content: minicore_runtime::Text::new("large append".repeat(3000)),
             },
         }])
         .unwrap();

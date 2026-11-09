@@ -7,7 +7,7 @@ use minicore_host_core::{BoundResources, Host, ResourceFuture, ResourceResolver}
 use minicore_host_protocol::*;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_runtime::{
-    BoundedText, ExecutionConfig, HistoryItem, LoopOptions,
+    ExecutionConfig, HistoryItem, LoopOptions, Text,
     model::{AssistantPart, Model, ModelDescriptor, ReasoningPreference as RuntimeReasoning},
     prompt::DefaultPromptProvider,
     tools::ToolSet,
@@ -31,11 +31,10 @@ impl ResourceResolver for ConfiguredResources {
     fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
         Box::pin(async move {
             self.validate(config)?;
-            let prompt = BoundedText::new(format!(
+            let prompt = Text::new(format!(
                 "Host framework rules\n{}",
                 config.role.instructions
-            ))
-            .unwrap();
+            ));
             Ok(BoundResources {
                 execution: ExecutionConfig::new(
                     self.model.clone(),

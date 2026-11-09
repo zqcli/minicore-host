@@ -49,7 +49,7 @@ impl Model for ModelFixture {
                 }
                 release.acquire_owned().await.unwrap().forget();
                 stream::iter([
-                    Ok(ModelEvent::text_delta("actual audited result").unwrap()),
+                    Ok(ModelEvent::text_delta("actual audited result")),
                     Ok(ModelEvent::Finish {
                         reason: ModelFinishReason::Stop,
                     }),
@@ -57,9 +57,7 @@ impl Model for ModelFixture {
             })
             .flatten();
             let initial = if partial {
-                vec![Ok(
-                    ModelEvent::text_delta("real partial before force").unwrap()
-                )]
+                vec![Ok(ModelEvent::text_delta("real partial before force"))]
             } else {
                 Vec::new()
             };
@@ -783,10 +781,10 @@ impl Model for ToolModelFixture {
                     tool_call_id: "audit-tool-call".parse().unwrap(),
                     tool_name: "audit_pending".parse().unwrap(),
                 }),
-                Ok(
-                    ModelEvent::tool_call_arguments_delta("audit-tool-call".parse().unwrap(), "{}")
-                        .unwrap(),
-                ),
+                Ok(ModelEvent::tool_call_arguments_delta(
+                    "audit-tool-call".parse().unwrap(),
+                    "{}",
+                )),
                 Ok(ModelEvent::ToolCallEnd {
                     tool_call_id: "audit-tool-call".parse().unwrap(),
                 }),

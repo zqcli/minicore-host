@@ -8,7 +8,7 @@ use futures_util::StreamExt;
 use minicore_runtime::{
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
     model::{DeliveryState, ModelCallContext, ModelError, ModelErrorKind},
-    value::BoundedText,
+    value::Text,
 };
 use serde_json::Value;
 use tokio::time::Instant as TokioInstant;
@@ -60,13 +60,8 @@ fn diagnostic(kind: ModelErrorKind, status: Option<u16>) -> DiagnosticSummary {
         Some(status) => format!("provider HTTP {status}: {kind:?}"),
         None => format!("provider request: {kind:?}"),
     };
-    DiagnosticSummary::new(
-        code,
-        DiagnosticCategory::Model,
-        BoundedText::new(text).expect("static diagnostic is bounded"),
-        false,
-    )
-    .expect("static diagnostic is valid")
+    DiagnosticSummary::new(code, DiagnosticCategory::Model, Text::new(text), false)
+        .expect("static diagnostic is valid")
 }
 
 fn structured_kind(value: &Value) -> Option<ModelErrorKind> {
@@ -172,7 +167,7 @@ pub(crate) async fn http(
                 if body
                     .len()
                     .checked_add(chunk.len())
-                    .is_none_or(|size| size > BoundedText::MAX_BYTES)
+                    .is_none_or(|size| size > Text::MAX_BYTES)
                 {
                     body.clear();
                     break;

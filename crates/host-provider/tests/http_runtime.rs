@@ -70,7 +70,7 @@ fn start_with_options(model: Arc<dyn Model>, tools: ToolSet, options: LoopOption
         tools,
         None,
         Arc::new(DefaultPromptProvider::new(Some(
-            minicore_runtime::BoundedText::new("Framework and role").unwrap(),
+            minicore_runtime::Text::new("Framework and role"),
         ))),
     )
     .unwrap();

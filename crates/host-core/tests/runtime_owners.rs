@@ -4,7 +4,7 @@ use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_runtime::{
-    BoundedText, ExecutionConfig, HistoryItem, LoopOptions,
+    ExecutionConfig, HistoryItem, LoopOptions, Text,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelMessage,
         ModelRequest, ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -47,7 +47,7 @@ impl Model for ScriptedModel {
         Box::pin(async move {
             let mut initial = Vec::new();
             if round.partial {
-                initial.push(Ok(ModelEvent::text_delta(round.text).unwrap()));
+                initial.push(Ok(ModelEvent::text_delta(round.text)));
             }
             let tail = stream::once(async move {
                 if let Some(gate) = round.gate {
@@ -55,7 +55,7 @@ impl Model for ScriptedModel {
                 }
                 let mut events = Vec::new();
                 if !round.partial {
-                    events.push(Ok(ModelEvent::text_delta(round.text).unwrap()));
+                    events.push(Ok(ModelEvent::text_delta(round.text)));
                 }
                 events.push(Ok(ModelEvent::Finish {
                     reason: ModelFinishReason::Stop,
@@ -89,8 +89,7 @@ impl ResourceResolver for Resources {
                     "test model is not registered",
                 ));
             }
-            let prompt =
-                BoundedText::new(format!("framework\n{}", config.role.instructions)).unwrap();
+            let prompt = Text::new(format!("framework\n{}", config.role.instructions));
             Ok(BoundResources {
                 execution: ExecutionConfig::new(
                     Arc::clone(&self.model),
@@ -827,7 +826,7 @@ impl Model for FailOnceModel {
         self.seen.send(request).unwrap();
         let first = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0;
         Box::pin(async move {
-            let mut events = vec![Ok(ModelEvent::text_delta("partial actual output").unwrap())];
+            let mut events = vec![Ok(ModelEvent::text_delta("partial actual output"))];
             if !first {
                 events.push(Ok(ModelEvent::Finish {
                     reason: ModelFinishReason::Stop,

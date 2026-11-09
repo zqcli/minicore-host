@@ -11,8 +11,8 @@ mod retirement;
 pub(crate) use retirement::SessionShutdownStatus;
 mod persistent;
 use minicore_runtime::{
-    AgentLoop, BoundedText, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory,
-    LoopId, LoopInputs, LoopOptions, LoopOutcome, LoopReport, LoopRequest, UserInput,
+    AgentLoop, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory, LoopId,
+    LoopInputs, LoopOptions, LoopOutcome, LoopReport, LoopRequest, Text, UserInput,
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
 };
 use std::collections::{BTreeMap, VecDeque};
@@ -1350,8 +1350,7 @@ impl LoopHistory for SessionHistory {
                 DiagnosticSummary::new(
                     DiagnosticCode::ContextFailed,
                     DiagnosticCategory::Context,
-                    BoundedText::new("Session could not confirm its history save boundary")
-                        .expect("static diagnostic"),
+                    Text::new("Session could not confirm its history save boundary"),
                     false,
                 )
                 .expect("static diagnostic")

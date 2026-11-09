@@ -47,7 +47,7 @@ impl Model for FixtureModel {
         self.started.add_permits(1);
         let finish = Arc::clone(&self.finish);
         Box::pin(async move {
-            let first = stream::iter([Ok(ModelEvent::text_delta("fixture output").unwrap())]);
+            let first = stream::iter([Ok(ModelEvent::text_delta("fixture output"))]);
             let last = stream::once(async move {
                 finish.acquire_owned().await.unwrap().forget();
                 Ok(ModelEvent::Finish {

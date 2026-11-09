@@ -41,7 +41,7 @@ impl Model for ModelFixture {
             let tail = stream::once(async move {
                 release.acquire_owned().await.unwrap().forget();
                 stream::iter([
-                    Ok(ModelEvent::text_delta("actual audited result").unwrap()),
+                    Ok(ModelEvent::text_delta("actual audited result")),
                     Ok(ModelEvent::Finish {
                         reason: ModelFinishReason::Stop,
                     }),

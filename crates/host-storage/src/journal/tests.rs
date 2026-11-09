@@ -1,7 +1,7 @@
 use super::*;
 use crate::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData, SessionRecord};
 use minicore_host_protocol::{AgentConfig, AgentId, HostId, SessionConfig, StorageMode};
-use minicore_runtime::{BoundedText, history::SummaryHistory};
+use minicore_runtime::{Text, history::SummaryHistory};
 
 fn fixture() -> (tempfile::TempDir, SessionStore) {
     let temp = tempfile::tempdir().unwrap();
@@ -49,7 +49,7 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
 fn entry(text: &str) -> HistoryEntry {
     HistoryEntry::Summary {
         summary: SummaryHistory {
-            content: BoundedText::new(text).unwrap(),
+            content: Text::new(text),
         },
     }
 }

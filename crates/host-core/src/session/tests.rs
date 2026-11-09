@@ -108,7 +108,7 @@ fn model(scripts: Vec<Vec<ModelEvent>>) -> Arc<FixtureModel> {
 }
 fn final_events(text: &str) -> Vec<ModelEvent> {
     vec![
-        ModelEvent::text_delta(text).unwrap(),
+        ModelEvent::text_delta(text),
         ModelEvent::Finish {
             reason: ModelFinishReason::Stop,
         },
@@ -250,7 +250,7 @@ async fn real_files_confirm_response_tool_and_turn_boundaries_before_continuatio
             tool_call_id: call_id,
             tool_name: "count".parse().unwrap(),
         },
-        ModelEvent::tool_call_arguments_delta("tool-original-id".parse().unwrap(), "{}").unwrap(),
+        ModelEvent::tool_call_arguments_delta("tool-original-id".parse().unwrap(), "{}"),
         ModelEvent::ToolCallEnd {
             tool_call_id: "tool-original-id".parse().unwrap(),
         },
@@ -337,9 +337,7 @@ async fn real_files_confirm_response_tool_and_turn_boundaries_before_continuatio
 
 #[tokio::test]
 async fn real_partial_is_saved_as_partial_without_fabricated_assistant() {
-    let model = model(vec![vec![
-        ModelEvent::text_delta("unfinished actual text").unwrap(),
-    ]]);
+    let model = model(vec![vec![ModelEvent::text_delta("unfinished actual text")]]);
     let fixture = setup(
         Arc::new(Resources {
             model,
@@ -397,9 +395,9 @@ impl HistoryBackend for FailedSave {
 }
 #[tokio::test]
 async fn failed_save_retains_report_and_primary_failure_without_reappend_or_success() {
-    let model = model(vec![vec![
-        ModelEvent::text_delta("partial before primary stream failure").unwrap(),
-    ]]);
+    let model = model(vec![vec![ModelEvent::text_delta(
+        "partial before primary stream failure",
+    )]]);
     let captured = Arc::new(Mutex::new(None));
     let out = captured.clone();
     let fixture = setup(
@@ -715,8 +713,7 @@ async fn resume_confirms_original_zero_or_full_write_without_second_model_or_too
                 tool_call_id: call_id,
                 tool_name: "count".parse().unwrap(),
             },
-            ModelEvent::tool_call_arguments_delta("must-not-execute".parse().unwrap(), "{}")
-                .unwrap(),
+            ModelEvent::tool_call_arguments_delta("must-not-execute".parse().unwrap(), "{}"),
             ModelEvent::ToolCallEnd {
                 tool_call_id: "must-not-execute".parse().unwrap(),
             },
@@ -776,9 +773,9 @@ async fn resume_confirms_original_zero_or_full_write_without_second_model_or_too
 #[tokio::test]
 async fn report_partial_and_terminal_each_continue_once_and_keep_primary_failure() {
     use crate::backend::TestAppendFault::{FullWrite, NoWrite};
-    let model = model(vec![vec![
-        ModelEvent::text_delta("actual unfinished output").unwrap(),
-    ]]);
+    let model = model(vec![vec![ModelEvent::text_delta(
+        "actual unfinished output",
+    )]]);
     let (fixture, backend, _) = failure_setup(
         model.clone(),
         ToolSet::default(),
@@ -995,8 +992,7 @@ impl Model for PartialUntilCancelled {
             Ok(Box::pin(
                 futures_util::stream::iter([Ok(ModelEvent::text_delta(
                     "actual cancellation partial",
-                )
-                .unwrap())])
+                ))])
                 .chain(pending),
             ) as ModelStream)
         })
@@ -1050,7 +1046,7 @@ async fn confirmed_tool_execution_is_not_repeated_after_its_save_fails() {
             tool_call_id: "executed-once".parse().unwrap(),
             tool_name: "count".parse().unwrap(),
         },
-        ModelEvent::tool_call_arguments_delta("executed-once".parse().unwrap(), "{}").unwrap(),
+        ModelEvent::tool_call_arguments_delta("executed-once".parse().unwrap(), "{}"),
         ModelEvent::ToolCallEnd {
             tool_call_id: "executed-once".parse().unwrap(),
         },
@@ -1139,7 +1135,7 @@ fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
         Arc::new(MemoryHistory),
         vec![HistoryItem::Summary(
             minicore_runtime::history::SummaryHistory {
-                content: BoundedText::new("provided memory fixture context").unwrap(),
+                content: Text::new("provided memory fixture context"),
             },
         )],
         Arc::new(AtomicBool::new(true)),
