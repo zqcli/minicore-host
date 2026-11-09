@@ -112,6 +112,17 @@ impl Clients {
             pipe,
         }
     }
+    /// A deliberate disconnect may close the response pipe before an already
+    /// dispatched query writes its late reply. Only that known pipe outcome is
+    /// expected; ordinary completed-call teardown below remains strict.
+    pub async fn finish_disconnected(self) {
+        for client in &self.clients {
+            client.close();
+        }
+        if let Err(error) = self.pipe.await.unwrap() {
+            assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+        }
+    }
     pub async fn finish(self) {
         for client in &self.clients {
             client.close();

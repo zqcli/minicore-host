@@ -154,3 +154,28 @@ WSS. This is a normal source-consistency bug, not a hostile-filesystem scenario.
 The route correction is committed separately before consuming the producer's
 independent tool-finish fix `4f0988b` -> `e330db7` -> `0a4f90d`. A full fixed
 combined gate and independent rereview remain required.
+
+## Combined correction and teardown fixture
+
+- Consumed production fixes in order: `4f0988b` -> `c6e171d`, `e330db7` ->
+  `58408d5`, `0a4f90d` -> `320af7c`. There were no code conflicts. Task 042's
+  earlier document had not been consumed here, so the documentation pick had a
+  modify/delete conflict; the producer's complete unchanged blob was retained.
+- At `320af7cf1c42ef92dda03844e343378bf05539e7`, full `./scripts/check.sh`
+  passed; independent inventory counted **684 unique cases (114 unit + 570
+  integration) plus 4 doctests**. Logs are
+  `/workspace/shared/workspace-routing-combined-fixed-gate.log` and
+  `/workspace/shared/workspace-routing-combined-fixed-inventory.log`.
+- Recompiled the two unchanged reviewer probes against that exact combined
+  source. Both passed. Their source SHA remains unchanged and exact Cargo
+  compiler artifacts/argv are retained in the source-fix artifact directory.
+- The sixth repetition exposed a test teardown error after all business and
+  source assertions had passed: the intentional disconnect test closes the
+  stdio response pipe while late query replies are outstanding. `serve_stdio`
+  can correctly report `BrokenPipe`, as already documented by this adapter,
+  but the generic fixture required success. The failure is preserved in
+  `/workspace/shared/workspace-routing-combined-fixed-repeat.log`.
+- A dedicated fixture teardown now permits only success or that exact
+  `BrokenPipe` outcome for the deliberate-disconnect case. Ordinary completed
+  query teardown remains strict. No production behavior or reviewer assertion
+  was changed. A fresh final-source gate and repetitions follow.

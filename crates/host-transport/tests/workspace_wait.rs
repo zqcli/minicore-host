@@ -172,7 +172,7 @@ fn query_timeout_disconnect_and_context_cancellation_leave_real_turn_running() {
             );
             finish.add_permits(1);
             settled(&observer, 1).await;
-            peers.finish().await;
+            peers.finish_disconnected().await;
         });
 }
 
