@@ -87,3 +87,29 @@ CARGO_TARGET_DIR=/workspace/shared/minicore-host-workspace-routing-target
 Final exact source hash, full gate, inventory and repeated results follow after
 source freeze. Independent review and parent aggregate integration remain
 separate gates; no publication is authorized by this task record.
+
+## Fixed routing candidate validation
+
+- Owner/Fault source commit: `038b3fd09da55c22326e70ab43687a0f47f69269`.
+- Transport/tests/source checkpoint:
+  `9ec99d852076749717421630969719025863317f`.
+- At that fixed checkpoint, `./scripts/check.sh` passed formatting, strict
+  workspace Clippy, all target tests, 4 doctests and strict rustdoc. Log:
+  `/workspace/shared/workspace-routing-gate-9ec99d8.log`.
+- `cargo test --workspace --all-targets --locked -- --list` independently lists
+  **677 unique target/test pairs: 114 unit + 563 integration**. This includes
+  task 044's 8 integration cases and 1 unit case. Storage subprocess executions
+  are not additional test cases. Inventory:
+  `/workspace/shared/workspace-routing-inventory-9ec99d8.log`.
+- Repeated the eight canonical routing cases ten times with
+  `for iteration in $(seq 1 10); do cargo test -p minicore-host-transport --test
+  workspace_queries --test workspace_tool_changes --test workspace_wait --locked;
+  done`: **80/80 passed**. Log:
+  `/workspace/shared/workspace-routing-repeat-9ec99d8.log`.
+- This is a routing candidate pass, not approval of the entire dependency tree:
+  independent production-tool review found that cancellation could publish
+  toolcall.finished before the actual worker tail was drained. The original
+  producer owns that repair. This worktree must consume its exact reviewed
+  commits and rerun the full fixed-source gate before final combined approval.
+  Do not treat the green aggregate above as evidence that the known issue is
+  absent. Workspace routing does not change tool finishing or cleanup ownership.
