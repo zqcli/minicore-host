@@ -167,15 +167,7 @@ impl Host {
                     .cloned()
                     .map(Receipt::AgentCreate)
                     .collect::<Vec<_>>();
-                receipts.extend(
-                    state
-                        .controls
-                        .get(operation)
-                        .into_iter()
-                        .flatten()
-                        .cloned()
-                        .map(Receipt::HostShutdown),
-                );
+                receipts.extend(state.controls.get(operation).into_iter().flatten().cloned());
                 (receipts, state.agents.values().cloned().collect::<Vec<_>>())
             };
             receipts.extend(self.configuration.receipts_owned(operation));

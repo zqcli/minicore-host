@@ -82,6 +82,7 @@ impl AgentOwner {
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
+                    deletion: None,
                     id: record.id,
                     host_id: record.host_id,
                     name: record.data.name,
@@ -112,6 +113,9 @@ impl AgentOwner {
                 closing: Default::default(),
                 close_tasks: BTreeMap::new(),
                 close_running: Default::default(),
+                deleting_sessions: Default::default(),
+                delete_tasks: BTreeMap::new(),
+                deleting: false,
             }),
         })
     }

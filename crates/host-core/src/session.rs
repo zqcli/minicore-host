@@ -9,6 +9,7 @@ mod compaction;
 pub use compaction::{BoundCompactionResources, CompactionResourceFuture};
 mod context;
 mod controls;
+mod deletion;
 mod history;
 mod history_read;
 mod interaction;
@@ -308,6 +309,8 @@ struct SessionState {
     releasing: bool,
     released: bool,
     reclaimed: bool,
+    deleting: bool,
+    deletion: Option<SessionDeletionState>,
     block_reason: Option<Fault>,
     executor: Option<tokio::runtime::Handle>,
     driver_running: bool,
@@ -412,6 +415,8 @@ impl SessionController {
             releasing: false,
             released: false,
             reclaimed: false,
+            deleting: false,
+            deletion: None,
             block_reason: None,
             executor: tokio::runtime::Handle::try_current().ok(),
             driver_running: false,
@@ -485,6 +490,7 @@ impl SessionController {
                     .or_else(|| state.last_compaction.clone())
                     .map(Box::new),
                 saving: state.saving,
+                deletion: state.deletion.clone(),
                 metadata_saving: state.record_work.as_ref().is_some_and(|work| work.running),
                 metadata_fault: state
                     .record_work
@@ -523,6 +529,12 @@ impl SessionController {
         }
     }
     fn available(state: &SessionState) -> Result<(), Fault> {
+        if state.deleting {
+            return Err(Fault::new(
+                FaultKind::SessionBusy,
+                "Session deletion has fenced new controls",
+            ));
+        }
         if state.reclaimed {
             return Err(Fault::new(
                 FaultKind::AgentSessionNotFound,

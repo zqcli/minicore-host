@@ -6,6 +6,7 @@ use minicore_host_storage::{AgentRecord, AgentStore};
 mod collaboration;
 mod controls;
 mod create;
+mod deletion;
 mod metadata;
 mod persistent;
 mod retirement;
@@ -50,6 +51,9 @@ struct AgentState {
     closing: std::collections::BTreeSet<SessionId>,
     close_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     close_running: std::collections::BTreeSet<SessionId>,
+    deleting_sessions: std::collections::BTreeSet<SessionId>,
+    delete_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
+    deleting: bool,
 }
 struct SynchronousCreation<'a> {
     owner: &'a AgentOwner,
@@ -86,6 +90,7 @@ impl AgentOwner {
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
+                    deletion: None,
                     id,
                     host_id,
                     name,
@@ -116,6 +121,9 @@ impl AgentOwner {
                 closing: Default::default(),
                 close_tasks: BTreeMap::new(),
                 close_running: Default::default(),
+                deleting_sessions: Default::default(),
+                delete_tasks: BTreeMap::new(),
+                deleting: false,
             }),
         })
     }

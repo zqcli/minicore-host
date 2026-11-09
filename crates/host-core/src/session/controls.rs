@@ -424,19 +424,13 @@ impl SessionController {
         self.handoff_delegation_owned();
         Ok((result, receipt))
     }
-    pub(super) fn close_owned(
-        &self,
-        operation: OperationId,
-    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>), Fault> {
-        self.start_scope_cleanup_owned();
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        Self::available(&state)?;
-        let handle = if state.lifecycle == SessionLifecycle::Closed {
+    pub(super) fn apply_close_locked(&self, state: &mut SessionState) -> Option<LoopHandle> {
+        if state.lifecycle == SessionLifecycle::Closed {
             None
         } else {
             state.lifecycle = SessionLifecycle::Closing;
-            Self::cancel_compaction_locked(&mut state);
-            clear_inbox(&mut state);
+            Self::cancel_compaction_locked(state);
+            clear_inbox(state);
             let handle = state.active.as_mut().and_then(|active| {
                 if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
                     active._activation.expire();
@@ -444,10 +438,19 @@ impl SessionController {
                 }
                 active.handle.clone()
             });
-            Self::finish_memory_close(&mut state);
-            self.publish(&mut state);
+            Self::finish_memory_close(state);
+            self.publish(state);
             handle
-        };
+        }
+    }
+    pub(super) fn close_owned(
+        &self,
+        operation: OperationId,
+    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>), Fault> {
+        self.start_scope_cleanup_owned();
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        Self::available(&state)?;
+        let handle = self.apply_close_locked(&mut state);
         let receipt = SessionCloseReceipt {
             kind: SessionCloseKind::SessionClose,
             host_id: self.host_id.clone(),

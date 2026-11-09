@@ -34,10 +34,12 @@ impl AgentOwner {
             state.host_shutdown_phase = phase;
             if force {
                 self.enabled.store(false, Ordering::SeqCst);
-                if !matches!(
-                    state.info.lifecycle,
-                    AgentLifecycle::Retiring | AgentLifecycle::Retired
-                ) {
+                if !state.deleting
+                    && !matches!(
+                        state.info.lifecycle,
+                        AgentLifecycle::Retiring | AgentLifecycle::Retired
+                    )
+                {
                     state.info.lifecycle = AgentLifecycle::Stopping;
                 }
             }
@@ -64,7 +66,9 @@ impl AgentOwner {
                     && !state.retirement_joining
                     && state.creation_committed
                     && state.record_work.is_none()
-                    && state.close_running.is_empty(),
+                    && state.close_running.is_empty()
+                    && !state.deleting
+                    && state.deleting_sessions.is_empty(),
                 fault,
             )
         };

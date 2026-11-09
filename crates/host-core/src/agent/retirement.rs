@@ -10,7 +10,9 @@ impl AgentOwner {
             state
                 .closing
                 .iter()
-                .filter(|id| !state.close_running.contains(*id))
+                .filter(|id| {
+                    !state.close_running.contains(*id) && !state.deleting_sessions.contains(*id)
+                })
                 .filter_map(|id| state.sessions.get(id))
                 .cloned()
                 .collect::<Vec<_>>()
@@ -29,7 +31,9 @@ impl AgentOwner {
     async fn join_empty_owner_tasks(&self) {
         let tasks = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
-            if state.info.mode != StorageMode::Memory
+            if state.deleting
+                || !state.deleting_sessions.is_empty()
+                || state.info.mode != StorageMode::Memory
                 || !state.creation_committed
                 || !state.sessions.is_empty()
                 || state.creating != 0
@@ -91,7 +95,9 @@ impl AgentOwner {
     pub(crate) fn try_retire_empty_owned(&self) {
         let tasks = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
-            if state.info.mode != StorageMode::Memory
+            if state.deleting
+                || !state.deleting_sessions.is_empty()
+                || state.info.mode != StorageMode::Memory
                 || !state.creation_committed
                 || !state.sessions.is_empty()
                 || state.creating != 0

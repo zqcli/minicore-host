@@ -125,7 +125,7 @@ impl SessionController {
             fault,
         }
     }
-    fn work_settled(state: &SessionState) -> bool {
+    pub(super) fn work_settled(state: &SessionState) -> bool {
         state.active.is_none()
             && state.compaction.is_none()
             && !state.preparing
@@ -250,7 +250,7 @@ impl SessionController {
         self.reclaim_bodies();
         Ok(())
     }
-    fn reclaim_bodies(&self) {
+    pub(super) fn reclaim_bodies(&self) {
         let retired = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             state.reclaimed = true;
@@ -276,16 +276,19 @@ impl SessionController {
         };
         drop(retired);
     }
-    async fn release_resources(self: &Arc<Self>, closed_memory: bool) -> Result<(), Fault> {
+    pub(super) async fn release_resources(
+        self: &Arc<Self>,
+        closed_memory: bool,
+    ) -> Result<(), Fault> {
         let tasks = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if closed_memory {
-                if state.info.mode != StorageMode::Memory
+                if (state.info.mode != StorageMode::Memory && !state.deleting)
                     || state.lifecycle != SessionLifecycle::Closed
                 {
                     return Err(Fault::new(
                         FaultKind::SessionBusy,
-                        "only a closed memory Session can be reclaimed",
+                        "release requires closed memory or explicitly deleted persistent ownership",
                     ));
                 }
             } else if !state.host_draining

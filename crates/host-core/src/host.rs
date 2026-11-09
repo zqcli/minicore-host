@@ -12,6 +12,7 @@ mod configuration;
 mod context;
 mod controls;
 mod create;
+mod deletion;
 mod metadata;
 mod network;
 mod observation;
@@ -52,7 +53,9 @@ struct HostState {
     // The generated object identity distinguishes accepted invocations. The
     // caller's operation_id is correlation data, never an idempotency key.
     creations: BTreeMap<AgentId, AgentCreateReceipt>,
-    controls: BTreeMap<OperationId, Vec<HostShutdownReceipt>>,
+    controls: BTreeMap<OperationId, Vec<Receipt>>,
+    deleting: usize,
+    delete_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
     load_failures: BTreeMap<AgentId, Fault>,
     create_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
 }
@@ -104,6 +107,8 @@ impl Host {
                 agents: BTreeMap::new(),
                 creations: BTreeMap::new(),
                 controls: BTreeMap::new(),
+                deleting: 0,
+                delete_tasks: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
             }),

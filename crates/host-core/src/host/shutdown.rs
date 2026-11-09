@@ -71,7 +71,7 @@ impl Host {
                 .controls
                 .entry(receipt.operation_id.clone())
                 .or_default()
-                .push(receipt.clone());
+                .push(Receipt::HostShutdown(receipt.clone()));
             Ok((
                 (
                     state.lifecycle,
@@ -106,7 +106,7 @@ impl Host {
                 (
                     state.lifecycle,
                     state.agents.values().cloned().collect::<Vec<_>>(),
-                    state.creating,
+                    state.creating + state.deleting,
                     state.creations.values().find_map(|receipt| {
                         creation_save_fault(&receipt.result.steps.agent)
                             .or_else(|| creation_save_fault(&receipt.result.steps.session))

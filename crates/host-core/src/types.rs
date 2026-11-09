@@ -14,6 +14,8 @@ pub struct HostInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion: Option<AgentDeletionState>,
     pub id: AgentId,
     pub host_id: HostId,
     pub name: String,
@@ -64,6 +66,8 @@ pub struct MessageRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionStateData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deletion: Option<SessionDeletionState>,
     pub mode: StorageMode,
     pub controller_revision: ControllerRevision,
     pub lifecycle: SessionLifecycle,
