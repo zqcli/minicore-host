@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -16,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Debug)]
 pub struct Captured {
+    pub received_at: Instant,
     pub head: String,
     pub body: Value,
 }
@@ -103,6 +105,10 @@ impl Fixture {
         }
     }
 
+    pub fn request_count(&self) -> usize {
+        self.requests.lock().unwrap().len()
+    }
+
     pub async fn finish(self) -> Vec<Captured> {
         self.shutdown.cancel();
         self.join.await.unwrap();
@@ -137,6 +143,7 @@ async fn read_request(socket: &mut TcpStream) -> Captured {
         bytes.extend_from_slice(&chunk[..count]);
     }
     Captured {
+        received_at: Instant::now(),
         head,
         body: serde_json::from_slice(&bytes[boundary..boundary + len]).unwrap(),
     }

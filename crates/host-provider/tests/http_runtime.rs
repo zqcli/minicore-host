@@ -3,12 +3,12 @@ mod support;
 use futures_util::StreamExt;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_runtime::{
-    AgentLoop, ExecutionConfig, HistoryItem, LoopEvent, LoopId, LoopInputs, LoopOptions,
-    LoopOutcome, LoopReport, LoopRequest, UserInput,
+    AgentLoop, CancelReason, ExecutionConfig, HistoryItem, LoopEvent, LoopId, LoopInputs,
+    LoopOptions, LoopOutcome, LoopReport, LoopRequest, UserInput,
     model::{
-        AssistantPart, DeliveryState, Model, ModelCallContext, ModelDescriptor, ModelErrorKind,
-        ModelEvent, ModelFinishReason, ModelLimits, ModelMessage, ModelRequest,
-        ReasoningPreference, RetryHint,
+        AssistantPart, DeliveryState, Model, ModelCallContext, ModelDescriptor, ModelError,
+        ModelErrorKind, ModelEvent, ModelFinishReason, ModelLimits, ModelMessage, ModelRequest,
+        ModelStartFuture, ReasoningPreference, RetryHint,
     },
     prompt::DefaultPromptProvider,
     tools::{
@@ -23,7 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use support::{Fixture, Reply};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 use tokio_util::sync::CancellationToken;
 
 fn frame(delta: Value, finish: Option<&str>) -> String {
@@ -58,6 +58,12 @@ impl LoopInputs for NoInputs {
     }
 }
 fn start(model: Arc<dyn Model>, tools: ToolSet) -> AgentLoop {
+    let mut options = LoopOptions::default_checked().unwrap();
+    options.model_retry_base_delay = Duration::from_millis(1);
+    options.model_timeout = Duration::from_secs(3);
+    start_with_options(model, tools, options)
+}
+fn start_with_options(model: Arc<dyn Model>, tools: ToolSet, options: LoopOptions) -> AgentLoop {
     let config = ExecutionConfig::new(
         model,
         ReasoningPreference::Auto,
@@ -68,9 +74,6 @@ fn start(model: Arc<dyn Model>, tools: ToolSet) -> AgentLoop {
         ))),
     )
     .unwrap();
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_retry_base_delay = Duration::from_millis(1);
-    options.model_timeout = Duration::from_secs(3);
     AgentLoop::start(
         LoopRequest::new(
             Arc::from([]),
@@ -876,6 +879,392 @@ async fn unknown_tool_finish_does_not_authorize_tool_execution() {
             .unwrap()
             .payload()["finish_reason"],
         "future_interrupted_reason"
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn sse_long_retry_after_prevents_runtime_from_retrying_early() {
+    let fixture = Fixture::start(vec![
+        Reply::Full {
+            status: 200,
+            content_type: "text/event-stream",
+            headers: "Retry-After: 60\r\n".to_owned(),
+            body: format!("data: {}\n\n", json!({"error":{"type":"rate_limit_error"}})),
+            fragment: 7,
+        },
+        Reply::sse(final_text("must not happen")),
+    ])
+    .await;
+    let mut options = LoopOptions::default_checked().unwrap();
+    options.model_retry_base_delay = Duration::from_millis(1);
+    // A 60s delay fits this deadline but exceeds Runtime's 30s wait limit.
+    // This must stop, not clamp the header or silently fall back to 1ms.
+    options.model_timeout = Duration::from_secs(120);
+    let report = finish(start_with_options(
+        provider(&fixture.endpoint),
+        ToolSet::default(),
+        options,
+    ))
+    .await;
+    let requests = fixture.finish().await;
+    assert_eq!(
+        requests.len(),
+        1,
+        "Retry-After: 60 must stop retries; request gaps: {:?}",
+        requests
+            .windows(2)
+            .map(|pair| pair[1].received_at.duration_since(pair[0].received_at))
+            .collect::<Vec<_>>()
+    );
+    let error = failure(&report);
+    assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+    assert_eq!(error.delivery(), DeliveryState::NotStarted);
+    assert!(
+        matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(30))
+    );
+    assert!(error.diagnostic().message().as_ref().contains("HTTP 200"));
+    assert_eq!(report.requests, 1);
+    assert!(report.partial.is_none());
+}
+
+fn sse_rejection(headers: &str, error: Value, prefix: &str) -> Reply {
+    Reply::Full {
+        status: 200,
+        content_type: "text/event-stream",
+        headers: headers.to_owned(),
+        body: format!("{prefix}data: {error}\n\n"),
+        fragment: 7,
+    }
+}
+
+// Test-only observation, not a replacement Model: every call delegates the
+// unchanged request/context to the real provider and returns its exact result.
+// Notification occurs in the same poll as Runtime receives the rejection; on
+// the current-thread test executor the driver reaches its wait before the test
+// wakes. This permits cancellation/time advancement without guessed sleeps.
+struct TestObservedProvider {
+    inner: Arc<OpenAiChatModel>,
+    rejected: mpsc::UnboundedSender<ModelError>,
+}
+impl Model for TestObservedProvider {
+    fn descriptor(&self) -> &ModelDescriptor {
+        self.inner.descriptor()
+    }
+    fn start<'a>(
+        &'a self,
+        request: ModelRequest,
+        context: ModelCallContext,
+    ) -> ModelStartFuture<'a> {
+        Box::pin(async move {
+            let result = self.inner.start(request, context).await;
+            if let Err(error) = &result {
+                let _ = self.rejected.send(error.clone());
+            }
+            result
+        })
+    }
+}
+fn observe_provider(endpoint: &str) -> (Arc<dyn Model>, mpsc::UnboundedReceiver<ModelError>) {
+    let (rejected, receiver) = mpsc::unbounded_channel();
+    (
+        Arc::new(TestObservedProvider {
+            inner: provider(endpoint),
+            rejected,
+        }),
+        receiver,
+    )
+}
+async fn rejection(receiver: &mut mpsc::UnboundedReceiver<ModelError>) -> ModelError {
+    tokio::time::timeout(Duration::from_secs(3), receiver.recv())
+        .await
+        .expect("real HTTP provider did not return a rejection")
+        .expect("provider observer ended")
+}
+
+#[tokio::test]
+async fn sse_retry_after_and_exponential_backoff_are_actual_request_lower_bounds() {
+    for (headers, base, minimum) in [
+        ("Retry-After: 1\r\n", 1, 1_000),
+        ("Retry-After-ms: 80\r\n", 1, 80),
+        ("Retry-After-ms: NaN\r\nRetry-After: 0.08\r\n", 1, 80),
+        ("Retry-After: 0.001\r\n", 80, 80),
+    ] {
+        let fixture = Fixture::start(vec![
+            sse_rejection(
+                headers,
+                json!({"error":{"type":"overloaded_error"}}),
+                ": keepalive\n\n",
+            ),
+            Reply::sse(final_text("retried once")),
+        ])
+        .await;
+        let mut options = LoopOptions::default_checked().unwrap();
+        options.model_retry_base_delay = Duration::from_millis(base);
+        options.model_timeout = Duration::from_secs(3);
+        let report = finish(start_with_options(
+            provider(&fixture.endpoint),
+            ToolSet::default(),
+            options,
+        ))
+        .await;
+        assert_eq!(report.outcome, LoopOutcome::Completed);
+        assert_eq!(report.requests, 1, "retries are one logical model request");
+        let requests = fixture.finish().await;
+        assert_eq!(requests.len(), 2);
+        let elapsed = requests[1]
+            .received_at
+            .duration_since(requests[0].received_at);
+        assert!(
+            elapsed >= Duration::from_millis(minimum),
+            "{headers:?}: retry arrived after {elapsed:?}, before the {minimum}ms lower bound"
+        );
+        assert_eq!(requests[0].body, requests[1].body);
+    }
+}
+
+#[tokio::test]
+async fn sse_invalid_or_absent_retry_after_keeps_runtime_backoff() {
+    for headers in [
+        "",
+        "Retry-After: -1\r\n",
+        "Retry-After: NaN\r\n",
+        "Retry-After: invalid\r\n",
+        "Retry-After-ms: inf\r\n",
+        "Retry-After: Thu, 01 Jan 1970 00:00:00 GMT\r\n",
+    ] {
+        let fixture = Fixture::start(vec![
+            sse_rejection(headers, json!({"error":{"type":"rate_limit_error"}}), ""),
+            Reply::sse(final_text("normal bounded retry")),
+        ])
+        .await;
+        let (model, mut observed) = observe_provider(&fixture.endpoint);
+        let mut options = LoopOptions::default_checked().unwrap();
+        options.model_retry_base_delay = Duration::from_millis(40);
+        options.model_timeout = Duration::from_secs(3);
+        let agent = start_with_options(model, ToolSet::default(), options);
+        let error = rejection(&mut observed).await;
+        assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+        assert_eq!(error.delivery(), DeliveryState::NotStarted);
+        assert_eq!(
+            *error.retry_hint(),
+            RetryHint::Retryable { retry_after: None }
+        );
+        assert!(error.diagnostic().message().as_ref().contains("HTTP 200"));
+        assert_eq!(finish(agent).await.outcome, LoopOutcome::Completed);
+        let requests = fixture.finish().await;
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests[1]
+                .received_at
+                .duration_since(requests[0].received_at)
+                >= Duration::from_millis(40)
+        );
+    }
+}
+
+#[tokio::test]
+async fn sse_retry_after_does_not_authorize_unknown_or_permanent_rejections() {
+    let cases = [
+        (
+            json!({"error":{"type":"future_error","message":"rate_limit_error"}}),
+            ModelErrorKind::ProviderUnavailable,
+            DeliveryState::Unknown,
+        ),
+        (
+            json!({"error":{"type":"rate_limit_error","code":"insufficient_quota"}}),
+            ModelErrorKind::QuotaExceeded,
+            DeliveryState::NotStarted,
+        ),
+        (
+            json!({"error":{"type":"authentication_error"}}),
+            ModelErrorKind::AuthRejected,
+            DeliveryState::NotStarted,
+        ),
+        (
+            json!({"error":{"type":"invalid_request_error"}}),
+            ModelErrorKind::InvalidRequest,
+            DeliveryState::NotStarted,
+        ),
+    ];
+    for (body, kind, delivery) in cases {
+        let fixture = Fixture::start(vec![
+            sse_rejection("Retry-After: 0\r\n", body, ""),
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let error = failure(&report);
+        assert_eq!(error.kind(), kind);
+        assert_eq!(error.delivery(), delivery);
+        assert_eq!(*error.retry_hint(), RetryHint::Never);
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn sse_retry_after_does_not_authorize_replay_after_role_or_text() {
+    for (prefix, partial) in [
+        (frame(json!({"role":"assistant"}), None), None),
+        (
+            frame(json!({"content":"preserve partial"}), None),
+            Some("preserve partial"),
+        ),
+    ] {
+        let fixture = Fixture::start(vec![
+            sse_rejection(
+                "Retry-After-ms: 1\r\n",
+                json!({"error":{"type":"rate_limit_error"}}),
+                &prefix,
+            ),
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let error = failure(&report);
+        assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+        assert_eq!(error.delivery(), DeliveryState::Started);
+        assert_eq!(*error.retry_hint(), RetryHint::Never);
+        if let Some(text) = partial {
+            assert!(
+                report.partial.as_ref().unwrap().content.iter().any(
+                    |part| matches!(part, AssistantPart::Text(value) if value.as_ref() == text)
+                )
+            );
+        }
+        assert!(
+            !report
+                .appended
+                .iter()
+                .any(|item| matches!(item, HistoryItem::Assistant(_)))
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn sse_retry_after_must_fit_the_original_model_or_turn_deadline() {
+    for turn_deadline in [false, true] {
+        let fixture = Fixture::start(vec![
+            sse_rejection(
+                "Retry-After: 10\r\n",
+                json!({"error":{"type":"rate_limit_error"}}),
+                "",
+            ),
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let mut options = LoopOptions::default_checked().unwrap();
+        options.model_retry_base_delay = Duration::from_millis(1);
+        if turn_deadline {
+            options.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(3));
+        } else {
+            options.model_timeout = Duration::from_secs(3);
+        }
+        let report = finish(start_with_options(
+            provider(&fixture.endpoint),
+            ToolSet::default(),
+            options,
+        ))
+        .await;
+        let error = failure(&report);
+        assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+        assert_eq!(error.delivery(), DeliveryState::NotStarted);
+        assert!(
+            matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancellation_interrupts_real_sse_retry_wait_without_another_request() {
+    let fixture = Fixture::start(vec![
+        sse_rejection(
+            "Retry-After: 10\r\n",
+            json!({"error":{"type":"rate_limit_error"}}),
+            "",
+        ),
+        Reply::sse(final_text("must not happen")),
+    ])
+    .await;
+    let (model, mut observed) = observe_provider(&fixture.endpoint);
+    let mut options = LoopOptions::default_checked().unwrap();
+    options.model_timeout = Duration::from_secs(60);
+    options.model_retry_base_delay = Duration::from_millis(1);
+    let agent = start_with_options(model, ToolSet::default(), options);
+    let error = rejection(&mut observed).await;
+    assert!(
+        matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
+    );
+    assert_eq!(fixture.request_count(), 1);
+    assert!(agent.handle().cancel());
+    assert_eq!(
+        finish(agent).await.outcome,
+        LoopOutcome::Cancelled(CancelReason::User)
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn model_timeout_during_real_sse_retry_wait_preserves_primary_rejection() {
+    let fixture = Fixture::start(vec![
+        sse_rejection(
+            "Retry-After: 10\r\n",
+            json!({"error":{"type":"rate_limit_error"}}),
+            "",
+        ),
+        Reply::sse(final_text("must not happen")),
+    ])
+    .await;
+    let (model, mut observed) = observe_provider(&fixture.endpoint);
+    let mut options = LoopOptions::default_checked().unwrap();
+    options.model_timeout = Duration::from_secs(20);
+    options.model_retry_base_delay = Duration::from_millis(1);
+    let agent = start_with_options(model, ToolSet::default(), options);
+    let error = rejection(&mut observed).await;
+    assert!(
+        matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
+    );
+    assert_eq!(fixture.request_count(), 1);
+    // Real TCP has already delivered the rejection. Freeze only now so Tokio
+    // cannot auto-advance time while that real network I/O is still pending.
+    // Cross both timers: the original deadline wins over a late retry wakeup.
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    let report = finish(agent).await;
+    assert_eq!(failure(&report), &error);
+    assert!(report.history_failure.is_none());
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn turn_deadline_during_real_sse_retry_wait_cancels_without_another_request() {
+    let fixture = Fixture::start(vec![
+        sse_rejection(
+            "Retry-After: 10\r\n",
+            json!({"error":{"type":"rate_limit_error"}}),
+            "",
+        ),
+        Reply::sse(final_text("must not happen")),
+    ])
+    .await;
+    let (model, mut observed) = observe_provider(&fixture.endpoint);
+    let mut options = LoopOptions::default_checked().unwrap();
+    options.model_timeout = Duration::from_secs(60);
+    options.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(20));
+    options.model_retry_base_delay = Duration::from_millis(1);
+    let agent = start_with_options(model, ToolSet::default(), options);
+    let error = rejection(&mut observed).await;
+    assert!(
+        matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
+    );
+    assert_eq!(fixture.request_count(), 1);
+    tokio::time::pause();
+    tokio::time::advance(Duration::from_secs(30)).await;
+    assert_eq!(
+        finish(agent).await.outcome,
+        LoopOutcome::Cancelled(CancelReason::Deadline)
     );
     assert_eq!(fixture.finish().await.len(), 1);
 }
