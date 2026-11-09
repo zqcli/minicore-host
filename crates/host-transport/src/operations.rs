@@ -4,9 +4,13 @@ use minicore_host_core::{
     AgentInfo, CallerContext, Host, HostConfig, HostConfigSnapshot, HostInfo,
     InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
     SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
-    TurnInfo, TurnResult, TurnSnapshot,
+    TurnInfo, TurnResult, TurnSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
+use minicore_host_workspace::{
+    ChangesListRequest, ChangesListResult, DiffRequest, DiffResult, FilesRequest, FilesResult,
+    QueryContext, ReadRequest, ReadResult, SearchRequest, SearchResult, StatusResult,
+};
 use minicore_runtime::tools::ToolSpec;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -119,6 +123,37 @@ pub(crate) struct ToolReadParams {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct FilesParams {
+    pub target: SessionRef,
+    pub request: FilesRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct WorkspaceReadParams {
+    pub target: SessionRef,
+    pub request: ReadRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SearchParams {
+    pub target: SessionRef,
+    pub request: SearchRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChangesListParams {
+    pub target: SessionRef,
+    pub request: ChangesListRequest,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ChangesDiffParams {
+    pub target: SessionRef,
+    pub request: DiffRequest,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AnswerParams {
     pub target: SessionRef,
     pub request: InteractionAnswerRequest<InteractionAnswerData>,
@@ -195,6 +230,12 @@ operations! {
     ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
     GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
     ReadToolOutput, "toolcall.output.read", ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
+    WorkspaceFiles, "workspace.files", FilesParams => WorkspaceSnapshot<FilesResult>, |h, c, p| { h.workspace_files(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceRead, "workspace.read", WorkspaceReadParams => WorkspaceSnapshot<ReadResult>, |h, c, p| { h.workspace_read(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceSearch, "workspace.search", SearchParams => WorkspaceSnapshot<SearchResult>, |h, c, p| { h.workspace_search(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesList, "changes.list", ChangesListParams => WorkspaceSnapshot<ChangesListResult>, |h, c, p| { h.changes_list(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesDiff, "changes.diff", ChangesDiffParams => WorkspaceSnapshot<DiffResult>, |h, c, p| { h.changes_diff(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceStatus, "workspace.status", SessionTarget => WorkspaceSnapshot<StatusResult>, |h, c, p| { h.workspace_status(&c, &p.target, QueryContext::default()).await };
     AnswerInteraction, "interaction.answer", AnswerParams => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
     Unsubscribe, "events.unsubscribe", UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
 }

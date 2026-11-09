@@ -416,7 +416,7 @@ async fn rpc_protocol_errors_and_notifications_do_not_dispatch_messages() {
         -32601
     );
     assert_eq!(
-        peer.request(json!(2), "workspace.files", json!({})).await["error"]["data"]["type"],
+        peer.request(json!(2), "agent.start", json!({})).await["error"]["data"]["type"],
         "HOST_METHOD_UNAVAILABLE"
     );
     assert_eq!(
@@ -743,7 +743,7 @@ async fn receipt_lookup_faults_are_not_method_unavailable() {
         .await;
     assert_eq!(ambiguous["error"]["data"]["code"], 1203);
     assert_eq!(ambiguous["error"]["data"]["type"], "HOST_RECEIPT_AMBIGUOUS");
-    let unsupported = peer.request(json!(6), "workspace.files", json!({})).await;
+    let unsupported = peer.request(json!(6), "agent.start", json!({})).await;
     assert_eq!(unsupported["error"]["data"]["code"], 1401);
     assert_eq!(
         unsupported["error"]["data"]["type"],

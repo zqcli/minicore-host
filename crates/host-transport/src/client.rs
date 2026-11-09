@@ -4,9 +4,13 @@ use minicore_host_core::{
     HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageRecord, ModelDescription,
     ModelTextSnapshot, ObservationNotification, SessionHistorySnapshot, SessionInfo,
     SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult,
-    TurnSnapshot,
+    TurnSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
+use minicore_host_workspace::{
+    ChangesListRequest, ChangesListResult, DiffRequest, DiffResult, FilesRequest, FilesResult,
+    ReadRequest, ReadResult, SearchRequest, SearchResult, StatusResult,
+};
 use minicore_runtime::tools::ToolSpec;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -552,6 +556,96 @@ impl SessionClient {
             )
             .await
     }
+    /// Read only the explicitly addressed Session's committed workspace.
+    pub async fn workspace_files(
+        &self,
+        request: FilesRequest,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<FilesResult>, CallError> {
+        self.client
+            .call(
+                WorkspaceFiles(FilesParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn workspace_read(
+        &self,
+        request: ReadRequest,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<ReadResult>, CallError> {
+        self.client
+            .call(
+                WorkspaceRead(WorkspaceReadParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn workspace_search(
+        &self,
+        request: SearchRequest,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<SearchResult>, CallError> {
+        self.client
+            .call(
+                WorkspaceSearch(SearchParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn changes_list(
+        &self,
+        request: ChangesListRequest,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<ChangesListResult>, CallError> {
+        self.client
+            .call(
+                ChangesList(ChangesListParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn changes_diff(
+        &self,
+        request: DiffRequest,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<DiffResult>, CallError> {
+        self.client
+            .call(
+                ChangesDiff(ChangesDiffParams {
+                    target: self.target.clone(),
+                    request,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn workspace_status(
+        &self,
+        options: CallOptions,
+    ) -> Result<WorkspaceSnapshot<StatusResult>, CallError> {
+        self.client
+            .call(
+                WorkspaceStatus(SessionTarget {
+                    target: self.target.clone(),
+                }),
+                options,
+            )
+            .await
+    }
+
     pub async fn history(
         &self,
         request: HistoryReadRequest,

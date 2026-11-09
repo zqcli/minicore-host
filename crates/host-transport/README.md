@@ -107,10 +107,12 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 37 real routes:
+`SUPPORTED_METHODS` lists these 43 real routes:
 
 - Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
+- Workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
+- Changes: `changes.list`, `changes.diff`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
 - Session: `session.create`, `session.get`, `session.list`, `session.state`,
   `session.load`, `session.unload`, `session.pause`, `session.resume`,
@@ -299,3 +301,35 @@ late answers are rejected. Runtime answer-versus-cancel decides the actual fact;
 the Session publishes answered only after Runtime acceptance. A private in-flight
 fence holds final interaction settlement/reclamation until that synchronous
 control call returns, with no Session lock held across the Runtime call or wait.
+
+## Workspace and retained edits
+
+`SessionClient::workspace_files`, `workspace_read`, `workspace_search`,
+`workspace_status`, `changes_list` and `changes_diff` route through the explicit
+Session's direct owners. All are available to read-only clients. RPC parameters
+are `{ target: SessionRef, request: <existing host-workspace request> }`; status
+takes only `{ target: SessionRef }`. Returned `WorkspaceSnapshot<T>` flattens
+the actual Session identity and puts the existing backend result in `data`.
+Filesystem/Git results include the committed `config_revision` that selected
+the root. Session/Turn tool observations have no current configuration revision.
+
+Workspace reads clone that Session's committed configuration before binding the
+root and performing I/O outside owner locks. An active Turn keeps its original
+workspace after Session configuration changes; queries never borrow that Turn
+or a client-selected current page. Git changes are current workspace facts with
+`workspace_unknown` origin. Session/Turn changes come only from the Session's
+actual captured tool observations, and diffs use their exact before/after bytes
+without reading a current file to fill missing history.
+
+The backend's UTF-8 byte ranges, explicit page sizes, bound continuations, local
+path containment and external-filter rejection remain unchanged. Invalid
+ranges/cursors, missing sources, unsupported content and I/O failure are public
+Faults, not complete empty pages. Unload retains existing observations. Source
+reclamation removes them; after persistent reopen, Session-wide old edit
+coverage is explicitly missing while new retained Turn observations remain
+queryable. There is no additional durable edit database.
+
+`CallOptions` remains a client wait budget, not a workspace or business execution
+deadline. It is never serialized or connected to the active Turn's cancellation.
+The low-level Host methods accept the backend's optional `QueryContext` for an
+embedding's own query cancellation; that context also cannot cancel a Turn.
