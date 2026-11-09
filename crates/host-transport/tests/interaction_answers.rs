@@ -561,3 +561,162 @@ async fn approval_answers_allow_or_deny_the_original_real_tool_without_new_permi
         server.await.unwrap().unwrap();
     }
 }
+
+struct DeadlineResources {
+    base: Arc<dyn ResourceResolver>,
+}
+impl ResourceResolver for DeadlineResources {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        self.base.validate(config)
+    }
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
+        Box::pin(async move {
+            let mut bound = self.base.resolve(config).await?;
+            bound.options.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(2));
+            Ok(bound)
+        })
+    }
+}
+#[derive(Clone, Copy)]
+enum BeforeDeadline {
+    Pending,
+    Answer,
+    Cancel,
+}
+async fn settle_at_original_deadline(approval: bool, before: BeforeDeadline) {
+    let (base, events, mut started) = resources(2, (!approval).then(tool));
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let base: Arc<dyn ResourceResolver> = if approval {
+        Arc::new(ApprovalResources {
+            base,
+            calls: calls.clone(),
+        })
+    } else {
+        base
+    };
+    let host = Host::memory(Arc::new(DeadlineResources { base })).unwrap();
+    let (client, server) = stdio_pipes(host).await;
+    let session = create(&client).await;
+    let mut sub = observed(&client, &session).await;
+    session
+        .send(input("original deadline"), options(2000))
+        .await
+        .unwrap();
+    started.recv().await.unwrap();
+    call(&events[0]);
+    let (source, id) = pending(&mut sub).await;
+    let mut request = answer(&source, id.clone());
+    if approval {
+        request.answer = InteractionAnswerData::Approval {
+            decision: ApprovalAnswer::AllowOnce,
+        };
+    }
+    match before {
+        BeforeDeadline::Pending => {}
+        BeforeDeadline::Answer => {
+            session
+                .answer_interaction(request.clone(), options(2000))
+                .await
+                .unwrap();
+            // The answer is accepted at its actual waiting point. Leave the
+            // next model request open so the same original deadline ends it.
+            started.recv().await.unwrap();
+        }
+        BeforeDeadline::Cancel => {
+            session
+                .cancel_turn(
+                    TurnCancelRequest {
+                        operation_id: OperationId::new().unwrap(),
+                        turn_id: source.turn.turn_id.clone(),
+                        keep_inbox: false,
+                    },
+                    options(2000),
+                )
+                .await
+                .unwrap();
+        }
+    }
+    let mut resolutions = Vec::new();
+    let mut tool_results = Vec::new();
+    loop {
+        match next(&mut sub).await {
+            ObservationEvent::Activity(ActivityEvent::InteractionResolved {
+                source: actual,
+                interaction_id,
+                data,
+            }) => {
+                assert_eq!(actual, source);
+                assert_eq!(interaction_id, id);
+                resolutions.push(serde_json::to_value(data.resolution).unwrap());
+            }
+            ObservationEvent::Activity(ActivityEvent::ToolFinished { data, .. }) => {
+                tool_results.push(data.result.outcome);
+            }
+            ObservationEvent::Activity(ActivityEvent::TurnFinished {
+                source: actual,
+                data,
+            }) => {
+                assert_eq!(actual, source.turn);
+                assert_eq!(data.outcome, Some(TurnOutcome::Cancelled));
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        session
+            .answer_interaction(request, options(2000))
+            .await
+            .is_err()
+    );
+    assert!(
+        session
+            .state(options(2000))
+            .await
+            .unwrap()
+            .data
+            .pending_interactions
+            .is_empty()
+    );
+    let (resolution, tool_outcome) = match before {
+        BeforeDeadline::Pending => ("expired", ToolResultOutcome::Cancelled),
+        BeforeDeadline::Cancel => ("cancelled", ToolResultOutcome::Cancelled),
+        BeforeDeadline::Answer => (
+            "answered",
+            if approval {
+                ToolResultOutcome::Success
+            } else {
+                ToolResultOutcome::InputProvided
+            },
+        ),
+    };
+    assert_eq!(resolutions, [serde_json::json!(resolution)]);
+    assert_eq!(tool_results, [tool_outcome]);
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        usize::from(approval && matches!(before, BeforeDeadline::Answer))
+    );
+    client.close();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn original_deadline_expires_pending_approval_and_tool_input_once() {
+    for approval in [false, true] {
+        settle_at_original_deadline(approval, BeforeDeadline::Pending).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn original_deadline_does_not_replace_an_already_answered_interaction() {
+    for approval in [false, true] {
+        settle_at_original_deadline(approval, BeforeDeadline::Answer).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn explicit_cancel_before_deadline_remains_cancelled_for_both_interaction_kinds() {
+    for approval in [false, true] {
+        settle_at_original_deadline(approval, BeforeDeadline::Cancel).await;
+    }
+}

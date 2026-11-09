@@ -209,6 +209,7 @@ pub struct InteractionResolvedData {
 pub enum InteractionResolution {
     Answered,
     Cancelled,
+    Expired,
     Failed,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

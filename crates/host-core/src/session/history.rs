@@ -411,7 +411,7 @@ impl SessionController {
             history: state.history[active.start_history..].to_vec(),
             partials: active.partials,
         };
-        self.observe_finished(&mut state, &result.info);
+        self.observe_finished(&mut state, &result.info, active.report.as_deref());
         state.completion_order.push(turn_id.clone());
         let mut inputs = active.consumed_inputs;
         for id in active.bound_inputs {

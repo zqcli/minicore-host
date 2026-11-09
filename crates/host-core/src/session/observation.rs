@@ -481,9 +481,22 @@ impl SessionController {
             _ => {}
         }
     }
-    pub(super) fn observe_finished(&self, state: &mut SessionState, info: &TurnInfo) {
+    pub(super) fn observe_finished(
+        &self,
+        state: &mut SessionState,
+        info: &TurnInfo,
+        report: Option<&LoopReport>,
+    ) {
         let revision = state.runner_revision;
         if let Some(resolution) = match info.outcome {
+            Some(TurnOutcome::Cancelled)
+                if report.is_some_and(|report| {
+                    report.outcome
+                        == LoopOutcome::Cancelled(minicore_runtime::CancelReason::Deadline)
+                }) =>
+            {
+                Some(InteractionResolution::Expired)
+            }
             Some(TurnOutcome::Cancelled) => Some(InteractionResolution::Cancelled),
             Some(TurnOutcome::Failed) => Some(InteractionResolution::Failed),
             _ => None,

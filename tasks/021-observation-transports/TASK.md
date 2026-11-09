@@ -196,3 +196,38 @@ to task 022: public history must include actual saved partial records rather
 than Runtime model-context projection alone. That separate fix and independent
 review/final parent integration remain required before claiming the complete
 observation surface ready. No Runtime, Host or branch was pushed by this worker.
+
+## Review correction: preserve the original interaction deadline
+
+Review of integrated `713efb0` found that a real Runtime deadline settled a
+pending interaction as `cancelled` rather than the `expired` fact required by
+SPEC section 5. The retained `LoopReport` already distinguishes
+`CancelReason::Deadline`; no new timer or deadline service is necessary.
+The final observation now reads that original report and publishes `expired`
+only for unresolved interactions actually ended by that deadline. The Turn
+remains `Cancelled`, explicit cancellation remains `cancelled`, and previously
+accepted answers remain `answered`. The only history finalizer change passes
+its existing report to the observation projection; no history DTO or save
+behavior changes.
+
+Validation now uses the published Runtime
+`69faf9196991524b5549499d6208a1eaf567bf56` directly, without a command-line patch.
+Independent bootstrap `87ed77a6c81518609e71e54d67c4713bec52ed34` changes only the
+four Runtime manifest revisions and matching lock source; the parent already
+owns that pin and need not replay the bootstrap.
+
+- `cargo test -p minicore-host-transport --test interaction_answers
+  original_deadline_expires_pending --locked --offline`: reproduced red before
+  the fix (`cancelled` instead of `expired`).
+- `cargo test -p minicore-host-transport --test interaction_answers --locked
+  --offline`: **8 passed**, including three new real OS-pipe/Runtime cases.
+  Each covers both Approval and ToolInput, one settlement, actual tool outcome,
+  pending cleanup and rejection of a late answer. The cases distinguish pending
+  expiry, answer before the original deadline, and explicit cancellation before
+  that deadline.
+- `cargo fmt --all --check`: passed after formatting.
+
+Logs: `/workspace/shared/event-deadline-red.log` and
+`/workspace/shared/event-deadline-green.log`. Full aggregate validation follows
+the independent pipe teardown correction. These are scripted-model owner tests,
+not live-provider or TUI validation. No remote push was performed.
