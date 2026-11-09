@@ -31,6 +31,7 @@ struct FixtureModel {
     round: AtomicUsize,
     six_actions: bool,
     close_scope: bool,
+    create_agent: bool,
     child: Mutex<Option<SessionRef>>,
     child_gate: Arc<Semaphore>,
     calls: mpsc::UnboundedSender<(usize, ModelRequest)>,
@@ -140,7 +141,11 @@ impl Model for FixtureModel {
         } else if !self.six_actions && round == 0 {
             let target = self.agent.lock().unwrap().clone().unwrap();
             let call = "upstream-delegate".parse().unwrap();
-            let arguments = json!({"action":"create","resource":"session","target":target,"mode":"memory","text":"child work"});
+            let arguments = if self.create_agent {
+                json!({"action":"create","resource":"agent","target":{"host_id":target.host_id},"name":"delegated reviewer","from_agent_id":target.agent_id,"mode":"memory","text":"child work"})
+            } else {
+                json!({"action":"create","resource":"session","target":target,"mode":"memory","text":"child work"})
+            };
             vec![
                 ModelEvent::ToolCallStart {
                     tool_call_id: call,
@@ -242,6 +247,13 @@ async fn settled(
 }
 #[tokio::test]
 async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
+    run_host_delegation(false).await;
+}
+#[tokio::test]
+async fn real_agent_delegation_copies_config_and_reclaims_temporary_owners() {
+    run_host_delegation(true).await;
+}
+async fn run_host_delegation(create_agent: bool) {
     let (calls, mut requests) = mpsc::unbounded_channel();
     let gate = Arc::new(Semaphore::new(0));
     let model = Arc::new(FixtureModel {
@@ -256,6 +268,7 @@ async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
         round: AtomicUsize::new(0),
         six_actions: false,
         close_scope: false,
+        create_agent,
         child: Mutex::new(None),
         child_gate: Arc::clone(&gate),
         calls,
@@ -271,10 +284,13 @@ async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
     .unwrap();
     let connection = host.connect().unwrap();
     let mut config = AgentConfig::default();
+    config.role.name = "Source role".into();
+    config.role.instructions = "Preserved source instructions, not the task text".into();
     config.session_defaults.model = "fixture/model".parse().unwrap();
     config.session_defaults.tools = vec![ToolBinding {
         name: "agent".into(),
     }];
+    let source_config = config.clone();
     let created = host
         .create_agent_async(
             &connection.caller(),
@@ -335,6 +351,17 @@ async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
         session_id: serde_json::from_value(launch["session_id"].clone()).unwrap(),
     };
     assert_ne!(root, child);
+    let child_agent = AgentRef {
+        host_id: host.info(&connection.caller()).unwrap().host_id,
+        agent_id: child.agent_id.clone(),
+    };
+    if create_agent {
+        assert_ne!(root.agent_id, child.agent_id);
+        let info = host.agent_info(&connection.caller(), &child_agent).unwrap();
+        assert_eq!(info.name, "delegated reviewer");
+        assert_eq!(info.config, source_config);
+        assert_eq!(info.default_session_id, Some(child.session_id.clone()));
+    }
     assert!(
         host.session_state(&connection.caller(), &child)
             .unwrap()
@@ -383,7 +410,12 @@ async fn real_host_delegation_survives_parent_turn_and_client_disconnect() {
     assert_eq!(original_tool.output, tool.output);
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if host.session_info(&replacement.caller(), &child).is_err() {
+            if host.session_info(&replacement.caller(), &child).is_err()
+                && (!create_agent
+                    || host
+                        .agent_info(&replacement.caller(), &child_agent)
+                        .is_err())
+            {
                 break;
             }
             tokio::task::yield_now().await;
@@ -409,6 +441,7 @@ async fn all_six_actions_execute_through_real_owners_and_one_runtime_turn() {
         round: AtomicUsize::new(0),
         six_actions: true,
         close_scope: false,
+        create_agent: false,
         child: Mutex::new(None),
         child_gate: Arc::clone(&gate),
         calls,
@@ -533,6 +566,7 @@ async fn actual_factory_binding_failure_keeps_input_queued_without_a_turn() {
         round: AtomicUsize::new(0),
         six_actions: false,
         close_scope: false,
+        create_agent: false,
         child: Mutex::new(None),
         child_gate: Arc::new(Semaphore::new(0)),
         calls,
@@ -623,6 +657,7 @@ async fn real_close_scope_does_not_join_its_own_runtime_tool() {
         round: AtomicUsize::new(0),
         six_actions: false,
         close_scope: true,
+        create_agent: false,
         child: Mutex::new(None),
         child_gate: Arc::new(Semaphore::new(0)),
         calls,
