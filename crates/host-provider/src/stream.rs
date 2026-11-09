@@ -4,12 +4,8 @@ use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use minicore_runtime::{
     ToolCallId,
-    model::{
-        MAX_MODEL_EVENT_TEXT_BYTES, ModelError, ModelErrorKind, ModelEvent, ModelFinishReason,
-        ProviderReplay, Usage,
-    },
+    model::{ModelError, ModelErrorKind, ModelEvent, ModelFinishReason, ProviderReplay, Usage},
     tools::ToolName,
-    value::MAX_JSON_BYTES,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -115,7 +111,7 @@ impl State {
                 self.pending_error = Some(error);
                 Ok(ModelEvent::ProviderReplay { replay })
             }
-            // Runtime's pre-existing replay structural bound is not bypassed.
+            // Keep Runtime's JSON nesting and replay-format validation.
             Err(_) => Err(error),
         }
     }
@@ -181,13 +177,13 @@ impl State {
             return Err(self.malformed());
         }
         if let Some(reasoning) = choice.delta.reasoning_content.or(choice.delta.reasoning) {
-            self.queue_text(&reasoning, true)?;
+            self.queue_text(&reasoning, true);
         }
         if let Some(text) = choice.delta.content {
-            self.queue_text(&text, false)?;
+            self.queue_text(&text, false);
         }
         if let Some(refusal) = choice.delta.refusal {
-            self.queue_text(&refusal, false)?;
+            self.queue_text(&refusal, false);
         }
         if let Some(tools) = choice.delta.tool_calls {
             for tool in tools {
@@ -203,17 +199,15 @@ impl State {
         Ok(())
     }
 
-    fn queue_text(&mut self, value: &str, reasoning: bool) -> Result<(), ModelError> {
+    fn queue_text(&mut self, value: &str, reasoning: bool) {
         self.has_output |= !value.is_empty();
-        for chunk in text_chunks(value) {
-            let event = if reasoning {
-                ModelEvent::reasoning_delta(chunk)
+        if !value.is_empty() {
+            self.pending.push_back(if reasoning {
+                ModelEvent::reasoning_delta(value)
             } else {
-                ModelEvent::text_delta(chunk)
-            };
-            self.pending.push_back(event);
+                ModelEvent::text_delta(value)
+            });
         }
-        Ok(())
     }
 
     fn tool_delta(&mut self, delta: ToolDelta) -> Result<(), ModelError> {
@@ -256,14 +250,6 @@ impl State {
             return Err(self.malformed());
         }
         if let Some(arguments) = function.arguments {
-            if tool
-                .arguments
-                .len()
-                .checked_add(arguments.len())
-                .is_none_or(|size| size > MAX_JSON_BYTES)
-            {
-                return Err(self.malformed());
-            }
             tool.arguments.push_str(&arguments);
             if !tool.started {
                 let id = ToolCallId::new(&tool.id)
@@ -281,10 +267,8 @@ impl State {
             }
             let id = ToolCallId::new(&tool.id)
                 .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
-            for part in text_chunks(&arguments) {
-                self.pending
-                    .push_back(ModelEvent::tool_call_arguments_delta(id.clone(), part));
-            }
+            self.pending
+                .push_back(ModelEvent::tool_call_arguments_delta(id, arguments));
         }
         if self.tools.iter().enumerate().any(|(other, tool)| {
             other != index && tool.id == self.tools[index].id && !tool.id.is_empty()
@@ -412,21 +396,6 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
             }
         }
     }
-}
-
-fn text_chunks(mut value: &str) -> impl Iterator<Item = &str> {
-    std::iter::from_fn(move || {
-        if value.is_empty() {
-            return None;
-        }
-        let mut end = value.len().min(MAX_MODEL_EVENT_TEXT_BYTES);
-        while !value.is_char_boundary(end) {
-            end -= 1;
-        }
-        let (head, tail) = value.split_at(end);
-        value = tail;
-        Some(head)
-    })
 }
 
 #[derive(Deserialize)]

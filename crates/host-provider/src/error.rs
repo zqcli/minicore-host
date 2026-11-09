@@ -162,16 +162,6 @@ pub(crate) async fn http(
         };
         match next {
             Some(Ok(chunk)) => {
-                // Bound diagnostic extraction only. An oversized error body is
-                // discarded and remains unclassified, never a retry license.
-                if body
-                    .len()
-                    .checked_add(chunk.len())
-                    .is_none_or(|size| size > Text::MAX_BYTES)
-                {
-                    body.clear();
-                    break;
-                }
                 body.extend_from_slice(&chunk);
             }
             Some(Err(error)) if error.is_timeout() => return unknown(ModelErrorKind::Timeout),

@@ -33,7 +33,11 @@ Behavior intentionally stricter than the old Agent adapter:
   secret argument or the named environment variable.
 - Provider error free-text and reqwest error strings are not retained. Safe
   diagnostics retain HTTP status and a structured ModelError classification.
-- Normal streamed content has no new adapter quota. Runtime's existing event,
-  ToolCallId, ToolName, JSON and replay structural ceilings still apply. Error
-  body extraction alone is bounded by Runtime's BoundedText::MAX_BYTES; an
-  oversized error body is discarded and is never evidence for safe retry.
+- Streamed text/reasoning, accumulated tool arguments and HTTP error bodies
+  have no adapter byte quota. Provider deltas are forwarded without artificial
+  event-size splitting. Runtime still validates ToolCallId/ToolName grammar and
+  JSON parser nesting safety; malformed streams never fabricate completion.
+- HTTP error classification consumes the complete body under the original
+  cancellation/deadline. Only recognized structured error codes, status and
+  response retry headers may authorize Runtime retries; provider free-text is
+  still excluded from diagnostics.
