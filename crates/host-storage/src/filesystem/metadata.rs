@@ -209,3 +209,32 @@ mod tests {
         assert!(matches!(index.get(path), Err(StorageError::Io { .. })));
     }
 }
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn review_parallel_gate_reacquisition_never_splits_one_live_path() {
+        let index = Arc::new(MetadataGates::default());
+        let active_writers = AtomicUsize::new(0);
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    start.wait();
+                    for _ in 0..512 {
+                        let gate = index.get("same-object.json".into()).unwrap();
+                        let _publication = gate.write().unwrap();
+                        assert_eq!(active_writers.fetch_add(1, Ordering::SeqCst), 0);
+                        std::thread::yield_now();
+                        assert_eq!(active_writers.fetch_sub(1, Ordering::SeqCst), 1);
+                    }
+                });
+            }
+        });
+        assert_eq!(active_writers.load(Ordering::SeqCst), 0);
+        assert!(index.entries.lock().unwrap().is_empty());
+    }
+}
