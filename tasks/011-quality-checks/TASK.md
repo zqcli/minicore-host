@@ -1,6 +1,6 @@
 # Check committed whitespace
 
-Status: fix implemented with isolated Git regression checks; aggregate verification follows this commit. This is a quality-gate correction, not full foundation review approval.
+Status: fixed and verified at `5ac4d08`; the full integrated gate also passes at `38991d3`. This is a quality-gate correction, not full foundation review approval.
 
 ## Reproduction
 
@@ -18,3 +18,7 @@ At Host `6d29cdca4c265c3f1eaee906d97f7855c9d74545`, `git diff --check main..HEAD
 An isolated Git repository exercised five cases: bad committed EOF whitespace is rejected; a later committed correction passes; staged whitespace is rejected; unstaged whitespace is rejected; an actual shallow `file://` clone is explicitly rejected. `bash -n scripts/check.sh scripts/check-whitespace.sh` and `git diff --check main` passed after the edits. Report: `minicore-host-validation/whitespace-gate-regression.json`.
 
 The same independent review also found the separate HTTP 200 SSE Retry-After defect. That belongs to task 010 and is not fixed or hidden by this quality-gate change. A prior test-suite pass is not full SPEC or external review acceptance. No remote action was performed.
+
+## Aggregate verification
+
+At `5ac4d08`, the unchanged 198-test/2-doctest workspace gate passed with the new committed-range check, and `git diff --check main..HEAD` returned success. At provider integration `38991d37bc4980fc31a3312e943a62a060ce635a`, the full gate passed 207 unit/integration tests plus 2 doctests, formatting, Clippy and rustdoc warnings denied, and both committed/uncommitted whitespace checks. The CI YAML was parsed again to verify full-history checkout, unchanged read-only permission and direct quality-script invocation. Logs: `minicore-host-validation/committed-whitespace-gate.log` and `provider-retry-integrated.log`. The separate provider defect is fixed in integrated `7b24ca2`; external/full release review is still pending.

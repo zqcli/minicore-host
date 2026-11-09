@@ -24,7 +24,7 @@ Implementation of the complete v4.93 design in `SPEC.md`. The foundation is impl
 
 Host owner tests use a real AgentLoop with clearly named scripted model fixtures. Provider tests use real TCP/HTTP/SSE and the production transport against a loopback fixture. The full Host path has also completed two turns through that production adapter. These are genuine component/integration checks, **not live external model or TUI validation**.
 
-No access key, live endpoint, payment, external message or user model account was used. TUI and Agent source were not changed. At code/test checkpoint `0b9b390`, the complete workspace gate passed 198 tests and 2 doctests, formatting, Clippy and rustdoc warnings-as-errors, using the published Runtime revision. The 16-case owner suite also passed 25 repeated runs, mostly using multi-thread Tokio scheduling; this is not a capacity measurement. Exact commands and outcomes are in `tasks/*/TASK.md`. Seven additional default-reference, revocation and file-gate regressions from targeted review are retained in the repository. A dedicated fresh-target review passed the final core/storage cases and found no new blocking issue in those corrections; it does not replace the requested external review. See [review handoff](docs/review-handoff.md).
+No access key, live endpoint, payment, external message or user model account was used. TUI and Agent source were not changed. At provider-correction checkpoint `38991d3`, the complete workspace gate passed 207 tests and 2 doctests, formatting, Clippy and rustdoc warnings-as-errors, using the published Runtime revision. The 16-case owner suite also passed 25 repeated runs, mostly using multi-thread Tokio scheduling; this is not a capacity measurement. Exact commands and outcomes are in `tasks/*/TASK.md`. Seven additional default-reference, revocation and file-gate regressions from targeted review are retained in the repository. A dedicated fresh-target review passed the final core/storage cases and found no new blocking issue in those corrections; it does not replace the requested external review. See [review handoff](docs/review-handoff.md).
 
 ## Reproducible Runtime dependency
 
@@ -38,7 +38,7 @@ All three Runtime dependencies and `Cargo.lock` now select the published revisio
 
 The next stage implements controlled Host shutdown, original history-save continuation and memory entity retirement in separate ownership-scoped worktrees. The existing immutable storage/root references require explicit quiescent resource release; changing a lifecycle label alone cannot release directory ownership safely.
 
-A later independent review found a provider defect at `6d29cdc`: an HTTP 200 SSE first-frame `rate_limit_error` lost `Retry-After: 60`, allowing a second request within milliseconds. A real TCP/Runtime regression reproduces it; task 010 is fixing this separately. The 198-test historical pass did not cover this case and is not full foundation review approval. Task 011 also corrects two committed manifest EOF blank lines and expands the whitespace gate to committed changes.
+A later independent review found a provider defect at `6d29cdc`: an HTTP 200 SSE first-frame `rate_limit_error` lost `Retry-After: 60`, allowing a second request within milliseconds. The real TCP/Runtime regression reproduced it and integrated fix `7b24ca2` now retains the original HTTP status/retry hint. Nine new cases cover the retry cap, lower bound, deadlines, cancellation and conservative eligibility; the full gate at `38991d3` passes 207 tests and 2 doctests. A separate provider-scoped review reproduced the old failure and passed the fixed regression, six added probes and lint/doc checks. The 198-test historical pass did not cover this case; neither that pass nor the scoped correction review is full foundation review approval. Task 011 also corrects two committed manifest EOF blank lines and expands the whitespace gate to committed changes.
 
 ## Remaining first-version work
 
@@ -51,7 +51,7 @@ A later independent review found a provider defect at `6d29cdc`: an HTTP 200 SSE
 
 ## CI and external handoff
 
-The Linux CI workflow calls the same full gate on Ubuntu 24.04 with pinned Rust 1.90.0, a verified immutable official checkout action, read-only contents access and no persisted checkout credentials. YAML/command alignment and Bash syntax were checked locally. The hosted Host workflow has not run because Host is not yet published; actionlint/yamllint/shellcheck were unavailable and were not run. The self-contained [review handoff](docs/review-handoff.md) explains reproducibility, invariants and the unfinished release scope.
+The Linux CI workflow checks out full history and calls the same full gate on Ubuntu 24.04 with pinned Rust 1.90.0, a verified immutable official checkout action, read-only contents access and no persisted checkout credentials. YAML/command alignment and Bash syntax were checked locally. The hosted Host workflow has not run because Host is not yet published; actionlint/yamllint/shellcheck were unavailable and were not run. The self-contained [review handoff](docs/review-handoff.md) explains reproducibility, invariants and the unfinished release scope.
 
 ## Branch and review policy
 

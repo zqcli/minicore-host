@@ -2,7 +2,7 @@
 
 ## Review target and authority
 
-The target is the `dev` foundation, with code/test checkpoint `0b9b390750233f7b11ad006563da697014f162e2`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
+The target is the `dev` foundation, with provider-correction checkpoint `38991d37bc4980fc31a3312e943a62a060ce635a`, not a complete v4.93 release. The full specification remains the implementation target; unimplemented surfaces are not waived by this review. `main` remains the initial specification/documentation commit `98621c9` and must not receive development changes before the requested external independent review and required checks pass.
 
 Read `AGENTS.md`, the complete `SPEC.md`, `PROJECT.md`, and `docs/method-coverage.md` first. The unchanged specification SHA-256 is `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`. The 52-method catalog describes names/contracts, not 52 finished handlers. No remote Host publication or main merge has been performed. Remote pushes require the owner's explicit approval.
 
@@ -35,7 +35,7 @@ cargo metadata --locked --format-version 1
 sha256sum SPEC.md
 ```
 
-The script checks formatting, all-target workspace Clippy with warnings denied, unit/integration tests, doctests, rustdoc with warnings denied and diff whitespace. The Linux CI workflow calls this same script with read-only repository permissions and a pinned official checkout action. The first hosted Host run is still pending publication; local success is not a hosted-runner result.
+The script requires full Git history and checks committed, staged and unstaged whitespace before formatting, all-target workspace Clippy with warnings denied, unit/integration tests, doctests, rustdoc with warnings denied and diff whitespace. The Linux CI workflow calls this same script with read-only repository permissions and a pinned official checkout action. The first hosted Host run is still pending publication; local success is not a hosted-runner result.
 
 Test evidence is actual code execution, with its boundaries kept explicit:
 
@@ -46,7 +46,7 @@ Test evidence is actual code execution, with its boundaries kept explicit:
 - Storage tests: real filesystem/process locking, abrupt process exit, unsafe paths, corruption, partial writes and sync/reconciliation failures. Metadata gates coordinate only the same file's raw snapshot/publication, not owner state or unrelated files.
 - Provider tests: production HTTP/SSE transport plus real Runtime. No live external model credentials or endpoint were used.
 
-The final clean-source checkpoint at `0b9b390` passed the entire 198-test/2-doctest gate in a fresh local Git clone with its own empty target directory, using the published Runtime Git source. An earlier clean clone at `d73b161` passed its then-current 190-test/2-doctest gate. Cargo downloads were cached; this was not a remote Host clone or hosted workflow. The final counts are core 67, protocol 47, provider 27 and storage 57. Seven additional default-reference, revocation and gate-reacquisition regressions from targeted review are part of those counts. A separate fresh-target review passed core/storage tests and lint/doc checks; it is not the requested external review. Exact commands and source checkpoints are recorded in task 001 and task 006.
+The final clean-source checkpoint at `0b9b390` passed the entire 198-test/2-doctest gate in a fresh local Git clone with its own empty target directory, using the published Runtime Git source. An earlier clean clone at `d73b161` passed its then-current 190-test/2-doctest gate. Cargo downloads were cached; this was not a remote Host clone or hosted workflow. Those clean-source counts are core 67, protocol 47, provider 27 and storage 57. A later independent review found the HTTP 200 SSE Retry-After defect; fix `7b24ca2` and nine new real HTTP regressions are integrated at `38991d3`, whose complete gate passes 207 tests and 2 doctests (provider 36). The original defect was reproduced before fixing it; a separate provider-scoped review passed the fixed regression and additional probes. The earlier 198-test result is not evidence that this missed case was covered. Seven additional default-reference, revocation and gate-reacquisition regressions from targeted review are part of those counts. A separate fresh-target review passed core/storage tests and lint/doc checks; it is not the requested external review. Exact commands and source checkpoints are recorded in task 001 and task 006.
 
 ## Required scope still open
 
