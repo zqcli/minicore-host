@@ -57,3 +57,11 @@ All 55 unsubmitted stage commits were replayed after existing local dev `f03aaac
 ## Final dev rerun blocked
 
 At `34641c5ab1784237cb73bdb0f36f9923697d0c34`, `./scripts/check.sh` failed two task024 setup cases: `cancellation_after_old_history_projection_keeps_real_partial_and_original_file_prefix` at seed `read_history` returned HistoryInUse after the journal was dropped; `unsupported_replay_and_signed_reasoning_are_rejected_before_http_not_flattened` failed the following Host open with RootInUse. Both failures occur before model execution. The full original log is `dev-reviewed-final-full.log`; this run is failed, not subsumed by the earlier identical-tree 494/3 passes. Publication is paused for independent diagnosis. A separate pure-std immediate File-lock drop/reopen probe ran 20,000 iterations with no file or directory lock failures; this does not establish the failing path's cause. No production lock change or retry was made on that assumption.
+
+## Lock diagnosis and integrated correction
+
+Task 034 subsequently captured the real sha256sum child retaining each failing inode's flock after the parent closed its descriptor. The test hash helper, not production locking, is corrected. Source bootstrap `0fb766e` maps to dev `ebf59d825b4cc8d1d14995b5dd643d7f0aabf082`; source fix `d2edb50411045b805e86828cd72025b79e7bdf31` maps to `c372c65f78b8e6a4cf91e5cf6eae2df5c0501418`; source validation documentation `504f802` maps to `a151357a68382f63a14da332a67b0d24daf3306b`.
+
+At exactly c372c65, the integration owner reran `./scripts/check.sh` successfully, including fmt, strict all-target Clippy, tests, 3 doctests and strict rustdoc. `cargo test --workspace --all-targets --locked -- --list` reports 495 unique cases. Logs: `dev-c372c65-full.log` and `dev-c372c65-test-list.txt` in `/workspace/shared/minicore-host-validation`. `git diff --check main..HEAD` passed; all new dev subjects since f03aaac follow `type(scope): summary`, and SPEC SHA-256 remains unchanged.
+
+Publication still waits for a newly reproduced, independent terminal-claim correction: failed Runtime report versus partial-save I/O, and prior cancellation versus later Runtime cleanup failure. These are real new probes, not failures of the hash fix. The separate ordinary-tool topic is also held for its own findings and reuse comparison and is not included in this dev checkpoint.
