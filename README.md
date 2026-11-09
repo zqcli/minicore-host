@@ -8,7 +8,7 @@ The foundation contains strict contracts, Linux durable storage, a production HT
 
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed.
 
-**Current prerequisite:** the independently committed Runtime extension is still unpublished. The locally verified build uses an ignored Cargo patch to the Runtime worktree at the exact commit in `PROJECT.md`. The upstream revision alone does not supply the required history/partial APIs. The extension has been reviewed, but publication is blocked by the available authentication/author controls. Remote standalone reproducibility remains blocked until the permitted publication succeeds and its exact remote revision is pinned here. No fallback fake Runtime is provided.
+The required Runtime history/partial extension is pinned to published commit `18a6ac9b82d003330cd870275efca793cdcc9a96` on `zqcli/minicore-runtime:feat/host-history-handoff`. No local Runtime patch, copied source or bootstrap bundle is required. Runtime's push CI passed all seven checks; see [PROJECT.md](PROJECT.md) for verification boundaries and the exact source-tree mapping.
 
 ## Components
 
@@ -19,4 +19,4 @@ Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for for
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
 - [Controller and integration evidence](tasks/005-controllers/TASK.md)
 
-Live provider and TUI checks have not been run. `main` is not merged with development changes; no remote publication has been performed.
+Live provider and TUI checks have not been run. `main` is not merged with development changes; Host has not been remotely published. The Runtime prerequisite branch is published.

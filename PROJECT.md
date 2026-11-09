@@ -8,7 +8,7 @@ Implementation of the complete v4.93 design in `SPEC.md`. The foundation is impl
 | --- | --- | --- |
 | Design v4.93 | SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3` | Full source copied unchanged; hash rechecked |
 | Runtime upstream dev | `3fd5ecda1fb7c717ab0a39218d90268b4d97909c` | Remote dev rechecked; original source lacks required Host handoff |
-| Runtime local extension | `4f976b41f2381e2b09f3383aa66318b7aee2a8b3` | Six local commits; 307 tests, 2 doctests and full upstream gate passed; approved branch publication blocked by unavailable Git credentials |
+| Runtime published extension | `18a6ac9b82d003330cd870275efca793cdcc9a96` | `feat/host-history-handoff`; six verified commits, exact original source trees; push CI 7/7 passed |
 | Agent reference dev | `f36a87366d8e2fe0a1c8216463887902e471c739` | Remote dev rechecked; reference only, unchanged |
 | TUI reference dev | `3beeb1d8a525e58ce6352e05061f242c5580e248` | Remote dev/local checkout agree; clean and unchanged |
 | Agent/TUI actual Runtime lock | `b276d9c0a1f3a3c06e32029f831ccd100c9699c7` | Not Runtime dev HEAD; no claim these heads were jointly tested |
@@ -26,11 +26,13 @@ Host owner tests use a real AgentLoop with clearly named scripted model fixtures
 
 No access key, live endpoint, payment, external message or user model account was used. TUI and Agent source were not changed. At Host checkpoint `3945488`, the complete workspace gate passed 144 tests and 2 doctests, formatting, Clippy and rustdoc warnings-as-errors. The 16-case owner suite also passed 25 repeated runs, mostly using multi-thread Tokio scheduling; this is not a capacity measurement. Exact commands and outcomes are in `tasks/*/TASK.md`.
 
-## Local Runtime dependency blocker
+## Reproducible Runtime dependency
 
-The required Runtime extension is an independently committed, unpublished worktree. Publication of only `feat/host-history-handoff` at the fixed SHA above was explicitly approved, but the attempted HTTPS Git push failed for missing credentials. Read-only verification confirms that the remote ref and commit are absent; no remote CI result exists for it. Local verification currently uses an ignored Cargo patch pointing to that worktree. The root lock reflects this local patch. A clean remote Host checkout is not yet advertised as independently buildable: the Runtime extension must be reviewed and published with explicit approval, then Host must pin that exact remote revision and regenerate/verify the lock without the local patch.
+The approved Runtime extension is published at [`18a6ac9b82d003330cd870275efca793cdcc9a96`](https://github.com/zqcli/minicore-runtime/commit/18a6ac9b82d003330cd870275efca793cdcc9a96). The GitHub interface recreated the six original commits after the owner approved new commit identities and the interface's default authorship. Every blob, tree, parent order and raw commit message was verified against the original local history; all published authors and committers are `zqcli`, with no co-author trailers. The final tree is `46a3dc03a8ec0d89fc18ac39e9924eb1799ec45b`, identical to original local `4f976b41f2381e2b09f3383aa66318b7aee2a8b3`.
 
-No bundle/bootstrap layer or copied Runtime source was added. The original Runtime git revision in manifests is provenance, **not the source used by the locally patched validation**.
+All three Runtime dependencies and `Cargo.lock` now select the published revision. The local Cargo patch and unused vendor symlink were removed; no bundle/bootstrap layer or copied Runtime source is used. `cargo metadata --locked` confirms the source is the GitHub revision rather than a workspace path. With this source, the full Host gate passes 178 unit/integration tests and 2 doctests at the source checkpoint following `30c588c`. A separate clean-source checkout check will be recorded after the pending owner/storage fixes are integrated.
+
+[Runtime push CI](https://github.com/zqcli/minicore-runtime/actions/runs/42598793185) completed successfully: Ubuntu quality gate, macOS and Windows tests, and all four package targets passed (7/7 checks). Runtime `dev` and `main` were not modified.
 
 ## Remaining first-version work
 
@@ -43,7 +45,7 @@ No bundle/bootstrap layer or copied Runtime source was added. The original Runti
 
 ## Branch and review policy
 
-`main` remains the initial specification/documentation baseline (`98621c9`). Work is committed in reviewable modules on topic worktrees and integrated onto `dev`. No remote update has succeeded. The sole approved Runtime branch push failed before publication; no Host push is authorized or attempted. Every push requires explicit approval; main merge additionally requires the requested independent review and required gates.
+`main` remains the initial specification/documentation baseline (`98621c9`). Work is committed in reviewable modules on topic worktrees and integrated onto `dev`. The approved Runtime topic branch is published as recorded above. No Host push is authorized or attempted. Every push requires explicit approval; main merge additionally requires the requested independent review and required gates.
 
 ## Execution provenance
 
