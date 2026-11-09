@@ -161,7 +161,7 @@ pub struct Fault {
     identity: FaultIdentity,
     message: String,
     diagnostic_id: Option<String>,
-    details: Option<FaultDetails>,
+    details: Option<Box<FaultDetails>>,
     retry_after_ms: Option<u64>,
 }
 impl Fault {
@@ -205,7 +205,7 @@ impl Fault {
         self.diagnostic_id.as_deref()
     }
     pub fn details(&self) -> Option<&FaultDetails> {
-        self.details.as_ref()
+        self.details.as_deref()
     }
     pub const fn retry_after_ms(&self) -> Option<u64> {
         self.retry_after_ms
@@ -215,7 +215,7 @@ impl Fault {
         self
     }
     pub fn with_details(mut self, details: FaultDetails) -> Result<Self, ValidationError> {
-        self.details = Some(details);
+        self.details = Some(Box::new(details));
         self.validate()?;
         Ok(self)
     }
@@ -229,7 +229,7 @@ impl Fault {
         let Some(kind) = self.kind() else {
             if self
                 .details
-                .as_ref()
+                .as_deref()
                 .is_some_and(|details| !matches!(details, FaultDetails::Unrecognized(_)))
             {
                 return Err(invalid(
@@ -243,7 +243,7 @@ impl Fault {
                 "retry_after_ms is only registered for temporary upstream faults",
             ));
         }
-        match &self.details {
+        match self.details.as_deref() {
             None => {}
             Some(FaultDetails::HistoryWrite(_))
                 if kind.details_schema() == FaultDetailsSchema::HistoryWrite => {}
@@ -331,7 +331,9 @@ impl<'de> Deserialize<'de> for Fault {
                 })),
                 message: wire.message,
                 diagnostic_id: wire.diagnostic_id,
-                details: wire.details.map(FaultDetails::Unrecognized),
+                details: wire
+                    .details
+                    .map(|value| Box::new(FaultDetails::Unrecognized(value))),
                 retry_after_ms: wire.retry_after_ms,
             });
         };
@@ -366,7 +368,7 @@ impl<'de> Deserialize<'de> for Fault {
             identity: FaultIdentity::Registered(kind),
             message: wire.message,
             diagnostic_id: wire.diagnostic_id,
-            details,
+            details: details.map(Box::new),
             retry_after_ms: wire.retry_after_ms,
         };
         fault.validate().map_err(serde::de::Error::custom)?;
