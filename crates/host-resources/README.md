@@ -15,10 +15,10 @@ Successful publication replaces one immutable resource snapshot and changes netw
 ## Current limits
 
 - This is production library composition, not the Host executable, CLI/config-file frontend, WSS listener startup, or completed `host.reload` transport route/operation receipt contract.
-- Automatic compaction is not implemented by the current Session owner. This assembler explicitly rejects `execution.compaction.enabled = true`; callers must disable it rather than silently receive different behavior. Defaults currently enable compaction, so unmodified default Agent configuration is not a complete production setup.
+- The Session owner supports automatic compaction at Runtime prompt boundaries using the original bound model/settings. Manual compaction prepares model, reasoning, selected ToolSpecs and the framework/Role/workspace prompt without creating a Turn or binding tools. Enabling compaction is supported; actual utility calls and their persistence can still fail and report their own facts.
 - Workspace preparation uses the real configured-root backend and retains its canonical root in the Turn's prompt context. It does not install read/edit/shell tool modules; those remain a separate integration task.
 - Model capabilities are explicit configuration declarations. Lists do not invent values for other, unknown capabilities. Full ModelRef strings and actual ToolSpec declarations are retained, without new model/tool IDs or a plugin platform.
-- Historical incomplete-tool projection is being integrated separately. No history rewrite or invented tool result is performed here.
+- Historical incomplete-tool projection preserves complete native exchanges and explains genuinely missing old results in the model prompt. Compaction does not rewrite original history or invent tool results.
 - A failed persistent configuration save remains an explicit blocker, with the original candidate retained. There is no new public repair command in this stage.
 
 Tests use real Host/Runtime and loopback production HTTP/SSE with scripted replies, plus explicitly named scheduling gates and a harmless tool fixture. They are not live-provider or TUI validation.

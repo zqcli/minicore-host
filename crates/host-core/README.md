@@ -64,7 +64,35 @@ Tests use temporary files, production owners, real Runtime and explicitly named 
 
 Run formatting, workspace tests, all-target Clippy with warnings denied, and rustdoc with warnings denied in the configured development checkout. Detailed checkpoints and commands are in tasks 006, 008, 009 and 012 at the repository root. The integrated canonical-control correction checkpoint `b961f9f` passed all 254 unit/integration tests and 2 doctests, with strict lint/documentation gates. A separate scoped review exercised 12 additional public-API acceptance cases; it is not the requested external review.
 
-Not implemented here: complete Host execution-resource configuration/reload, phased directory deletion, the complete canonical operation surface, transport/SDK adapters, DSH, full output/event reads, standard interaction and compaction. API/type presence is not evidence that these features are complete.
+Not implemented here: complete Host execution-resource configuration/reload, phased directory deletion, the complete canonical operation surface, transport/SDK adapters, DSH, full output/event reads, standard interaction. API/type presence is not evidence that these features are complete.
+
+## Session-owned compaction
+
+`session_compact` accepts manual utility work directly at an idle usable Session.
+It shares admission with Turn preparation, creates no Turn, and leaves both
+message queues writable but unconsumed until the work and its save settle.
+Explicit pause survives completion. `session_compact_cancel` targets the original
+manual operation only; a late cancellation cannot cancel a later compaction.
+The original receipt and Session state expose actual phases and known results.
+
+Automatic compaction runs at real Runtime prompt boundaries with the public
+Turn's frozen model and settings. Only unhanded inputs and the final incomplete
+accepted exchange are protected; earlier saved batches from that same Turn can
+be covered. Utility usage is separate from normal response indexes and usage.
+
+Raw native history remains append-only. The latest confirmed coverage marker
+projects one summary plus uncovered raw history for the model, while original
+content and TurnResult slicing remain intact. Marker saves use the existing
+Session journal boundary. Cancel-before-commit performs no marker append;
+commit-before-cancel retains the necessary save and does not claim rollback.
+A dropped Runtime prompt waiter cannot discard that work or allow its terminal
+history callback to accept a competing batch. An explicit `session_resume`
+continues only the original failed save and candidate without rerunning utility
+or tools. Force/close and resource retirement retain their real worker joins.
+
+Task 037 records the deterministic owner, journal, Runtime and loopback HTTP/SSE
+coverage. Transport routing and independent review remain separate acceptance
+steps; no live-model or TUI validation is claimed.
 
 ## Source-owned observation
 

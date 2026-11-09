@@ -1,6 +1,7 @@
 # Own Session compaction and durable commits
 
-Status: implementation in progress. No operational acceptance or push claimed.
+Status: implemented and full workspace gate passed. Independent review and
+transport integration remain separate. No push.
 
 ## Scope and fixed inputs
 
@@ -17,14 +18,6 @@ Status: implementation in progress. No operational acceptance or push claimed.
   quotas, recovery tickets or whole-Turn settlement behavior is adopted.
 - Storage coverage marker and journal validation are owned separately in task036.
   Transport, local-tools, registry, workspace backend and TUI are not edited.
-
-## Implementation and verification
-
-Pending. The intended gates include repeated reloadable coverage, same-Turn
-compaction, A/F input rebuild, manual/startup exclusion, both cancellation claim
-orders, original save continuation, prompt cancellation during save, missing
-old results, and lifecycle joins. Test doubles and local HTTP tests will be
-identified honestly; no live provider claim is made.
 
 ## Implemented owner path
 
@@ -76,5 +69,47 @@ An older large-verbatim HTTP fixture now explicitly disables compaction, since
 its two-response server and assertion deliberately test uncompressed history.
 No production fallback or silent disabling was added.
 
-Full workspace lint/test/doc gate and exact unique counts are pending below.
-Transport and independent review remain separate. No push.
+## Final code and aggregate verification
+
+Owned commits to integrate, after the coordinator's clean prerequisites:
+
+- `b03239b`: typed protocol facts, compact/cancel receipts and narrow Faults.
+- `7171d8d436c00ce311ad4abe27520a6f779f4e39`: actual Session owner integration,
+  resource-only manual binding, coverage/save/lifecycle boundaries and tests.
+- `6893969eee546fd1469f236b3b596fa575c816ae`: strict cancelled/unchanged outcome
+  decoding. Serde's tagged unit variants otherwise ignore unknown fields; a
+  private strict wire shape preserves the public Rust constructors and JSON.
+
+The parent-owned storage README correction `b69d0b8` was picked as `0b31670`
+only after the exact `7171d8d` aggregate gate completed. Final production code
+verification ran at `0b316707316bcf7de775a1ea1037acb79fa342db`, including the
+protocol correction and unchanged core/resource source:
+
+```sh
+CARGO_NET_OFFLINE=true ./scripts/check.sh
+cargo test --workspace --all-targets --locked --offline -- --list
+cargo metadata --locked --offline --format-version 1
+sha256sum SPEC.md
+```
+
+Passed whitespace and formatting, strict all-target workspace Clippy, **606
+unique target/test cases**, **3 workspace doctests**, and strict rustdoc. The
+list command, not nested storage subprocess output, supplies the unique count.
+This work adds 14 core owner cases, 2 production-resource HTTP cases and 2 strict
+protocol cases. The earlier exact `7171d8d` full gate also passed.
+
+Metadata retains one Runtime 0.10.0 at the fixed `69faf919` revision with no
+patch or version change. SPEC SHA-256 remains
+`f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
+
+Validation logs, test lists and metadata are retained in the separate
+`minicore-host-session-compaction-validation` directory. The final aggregate
+log is `final-protocol-gate.log`; `final-test-list.txt` records its test inventory.
+Only documentation changed afterward, with whitespace/format checks repeated.
+
+The 606-test total includes unrelated local-tools code already present in the
+quarantined base. It is not acceptance of that module. Integrate only the owned
+commits into clean dev, not this worktree's full ancestry. No transport, Runtime,
+engine, local-tools, registry, workspace-backend or TUI source was changed.
+Independent review, transport adapter verification and clean-dev integration
+remain with the coordinator. No live provider credentials or TUI were tested.
