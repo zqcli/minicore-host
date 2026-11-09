@@ -82,3 +82,9 @@ validation directory. An initial validation wrapper incorrectly passed
 `--config` to the rustfmt subcommand and exited before tests; the corrected
 wrapper leaves fmt unchanged and patches only dependency-consuming Cargo
 commands. It is not counted as a passing gate or retained in the repository.
+
+## Observation-stage capability bridge
+
+- Locally replayed observation prerequisites `49af8f89d67d741d445329e6a66f620086d98ef9` and `39a138ec42ea1abddd3c33427e79032f1e3e0426`; the integration owner already has these, so they must not be replayed again there.
+- Added TurnCapability::history_read as a narrow asynchronous wrapper over the real paged SessionHistorySnapshot owner path; no full-history substitute or released-body cache.
+- Core cargo check passed with command-line patch `/workspace/shared/minicore-runtime-retry-state`, fixed `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`. This is explicitly local validation, not a claim that this SHA is remotely available. Final scope tests below use this exact retry-capable runtime.

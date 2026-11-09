@@ -580,3 +580,14 @@ impl TurnCapability {
             .await
     }
 }
+impl TurnCapability {
+    pub async fn history_read(
+        &self,
+        target: &SessionRef,
+        request: &HistoryReadRequest,
+    ) -> Result<SessionHistorySnapshot, Fault> {
+        self.host()?
+            .history_read(&self.caller()?, target, request)
+            .await
+    }
+}
