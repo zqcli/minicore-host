@@ -1,4 +1,5 @@
 use crate::{StorageError, error::io_error};
+use metadata::MetadataGates;
 use rustix::fs::{self, AtFlags, Mode, OFlags};
 use std::{
     fs::{DirBuilder, File},
@@ -16,6 +17,7 @@ pub(crate) struct Directory {
     pub file: Arc<File>,
     pub path: PathBuf,
     parent: Option<Arc<Directory>>,
+    metadata: Arc<MetadataGates>,
 }
 
 impl Directory {
@@ -55,6 +57,7 @@ impl Directory {
             file: Arc::new(file),
             path: canonical,
             parent: None,
+            metadata: Arc::default(),
         })
     }
 
@@ -83,6 +86,7 @@ impl Directory {
             file: Arc::new(file),
             path,
             parent: Some(Arc::new(self.clone())),
+            metadata: self.metadata.clone(),
         })
     }
 
@@ -123,6 +127,29 @@ impl Directory {
         Ok(bytes)
     }
 
+    /// Capture one metadata file, excluding only this instance's atomic
+    /// replacement of that exact path. Release before decoding or following any
+    /// parent/default reference; no two metadata gates are held together.
+    pub fn read_metadata(&self, name: &str) -> Result<Vec<u8>, StorageError> {
+        component(name)?;
+        let gate = self.metadata.get(self.path.join(name))?;
+        let _snapshot = gate.read()?;
+        self.verify_attached()?;
+        let mut file = self.open_file(name, false, false)?;
+        #[cfg(test)]
+        run_hook(&METADATA_READ_HOOK);
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)
+            .map_err(|e| io_error("read object snapshot", self.path.join(name), e))?;
+        // Internal publishers cannot invalidate this snapshot. Any unlink,
+        // extra hardlink, unsafe permission or detached path here is external
+        // or an uncoordinated deletion, not a reason to accept nlink == 0.
+        check_file(&file)?;
+        self.verify_file_identity(name, &file)?;
+        self.verify_attached()?;
+        Ok(bytes)
+    }
+
     pub fn entries(&self) -> Result<Vec<String>, StorageError> {
         let reader = fs::Dir::read_from(&*self.file)
             .map_err(|e| io_error("read storage directory", &self.path, e))?;
@@ -157,9 +184,6 @@ impl Directory {
     pub fn atomic_write(&self, name: &str, bytes: &[u8]) -> Result<(), StorageError> {
         component(name)?;
         self.verify_attached()?;
-        if self.contains(name)? {
-            self.open_file(name, false, false)?;
-        }
         let nonce =
             minicore_host_protocol::OperationId::new().map_err(|_| StorageError::UnsafePath {
                 reason: "secure temporary filename generation failed",
@@ -173,6 +197,14 @@ impl Directory {
             file.sync_all().map_err(|e| {
                 io_error("sync object temporary file", self.path.join(&temporary), e)
             })?;
+            #[cfg(test)]
+            run_hook(&METADATA_PUBLISH_HOOK);
+            let gate = self.metadata.get(self.path.join(name))?;
+            let _publication = gate.write()?;
+            self.verify_attached()?;
+            if self.contains(name)? {
+                self.open_file(name, false, false)?;
+            }
             fs::renameat(&*self.file, &temporary, &*self.file, name)
                 .map_err(|e| io_error("publish object file", self.path.join(name), e))?;
             self.sync()?;
@@ -360,6 +392,18 @@ pub(crate) fn sync_file(
 thread_local! {
     static SYNC_FAILURE: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
     static SYNC_TRACE: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+    static METADATA_READ_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
+    static METADATA_PUBLISH_HOOK: std::cell::RefCell<Option<Box<dyn FnOnce()>>> = const { std::cell::RefCell::new(None) };
 }
+#[cfg(test)]
+type MetadataHook = std::thread::LocalKey<std::cell::RefCell<Option<Box<dyn FnOnce()>>>>;
+#[cfg(test)]
+fn run_hook(hook: &'static MetadataHook) {
+    let callback = hook.with(|hook| hook.borrow_mut().take());
+    if let Some(callback) = callback {
+        callback();
+    }
+}
+mod metadata;
 #[cfg(test)]
 mod tests;

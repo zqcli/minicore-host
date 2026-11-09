@@ -81,6 +81,20 @@ cleanup never deletes an original object. Initial Session creation confirms its
 empty history before publishing the Session record; this is not a multi-file
 transaction and partial creation remains a real fact.
 
+Metadata snapshots and atomic publication coordinate only on the exact file
+path within this `DataRoot`. A snapshot retains its file-local read gate through
+no-follow open, read and final file/directory checks; publication takes that
+path's write gate for target validation, rename, synchronization and confirmation.
+The shared gate index never holds a lock over filesystem work. A raw read releases
+its gate before typed decoding or following parent/default references, so there
+are no cross-object gate chains and unrelated metadata files remain independent.
+Same-instance replacement therefore cannot invalidate a legitimate open snapshot.
+External unlink, replacement, extra hardlinks, unsafe permissions or detached
+directories observed during the read still fail; no `nlink == 0` exception,
+automatic retry or repair is introduced. Append-only history does not use these
+metadata gates and retains all its existing identity/link checks. A valid
+snapshot is readable data, not a durability confirmation for a failed save.
+
 Memory Agent/Session saves return not_applicable before filesystem work. A memory
 Session journal performs no directory lookup, object creation or JSONL write.
 Memory Agent plus persistent Session is rejected; modes never silently change.
@@ -142,6 +156,9 @@ All disk methods are synchronous. Invoke them in an owned blocking worker,
 outside Host, Agent and Session state locks. A caller stopping its wait must not
 drop the owner's accepted worker. A dedicated journal has one OS-locked writer;
 it is not a Host-wide request lock. Independent Sessions can write independently.
+Each direct owner must serialize accepted saves of its own object outside its
+business-state lock. File-local metadata coordination is not a compare-and-swap
+for competing same-object revision updates or a multi-object transaction.
 
 1. `accept(entries)` or `accept_batch(exact_records)` validates and takes a new
    range `[start,end)`. The exclusive accepted position advances immediately.

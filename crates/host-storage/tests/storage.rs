@@ -1368,3 +1368,69 @@ fn unsafe_shared_collection_directories_still_fail_at_their_owner_boundary() {
         );
     }
 }
+
+#[test]
+fn concurrent_parent_child_metadata_saves_preserve_confirmed_records() {
+    let f = Fixture::new();
+    let mut agent_record = f.agent.load_record().unwrap();
+    agent_record.data.default_session_id = Some(f.session.id().clone());
+    f.agent.save(&agent_record).unwrap();
+    let mut session_record = f.session.load().unwrap();
+    let start = std::sync::Barrier::new(3);
+    let rounds = 512;
+    std::thread::scope(|scope| {
+        let agent = scope.spawn(|| {
+            start.wait();
+            for revision in 2..=rounds + 1 {
+                agent_record.data.config_revision = revision;
+                agent_record.data.config.role.name = format!("Agent revision {revision}");
+                assert_eq!(
+                    f.agent.save(&agent_record).unwrap(),
+                    ObjectSave {
+                        config_revision: revision,
+                        persistence: PersistenceState::Persisted,
+                    }
+                );
+            }
+        });
+        let session = scope.spawn(|| {
+            start.wait();
+            for revision in 2..=rounds + 1 {
+                session_record.data.config_revision = revision;
+                session_record.data.effective_config.role.name =
+                    format!("Session revision {revision}");
+                assert_eq!(
+                    f.session.save(&session_record).unwrap(),
+                    ObjectSave {
+                        config_revision: revision,
+                        persistence: PersistenceState::Persisted,
+                    }
+                );
+            }
+        });
+        start.wait();
+        for _ in 0..rounds * 4 {
+            f.agent.load().unwrap();
+            f.session.load().unwrap();
+        }
+        agent.join().unwrap();
+        session.join().unwrap();
+    });
+    assert_eq!(f.agent.load().unwrap(), agent_record);
+    assert_eq!(f.session.load().unwrap(), session_record);
+    assert_eq!(std::fs::read(f.history_path()).unwrap(), b"");
+
+    let path = f.root.canonical_path().to_path_buf();
+    let host_id = f.host.id().clone();
+    let agent_id = f.agent.id().clone();
+    let session_id = f.session.id().clone();
+    drop(f.session);
+    drop(f.agent);
+    drop(f.host);
+    drop(f.root);
+    let root = DataRoot::acquire(&path).unwrap();
+    let agent = root.host(host_id).agent(agent_id, StorageMode::Persistent);
+    let session = agent.session(session_id, StorageMode::Persistent).unwrap();
+    assert_eq!(agent.load().unwrap(), agent_record);
+    assert_eq!(session.load().unwrap(), session_record);
+}

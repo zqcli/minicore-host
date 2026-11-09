@@ -477,7 +477,7 @@ fn read_object<T: DeserializeOwned + Serialize>(
     dir: &Directory,
     name: &str,
 ) -> Result<T, StorageError> {
-    let value = strict_json::value(&dir.read(name)?)
+    let value = strict_json::value(&dir.read_metadata(name)?)
         .map_err(|reason| StorageError::InvalidObject { reason })?;
     let version = value
         .get("schema_version")
