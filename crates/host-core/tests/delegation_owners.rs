@@ -1188,3 +1188,64 @@ async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate()
         "persisted name"
     );
 }
+
+async fn close_during_preparation_hands_off_discarded_task(fail: bool) {
+    let preparation = Arc::new(Semaphore::new(1));
+    let mut f = setup(1, Some(preparation.clone()), false);
+    let parent = agent(&f);
+    let child = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    cap.prepare_scope(hooks()).unwrap();
+    let task = input(MessageMode::FollowUp);
+    let relation = registration(&cap, child.clone(), &task);
+    let (sink, mut results) = mpsc::unbounded_channel();
+    let permit = cap
+        .prepare_delegation(relation.clone(), Arc::new(Sink(sink)))
+        .unwrap();
+    cap.send_delegated(&relation, task.clone()).unwrap();
+    let candidate = recv(&mut f.bindings).await;
+    assert!(candidate.capability().check_active().is_err());
+    f.resources.fail.store(fail, Ordering::SeqCst);
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &child)
+        .unwrap();
+    let closing = permit.clone();
+    let close = tokio::spawn(async move { closing.close(OperationId::new().unwrap()).await });
+    while states.snapshot().unwrap().data.lifecycle != SessionLifecycle::Closing {
+        states.changed().await.unwrap();
+    }
+    assert!(results.try_recv().is_err());
+    assert!(!close.is_finished());
+    preparation.add_permits(1);
+    let completion = recv(&mut results).await;
+    assert!(completion.results.is_empty());
+    assert!(completion.inputs.is_empty());
+    assert_eq!(completion.discarded_inputs, vec![task.message_id]);
+    tokio::time::timeout(Duration::from_secs(10), close)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let receipt = permit.notify(input(MessageMode::FollowUp)).await.unwrap();
+    permit
+        .release(DelegationDisposition::Notified(receipt))
+        .await
+        .unwrap();
+    assert!(f.starts.try_recv().is_err());
+    f.host
+        .cancel_session(&f.connection.caller(), &parent, false)
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn successful_preparation_after_close_transfers_discarded_task_before_retirement() {
+    close_during_preparation_hands_off_discarded_task(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_preparation_after_close_transfers_discarded_task_before_retirement() {
+    close_during_preparation_hands_off_discarded_task(true).await;
+}

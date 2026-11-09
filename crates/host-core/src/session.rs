@@ -974,6 +974,8 @@ impl SessionController {
                     Self::finish_memory_close(&mut state);
                     state.driver_running = false;
                     self.publish(&mut state);
+                    drop(state);
+                    self.handoff_delegation_owned();
                     return;
                 }
                 state.preparing = true;
@@ -1066,6 +1068,8 @@ impl SessionController {
                     state.driver_running = false;
                     Self::finish_memory_close(&mut state);
                     self.publish(&mut state);
+                    drop(state);
+                    self.handoff_delegation_owned();
                     return;
                 }
             };
@@ -1149,7 +1153,10 @@ impl SessionController {
         }
         state.block_reason = Some(fault);
         state.driver_running = false;
+        Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+        drop(state);
+        self.handoff_delegation_owned();
     }
     async fn run_turn(
         self: &Arc<Self>,

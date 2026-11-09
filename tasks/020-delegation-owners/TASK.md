@@ -88,3 +88,10 @@ commands. It is not counted as a passing gate or retained in the repository.
 - Locally replayed observation prerequisites `49af8f89d67d741d445329e6a66f620086d98ef9` and `39a138ec42ea1abddd3c33427e79032f1e3e0426`; the integration owner already has these, so they must not be replayed again there.
 - Added TurnCapability::history_read as a narrow asynchronous wrapper over the real paged SessionHistorySnapshot owner path; no full-history substitute or released-body cache.
 - Core cargo check passed with command-line patch `/workspace/shared/minicore-runtime-retry-state`, fixed `3cf57e3e1947b0464bd8843ed0508bfddfb2639a`. This is explicitly local validation, not a claim that this SHA is remotely available. Final scope tests below use this exact retry-capable runtime.
+
+## Preparation-close handoff correction
+
+- The production adapter's real close_scope integration exposed a missing transfer after a child was closed while resources were preparing. Inbox clearing correctly recorded the unconsumed task as discarded, but the preparation fence prevented immediate handoff and no preparation exit retriggered it.
+- Driver termination and preparation-failure exits now attempt the existing handoff outside the Session lock after preparation settles. Closed/retirement still waits for actual transfer, required saves, and owned cleanup.
+- Added two channel/semaphore-ordered Host/Runtime tests: successful and failed preparation after close both transfer only the discarded task fact, publish no Turn, and let the real close/retirement complete.
+- Focused delegation suite: 17/17 passed using the exact local Runtime `3cf57e3e1947b0464bd8843ed0508bfddfb2639a` patch described above. The adapter's separate integration is rerun by its owner; no fixture is represented as that adapter result.
