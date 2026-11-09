@@ -22,3 +22,23 @@ pub use error::*;
 pub use journal::*;
 pub use objects::*;
 pub use records::*;
+
+/// Open a stable Host identity while retaining its exclusive root guard.
+///
+/// ```no_run
+/// use minicore_host_protocol::HostId;
+/// use minicore_host_storage::{DataRoot, HostRecord};
+/// # fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let root = DataRoot::acquire("./host-data")?;
+/// let existing = root.load_host::<serde_json::Value>()?;
+/// let record = match existing {
+///     Some(record) => record,
+///     None => HostRecord::new(HostId::new()?, serde_json::json!({}), 0),
+/// };
+/// let host = root.host(record.id.clone());
+/// host.save_host(&record)?;
+/// // The Host initializes only its direct Agents through their owners.
+/// # Ok(())
+/// # }
+/// ```
+pub const STORAGE_SCHEMA_VERSION: u32 = SCHEMA_VERSION;

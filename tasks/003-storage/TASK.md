@@ -1,50 +1,57 @@
 # Implement durable Host storage
 
-Status: active. First storage implementation and 21 focused tests are complete; additional native-history and real OS failure tests, final lint, documentation and integration handoff remain.
+Status: completed for the storage foundation. Full-version integration and the explicit limits below remain with their actual owners.
 
-## Scope and baseline
+## Scope and sources
 
-- Implements SPEC v4.93 §4 and the storage decisions in §15. The original SPEC.md is unchanged.
-- Owns only `crates/host-storage/**` and this task record. Protocol contracts come from `minicore-host-protocol`; native history and authoritative partials come from the Runtime patch based on `3fd5ecda1fb7c717ab0a39218d90268b4d97909c`.
-- Linux is the explicit supported storage platform. Other platforms fail compilation rather than silently using weaker locks or path checks.
-- Real directory-inode advisory lock, no stale-marker ownership; fd-relative no-follow filesystem operations; owned regular files and non-writable-by-others directories; strict schema/identity validation; atomic object replacement with file and directory sync.
-- Session-local JSONL positions, distinct consumed Input, exact Runtime HistoryItem, ModelPartial and TurnFinished facts. Memory creates no object or history files. Loading never restores execution or repairs data.
-- Accepted and synchronized positions are separate. Failed saves retain the original byte range; explicit same-run reconciliation permits only exact complete-suffix sync or a proven-unwritten original range. Partial/changed data stays blocked.
+- Implements the durable adapter for SPEC v4.93 §4, incremental record handoff in §5 and storage decisions in §15. `SPEC.md` is unchanged.
+- Changed only `crates/host-storage/**` and this task record. Root workspace, Cargo.lock, PROJECT and protocol files belong to the parent.
+- Runtime manifest baseline: `3fd5ecda1fb7c717ab0a39218d90268b4d97909c`. Final local checks used the clean Runtime patch worktree at `4f976b41f2381e2b09f3383aa66318b7aee2a8b3` and clean protocol worktree at `2c0b024f87a156bb1a1d47399cf302bc7262eedf`.
+- Linux is the explicit supported platform. There is no weaker fallback for unsupported locking, filesystem synchronization or another OS.
 
-## Commands and first milestone results
+## Functional commits
 
-Environment: `export RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/cargo PATH=/workspace/shared/cargo/bin:$PATH`.
+- `0c32443`: real directory-inode exclusive lock; fd-relative no-follow I/O; strict owned object envelopes; atomic file/directory synchronization; native incremental JSONL and exact-range reconciliation. Initial 21 tests passed.
+- `936cdf3`: unknown/discarded native fields, real kernel EFBIG object/history failures, native tool and partial history, replacement and explicit deletion tests. 31 tests passed.
+- `2366ff23c442f68040d7637596d95e3c99663da9`: all five focused-review corrections below, stable configuration/provenance checks and metadata-sync retry coverage. 43 code tests passed.
+- `bf671a9ff2a4145fd6f39cc48cfd5fd7fb3e8e8f`: `AgentStore::load_record()` and direct-owner Session enumeration; healthy siblings initialize despite damaged default Session metadata or a missing default history. 44 code tests passed.
+- The final documentation commit adds the schema/platform contract, integration guidance, remaining limits and one compiling rustdoc example.
 
-Independent-worktree commands use the actual Runtime patch through:
+## Focused review and failure coverage
 
-`--config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"'`
+A read-only code/spec review found five issues. Each was corrected and regression-tested:
 
-- `cargo check --manifest-path crates/host-storage/Cargo.toml` with that patch: passed.
-- `cargo test --manifest-path crates/host-storage/Cargo.toml` with that patch: 4 unit tests and 17 integration tests passed, plus doc tests.
-- `cargo fmt --manifest-path crates/host-storage/Cargo.toml`: completed.
-- First Clippy run identified a large enum variant and a copy-type clone; both corrected. Final lint run follows.
+1. **Retry durability:** root/child directory ancestry and already-visible empty initial histories are explicitly synchronized again; existence never proves a previous failed sync completed.
+2. **Replacement during I/O:** after write/sync, save confirmation rechecks current directory/file identity and exact expected length. Tests replace files/directories inside the synchronization window, including reconciliation.
+3. **Terminal partial association:** one Loop's terminal partial forbids subsequent records for that Loop. Full response followed by its next-request partial remains valid.
+4. **Numeric rounding:** parse raw JSON numeric tokens exactly before native decoding. Numbers the reused native codec cannot roundtrip are explicitly rejected, never converted silently to f64. Generic Host JSON retains exact large integers.
+5. **Incremental cost:** validation uses a batch-local overlay and commits only touched indexes. No historical validation-map clone occurs per append; rejected batches leave accepted positions and old indexes unchanged.
 
-The local protocol symlink is test scaffolding, not committed. Root workspace/Cargo.lock integration belongs to the parent. No remote writes, live provider execution, TUI validation, power-loss experiment, or cross-platform validation has been performed.
+Additional tests cover cross-process and same-process lock exclusion, symlink aliases, abnormal exit, stale markers, retained root guards, owner/path/hardlink checks, schema/corruption/duplicate failures, complete tails without newlines, missing histories, native tool-result associations and legitimate missing results, no-file memory modes, immutable creation provenance and exact confirmation ranges. Explicit test hooks inject zero writes, partial writes and file/directory sync failures around real files. Linux subprocesses induce actual EFBIG errors; their output uses pipes so redirected test logs do not inherit the test file-size limit.
 
-## Hardening milestone
+Partial deletion is tested after history unlink but before required directory sync: the original closed metadata remains, so an explicit retry can finish. No rollback, recursion or automatic repair occurs. See the remaining limitation below for a later failure after metadata unlink.
 
-- First implementation commit: `0c32443` (`feat(storage): add durable owner-scoped object and history storage`).
-- Added actual kernel `EFBIG` subprocess tests for atomic object-save failure and partial JSONL append. Existing object bytes survive; partial history remains blocked and unchanged after reopening.
-- Added full native tool-call/result association, missing-result history, authoritative partial roundtrip, moved-directory, active-writer deletion, and lossy/native unknown-null rejection tests.
-- The tests found that serde callbacks can miss fields buffered inside tagged enums. Removed that dependency and made the lossless decode check reject every discarded field, including null; no stored text is silently normalized.
-- Latest checks: 4 unit tests + 27 integration tests passed; Clippy `--all-targets -- -D warnings` passed; rustdoc with `RUSTDOCFLAGS='-D warnings'` passed. Final format and task handoff follow.
+## Final verification
 
-## Focused review corrections
+Set the toolchain with:
 
-- `936cdf3` added lossy-record rejection and real OS write-failure regression tests.
-- Read-only focused review identified metadata-sync retry gaps, replacement during I/O, terminal partial association, numeric rounding before comparison and copying accumulated validation indexes. All five were corrected with targeted regressions.
-- Root/child directory ancestry and visible initial history files are explicitly re-synchronized on retry. Successful save confirmation rechecks current file/directory identity and expected file length after I/O.
-- Strict JSON parsing preserves numeric tokens before native decoding; an unsupported native numeric representation is explicitly rejected, never rounded.
-- Validation uses a batch-local overlay and commits only touched indexes. Rejected batches leave accepted positions and historical indexes unchanged.
-- Explicit deletion can continue after history removal when the closed ownership record remains. No generic transaction or execution recovery was added. If the ownership record itself is removed and later directory cleanup fails, owner-level phased continuation remains outside this foundation adapter and must not be claimed complete.
+`export RUSTUP_HOME=/workspace/shared/rustup CARGO_HOME=/workspace/shared/cargo PATH=/workspace/shared/cargo/bin:$PATH`
 
-## Owner initialization boundary
+Exact commands, all passed against the final working tree:
 
-- Hardening commit: `2366ff23c442f68040d7637596d95e3c99663da9` (11 unit + 32 integration tests passed; the compiling rustdoc example follows in the documentation commit).
-- Added `AgentStore::load_record()` to validate only the Agent's authoritative schema/identity/mode/config. `list_sessions()` uses the same direct-owner boundary, so broken default Session metadata or a missing history cannot prevent enumeration or initialization of healthy siblings.
-- Strict `load()` remains available and still validates the saved default. The actual Agent owner must retain the broken Session's fault and unavailable default; no pointer is cleared or redirected automatically.
+- `cargo fmt --manifest-path crates/host-storage/Cargo.toml --check`
+- `cargo clippy --manifest-path crates/host-storage/Cargo.toml --all-targets --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"' -- -D warnings`
+- `cargo test --manifest-path crates/host-storage/Cargo.toml --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"'`
+- `RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path crates/host-storage/Cargo.toml --no-deps --config 'patch."https://github.com/zqcli/minicore-runtime".minicore-runtime.path="/workspace/shared/minicore-runtime-handoff"'`
+
+Final results: **11 unit tests + 33 integration tests + 1 compiling rustdoc example** passed. Formatting, Clippy warnings-as-errors and rustdoc warnings-as-errors passed. Standalone test Cargo.lock/target files and the temporary protocol symlink are not committed. The parent integrates the reproducible workspace lock and vendored Runtime patch, then runs the full workspace gates.
+
+## Integration rules and remaining limits
+
+- All disk methods run in owned blocking work outside business-state locks. Accepted workers retain their journals/root guards until actual completion. Failed saves preserve accepted positions and the exact pending range; no retry re-executes Runtime or tools.
+- Initialize Agents with `load_record()`, then initialize children independently and retain per-Session faults. Strict `load()` additionally checks the default. An unavailable default stays unavailable; it is never redirected. Clear and save the Agent pointer before committing closure of its current default Session.
+- Memory objects create no own records, histories or result stores. No quotas, TTLs, retention budgets, migration, tail repair or execution recovery are introduced.
+- **Remaining explicit deletion limitation:** if `session.json` has already been removed and later directory cleanup/sync fails, the convenience deletion API does not reconstruct authority from an empty directory or declare completion. A business-owner phased-deletion handle that retains the accepted operation's exact partial facts is not implemented here. This is a remaining full-version lifecycle task, not a successful rollback or recovery.
+- Standalone Summary records preserve native summary content; they do not imply prefix replacement. Actual compaction replacement needs its owner-level commit contract.
+- No power-loss experiment, network-filesystem certification, other-OS validation, live provider execution or TUI validation was performed by this storage task. The focused read-only review does not replace the user's separate independent review.
+- No remote push or tag was attempted.
