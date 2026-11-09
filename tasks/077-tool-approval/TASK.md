@@ -35,3 +35,14 @@ Existing non-approval ordinary/resource fixtures explicitly select Auto at their
 - Cancel and force shutdown during approval both exit without starting the real bash side effect; cancellation resolves the original interaction as cancelled.
 - Changing Session policy from Ask to Auto does not replace the active Turn's policy, including a second internal Loop after a queued steer. Both old calls still ask, while the next public Turn executes automatically with the new config revision. Query projections verify the original/new bound policy values.
 - Initial binary run passed 4/6; two new read fixtures omitted the existing required `limit` argument and received actual invalid-invocation output. Added `limit: 1` to those fixtures, without production changes; all 6 then passed.
+
+### Initial scoped gate (before external-name provenance review)
+
+With `RUSTUP_HOME=/workspace/shared/rustup`, `CARGO_HOME=/workspace/shared/cargo`, `CARGO_TARGET_DIR=/workspace/shared/minicore-host-tool-approval-target`, `CARGO_BUILD_JOBS=2`, disabled dev/test debug and incremental compilation, and the shared temporary directory:
+
+- `cargo test -p minicore-host -p minicore-host-protocol -p minicore-host-tools -p minicore-host-resources --all-targets --locked --offline`: passed **207** unique cases, confirmed by the same package/target selection with `-- --list` and unique target/test-name counting.
+- `cargo clippy -p minicore-host -p minicore-host-protocol -p minicore-host-tools -p minicore-host-resources --all-targets --locked --offline -- -D warnings`: passed after replacing a new test fixture's default-plus-field reassignment with a struct initializer. The earlier Clippy failure is retained as a test-fixture lint issue, not a production failure.
+- `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host -p minicore-host-protocol -p minicore-host-tools -p minicore-host-resources --no-deps --locked --offline`: passed.
+- Formatting and whitespace checks pass. SPEC and Cargo.lock remain unchanged (lock SHA-256 `1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125`).
+
+Independent task078 review then reproduced an external factory named `read` bypassing Ask/ReadOnly via the name-only read exemption. This is a genuine conflict with conservative external-tool classification, not an OS sandbox claim. The initial passing scoped gate is retained; the issue remains open until the registry provenance correction and its probes pass. The analogous external `agent` name is included in that correction. No full workspace or release acceptance is claimed from this scoped gate.

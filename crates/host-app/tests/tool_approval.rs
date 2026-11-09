@@ -286,9 +286,14 @@ async fn binary_read_only_blocks_local_and_agent_mutations_but_reads_inspects_an
     )
     .await;
     let agent_ref = json!({"host_id":app.initial["host_id"],"agent_id":victim["agent_id"]});
-    let mut execution = ExecutionSettings::default();
-    execution.compaction.enabled = false;
-    execution.approval = ApprovalMode::Auto;
+    let execution = ExecutionSettings {
+        approval: ApprovalMode::Auto,
+        compaction: CompactionSettings {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     app.process
         .rpc("message.send", message(&target, "read-only policy matrix"))
         .await;
@@ -547,9 +552,14 @@ async fn binary_policy_update_is_frozen_through_internal_loops_and_applies_next_
         .await;
     let first = provider.request().await;
     let turn = only_turn(&mut app.process, &target).await;
-    let mut execution = ExecutionSettings::default();
-    execution.approval = ApprovalMode::Auto;
-    execution.compaction.enabled = false;
+    let execution = ExecutionSettings {
+        approval: ApprovalMode::Auto,
+        compaction: CompactionSettings {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     app.process.rpc("session.update", json!({"target":target,"operation_id":OperationId::new().unwrap(),"expected_config_revision":0,"changes":{"config":{"execution":execution}}})).await;
     tokio::time::timeout(support::WAIT, async {
         loop {
