@@ -9,8 +9,13 @@ use minicore_runtime::{
 };
 use serde::{Deserialize, Serialize};
 
-/// On-disk schema version, independent of the design-specification version.
+/// Object-file schema version, independent of the design-specification version.
 pub const SCHEMA_VERSION: u32 = 1;
+
+/// New JSONL records use v2. Original v1 history branches remain readable in
+/// their exact shape; compaction coverage is only defined in v2. No file is
+/// rewritten or migrated when v2 records are appended to an existing v1 log.
+pub const HISTORY_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -153,8 +158,15 @@ pub enum HistoryEntry {
         outcome: TurnOutcome,
         reason: Option<String>,
     },
-    /// An independent committed compaction need not invent a Turn identity.
+    /// A literal native summary item, with no implied replacement coverage.
     Summary { summary: SummaryHistory },
+    /// An actual prefix replacement in model context, not in the raw transcript.
+    /// Its source is this marker's existing Session-local log position.
+    Compaction {
+        source_position: u64,
+        covered_items: u64,
+        summary: SummaryHistory,
+    },
 }
 impl HistoryEntry {
     pub fn turn_id(&self) -> Option<&TurnId> {
@@ -163,7 +175,7 @@ impl HistoryEntry {
             | Self::Runtime { turn_id, .. }
             | Self::Partial { turn_id, .. }
             | Self::TurnFinished { turn_id, .. } => Some(turn_id),
-            Self::Summary { .. } => None,
+            Self::Summary { .. } | Self::Compaction { .. } => None,
         }
     }
     /// A projection, not execution recovery. Partial and finish facts are never
@@ -173,7 +185,7 @@ impl HistoryEntry {
             Self::Input { user, .. } => Some(HistoryItem::User(user.clone())),
             Self::Runtime { item, .. } => Some(item.clone()),
             Self::Summary { summary } => Some(HistoryItem::Summary(summary.clone())),
-            Self::Partial { .. } | Self::TurnFinished { .. } => None,
+            Self::Partial { .. } | Self::TurnFinished { .. } | Self::Compaction { .. } => None,
         }
     }
 }
@@ -189,7 +201,7 @@ pub struct HistoryRecord {
 impl HistoryRecord {
     pub fn new(session_id: SessionId, position: u64, entry: HistoryEntry) -> Self {
         Self {
-            schema_version: SCHEMA_VERSION,
+            schema_version: HISTORY_SCHEMA_VERSION,
             session_id,
             position,
             entry,

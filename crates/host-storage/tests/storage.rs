@@ -1438,3 +1438,6 @@ fn concurrent_parent_child_metadata_saves_preserve_confirmed_records() {
     assert_eq!(agent.load().unwrap(), agent_record);
     assert_eq!(session.load().unwrap(), session_record);
 }
+
+#[path = "storage/compaction.rs"]
+mod compaction;

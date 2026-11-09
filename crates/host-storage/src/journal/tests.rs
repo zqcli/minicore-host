@@ -218,3 +218,5 @@ fn directory_replacement_during_sync_cannot_be_confirmed() {
         b"replacement"
     );
 }
+
+mod compaction;

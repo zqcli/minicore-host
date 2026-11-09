@@ -11,6 +11,7 @@ compile_error!(
     "MiniCore Host storage currently supports Linux only; no weaker lock/path fallback is provided"
 );
 
+mod compaction;
 mod error;
 mod filesystem;
 mod journal;
@@ -18,6 +19,7 @@ mod objects;
 mod records;
 mod strict_json;
 
+pub use compaction::*;
 pub use error::*;
 pub use journal::*;
 pub use objects::*;

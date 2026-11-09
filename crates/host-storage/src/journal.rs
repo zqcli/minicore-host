@@ -1,6 +1,7 @@
 use crate::{
-    FilePosition, HistoryEntry, HistoryProblem, HistoryRecord, SCHEMA_VERSION, SaveRange,
-    SessionStore, StorageError, filesystem::Directory, strict_json,
+    CompactionProjection, FilePosition, HISTORY_SCHEMA_VERSION, HistoryEntry, HistoryProblem,
+    HistoryRecord, SCHEMA_VERSION, SaveRange, SessionStore, StorageError, filesystem::Directory,
+    strict_json,
 };
 use minicore_host_protocol::{PersistenceState, SessionId, TurnId, TurnOutcome};
 use minicore_runtime::{
@@ -35,11 +36,39 @@ pub struct LoadedHistory {
     pub next_position: u64,
 }
 impl LoadedHistory {
+    /// Original native transcript, never the compressed model projection.
     pub fn runtime_history(&self) -> Vec<HistoryItem> {
         self.records
             .iter()
             .filter_map(|record| record.entry.runtime_item())
             .collect()
+    }
+
+    pub fn compaction_projection(&self) -> Option<CompactionProjection> {
+        self.records.iter().rev().find_map(|record| {
+            if let HistoryEntry::Compaction {
+                source_position,
+                covered_items,
+                summary,
+            } = &record.entry
+            {
+                Some(CompactionProjection::new(
+                    *source_position,
+                    *covered_items,
+                    summary.clone(),
+                ))
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn model_history(&self) -> Result<Vec<HistoryItem>, HistoryProblem> {
+        let raw = self.runtime_history();
+        match self.compaction_projection() {
+            Some(projection) => projection.project(&raw),
+            None => Ok(raw),
+        }
     }
 }
 
@@ -224,7 +253,7 @@ impl SessionJournal {
             };
             validate_envelope(record, &self.session_id, next, location)?;
             validation
-                .entry(&record.entry)
+                .entry(&record.entry, record.position)
                 .map_err(|problem| StorageError::InvalidHistory {
                     position: location,
                     problem,
@@ -589,10 +618,10 @@ fn decode_history(
                     HistoryProblem::InvalidRecord("missing or invalid schema_version".into()),
                 )
             })?;
-        if version != u64::from(SCHEMA_VERSION) {
+        if version != u64::from(SCHEMA_VERSION) && version != u64::from(HISTORY_SCHEMA_VERSION) {
             return Err(StorageError::UnsupportedSchema {
                 found: version,
-                supported: SCHEMA_VERSION,
+                supported: HISTORY_SCHEMA_VERSION,
                 position: Some(position),
             });
         }
@@ -600,7 +629,7 @@ fn decode_history(
             .map_err(|e| invalid(position, HistoryProblem::InvalidRecord(e)))?;
         validate_envelope(&record, session, next, position)?;
         validation
-            .entry(&record.entry)
+            .entry(&record.entry, record.position)
             .map_err(|e| invalid(position, e))?;
         records.push(record);
         next = next.checked_add(1).ok_or(StorageError::PositionOverflow)?;
@@ -625,12 +654,22 @@ fn validate_envelope(
     expected: u64,
     location: FilePosition,
 ) -> Result<(), StorageError> {
-    if record.schema_version != SCHEMA_VERSION {
+    if record.schema_version != SCHEMA_VERSION && record.schema_version != HISTORY_SCHEMA_VERSION {
         return Err(StorageError::UnsupportedSchema {
             found: u64::from(record.schema_version),
-            supported: SCHEMA_VERSION,
+            supported: HISTORY_SCHEMA_VERSION,
             position: Some(location),
         });
+    }
+    if record.schema_version == SCHEMA_VERSION
+        && matches!(record.entry, HistoryEntry::Compaction { .. })
+    {
+        return Err(invalid(
+            location,
+            HistoryProblem::InvalidRecord(
+                "compaction coverage requires history schema version 2".into(),
+            ),
+        ));
     }
     if &record.session_id != session {
         return Err(invalid(location, HistoryProblem::WrongSession));
@@ -658,6 +697,9 @@ fn validate_envelope(
 
 #[derive(Default)]
 struct Validation {
+    native_items: u64,
+    covered_items: u64,
+    last_non_result: Option<u64>,
     loops: BTreeMap<LoopId, TurnId>,
     response_next: BTreeMap<TurnId, u32>,
     requests: BTreeSet<(LoopId, u32)>,
@@ -672,10 +714,14 @@ struct SavedCall {
     request_index: u32,
     response_index: u32,
     name: String,
-    has_result: bool,
+    native_position: u64,
+    result_position: Option<u64>,
 }
 impl Validation {
     fn merge(&mut self, delta: Self) {
+        self.native_items = delta.native_items;
+        self.covered_items = delta.covered_items;
+        self.last_non_result = delta.last_non_result;
         self.loops.extend(delta.loops);
         self.response_next.extend(delta.response_next);
         self.requests.extend(delta.requests);
@@ -695,14 +741,19 @@ impl<'a> Validator<'a> {
     fn new(base: &'a Validation) -> Self {
         Self {
             base,
-            delta: Validation::default(),
+            delta: Validation {
+                native_items: base.native_items,
+                covered_items: base.covered_items,
+                last_non_result: base.last_non_result,
+                ..Validation::default()
+            },
         }
     }
     fn finish(self) -> Validation {
         self.delta
     }
 
-    fn entry(&mut self, entry: &HistoryEntry) -> Result<(), HistoryProblem> {
+    fn entry(&mut self, entry: &HistoryEntry, position: u64) -> Result<(), HistoryProblem> {
         let bad = |reason: &str| HistoryProblem::InvalidRecord(reason.to_owned());
         if entry
             .turn_id()
@@ -750,7 +801,8 @@ impl<'a> Validator<'a> {
                                 request_index: item.request_index,
                                 response_index: *response_index,
                                 name: call.name().as_str().to_owned(),
-                                has_result: false,
+                                native_position: self.delta.native_items,
+                                result_position: None,
                             },
                         );
                     }
@@ -779,10 +831,13 @@ impl<'a> Validator<'a> {
                             "ToolResult association conflicts with its original ToolCall",
                         ));
                     }
-                    if saved.has_result {
+                    if saved.result_position.is_some() {
                         return Err(bad("duplicate ToolResult"));
                     }
-                    saved.has_result = true;
+                    if saved.native_position < self.delta.covered_items {
+                        return Err(crate::compaction::split_exchange());
+                    }
+                    saved.result_position = Some(self.delta.native_items);
                 }
             },
             HistoryEntry::Partial {
@@ -876,6 +931,64 @@ impl<'a> Validator<'a> {
                 self.delta.finished.insert(turn_id.clone());
             }
             HistoryEntry::Summary { .. } => {}
+            HistoryEntry::Compaction {
+                source_position,
+                covered_items,
+                summary,
+            } => {
+                let projection =
+                    CompactionProjection::new(*source_position, *covered_items, summary.clone());
+                projection.validate_metadata(
+                    position,
+                    self.delta.covered_items,
+                    self.delta.native_items,
+                )?;
+                if self
+                    .delta
+                    .calls
+                    .values()
+                    .chain(
+                        self.base
+                            .calls
+                            .iter()
+                            .filter(|(key, _)| !self.delta.calls.contains_key(*key))
+                            .map(|(_, call)| call),
+                    )
+                    .any(|call| {
+                        projection.splits_exchange(
+                            call.native_position,
+                            call.result_position,
+                            self.delta.last_non_result,
+                        )
+                    })
+                {
+                    return Err(crate::compaction::split_exchange());
+                }
+                self.delta.covered_items = *covered_items;
+            }
+        }
+        match entry {
+            HistoryEntry::Input { .. }
+            | HistoryEntry::Summary { .. }
+            | HistoryEntry::Runtime { .. } => {
+                if !matches!(
+                    entry,
+                    HistoryEntry::Runtime {
+                        item: HistoryItem::ToolResult(_),
+                        ..
+                    }
+                ) {
+                    self.delta.last_non_result = Some(self.delta.native_items);
+                }
+                self.delta.native_items = self
+                    .delta
+                    .native_items
+                    .checked_add(1)
+                    .ok_or_else(|| bad("native history position overflow"))?;
+            }
+            HistoryEntry::Partial { .. }
+            | HistoryEntry::TurnFinished { .. }
+            | HistoryEntry::Compaction { .. } => {}
         }
         Ok(())
     }
