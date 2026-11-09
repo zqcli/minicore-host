@@ -13,7 +13,7 @@ install it. Runtime and TUI are unchanged.
   There is no environment-variable override, rotation configuration, or fallback.
 - `install(options)` installs the global tracing subscriber once and returns the
   unique `Guard`. Already-installed tracing, invalid service, file-open failure,
-  and worker-start failure are explicit `InitError`s. Error summaries contain
+  exclusive file-lock failure, and worker-start failure are explicit `InitError`s. Error summaries contain
   the operation/error kind, not a raw configured path or source error text.
 - `prepare(options)` creates the same pipeline without global installation for
   embedding applications and isolated tests. It does not merge with an existing
@@ -22,6 +22,8 @@ install it. Runtime and TUI are unchanged.
   handle cannot close another Host's writer. No full Logger is passed down owners.
 - After business saves and cleanup, the entrypoint calls
   `guard.shutdown(timeout)`. It returns `Flushed`, `Failed`, or `TimedOut`.
+  Completed shutdown confirms that the actual writer has released its file;
+  timeout does not release an output lease still held by a blocked writer.
   Dropping a forgotten guard waits at most one second. No shutdown branch prints
   a fallback message to stdout or stderr.
 
@@ -67,9 +69,12 @@ those formatting/allocation costs. There is no separate text formatter.
 
 The private writer uses one standard-library thread and unbounded channel.
 It handles stderr or an append-only file at exactly the requested path. No
-parent directories, permission changes, cross-process locks, quotas, retention,
-rotation, or second emergency channel are added. File coordination belongs to
-the application: unrelated processes must not share the same file. Applications
+parent directories, permission changes, quotas, retention,
+rotation, or second emergency channel are added. The actual output File holds
+an exclusive advisory lock through the writer's real lifetime, including a
+bounded shutdown timeout. Another cooperating writer (even through a path alias)
+fails initialization instead of sharing that file. External tools must respect
+the lock; it does not prevent uncoordinated writes or path replacement. Applications
 needing rotation can use externally managed stderr in this initial scope.
 
 Only serialized records cross the writer boundary. Enqueue holds a short mutex

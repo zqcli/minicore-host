@@ -43,7 +43,7 @@ use tracing_subscriber::prelude::*;
 pub enum Output {
     Stderr,
     /// Append to exactly this path. The parent directory must already exist.
-    /// The application must not share this file with an uncoordinated process.
+    /// The writer exclusively locks the actual file until its work has ended.
     File(PathBuf),
 }
 
@@ -75,6 +75,7 @@ impl Options {
 pub enum InitError {
     EmptyService,
     OpenOutput(io::ErrorKind),
+    LockOutput(io::ErrorKind),
     StartWorker(io::ErrorKind),
     SubscriberAlreadyInstalled,
 }
@@ -84,6 +85,9 @@ impl fmt::Display for InitError {
         match self {
             Self::EmptyService => f.write_str("diagnostic service name is empty"),
             Self::OpenOutput(kind) => write!(f, "cannot open diagnostic output ({kind:?})"),
+            Self::LockOutput(kind) => {
+                write!(f, "cannot exclusively lock diagnostic output ({kind:?})")
+            }
             Self::StartWorker(kind) => write!(f, "cannot start diagnostic worker ({kind:?})"),
             Self::SubscriberAlreadyInstalled => {
                 f.write_str("a process tracing subscriber is already installed")
@@ -111,6 +115,12 @@ pub fn prepare(options: Options) -> Result<(Dispatch, Guard), InitError> {
                 .append(true)
                 .open(path)
                 .map_err(|error| InitError::OpenOutput(error.kind()))?;
+            writer.try_lock().map_err(|error| {
+                InitError::LockOutput(match error {
+                    std::fs::TryLockError::WouldBlock => io::ErrorKind::WouldBlock,
+                    std::fs::TryLockError::Error(error) => error.kind(),
+                })
+            })?;
             prepare_writer(options, writer)
         }
     }

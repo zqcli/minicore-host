@@ -113,3 +113,11 @@ automatically sanitized. No full owner/session/request objects cross the worker.
 Next: independent review, final integrated workspace checks, then separate narrow
 Host/Agent/Session/Turn business instrumentation, host.info health mapping, and
 application startup/shutdown wiring. One Host's shutdown must never own this guard.
+
+## File writer ownership correction
+
+Source `af0f88eff812239fb0152e78cba78a02420e9f37` adds an exclusive OS lease to the actual diagnostic output File before starting its worker. The worker owns that File until actual exit, including after a bounded shutdown timeout. It drops the writer before signaling successful completion. Lock contention is a safe initialization error; there is no fallback destination or new lock service. This realizes SPEC section 12's cross-process output coordination.
+
+Independent fixed-source verification passes 19 diagnostics cases and one doctest, strict crate Clippy/rustdoc and formatting. Real file/alias/process tests and FIFO blocked-writer probes verify that success releases the lease while timeout retains it until the original writer actually ends. Initialization failure and all shutdown paths preserve stdout isolation. Original pipeline review remains valid except for this separately re-reviewed change.
+
+Only the diagnostic files and this evidence are integrated here. The source commit's application-task note was relocated here because its process/app ancestors are not part of this checkpoint. Trusted process lifecycle hooks and actual executable assembly remain separate work; these logging tests do not establish their acceptance.

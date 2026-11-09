@@ -191,6 +191,8 @@ pub(crate) fn start(
             if writer.flush().is_err() {
                 health.write_failed();
             }
+            // Completion includes release of the actual output file lease.
+            drop(writer);
             let _ = done.send(());
         })?;
     let guard = Guard {
