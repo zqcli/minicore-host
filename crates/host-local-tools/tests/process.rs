@@ -21,7 +21,7 @@ use support::*;
 
 async fn wait_file(path: &std::path::Path) {
     tokio::time::timeout(Duration::from_secs(5), async {
-        while !path.exists() {
+        while !fs::read(path).is_ok_and(|bytes| !bytes.is_empty()) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     })
