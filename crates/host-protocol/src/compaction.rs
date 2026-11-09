@@ -15,7 +15,11 @@ pub struct CompactionChange {
     pub after_tokens: u64,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(
+    tag = "outcome",
+    rename_all = "snake_case",
+    from = "CompactionOutcomeWire"
+)]
 pub enum CompactionOutcome {
     Compacted {
         change: CompactionChange,
@@ -26,6 +30,38 @@ pub enum CompactionOutcome {
     Failed {
         fault: Fault,
     },
+}
+// Serde's internally tagged unit variants ignore extra fields. Empty struct
+// variants in this private wire shape keep those outcomes strict while the
+// public Rust enum retains its ordinary unit constructors.
+#[derive(Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+enum CompactionOutcomeWire {
+    Compacted {
+        change: CompactionChange,
+        persistence: PersistenceState,
+    },
+    Unchanged {},
+    Cancelled {},
+    Failed {
+        fault: Fault,
+    },
+}
+impl From<CompactionOutcomeWire> for CompactionOutcome {
+    fn from(value: CompactionOutcomeWire) -> Self {
+        match value {
+            CompactionOutcomeWire::Compacted {
+                change,
+                persistence,
+            } => Self::Compacted {
+                change,
+                persistence,
+            },
+            CompactionOutcomeWire::Unchanged {} => Self::Unchanged,
+            CompactionOutcomeWire::Cancelled {} => Self::Cancelled,
+            CompactionOutcomeWire::Failed { fault } => Self::Failed { fault },
+        }
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "phase", rename_all = "snake_case", deny_unknown_fields)]
@@ -171,6 +207,8 @@ mod tests {
             serde_json::json!({"phase":"finished", "result":{"outcome":"compacted", "change":{"source_position":8,"covered_items":4,"before_tokens":500,"after_tokens":100}, "persistence":"pending"}}),
             serde_json::json!({"phase":"committing", "change":{"source_position":8,"covered_items":4,"before_tokens":500,"after_tokens":100},"persistence":"persisted"}),
             serde_json::json!({"phase":"preparing", "invented":true}),
+            serde_json::json!({"phase":"finished", "result":{"outcome":"cancelled","invented":true}}),
+            serde_json::json!({"phase":"finished", "result":{"outcome":"unchanged","invented":true}}),
         ] {
             assert!(
                 serde_json::from_value::<CompactFacts>(serde_json::json!({
