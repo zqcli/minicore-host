@@ -137,3 +137,18 @@ strict all-target Clippy then passed. Temporarily removing only the path check
 makes the original regression fail because the bad process incorrectly starts;
 restoring it returns the same test to green. The deliberate failing run is
 retained separately, not included as a passing gate.
+
+## Final corrected source gate
+
+At fixed source `544fd079c9af8571b4ea545c61db141aa94bd8f1`, the full workspace
+rerun passed formatting, all-target strict Clippy, all-target tests, strict
+rustdoc, and all four doctests with the same commands above. The canonical
+all-target test inventory contains **658 unique cases**, including 13 actual
+application subprocess cases, 4 process-capability cases, and 19 diagnostics
+cases. Nested subprocess execution is not added to this inventory. The worktree
+was clean throughout this run; SPEC and all dependency revisions are unchanged.
+Reports use the shared-workspace `minicore-host-app-544fd07-` prefix.
+
+This source checkpoint remains subject to the separate app/process independent
+review and later aggregate integration with production ordinary-tool binding.
+The following commit records validation only and changes no tested source.
