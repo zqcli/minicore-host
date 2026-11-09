@@ -799,6 +799,7 @@ name = "minicore-host-core"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "minicore-host-compaction",
  "minicore-host-protocol",
  "minicore-host-provider",
  "minicore-host-storage",
