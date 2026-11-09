@@ -2,9 +2,9 @@ use crate::{ToolListRequest, deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
     AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostConfig,
     HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageRecord, ModelDescription,
-    ModelTextSnapshot, ObservationNotification, SessionHistorySnapshot, SessionInfo,
-    SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult,
-    TurnSnapshot, WorkspaceSnapshot,
+    ModelTextSnapshot, ObservationNotification, SessionContextSnapshot, SessionHistorySnapshot,
+    SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo,
+    TurnResult, TurnSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -415,6 +415,18 @@ impl SessionClient {
                     operation_id: request.operation_id,
                     message_id: request.message_id,
                     expected_controller_revision: request.expected_controller_revision,
+                }),
+                options,
+            )
+            .await
+    }
+    /// Read only facts already held by the Session. Cold history stays unknown;
+    /// this call does not load, prepare resources, or invoke a model.
+    pub async fn context(&self, options: CallOptions) -> Result<SessionContextSnapshot, CallError> {
+        self.client
+            .call(
+                GetSessionContext(SessionTarget {
+                    target: self.target.clone(),
                 }),
                 options,
             )

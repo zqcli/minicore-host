@@ -3,8 +3,8 @@ use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
     AgentInfo, CallerContext, Host, HostConfig, HostConfigSnapshot, HostInfo,
     InteractionAnswerData, MessageRecord, ModelDescription, ModelTextSnapshot,
-    SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
-    TurnInfo, TurnResult, TurnSnapshot, WorkspaceSnapshot,
+    SessionContextSnapshot, SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot,
+    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_workspace::{
@@ -260,6 +260,7 @@ operations! {
     StopAgent, "agent.stop", AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
     CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
     GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
+    GetSessionContext, "session.context", SessionTarget => SessionContextSnapshot, |h, c, p| { h.session_context(&c, &p.target).await };
     ListSessions, "session.list", AgentTarget => Vec<SessionInfo>, |h, c, p| { h.sessions(&c, &p.target) };
     UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
     ListInputs, "input.list", SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
