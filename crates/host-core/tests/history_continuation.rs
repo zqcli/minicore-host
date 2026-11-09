@@ -193,8 +193,26 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&saved_path, &path).unwrap();
-    host.resume(&caller, &target)
+    let resumed = host
+        .session_resume(
+            &caller,
+            &target,
+            SessionControlRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
         .expect("explicit resume must continue the retained original history save");
+    assert!(host.session_state(&caller, &target).unwrap().data.saving);
+    let blocked = resumed
+        .result
+        .block_reason
+        .as_ref()
+        .expect("original save remains blocked until confirmed");
+    assert_eq!(
+        blocked.fault.as_ref().unwrap().kind(),
+        FaultKind::SessionHistoryWriteFailed
+    );
+    assert!(!blocked.resolution.is_empty());
     let result = tokio::time::timeout(
         Duration::from_secs(3),
         host.wait_turn(&caller, &target, &failed.id),
@@ -203,6 +221,10 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     .unwrap()
     .unwrap();
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert_eq!(
+        host.receipt_get(&caller, &resumed.operation_id).unwrap(),
+        Receipt::SessionControl(resumed)
+    );
     assert_eq!(result.info.outcome, failed.outcome);
     assert_eq!(
         calls.load(Ordering::SeqCst),

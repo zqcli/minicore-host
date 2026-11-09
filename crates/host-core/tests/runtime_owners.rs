@@ -1150,3 +1150,508 @@ fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
             .is_none()
     );
 }
+
+fn control_request() -> SessionControlRequest {
+    SessionControlRequest {
+        operation_id: OperationId::new().unwrap(),
+    }
+}
+fn assert_receipt(host: &Host, caller: &CallerContext, expected: Receipt) {
+    assert_eq!(
+        host.receipt_get(caller, expected.operation_id()).unwrap(),
+        expected
+    );
+    let wire = serde_json::to_value(&expected).unwrap();
+    assert_eq!(serde_json::from_value::<Receipt>(wire).unwrap(), expected);
+}
+
+#[tokio::test]
+async fn canonical_session_controls_freeze_actual_acceptance_facts() {
+    let (host, connection, target, _) = setup(Vec::new());
+    let caller = connection.caller();
+    let paused = host
+        .session_pause(&caller, &target, control_request())
+        .unwrap();
+    assert_eq!(paused.result.scheduling, Scheduling::Paused);
+    assert_eq!(paused.result.pause_reasons, [PauseReason::Explicit]);
+    let loaded = host
+        .session_load(&caller, &target, control_request())
+        .unwrap();
+    assert_eq!(loaded.result.residency, Residency::Loading);
+    assert!(loaded.result.load_id.is_none());
+    assert_eq!(loaded.result.scheduling, Scheduling::Paused);
+    wait_state(&host, &caller, &target, |state| {
+        state.residency == Residency::Loaded
+    })
+    .await;
+    assert_receipt(&host, &caller, Receipt::SessionControl(loaded));
+    let resumed = host
+        .session_resume(&caller, &target, control_request())
+        .unwrap();
+    assert_eq!(resumed.result.scheduling, Scheduling::Auto);
+    assert_eq!(resumed.result.residency, Residency::Loaded);
+    assert!(resumed.result.load_id.is_some());
+    let paused_again = host
+        .session_pause(&caller, &target, control_request())
+        .unwrap();
+    let queued = send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::FollowUp,
+        "keep while unloaded",
+    );
+    let unloaded = host
+        .session_unload(&caller, &target, control_request())
+        .unwrap();
+    assert_eq!(unloaded.result.residency, Residency::Unloaded);
+    assert!(unloaded.result.load_id.is_none());
+    assert_eq!(
+        unloaded.result.pause_reasons,
+        [PauseReason::Explicit, PauseReason::UnloadedWithInput]
+    );
+    let state = host.session_state(&caller, &target).unwrap().data;
+    assert_eq!(state.pause_reasons, unloaded.result.pause_reasons);
+    assert_eq!(
+        state.controller_revision,
+        unloaded.result.controller_revision
+    );
+    assert_eq!(state.next_turn[0].message_id, queued.message_id);
+    for receipt in [paused, resumed, paused_again, unloaded] {
+        assert_receipt(&host, &caller, Receipt::SessionControl(receipt));
+    }
+}
+
+#[tokio::test]
+async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
+    let (host, connection, target, _) = setup(Vec::new());
+    let caller = connection.caller();
+    let request = control_request();
+    let first = host
+        .session_pause(&caller, &target, request.clone())
+        .unwrap();
+    let second = host
+        .session_resume(&caller, &target, request.clone())
+        .unwrap();
+    let third = host
+        .session_pause(&caller, &target, request.clone())
+        .unwrap();
+    assert!(third.result.controller_revision > first.result.controller_revision);
+    assert_eq!(
+        host.receipts(&caller, &request.operation_id).unwrap(),
+        vec![
+            Receipt::SessionControl(first),
+            Receipt::SessionControl(second),
+            Receipt::SessionControl(third),
+        ]
+    );
+    assert!(host.receipt_get(&caller, &request.operation_id).is_err());
+    let agent_ref = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: target.agent_id.clone(),
+    };
+    let stop = host
+        .agent_stop(
+            &caller,
+            &agent_ref,
+            AgentStopRequest {
+                operation_id: request.operation_id.clone(),
+            },
+        )
+        .unwrap();
+    assert_eq!(stop.result.lifecycle, AgentStopLifecycle::Stopping);
+    assert_eq!(
+        host.receipts(&caller, &request.operation_id).unwrap().len(),
+        4
+    );
+    assert!(host.receipt_get(&caller, &request.operation_id).is_err());
+}
+
+#[tokio::test]
+async fn canonical_turn_cancellation_never_retargets_or_clears_later_input() {
+    let (host, connection, target, mut seen) = setup(vec![
+        Round {
+            text: "partial",
+            gate: Some(Arc::new(Semaphore::new(0))),
+            partial: true,
+        },
+        Round {
+            text: "second",
+            gate: Some(Arc::new(Semaphore::new(0))),
+            partial: true,
+        },
+    ]);
+    let caller = connection.caller();
+    send(&host, &caller, &target, MessageMode::FollowUp, "first");
+    next_request(&mut seen).await;
+    let first_id = host
+        .session_state(&caller, &target)
+        .unwrap()
+        .data
+        .active_turn_id
+        .unwrap();
+    let removed = send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::FollowUp,
+        "remove at claim",
+    );
+    let cancel = host
+        .turn_cancel(
+            &caller,
+            &target,
+            TurnCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                turn_id: first_id.clone(),
+                keep_inbox: false,
+            },
+        )
+        .unwrap();
+    assert!(cancel.result.cancel_claimed);
+    assert_eq!(cancel.result.turn_state, TurnState::Cancelling);
+    assert!(matches!(
+        host.message(&caller, &target, &removed.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Removed
+    ));
+    let later = send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::Steer,
+        "keep after claim",
+    );
+    let repeated = host
+        .turn_cancel(
+            &caller,
+            &target,
+            TurnCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                turn_id: first_id.clone(),
+                keep_inbox: false,
+            },
+        )
+        .unwrap();
+    assert!(!repeated.result.cancel_claimed);
+    assert_eq!(repeated.result.turn_state, TurnState::Cancelling);
+    assert!(matches!(
+        host.message(&caller, &target, &later.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    next_request(&mut seen).await;
+    let second_id = host
+        .session_state(&caller, &target)
+        .unwrap()
+        .data
+        .active_turn_id
+        .unwrap();
+    assert_ne!(first_id, second_id);
+    let next = send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::FollowUp,
+        "do not clear for stale T1",
+    );
+    let stale = host
+        .turn_cancel(
+            &caller,
+            &target,
+            TurnCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                turn_id: first_id,
+                keep_inbox: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(stale.result.turn_state, TurnState::Finished);
+    assert!(!stale.result.cancel_claimed);
+    assert_eq!(
+        host.turn_info(&caller, &target, &second_id).unwrap().state,
+        TurnState::Running
+    );
+    assert!(matches!(
+        host.message(&caller, &target, &next.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    let missing = host
+        .turn_cancel(
+            &caller,
+            &target,
+            TurnCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                turn_id: TurnId::new().unwrap(),
+                keep_inbox: false,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(missing.kind(), FaultKind::SessionTurnNotFound);
+    for receipt in [cancel, repeated, stale] {
+        assert_receipt(&host, &caller, Receipt::TurnCancel(receipt));
+    }
+    host.session_cancel(
+        &caller,
+        &target,
+        SessionCancelRequest {
+            operation_id: OperationId::new().unwrap(),
+            keep_inbox: false,
+        },
+    )
+    .unwrap();
+    settled(&host, &caller, &target, 2).await;
+}
+
+#[tokio::test]
+async fn canonical_session_cancel_reports_idle_and_exact_current_turn() {
+    let (host, connection, target, mut seen) = setup(vec![Round {
+        text: "partial",
+        gate: Some(Arc::new(Semaphore::new(0))),
+        partial: true,
+    }]);
+    let caller = connection.caller();
+    host.pause(&caller, &target).unwrap();
+    let queued = send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::FollowUp,
+        "idle queued",
+    );
+    let kept = host
+        .session_cancel(
+            &caller,
+            &target,
+            SessionCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                keep_inbox: true,
+            },
+        )
+        .unwrap();
+    assert!(kept.turn_id.is_none());
+    assert!(kept.result.turn_state.is_none());
+    assert!(!kept.result.cancel_claimed);
+    assert!(matches!(
+        host.message(&caller, &target, &queued.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    let cleared = host
+        .session_cancel(
+            &caller,
+            &target,
+            SessionCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                keep_inbox: false,
+            },
+        )
+        .unwrap();
+    assert!(cleared.turn_id.is_none());
+    assert!(matches!(
+        host.message(&caller, &target, &queued.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Removed
+    ));
+    send(&host, &caller, &target, MessageMode::FollowUp, "run now");
+    host.resume(&caller, &target).unwrap();
+    next_request(&mut seen).await;
+    let current = host
+        .session_state(&caller, &target)
+        .unwrap()
+        .data
+        .active_turn_id
+        .unwrap();
+    let cancelled = host
+        .session_cancel(
+            &caller,
+            &target,
+            SessionCancelRequest {
+                operation_id: OperationId::new().unwrap(),
+                keep_inbox: false,
+            },
+        )
+        .unwrap();
+    assert_eq!(cancelled.turn_id, Some(current));
+    assert!(cancelled.result.cancel_claimed);
+    assert_eq!(cancelled.result.turn_state, Some(TurnState::Cancelling));
+    assert_eq!(
+        host.session_state(&caller, &target)
+            .unwrap()
+            .data
+            .scheduling,
+        Scheduling::Auto
+    );
+    for receipt in [kept, cleared, cancelled] {
+        assert_receipt(&host, &caller, Receipt::SessionCancel(receipt));
+    }
+    settled(&host, &caller, &target, 1).await;
+}
+
+#[tokio::test]
+async fn canonical_close_returns_accepted_facts_even_when_memory_is_reclaimed() {
+    let (host, connection, target, _) = setup(Vec::new());
+    let caller = connection.caller();
+    let receipt = host
+        .session_close(
+            &caller,
+            &target,
+            SessionCloseRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closed);
+    assert_eq!(receipt.session_id, target.session_id);
+    assert!(host.session_info(&caller, &target).is_err());
+    assert!(host.receipt_get(&caller, &receipt.operation_id).is_err());
+    assert!(host.agents(&caller).unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn canonical_agent_stop_preserves_queues_and_formed_lifecycle() {
+    let (host, connection, target, mut seen) = setup(vec![Round {
+        text: "partial",
+        gate: Some(Arc::new(Semaphore::new(0))),
+        partial: true,
+    }]);
+    let caller = connection.caller();
+    send(&host, &caller, &target, MessageMode::FollowUp, "running");
+    next_request(&mut seen).await;
+    host.pause(&caller, &target).unwrap();
+    let queued = send(&host, &caller, &target, MessageMode::FollowUp, "retained");
+    let agent_ref = AgentRef {
+        host_id: host.info(&caller).unwrap().host_id,
+        agent_id: target.agent_id.clone(),
+    };
+    let first = host
+        .agent_stop(
+            &caller,
+            &agent_ref,
+            AgentStopRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(first.result.lifecycle, AgentStopLifecycle::Stopping);
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while host.agent_info(&caller, &agent_ref).unwrap().lifecycle != AgentLifecycle::Stopped {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let again = host
+        .agent_stop(
+            &caller,
+            &agent_ref,
+            AgentStopRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(again.result.lifecycle, AgentStopLifecycle::Stopped);
+    assert!(matches!(
+        host.message(&caller, &target, &queued.message_id)
+            .unwrap()
+            .binding,
+        MessageBinding::Queued
+    ));
+    host.start_agent(&caller, &agent_ref).unwrap();
+    assert_eq!(
+        host.agent_info(&caller, &agent_ref).unwrap().lifecycle,
+        AgentLifecycle::Active
+    );
+    for receipt in [first, again] {
+        assert_receipt(&host, &caller, Receipt::AgentStop(receipt));
+    }
+}
+
+#[tokio::test]
+async fn canonical_receipts_require_live_read_authority_and_current_write_authority() {
+    let (host, operator, target, _) = setup(Vec::new());
+    let observer = host.connect().unwrap();
+    let request = control_request();
+    assert_eq!(
+        host.session_pause(&observer.caller(), &target, request.clone())
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessReadOnly
+    );
+    assert!(
+        host.receipts(&observer.caller(), &request.operation_id)
+            .unwrap()
+            .is_empty()
+    );
+    let old = operator.caller();
+    operator.close();
+    assert_eq!(
+        host.session_pause(&old, &target, request.clone())
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessInvalid
+    );
+    assert_eq!(
+        host.receipts(&old, &request.operation_id)
+            .unwrap_err()
+            .kind(),
+        FaultKind::HostAccessInvalid
+    );
+    let new = host.connect().unwrap();
+    let receipt = host.session_pause(&new.caller(), &target, request).unwrap();
+    assert_receipt(&host, &observer.caller(), Receipt::SessionControl(receipt));
+}
+
+#[tokio::test]
+async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
+    let (host, connection, target, _) = setup(Vec::new());
+    let caller = connection.caller();
+    host.pause(&caller, &target).unwrap();
+    send(
+        &host,
+        &caller,
+        &target,
+        MessageMode::FollowUp,
+        "not executed while paused",
+    );
+    let operation = OperationId::new().unwrap();
+    let first = host
+        .shutdown(
+            &caller,
+            HostShutdownRequest {
+                operation_id: operation.clone(),
+                strategy: HostShutdownStrategy::Graceful,
+            },
+        )
+        .unwrap();
+    assert_eq!(first.result.lifecycle, HostLifecycle::Draining);
+    let second = host
+        .shutdown(
+            &caller,
+            HostShutdownRequest {
+                operation_id: operation.clone(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
+    assert_eq!(second.result.lifecycle, HostLifecycle::Stopping);
+    assert_eq!(
+        host.receipts(&caller, &operation).unwrap(),
+        [Receipt::HostShutdown(first), Receipt::HostShutdown(second)]
+    );
+    assert!(host.receipt_get(&caller, &operation).is_err());
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while host.info(&caller).unwrap().lifecycle != HostLifecycle::Stopped {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
+}

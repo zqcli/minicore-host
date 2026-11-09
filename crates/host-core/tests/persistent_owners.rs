@@ -589,6 +589,10 @@ async fn accepted_creation_survives_waiter_abort_and_connection_revocation() {
     assert!(progress.result.steps.agent.succeeded());
     assert!(progress.result.steps.session.in_progress());
     progress.validate().unwrap();
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::AgentCreate(progress)
+    );
     waiting.abort();
     connection.close();
     gate.release();
@@ -605,6 +609,10 @@ async fn accepted_creation_survives_waiter_abort_and_connection_revocation() {
     })
     .await
     .unwrap();
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::AgentCreate(receipt.clone())
+    );
     assert!(receipt.result.steps.session.succeeded());
     assert!(receipt.result.steps.message.unwrap().succeeded());
     let target = SessionRef {
@@ -3205,4 +3213,232 @@ async fn review_close_old_default_preserves_confirmed_new_default() {
             .closed
             .is_some()
     );
+}
+
+#[test]
+fn canonical_loading_receipts_survive_connection_end_and_later_pause() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (_, agent_id, ids) = seed(directory.path());
+        let (resources, seen) = resources();
+        let host = Host::open_persistent(directory.path(), settings("canonical load"), resources)
+            .await
+            .unwrap();
+        let operator = host.connect().unwrap();
+        let observer = host.connect().unwrap();
+        let caller = operator.caller();
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        host.pause(&caller, &target).unwrap();
+        let load = host
+            .session_load(
+                &caller,
+                &target,
+                SessionControlRequest {
+                    operation_id: OperationId::new().unwrap(),
+                },
+            )
+            .unwrap();
+        let resume = host
+            .session_resume(
+                &caller,
+                &target,
+                SessionControlRequest {
+                    operation_id: OperationId::new().unwrap(),
+                },
+            )
+            .unwrap();
+        assert_eq!(load.result.residency, Residency::Loading);
+        assert_eq!(resume.result.residency, Residency::Loading);
+        assert_eq!(resume.result.scheduling, Scheduling::Paused);
+        assert_eq!(resume.result.pause_reasons, [PauseReason::Explicit]);
+        host.pause(&caller, &target).unwrap();
+        operator.close();
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        let state = wait_state(&host, &observer.caller(), &target, |state| !state.preparing).await;
+        assert_eq!(state.residency, Residency::Loaded);
+        assert_eq!(state.scheduling, Scheduling::Paused);
+        assert!(seen.lock().unwrap().is_empty());
+        for receipt in [load, resume] {
+            assert_eq!(
+                host.receipt_get(&observer.caller(), &receipt.operation_id)
+                    .unwrap(),
+                Receipt::SessionControl(receipt)
+            );
+        }
+    });
+}
+
+#[tokio::test]
+async fn canonical_creation_lookup_excludes_nested_steps_but_keeps_colliding_invocations() {
+    let directory = tempfile::tempdir().unwrap();
+    let (resources, _) = resources();
+    let host = Host::open_persistent(
+        directory.path(),
+        settings("canonical receipt lookup"),
+        resources,
+    )
+    .await
+    .unwrap();
+    let operator = host.connect().unwrap();
+    let caller = operator.caller();
+    let request = create_request(StorageMode::Persistent);
+    let operation = request.operation_id.clone();
+    let created = host.create_agent_async(&caller, request).await.unwrap();
+    assert_eq!(
+        host.receipt_get(&caller, &operation).unwrap(),
+        Receipt::AgentCreate(created.clone())
+    );
+    let target = AgentRef {
+        host_id: created.host_id,
+        agent_id: created.agent_id.unwrap(),
+    };
+    let second = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: operation.clone(),
+                target,
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
+    assert!(host.receipt_get(&caller, &operation).is_err());
+    assert!(
+        host.receipts(&caller, &operation)
+            .unwrap()
+            .contains(&Receipt::SessionCreate(second))
+    );
+}
+
+#[tokio::test]
+async fn canonical_close_keeps_formed_closing_fact_after_persistent_completion() {
+    let directory = tempfile::tempdir().unwrap();
+    let (_, agent_id, ids) = seed(directory.path());
+    let (resources, _) = resources();
+    let host = Host::open_persistent(directory.path(), settings("canonical close"), resources)
+        .await
+        .unwrap();
+    let operator = host.connect().unwrap();
+    let caller = operator.caller();
+    let target = SessionRef {
+        agent_id,
+        session_id: ids[0].clone(),
+    };
+    let receipt = host
+        .session_close(
+            &caller,
+            &target,
+            SessionCloseRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(receipt.result.lifecycle, SessionCloseLifecycle::Closing);
+    let state = wait_state(&host, &caller, &target, |state| {
+        state.lifecycle == SessionLifecycle::Closed
+    })
+    .await;
+    assert!(state.controller_revision > receipt.result.controller_revision);
+    assert_eq!(
+        host.receipt_get(&caller, &receipt.operation_id).unwrap(),
+        Receipt::SessionClose(receipt.clone())
+    );
+    let again = host
+        .session_close(
+            &caller,
+            &target,
+            SessionCloseRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    assert_eq!(again.result.lifecycle, SessionCloseLifecycle::Closed);
+    assert_eq!(
+        host.receipt_get(&caller, &again.operation_id).unwrap(),
+        Receipt::SessionClose(again)
+    );
+}
+
+#[test]
+fn canonical_resume_during_automatic_history_validation_returns_loading_then_continues() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .max_blocking_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    runtime.block_on(async {
+        let directory = tempfile::tempdir().unwrap();
+        let (_, agent_id, ids) = seed(directory.path());
+        let (resources, seen) = resources();
+        let host = Host::open_persistent(directory.path(), settings("automatic load"), resources)
+            .await
+            .unwrap();
+        let operator = host.connect().unwrap();
+        let caller = operator.caller();
+        let target = SessionRef {
+            agent_id,
+            session_id: ids[0].clone(),
+        };
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (entered, entering) = tokio::sync::oneshot::channel();
+        let blocker = tokio::task::spawn_blocking(move || {
+            let _ = entered.send(());
+            let _ = held.recv();
+        });
+        entering.await.unwrap();
+        host.send(
+            &caller,
+            SendMessage::new(input("accepted before automatic load"), target.clone()),
+        )
+        .unwrap();
+        wait_state(&host, &caller, &target, |state| {
+            state.residency == Residency::Loading
+        })
+        .await;
+        host.pause(&caller, &target).unwrap();
+        let resume = host
+            .session_resume(
+                &caller,
+                &target,
+                SessionControlRequest {
+                    operation_id: OperationId::new().unwrap(),
+                },
+            )
+            .unwrap();
+        assert_eq!(resume.result.residency, Residency::Loading);
+        assert_eq!(resume.result.scheduling, Scheduling::Paused);
+        release.send(()).unwrap();
+        blocker.await.unwrap();
+        assert_eq!(
+            completed(&host, &caller, &target).await.info.persistence,
+            PersistenceState::Persisted
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        assert_eq!(
+            host.receipt_get(&caller, &resume.operation_id).unwrap(),
+            Receipt::SessionControl(resume)
+        );
+    });
 }
