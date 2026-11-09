@@ -48,3 +48,6 @@ confirmed 275 entries; nested storage process probes were not counted again.
 Logs: `minicore-host-validation/workspace-integrated-b0fdbfb.log` and
 `workspace-test-list-b0fdbfb.txt`. Independent scoped review is in progress.
 No canonical Session integration, real write-tool recording or push is claimed.
+## Review follow-up: repository discovery
+
+Independent review reproduced a missing `.git/HEAD` being reported as a plain directory. Failed Git discovery now checks for a gitfile/symlink or nonempty `.git` directory in the bound directory or its ancestors before returning `repo_available: false`; existing damaged markers preserve a real repository-discovery error. Inherited discovery ceilings/overrides are cleared alongside Git directory/index overrides so a selected repository subdirectory is not incorrectly hidden. Real temporary fixtures cover missing HEAD at root and nested bindings, an incomplete `.git` directory retaining its config, a broken gitfile and a child-process-only inherited ceiling. Completely empty `.git` directories contain no repository state and are not treated as initialized repositories. The genuine plain-directory fixtures use Linux `/tmp`; no user process environment is mutated by the tests.

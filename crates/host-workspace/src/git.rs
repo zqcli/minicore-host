@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    fs,
     path::{Path, PathBuf},
     process::{ExitStatus, Stdio},
 };
@@ -85,7 +86,33 @@ impl Repository {
                 .stderr
                 .starts_with(b"fatal: not a git repository (or any")
             {
-                return Ok(None);
+                let root = workspace.root().to_owned();
+                let marker_exists = blocking(context.clone(), move |context| {
+                    for directory in root.ancestors() {
+                        context.check()?;
+                        match fs::symlink_metadata(directory.join(".git")) {
+                            Ok(metadata) => {
+                                // Empty ancestor placeholders carry no repository
+                                // state. An initialized but damaged directory does.
+                                if !metadata.is_dir()
+                                    || fs::read_dir(directory.join(".git"))?
+                                        .next()
+                                        .transpose()?
+                                        .is_some()
+                                {
+                                    return Ok(true);
+                                }
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                            Err(error) => return Err(error.into()),
+                        }
+                    }
+                    Ok(false)
+                })
+                .await?;
+                if !marker_exists {
+                    return Ok(None);
+                }
             }
             return Err(result.failure("repository discovery"));
         }
@@ -322,7 +349,7 @@ async fn git(root: &Path, args: &[&str], context: &QueryContext) -> Result<GitOu
             .args(args).current_dir(root).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true)
             .env("LC_ALL", "C").env("GIT_OPTIONAL_LOCKS", "0").env("GIT_LITERAL_PATHSPECS", "1")
             .env("GIT_NO_LAZY_FETCH", "1").env("GIT_TERMINAL_PROMPT", "0");
-        for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR"] { command.env_remove(name); }
+        for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM"] { command.env_remove(name); }
         let mut child = command.spawn().map_err(WorkspaceError::GitUnavailable)?;
         let mut stdout = child.stdout.take().expect("piped stdout");
         let mut stderr = child.stderr.take().expect("piped stderr");

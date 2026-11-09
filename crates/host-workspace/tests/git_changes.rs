@@ -181,7 +181,8 @@ async fn duplicate_paths_in_git_status_can_be_paged_without_losing_records() {
 
 #[tokio::test]
 async fn unborn_repository_staged_addition_and_empty_directory_are_distinct() {
-    let plain = TempDir::new().unwrap();
+    // Keep this genuine non-repository fixture outside checkout ancestors.
+    let plain = TempDir::new_in("/tmp").unwrap();
     let ws = Workspace::open(plain.path()).await.unwrap();
     let status = ws.status(QueryContext::default()).await.unwrap();
     assert!(!status.repo_available);
@@ -476,5 +477,76 @@ async fn git_paths_are_literal_and_detached_and_bare_states_are_real() {
             .await
             .unwrap()
             .repo_available
+    );
+}
+
+#[tokio::test]
+async fn damaged_git_markers_are_not_reported_as_plain_directories() {
+    let root = repository();
+    fs::create_dir(root.path().join("nested")).unwrap();
+    fs::remove_file(root.path().join(".git/HEAD")).unwrap();
+    for path in [root.path().to_owned(), root.path().join("nested")] {
+        let workspace = Workspace::open(path).await.unwrap();
+        assert!(matches!(
+            workspace.status(QueryContext::default()).await,
+            Err(WorkspaceError::GitFailed {
+                operation: "repository discovery",
+                ..
+            })
+        ));
+        assert!(matches!(
+            workspace
+                .changes_list(list(10), QueryContext::default())
+                .await,
+            Err(WorkspaceError::GitFailed { .. })
+        ));
+    }
+    let incomplete = TempDir::new().unwrap();
+    fs::create_dir(incomplete.path().join(".git")).unwrap();
+    fs::write(incomplete.path().join(".git/config"), "[core]\n").unwrap();
+    let workspace = Workspace::open(incomplete.path()).await.unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::GitFailed { .. })
+    ));
+    let broken_file = TempDir::new().unwrap();
+    fs::write(broken_file.path().join(".git"), "gitdir: missing\n").unwrap();
+    let workspace = Workspace::open(broken_file.path()).await.unwrap();
+    assert!(matches!(
+        workspace.status(QueryContext::default()).await,
+        Err(WorkspaceError::GitFailed { .. })
+    ));
+}
+
+#[tokio::test]
+async fn discovery_ignores_an_inherited_repository_ceiling() {
+    const CHILD_ROOT: &str = "MINICORE_TEST_DISCOVERY_ROOT";
+    if let Some(root) = std::env::var_os(CHILD_ROOT) {
+        let workspace = Workspace::open(root).await.unwrap();
+        assert!(
+            workspace
+                .status(QueryContext::default())
+                .await
+                .unwrap()
+                .repo_available
+        );
+        return;
+    }
+    let root = repository();
+    let selected = root.path().join("selected");
+    fs::create_dir(&selected).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "discovery_ignores_an_inherited_repository_ceiling",
+        ])
+        .env(CHILD_ROOT, &selected)
+        .env("GIT_CEILING_DIRECTORIES", root.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
     );
 }
