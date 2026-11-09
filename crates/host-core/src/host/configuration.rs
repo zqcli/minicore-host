@@ -359,6 +359,11 @@ impl Host {
                 tools: candidate.tools,
                 resources: Some(candidate.resources),
             });
+            // Only a successful publication tightens launch inheritance. Old
+            // Turn bindings share this name-only policy, not the new resources.
+            self.configuration
+                .tool_environment
+                .include(&published.config);
             let old = std::mem::replace(&mut state.snapshot, published);
             update_reload(
                 &mut state,

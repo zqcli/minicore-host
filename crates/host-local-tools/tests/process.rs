@@ -264,6 +264,7 @@ async fn owner_output_fault_is_internal_and_stops_and_joins_process() {
     let tools = LocalTools::new(
         Workspace::open(root.path()).await.unwrap(),
         Arc::new(BrokenOutput),
+        Arc::new(InheritCommandEnvironment),
     );
     assert_eq!(invoke(&tools,"bash",json!({"command":"echo $$ > leader.pid; printf once >> effects; printf trigger; exec sleep 30"})).await,Err(ToolError::Internal));
     let done = tools.finish().await;

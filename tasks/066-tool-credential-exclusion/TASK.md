@@ -49,5 +49,47 @@ cargo fmt --all
 cargo test -p minicore-host-resources --test task066_credential_environment --locked
 ```
 
-Production implementation, core publication boundary tests and green validation
-remain in progress. Independent task067 owns the app process-level regression.
+Red regression commit: `eb481bc` (`test(resources): reproduce configured credential inheritance`).
+
+## Implementation and focused green checks
+
+The configuration owner now holds one per-Host `ToolEnvironmentExclusions`
+capability containing a deduplicated set of names only. Initial construction
+seeds it from all configured models and the optional network source. Reload
+extends it only inside the existing successful publication boundary, after
+required save and credential validation. Preparing, rejected, conflicting and
+unsaved candidates do not modify it. Removing or renaming a published source
+does not remove its old name during this Host lifetime; independent Hosts have
+independent policies.
+
+`PreparedTurnBinding` exposes a read-only clone during local tool assembly.
+The host-tools adapter forwards snapshots to local-tools. Bash copies names
+immediately before command construction and applies `env_remove`; it never
+holds an owner/policy lock across spawn or I/O. This filter-read boundary does
+not retroactively alter an already-started child or make a concurrent spawn
+atomic with reload. Model clients, selected tools, framework and workspace
+bindings remain frozen for an old Turn. Ordinary environment and all actual
+output/history remain unchanged.
+
+Standalone `LocalTools::new` now requires an explicit `CommandEnvironment`.
+Existing standalone tests choose `InheritCommandEnvironment`, which promises no
+Host credential exclusion. There is no compatibility constructor, process-wide
+environment mutation, Session traversal, redaction or new dependency.
+
+Fresh recovered-tree checks passed:
+
+- `cargo test -p minicore-host-core --lib task066 --locked`: 4 tests. Covers all
+  configured names and deduplication, Host isolation, candidate construction,
+  preparation failure, restart-required rejection, deterministic pending save,
+  configuration conflict, successful publication and actual filesystem save
+  failure. Logs: `core-tests.log`.
+- `cargo test -p minicore-host-resources --test task066_credential_environment --locked`:
+  1 test now passes through all assertions, including gated old Turn, next Turn,
+  a third Turn after source removal, ordinary output, real JSONL and unchanged
+  native results after Host reopen. Log: `resource-tests.log`.
+- `cargo fmt --all -- --check`: passed.
+- Strict Clippy over all targets in core, local-tools, tools and resources:
+  passed (`--locked -- -D warnings`). Log: `clippy.log`.
+
+Full relevant-crate tests/docs are being recorded next. Independent task067 owns
+the separate app process-level authentication/output/history regression.

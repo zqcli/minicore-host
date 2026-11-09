@@ -145,7 +145,11 @@ mod unix {
             Err(error) => return business_error("working_directory", error.to_string()),
         };
         check(&context)?;
+        let excluded_names = binding.environment.excluded_names();
         let mut command = Command::new("/bin/bash");
+        for name in excluded_names {
+            command.env_remove(name);
+        }
         command
             .args(["--noprofile", "--norc", "-c", &input.command])
             .current_dir(cwd)

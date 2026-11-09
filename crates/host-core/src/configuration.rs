@@ -256,7 +256,37 @@ impl PreparedHostConfiguration {
     }
 }
 
+/// Read-only launch policy shared by this Host's old and new Turn bindings.
+/// It contains names only, never credential values. Successful publications
+/// add names for the Host lifetime; removing a configured source does not make
+/// its inherited process value available to later child commands again.
+#[derive(Clone)]
+pub struct ToolEnvironmentExclusions(Arc<Mutex<BTreeSet<String>>>);
+impl ToolEnvironmentExclusions {
+    fn new(config: &HostConfig) -> Self {
+        let exclusions = Self(Arc::default());
+        exclusions.include(config);
+        exclusions
+    }
+    pub(crate) fn include(&self, config: &HostConfig) {
+        let mut names = self.0.lock().expect("tool environment mutex poisoned");
+        names.extend(config.models.iter().map(|model| model.api_key_env.clone()));
+        names.extend(config.network.access_key_env.iter().cloned());
+    }
+    /// Snapshot at child-launch filtering time. The lock is released before
+    /// command construction or spawn; already-started children are unaffected.
+    pub fn names(&self) -> Vec<String> {
+        self.0
+            .lock()
+            .expect("tool environment mutex poisoned")
+            .iter()
+            .cloned()
+            .collect()
+    }
+}
+
 pub(crate) struct ConfigurationOwner {
+    pub(crate) tool_environment: ToolEnvironmentExclusions,
     pub(crate) state: Mutex<ConfigurationState>,
     #[cfg(test)]
     pub(crate) save_gate: Mutex<Option<Arc<tests::SaveGate>>>,
@@ -284,6 +314,7 @@ impl ConfigurationOwner {
         revision: ConfigRevision,
     ) -> (Arc<Self>, Option<String>) {
         let owner = Arc::new(Self {
+            tool_environment: ToolEnvironmentExclusions::new(&candidate.config),
             #[cfg(test)]
             save_gate: Mutex::new(None),
             state: Mutex::new(ConfigurationState {
@@ -433,5 +464,7 @@ fn environment_name(name: &str) -> Result<(), Fault> {
 
 #[cfg(test)]
 mod reload_tests;
+#[cfg(test)]
+mod task066_credential_environment;
 #[cfg(test)]
 mod tests;

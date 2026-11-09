@@ -72,7 +72,11 @@ impl LocalToolSink for Recorder {
 pub async fn fixture() -> (TempDir, LocalTools, Arc<Recorder>) {
     let root = TempDir::new().unwrap();
     let records = Arc::new(Recorder::default());
-    let tools = LocalTools::new(Workspace::open(root.path()).await.unwrap(), records.clone());
+    let tools = LocalTools::new(
+        Workspace::open(root.path()).await.unwrap(),
+        records.clone(),
+        Arc::new(InheritCommandEnvironment),
+    );
     (root, tools, records)
 }
 pub fn context() -> ToolContext {

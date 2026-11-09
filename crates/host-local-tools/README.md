@@ -2,8 +2,10 @@
 
 Workspace-bound `read`, `edit`, `write`, and Unix `bash` implementations of the
 real MiniCore Runtime 0.10.0 `Tool` interface. No UI or Host object is required.
-The immutable Workspace and a narrow, trusted Turn-bound `LocalToolSink` are
-constructor capabilities. Tool JSON contains business arguments only.
+The immutable Workspace, a narrow, trusted Turn-bound `LocalToolSink` and a
+name-only `CommandEnvironment` are constructor capabilities. Tool JSON contains
+business arguments only. Standalone callers explicitly choose their policy;
+`InheritCommandEnvironment` retains ordinary inheritance without exclusions.
 
 This crate provides execution and registration declarations. Production Host
 registry selection, Session persistence, public output/change projections, and
@@ -43,8 +45,16 @@ content. Shell changes remain unknown because arbitrary scripts have no known
 target, and Git dirty state cannot attribute changes to this execution.
 
 Bash executes `/bin/bash --noprofile --norc -c` with child-local cwd and null
-stdin. It inherits the process environment; it is not a filesystem or network
-sandbox. Runtime policy supplies permission, never Role text. Unix process groups
+stdin. It inherits the process environment except names supplied by its
+`CommandEnvironment` immediately before launch. Production Host bindings exclude
+all configured model API-key and optional network access-key source names,
+including formerly published names for that Host lifetime. Successful reloads
+tighten this policy for later commands even in already-bound Turns, without
+replacing their models, tools or workspace. Candidate preparation, rejection and
+failed saves do not publish exclusions. No process-global environment or actual
+tool output is changed. Already-started children are not retroactively altered;
+this is not a same-user process, filesystem or network sandbox. Runtime policy
+supplies permission, never Role text. Unix process groups
 are stopped on cancellation/deadline and remaining group descendants are stopped
 after leader exit, including when they redirected both output pipes. The real
 process wrapper wait is always joined without dropping it mid-flight, while both

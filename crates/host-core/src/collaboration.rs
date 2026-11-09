@@ -57,6 +57,16 @@ impl PreparedTurnBinding {
     pub fn capability(&self) -> TurnCapability {
         self.capability.clone()
     }
+    /// Bind the Host's cumulative credential-name exclusions without retaining
+    /// the Host itself or changing this Turn's selected execution resources.
+    pub fn tool_environment_exclusions(&self) -> Result<ToolEnvironmentExclusions, Fault> {
+        Ok(self
+            .capability
+            .host()?
+            .configuration
+            .tool_environment
+            .clone())
+    }
     /// Register actual execution owners before this candidate is claimed. The
     /// handles cannot authorize tool execution and are never run on rejection.
     pub fn register_tool_cleanup(

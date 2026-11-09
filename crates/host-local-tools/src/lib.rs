@@ -2,11 +2,13 @@
 #![forbid(unsafe_code)]
 
 mod command;
+mod environment;
 mod files;
 mod records;
 mod schema;
 mod scope;
 
+pub use environment::{CommandEnvironment, InheritCommandEnvironment};
 pub use records::*;
 pub use schema::local_tool_specs;
 pub use scope::LocalToolCompletion;
@@ -32,12 +34,21 @@ pub struct LocalTools {
 struct Binding {
     workspace: Workspace,
     sink: Arc<dyn LocalToolSink>,
+    environment: Arc<dyn CommandEnvironment>,
 }
 
 impl LocalTools {
-    pub fn new(workspace: Workspace, sink: Arc<dyn LocalToolSink>) -> Self {
+    pub fn new(
+        workspace: Workspace,
+        sink: Arc<dyn LocalToolSink>,
+        environment: Arc<dyn CommandEnvironment>,
+    ) -> Self {
         Self {
-            binding: Arc::new(Binding { workspace, sink }),
+            binding: Arc::new(Binding {
+                workspace,
+                sink,
+                environment,
+            }),
             scope: Arc::new(scope::Scope::default()),
         }
     }

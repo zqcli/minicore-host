@@ -274,6 +274,7 @@ async fn failed_owner_record_is_internal_and_does_not_undo_or_retry_write() {
     let tools = LocalTools::new(
         Workspace::open(root.path()).await.unwrap(),
         Arc::new(RejectEdits),
+        Arc::new(InheritCommandEnvironment),
     );
     assert_eq!(
         invoke(
@@ -314,6 +315,7 @@ async fn equal_upstream_call_ids_in_different_turn_bindings_remain_separate() {
     let second = LocalTools::new(
         Workspace::open(root.path()).await.unwrap(),
         second_records.clone(),
+        Arc::new(InheritCommandEnvironment),
     );
     invoke(
         &first,
@@ -347,8 +349,16 @@ async fn separate_turn_tools_share_mutation_order_and_disjoint_edit_snapshots() 
     fs::write(root.path().join("file"), original).unwrap();
     let first_records = Arc::new(Recorder::default());
     let second_records = Arc::new(Recorder::default());
-    let first = LocalTools::new(workspace.clone(), first_records.clone());
-    let second = LocalTools::new(workspace.clone(), second_records.clone());
+    let first = LocalTools::new(
+        workspace.clone(),
+        first_records.clone(),
+        Arc::new(InheritCommandEnvironment),
+    );
+    let second = LocalTools::new(
+        workspace.clone(),
+        second_records.clone(),
+        Arc::new(InheritCommandEnvironment),
+    );
 
     // An explicit operation gate, not a large-file timing race: both accepted
     // workers must wait before capturing any source through either Turn binding.

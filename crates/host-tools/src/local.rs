@@ -1,10 +1,10 @@
 //! Ordinary tools receive their frozen workspace and actual Turn record owner,
 //! not the agent tool's business port or a model-supplied source identity.
 use minicore_host_core::{
-    OwnerFuture, PreparedTurnBinding, ToolOutputLease, ToolOutputSink, TurnCapability,
-    TurnToolCleanup,
+    OwnerFuture, PreparedTurnBinding, ToolEnvironmentExclusions, ToolOutputLease, ToolOutputSink,
+    TurnCapability, TurnToolCleanup,
 };
-use minicore_host_local_tools::{LocalToolSink, LocalTools, RecordError};
+use minicore_host_local_tools::{CommandEnvironment, LocalToolSink, LocalTools, RecordError};
 use minicore_host_protocol::{Fault, FaultKind};
 use minicore_host_workspace::Workspace;
 use minicore_runtime::tools::{Tool, ToolContext, ToolError, ToolFuture, ToolInvocation, ToolSpec};
@@ -44,7 +44,10 @@ impl BoundLocalTools {
         workspace: Workspace,
         sink: Arc<dyn LocalToolInvocationSink>,
     ) -> Result<Self, Fault> {
-        let tools = Arc::new(LocalTools::new(workspace, sink.clone()));
+        let environment = Arc::new(HostCommandEnvironment(
+            binding.tool_environment_exclusions()?,
+        ));
+        let tools = Arc::new(LocalTools::new(workspace, sink.clone(), environment));
         binding.register_tool_cleanup(Arc::new(LocalCleanup(tools.clone())))?;
         Ok(Self {
             tools,
@@ -58,6 +61,12 @@ impl BoundLocalTools {
             capability: self.capability.clone(),
             sink: self.sink.clone(),
         }))
+    }
+}
+struct HostCommandEnvironment(ToolEnvironmentExclusions);
+impl CommandEnvironment for HostCommandEnvironment {
+    fn excluded_names(&self) -> Vec<String> {
+        self.0.names()
     }
 }
 struct BoundLocalTool {
