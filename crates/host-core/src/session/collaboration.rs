@@ -286,6 +286,7 @@ impl SessionController {
             if state.active.is_some()
                 || state.saving
                 || state.history_work.is_some()
+                || state.record_work.is_some()
                 || state.preparing
                 || state.handoff_pending
                 || !state.next_step.is_empty()

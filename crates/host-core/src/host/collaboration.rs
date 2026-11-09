@@ -77,3 +77,30 @@ impl Host {
         Ok(())
     }
 }
+impl Host {
+    pub(crate) async fn update_agent_candidate_owned(
+        &self,
+        caller: &CallerContext,
+        target: &AgentRef,
+        expected: u64,
+        config: AgentConfig,
+        name: String,
+    ) -> Result<AgentInfo, Fault> {
+        self.check_host(&target.host_id)?;
+        self.agent(caller, &target.agent_id)?
+            .update_candidate_async(caller, expected, config, name)
+            .await
+    }
+    pub(crate) async fn update_session_candidate_owned(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        expected: u64,
+        config: SessionConfig,
+        title: Option<String>,
+    ) -> Result<SessionInfo, Fault> {
+        self.session(caller, target)?
+            .update_candidate_async(caller, expected, config, title)
+            .await
+    }
+}

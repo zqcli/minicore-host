@@ -42,3 +42,11 @@
 - Public and internal close workers now share the actual memory-retirement tail. An internal close is Agent-owned before any wait; cancelling the permit wait does not discard accepted work.
 - Original weak target retirement makes cleanup an actual completed no-op rather than a false NotFound. Scope/close OnceCells cache only success. Explicit `session.resume` may continue only an already registered failed scope cleanup even during Host stopping; it never schedules new business work or retries automatically.
 - Focused delegation suite: 13/13 passed. Core all-target suite passed; core Clippy with `-D warnings` passed, using the same fixed local cd59b6e Runtime patch. Unique core suite increased from 134 to 137 cases; a final workspace `--list` is still pending.
+
+## Atomic metadata candidates
+
+- Added TurnCapability update_agent/update_session methods taking one expected revision and complete config/name or config/title candidate. Conflict does not reread a newer revision or overwrite newer metadata.
+- Agent and Session owners validate before admission, then submit config and metadata atomically. Persistent candidates use the existing owned record-save/confirmation path; title is loaded and preserved on close.
+- SessionData now has optional title with an absent-field default. Storage rejects blank titles and same-revision config/name/title changes. Existing records without a title retain their original meaning.
+- Real Host/Runtime tests cover same-snapshot memory updates and stale-revision rejection; persistent tests read the confirmed actual files and reopen the Host to verify title/name/config values.
+- Delegation tests: 15/15 passed. Storage all-target tests passed. Core and storage all-target Clippy with `-D warnings` passed. All used the documented fixed local Runtime cd59b6e command-line patch; manifests/lock remain uncommitted validation scaffolding.

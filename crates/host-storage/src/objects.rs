@@ -219,7 +219,7 @@ impl AgentStore {
             self.validate(&old)?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
             if old.data.config_revision == record.data.config_revision
-                && old.data.config != record.data.config
+                && (old.data.config != record.data.config || old.data.name != record.data.name)
             {
                 return Err(StorageError::InvalidObject {
                     reason: "configuration changed without a new revision".into(),
@@ -324,6 +324,16 @@ impl SessionStore {
         if record.data.mode != self.mode {
             return Err(StorageError::InvalidStorageMode);
         }
+        if record
+            .data
+            .title
+            .as_ref()
+            .is_some_and(|title| title.trim().is_empty())
+        {
+            return Err(StorageError::InvalidObject {
+                reason: "Session title must not be blank".into(),
+            });
+        }
         record
             .data
             .effective_config
@@ -357,7 +367,8 @@ impl SessionStore {
             let old = self.load()?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
             if old.data.config_revision == record.data.config_revision
-                && old.data.effective_config != record.data.effective_config
+                && (old.data.effective_config != record.data.effective_config
+                    || old.data.title != record.data.title)
             {
                 return Err(StorageError::InvalidObject {
                     reason: "configuration changed without a new revision".into(),

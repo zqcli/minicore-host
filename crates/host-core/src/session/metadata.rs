@@ -111,6 +111,7 @@ impl SessionController {
             .provenance
             .clone()
             .expect("persistent Session has provenance");
+        record.data.title = state.info.title.clone();
         record.data.config_revision = state.info.config_revision;
         record.data.effective_config = state.info.config.clone();
         record
@@ -260,6 +261,7 @@ impl SessionController {
             match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
+                    state.info.title = candidate.data.title;
                     state.info.config = candidate.data.effective_config;
                     state.info.config_revision = candidate.data.config_revision;
                     if candidate.data.closed.is_some() {
@@ -288,6 +290,7 @@ impl SessionController {
             }
         };
         if updated.is_ok() {
+            self.handoff_delegation_owned();
             self.wake();
         }
         updated
@@ -370,5 +373,80 @@ impl SessionController {
         self.save_record(candidate).await?;
         self.scope_root_closed_owned();
         Ok(())
+    }
+}
+
+impl SessionController {
+    pub(crate) async fn update_candidate_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected: u64,
+        config: SessionConfig,
+        title: Option<String>,
+    ) -> Result<SessionInfo, Fault> {
+        if title.as_ref().is_some_and(|title| title.trim().is_empty()) {
+            return Err(Fault::new(
+                FaultKind::SessionConfigInvalid,
+                "Session title must not be blank",
+            ));
+        }
+        config
+            .validate()
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
+        self.resources_owned()?.validate(&config)?;
+        self.ensure_executor()?;
+        let (sender, receiver) = oneshot::channel();
+        let memory =
+            self.access.accept_execution(caller, || {
+                let mut state = self.state.lock().expect("Session mutex poisoned");
+                Self::open(&state)?;
+                if state.info.config_revision != expected {
+                    return Err(Fault::new(
+                        FaultKind::SessionConfigConflict,
+                        "Session configuration revision changed",
+                    ));
+                }
+                if state.record_work.is_some() {
+                    return Err(Fault::new(
+                        FaultKind::SessionBusy,
+                        "Session has a pending metadata save",
+                    ));
+                }
+                let revision = expected.checked_add(1).ok_or_else(|| {
+                    Fault::new(
+                        FaultKind::SessionInternalUnexpected,
+                        "configuration revision exhausted",
+                    )
+                })?;
+                if state.info.mode == StorageMode::Memory {
+                    state.info.config = config;
+                    state.info.title = title;
+                    state.info.config_revision = revision;
+                    if state.block_reason.as_ref().is_some_and(|fault| {
+                        fault.kind() == Some(FaultKind::SessionResourceMissing)
+                    }) {
+                        state.block_reason = None;
+                    }
+                    self.publish(&mut state);
+                    Ok(Some(state.info.clone()))
+                } else {
+                    let mut record = self.record(&state);
+                    record.data.effective_config = config;
+                    record.data.title = title;
+                    record.data.config_revision = revision;
+                    self.spawn_record_save(&mut state, record, sender);
+                    Ok(None)
+                }
+            })?;
+        if let Some(info) = memory {
+            self.wake();
+            return Ok(info);
+        }
+        receiver.await.map_err(|_| {
+            Fault::new(
+                FaultKind::SessionInternalUnexpected,
+                "metadata owner ended without a result",
+            )
+        })?
     }
 }

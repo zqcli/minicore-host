@@ -37,6 +37,7 @@ impl SessionController {
         mutable.provenance = Some(record.clone());
         let state = mutable.state.get_mut().expect("Session mutex poisoned");
         state.record_base = Some(record.clone());
+        state.info.title = record.data.title.clone();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
         if record.data.closed.is_some() {

@@ -150,6 +150,7 @@ fn setup(
             id.clone(),
             agent_id.clone(),
             SessionData {
+                title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
                 config_revision: 0,

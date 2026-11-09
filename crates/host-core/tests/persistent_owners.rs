@@ -136,6 +136,7 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
                 id.clone(),
                 agent_id.clone(),
                 SessionData {
+                    title: None,
                     mode: StorageMode::Persistent,
                     agent_config_revision: 7,
                     config_revision: 4,

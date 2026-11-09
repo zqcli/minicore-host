@@ -63,6 +63,7 @@ impl Fixture {
                 session.id().clone(),
                 agent.id().clone(),
                 SessionData {
+                    title: None,
                     mode: StorageMode::Persistent,
                     agent_config_revision: 1,
                     config_revision: 1,
@@ -279,6 +280,7 @@ fn memory_records_and_journal_create_no_files() {
             session.id().clone(),
             agent_id.clone(),
             SessionData {
+                title: None,
                 mode: StorageMode::Memory,
                 agent_config_revision: 1,
                 config_revision: 1,
@@ -1130,6 +1132,7 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
             healthy.id().clone(),
             f.agent.id().clone(),
             SessionData {
+                title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,
                 config_revision: 1,
@@ -1170,6 +1173,7 @@ fn create_sibling_session(agent: &AgentStore) -> SessionStore {
             session.id().clone(),
             agent.id().clone(),
             SessionData {
+                title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,
                 config_revision: 1,

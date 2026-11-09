@@ -247,6 +247,7 @@ impl AgentOwner {
                 prepared.id.clone(),
                 self.id.clone(),
                 SessionData {
+                    title: None,
                     mode: prepared.mode,
                     agent_config_revision: prepared.agent_revision,
                     config_revision: 0,

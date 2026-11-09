@@ -969,3 +969,222 @@ async fn preparation_failure_cannot_finish_root_while_scope_cleanup_is_gated() {
         .unwrap()
         .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn metadata_and_config_use_one_snapshot_revision_and_conflicts_do_not_overwrite() {
+    let mut f = setup(1, None, false);
+    let parent = agent(&f);
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let snapshot = cap.session_snapshot(&parent).unwrap();
+    let mut config = snapshot.config.clone();
+    config.role.instructions = "new effective role".into();
+    let updated = cap
+        .update_session(
+            &parent,
+            snapshot.config_revision,
+            config.clone(),
+            Some("new title".into()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.title.as_deref(), Some("new title"));
+    assert_eq!(updated.config, config);
+    assert_eq!(updated.config_revision, snapshot.config_revision + 1);
+    assert_eq!(
+        cap.update_session(
+            &parent,
+            snapshot.config_revision,
+            snapshot.config,
+            Some("stale title".into())
+        )
+        .await
+        .unwrap_err()
+        .kind(),
+        Some(FaultKind::SessionConfigConflict)
+    );
+    assert_eq!(
+        cap.session_snapshot(&parent).unwrap().title.as_deref(),
+        Some("new title")
+    );
+    let target = AgentRef {
+        host_id: cap.source().host_id.clone(),
+        agent_id: parent.agent_id.clone(),
+    };
+    let snapshot = cap.agent_snapshot(&target).unwrap();
+    let mut config = snapshot.config.clone();
+    config.role.instructions = "new default role".into();
+    let updated = cap
+        .update_agent(
+            &target,
+            snapshot.config_revision,
+            config.clone(),
+            "new Agent name".into(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "new Agent name");
+    assert_eq!(updated.config, config);
+    assert_eq!(
+        cap.update_agent(
+            &target,
+            snapshot.config_revision,
+            snapshot.config,
+            "stale Agent".into()
+        )
+        .await
+        .unwrap_err()
+        .kind(),
+        Some(FaultKind::AgentConfigConflict)
+    );
+    assert_eq!(
+        cap.session_snapshot(&parent)
+            .unwrap()
+            .config
+            .role
+            .instructions,
+        "new effective role"
+    );
+    complete(&f.events[0], "bound old Turn still runs");
+    finished(&f, &parent, &cap.source().turn.turn_id).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut f = setup(1, None, false);
+    f.host = Host::open_persistent(
+        directory.path(),
+        HostSettings {
+            name: "metadata fixture".into(),
+        },
+        f.resources.clone(),
+    )
+    .await
+    .unwrap();
+    f.connection = f.host.connect().unwrap();
+    let created = f
+        .host
+        .create_agent_async(
+            &f.connection.caller(),
+            AgentCreate {
+                operation_id: OperationId::new().unwrap(),
+                name: "before".into(),
+                mode: StorageMode::Persistent,
+                config: AgentConfig::default(),
+                default_session: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let parent = SessionRef {
+        agent_id: created.agent_id.unwrap(),
+        session_id: created.session_id.unwrap(),
+    };
+    send(&f, &parent);
+    let cap = recv(&mut f.bindings).await.capability();
+    recv(&mut f.starts).await;
+    let session = cap.session_snapshot(&parent).unwrap();
+    let mut config = session.config;
+    config.role.instructions = "persisted role".into();
+    cap.update_session(
+        &parent,
+        session.config_revision,
+        config.clone(),
+        Some("persisted title".into()),
+    )
+    .await
+    .unwrap();
+    let session_path = directory
+        .path()
+        .join("agents")
+        .join(parent.agent_id.as_str())
+        .join("sessions")
+        .join(parent.session_id.as_str())
+        .join("session.json");
+    let record: minicore_host_storage::SessionRecord =
+        serde_json::from_slice(&std::fs::read(session_path).unwrap()).unwrap();
+    assert_eq!(record.data.title.as_deref(), Some("persisted title"));
+    assert_eq!(record.data.effective_config, config);
+    assert_eq!(record.data.config_revision, 1);
+    let target = AgentRef {
+        host_id: cap.source().host_id.clone(),
+        agent_id: parent.agent_id.clone(),
+    };
+    let agent = cap.agent_snapshot(&target).unwrap();
+    cap.update_agent(
+        &target,
+        agent.config_revision,
+        agent.config.clone(),
+        "persisted name".into(),
+    )
+    .await
+    .unwrap();
+    let record: minicore_host_storage::AgentRecord = serde_json::from_slice(
+        &std::fs::read(
+            directory
+                .path()
+                .join("agents")
+                .join(parent.agent_id.as_str())
+                .join("agent.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(record.data.name, "persisted name");
+    assert_eq!(record.data.config, agent.config);
+    assert_eq!(record.data.config_revision, 1);
+    complete(&f.events[0], "done");
+    finished(&f, &parent, &cap.source().turn.turn_id).await;
+    let mut states = f
+        .host
+        .events_subscribe(
+            &f.connection.caller(),
+            SubscribeRequest {
+                scope: SubscriptionScope::Host {
+                    host_id: target.host_id.clone(),
+                },
+                categories: BTreeSet::from([EventCategory::State]),
+            },
+        )
+        .unwrap();
+    f.host
+        .shutdown(
+            &f.connection.caller(),
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Graceful,
+            },
+        )
+        .unwrap();
+    while f.host.info(&f.connection.caller()).unwrap().lifecycle != HostLifecycle::Stopped {
+        states.recv().await.unwrap();
+    }
+    let reopened = Host::open_persistent(
+        directory.path(),
+        HostSettings {
+            name: "ignored".into(),
+        },
+        f.resources.clone(),
+    )
+    .await
+    .unwrap();
+    let connection = reopened.connect().unwrap();
+    assert_eq!(
+        reopened
+            .session_info(&connection.caller(), &parent)
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("persisted title")
+    );
+    assert_eq!(
+        reopened
+            .agent_info(&connection.caller(), &target)
+            .unwrap()
+            .name,
+        "persisted name"
+    );
+}

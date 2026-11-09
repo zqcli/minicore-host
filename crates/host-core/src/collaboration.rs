@@ -550,3 +550,33 @@ pub struct DelegationAssociation {
     pub child: SessionRef,
     pub task_message_id: MessageId,
 }
+impl TurnCapability {
+    pub async fn update_agent(
+        &self,
+        target: &AgentRef,
+        expected_revision: u64,
+        config: AgentConfig,
+        name: String,
+    ) -> Result<AgentInfo, Fault> {
+        self.host()?
+            .update_agent_candidate_owned(&self.caller()?, target, expected_revision, config, name)
+            .await
+    }
+    pub async fn update_session(
+        &self,
+        target: &SessionRef,
+        expected_revision: u64,
+        config: SessionConfig,
+        title: Option<String>,
+    ) -> Result<SessionInfo, Fault> {
+        self.host()?
+            .update_session_candidate_owned(
+                &self.caller()?,
+                target,
+                expected_revision,
+                config,
+                title,
+            )
+            .await
+    }
+}

@@ -397,3 +397,76 @@ impl AgentOwner {
         }
     }
 }
+
+impl AgentOwner {
+    pub(crate) async fn update_candidate_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected: u64,
+        config: AgentConfig,
+        name: String,
+    ) -> Result<AgentInfo, Fault> {
+        if name.trim().is_empty() {
+            return Err(Fault::new(
+                FaultKind::AgentConfigInvalid,
+                "Agent name must not be blank",
+            ));
+        }
+        let original = self.info(caller)?;
+        if original.config_revision != expected {
+            return Err(Fault::new(
+                FaultKind::AgentConfigConflict,
+                "Agent configuration revision changed",
+            ));
+        }
+        self.resources_owned()?.validate(
+            &SessionConfig::from_agent(&config, &SessionOverrides::default())
+                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
+        )?;
+        let persistent_default = if self.store().is_some() {
+            self.persisted_default(&original.default_session_id)?
+        } else {
+            None
+        };
+        let (sender, receiver) = oneshot::channel();
+        let memory = self.access.accept_business(caller, || {
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
+            Self::writable(&state)?;
+            if state.info.config_revision != expected
+                || state.info.default_session_id != original.default_session_id
+            {
+                return Err(Fault::new(
+                    FaultKind::AgentConfigConflict,
+                    "Agent configuration or default changed during preparation",
+                ));
+            }
+            let mut candidate = state.info.clone();
+            candidate.name = name;
+            candidate.config = config;
+            candidate.config_revision = expected.checked_add(1).ok_or_else(|| {
+                Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "configuration revision exhausted",
+                )
+            })?;
+            if state.info.mode == StorageMode::Memory {
+                state.info = candidate;
+                self.changed.notify_waiters();
+                Ok(Some(state.info.clone()))
+            } else {
+                let record = self.record(&candidate, persistent_default);
+                self.spawn_record_save(&mut state, record, candidate.default_session_id, sender)?;
+                Ok(None)
+            }
+        })?;
+        if let Some(info) = memory {
+            return Ok(info);
+        }
+        receiver.await.map_err(|_| {
+            Fault::new(
+                FaultKind::AgentInternalUnexpected,
+                "metadata owner ended without a result",
+            )
+        })?
+    }
+}
