@@ -8,7 +8,7 @@ The foundation contains strict contracts, Linux durable storage, a production HT
 
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed. Whitespace checks include committed changes and require full Git history; CI uses `fetch-depth: 0`.
 
-The required Runtime history/partial extension is pinned to published commit `18a6ac9b82d003330cd870275efca793cdcc9a96` on `zqcli/minicore-runtime:feat/host-history-handoff`. No local Runtime patch, copied source or bootstrap bundle is required. Runtime's push CI passed all seven checks; see [PROJECT.md](PROJECT.md) for verification boundaries and the exact source-tree mapping.
+The Runtime dependency is exactly `0.10.0`, pinned to published commit `59ee8ce668f72a21d408e6247d3ce075b260db14` on `zqcli/minicore-runtime:feat/host-history-handoff`. It includes authoritative history/partial handoff and application-quota removal. No local Runtime patch, copied source or bootstrap bundle is required. Runtime's exact-head CI passed all seven checks; see [PROJECT.md](PROJECT.md) for verification boundaries and the source-tree mapping.
 
 ## Components
 
@@ -22,4 +22,4 @@ The required Runtime history/partial extension is pinned to published commit `18
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
 - [Controller and integration evidence](tasks/005-controllers/TASK.md)
 
-Live provider and TUI checks have not been run. `main` is not merged with development changes; Host has not been remotely published. The Runtime prerequisite branch is published.
+The foundation is published on `dev` at [82583b31ac9091164da5f6dcfee6bb23e05137e5](https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5), with [exact-head Host CI passing](https://github.com/zqcli/minicore-host/actions/runs/42629644954). The [commit mapping](docs/host-publication.json) translates historical local checkpoints to GitHub commits. Remote `main` remains the README-only ancestor and has not received development changes. Live provider and TUI checks have not been run; external independent review and remaining first-version work are still required.
