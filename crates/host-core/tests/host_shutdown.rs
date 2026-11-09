@@ -449,6 +449,18 @@ fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_messag
             .unwrap();
         let connection = host.connect().unwrap();
         let caller = connection.caller();
+        let mut request = request(StorageMode::Persistent);
+        request.initial_message = Some(input("must not start after force"));
+        let operation = request.operation_id.clone();
+        let mut creating = Box::pin({
+            let host = host.clone();
+            let caller = caller.clone();
+            async move { host.create_agent_async(&caller, request).await }
+        });
+        // Queue pure preparation before occupying the one blocking worker.
+        // No owner task can run until this current-thread test yields, so the
+        // blocker still precedes accepted creation's actual storage I/O.
+        assert!(futures_util::poll!(&mut creating).is_pending());
         let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
@@ -456,14 +468,7 @@ fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_messag
             release_rx.recv().unwrap();
         });
         entered_rx.await.unwrap();
-        let mut request = request(StorageMode::Persistent);
-        request.initial_message = Some(input("must not start after force"));
-        let operation = request.operation_id.clone();
-        let worker = {
-            let host = host.clone();
-            let caller = caller.clone();
-            tokio::spawn(async move { host.create_agent_async(&caller, request).await })
-        };
+        let worker = tokio::spawn(creating);
         until(|| {
             (!host
                 .creation_receipts(&caller, &operation)
