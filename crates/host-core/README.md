@@ -73,7 +73,8 @@ It shares admission with Turn preparation, creates no Turn, and leaves both
 message queues writable but unconsumed until the work and its save settle.
 Explicit pause survives completion. `session_compact_cancel` targets the original
 manual operation only; a late cancellation cannot cancel a later compaction.
-The original receipt and Session state expose actual phases and known results.
+The original receipt retains its formation-time facts. Session state exposes
+current activity; late cancellation reads the original retained outcome.
 
 Automatic compaction runs at real Runtime prompt boundaries with the public
 Turn's frozen model and settings. Only unhanded inputs and the final incomplete

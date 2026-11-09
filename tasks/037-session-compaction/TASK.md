@@ -141,7 +141,6 @@ across cancellation and a later completed compaction. A new reused-operation-ID
 case preserves ambiguity without cancelling later work. The real local HTTP
 case compares public receipt_get with the original return during and after
 utility execution, while late cancel reads the real completed outcome.
-The protocol correction and the unchanged independent public probes are next.
 
 The receipt correction is fixed at
 `3cfb84ce1ab0ceb9e57aff54fd257bc5185279fb`. The second correction restricts
@@ -153,6 +152,36 @@ and deserialization, including the ordinary false-claim cases.
 
 The first attempt to link the independent probe selected mismatched feature
 build artifacts from this reused target directory; it failed to compile, not
-at a behavioral assertion. The final probe run will use the workspace gate's
-consistent dependency artifacts. Its source remains unchanged and its original
-review logs are preserved.
+at a behavioral assertion. The successful final probe run used the exact
+workspace dependency artifacts from Cargo's JSON output rather than selecting
+by modification time. Its source is unchanged and original review logs remain
+preserved.
+
+### Fixed review gate
+
+Both production corrections are fixed at
+`270f5becc36294006a90dd30735525c3781b4089`. The exact checkpoint passed:
+
+```sh
+CARGO_NET_OFFLINE=true ./scripts/check.sh
+cargo test --workspace --all-targets --locked --offline -- --list
+cargo test --workspace --all-targets --no-run --locked --offline --message-format=json
+cargo metadata --locked --offline --format-version 1
+sha256sum SPEC.md
+bash /workspace/shared/minicore-host-session-compaction-validation/run-review-probes.sh
+```
+
+The aggregate gate passed strict Clippy, all **608 unique target/test cases**,
+**3 doctests**, strict rustdoc, formatting and whitespace checks. The unchanged
+five independent public probes all passed: both review findings, internal-Loop
+continuation with frozen configuration, actual Runtime prompt timeout, and
+actual journal restart with partial/literal-summary/missing-result history.
+These five external probes are not counted again in the workspace inventory.
+The new repository regressions and corrected HTTP assertions remain checked in.
+
+Logs in the validation directory are `review-fix-gate.log`,
+`review-fix-test-list.txt`, `review-fix-probes.log`, and the exact Cargo artifact
+and metadata JSON files. One Runtime 0.10.0 still resolves to fixed `69faf919`;
+the SPEC digest is unchanged. Documentation-only updates follow this gate.
+Independent re-review and clean integration remain with the coordinator.
+The quarantined-base, transport, live-provider and TUI limits above still apply.
