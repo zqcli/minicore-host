@@ -11,6 +11,7 @@ pub(super) struct TurnObservation {
 pub(super) struct InteractionRecord {
     pub(super) data: PendingInteractionData,
     pub(super) resolved: bool,
+    pub(super) answering: Option<watch::Receiver<bool>>,
 }
 impl TurnObservation {
     fn interaction(
@@ -25,6 +26,7 @@ impl TurnObservation {
                     InteractionId::new().expect("Host interaction identity generation"),
                 ),
                 resolved: false,
+                answering: None,
             })
     }
 }

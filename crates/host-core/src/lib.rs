@@ -18,8 +18,9 @@ pub use backend::JournalHistory;
 pub use control::{CallerContext, ConnectionHandle};
 pub use host::Host;
 pub use session::{
-    BoundResources, HistoryBackend, LoadFuture, MemoryHistory, ResourceFuture, ResourceResolver,
-    SaveFuture, SessionSubscription, ToolOutputBinding, ToolOutputSink,
+    ApprovalAnswer, BoundResources, HistoryBackend, InteractionAnswerData, LoadFuture,
+    MemoryHistory, ResourceFuture, ResourceResolver, SaveFuture, SessionSubscription,
+    ToolOutputBinding, ToolOutputSink,
 };
 pub use types::*;
 

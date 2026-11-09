@@ -2,6 +2,16 @@ use super::*;
 use crate::observation::*;
 
 impl Host {
+    pub fn answer_interaction(
+        &self,
+        caller: &CallerContext,
+        target: &SessionRef,
+        request: InteractionAnswerRequest<crate::InteractionAnswerData>,
+    ) -> Result<InteractionAnswerReceipt, Fault> {
+        self.session(caller, target)?
+            .answer_interaction(caller, request)
+    }
+
     pub fn turn_snapshot(
         &self,
         caller: &CallerContext,

@@ -379,6 +379,7 @@ impl SessionController {
         {
             return;
         }
+        self.finish_pending_answers(turn_id).await;
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.history_work.is_some()
             || state.active.as_ref().is_none_or(|active| {

@@ -8,6 +8,8 @@ mod collaboration;
 mod controls;
 mod history;
 mod history_read;
+mod interaction;
+pub use interaction::{ApprovalAnswer, InteractionAnswerData};
 mod metadata;
 mod observation;
 mod tool_output;

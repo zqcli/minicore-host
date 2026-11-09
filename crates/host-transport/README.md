@@ -101,7 +101,7 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 30 real routes:
+`SUPPORTED_METHODS` lists these 31 real routes:
 
 - Host: `host.info`, `host.receipt.get`, `host.shutdown`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
@@ -112,6 +112,7 @@ and never dispatch `message.send` or other business work.
 - Turn: `turn.get`, `turn.list`, `turn.wait`, `turn.cancel`, `turn.result`, `turn.output.read`.
 - Tool calls: `toolcall.get`, `toolcall.output.read`.
 - Observations: `events.subscribe`, `events.unsubscribe`.
+- Interactions: `interaction.answer`.
 
 The count describes adapters for current core primitives, not completion of all
 SPEC §8. Lists retain basic current-owner results. `turn.get` returns
@@ -202,3 +203,22 @@ limits and use unbounded application response queues; no application buffer
 quota is added. Transport tests use generated localhost certificates, actual
 TCP/TLS/WebSocket traffic and real Host/Runtime owners with named model fixtures.
 They are not live-provider or CLI/TUI validation.
+
+## Exact interaction answers
+
+`SessionClient::answer_interaction` accepts the original Turn, Load, public
+20-character InteractionId, OperationId and a registered answer. Approval is
+`{ kind: "approval", decision: "allow_once" | "deny" }`; tool input wraps the
+Runtime's existing strict `ToolInputAnswer` as `{ kind: "tool_input", answer }`.
+RPC parameters are `{ target: SessionRef, request: InteractionAnswerRequest }`.
+The owner resolves the public ID to its original Runtime waiting point, validates
+current operation rights and identities, and invokes that real slot exactly once.
+An answered receipt means the slot accepted the answer, not tool/Turn completion.
+It is retained under the existing operation receipt index.
+
+Answers do not enqueue messages or clear pause. A new operator may answer a
+still-pending old interaction. Wrong Load, other interactions, resolved waits and
+late answers are rejected. Runtime answer-versus-cancel decides the actual fact;
+the Session publishes answered only after Runtime acceptance. A private in-flight
+fence holds final interaction settlement/reclamation until that synchronous
+control call returns, with no Session lock held across the Runtime call or wait.

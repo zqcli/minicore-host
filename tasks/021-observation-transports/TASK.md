@@ -152,3 +152,47 @@ execution-completed status. All fields and receipt branches reject unknown shape
 with the same explicit patch. Two new contract tests cover mandatory execution
 identity, unknown/null fields, receipt round-trip and invalid completion claims.
 The following source change supplies the actual owner/Runtime route.
+
+## Actual answer routing and final local gate
+
+Protocol source: `7ce7aaf4e98c7d383cd8b4b1b2f344576fb0a6d6`.
+The owner route now resolves the public 20-character interaction ID through the
+original Session's mapping to the actual Runtime ID. The Runtime's own answer
+validation and answer/cancel decision settle that exact slot. No projection can
+stand in for an answer. Both Runtime Approval and ToolInput are supported.
+
+The Session/history owner explicitly handed off these narrow shared hunks:
+`mod interaction` and reexports, a private per-record answer fence, visibility of
+existing receipt retention, and one lock-free fence wait before final
+`active.take`. All other drive/history/retirement logic remains with its owner.
+The synchronous `LoopHandle::answer` executes outside Session and registry locks.
+After real acceptance, answered is published once and the original receipt is
+retained. Final cancellation settlement waits for any already accepted answer
+attempt without adding public states, a new task layer or observer retention.
+
+Real typed/OS-pipe/TLS tests cover operator replacement, unchanged pause,
+read-only rejection, wrong Load/Turn/interaction, malformed/invalid choice,
+answer-before-cancel and cancel-before-answer, two concurrent Session waits with
+reused ToolCall IDs, and real tool execution/denial following Approval. ToolInput
+produces the Runtime's real InputProvided ToolResult. No transcript projection,
+live provider or TUI success is substituted for these actual owners.
+
+Final commands used the environment and explicit local Runtime patch documented
+above; manifests/committed lock still contain no local path or unpublished rev.
+The parent reports the matching Runtime tree published as
+`69faf9196991524b5549499d6208a1eaf567bf56` and owns the final remote pin/check.
+
+- `cargo fmt --all --check`: passed.
+- `cargo clippy --workspace --all-targets --locked --offline -- -D warnings`: passed.
+- `cargo test --workspace --all-targets --locked --offline`: passed.
+- `cargo test --workspace --all-targets --locked --offline -- --list`: **388 unique tests**.
+- `cargo test --workspace --doc --locked --offline`: **3 doctests passed**.
+- `RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked --offline`: passed.
+
+This count includes local DSH prerequisite `6536da6` and this task's 21 added
+cases relative to its observation prerequisites; it is not the parent's larger
+integration count. The independent partial-history review finding is delegated
+to task 022: public history must include actual saved partial records rather
+than Runtime model-context projection alone. That separate fix and independent
+review/final parent integration remain required before claiming the complete
+observation surface ready. No Runtime, Host or branch was pushed by this worker.

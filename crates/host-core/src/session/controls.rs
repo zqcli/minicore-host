@@ -57,7 +57,7 @@ impl SessionController {
             state.unloaded_with_input = false;
         }
     }
-    fn retain_control(state: &mut SessionState, receipt: Receipt) {
+    pub(super) fn retain_control(state: &mut SessionState, receipt: Receipt) {
         state
             .controls
             .entry(receipt.operation_id().clone())

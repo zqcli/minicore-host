@@ -1,9 +1,9 @@
 use crate::{deadline::Deadline, operations::*, rpc::RpcClient};
 use minicore_host_core::{
-    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostInfo, MessageRecord,
-    ModelTextSnapshot, ObservationNotification, SessionHistorySnapshot, SessionInfo,
-    SessionSnapshot, StateEvent, ToolCallSnapshot, ToolTextSnapshot, TurnInfo, TurnResult,
-    TurnSnapshot,
+    AgentInfo, CallerContext, ConnectionHandle, EventSubscription, Host, HostInfo,
+    InteractionAnswerData, MessageRecord, ModelTextSnapshot, ObservationNotification,
+    SessionHistorySnapshot, SessionInfo, SessionSnapshot, StateEvent, ToolCallSnapshot,
+    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
 use std::sync::Arc;
@@ -414,6 +414,21 @@ impl SessionClient {
                 GetTurnResult(TurnTarget {
                     target: self.target.clone(),
                     turn_id,
+                }),
+                options,
+            )
+            .await
+    }
+    pub async fn answer_interaction(
+        &self,
+        request: InteractionAnswerRequest<InteractionAnswerData>,
+        options: CallOptions,
+    ) -> Result<InteractionAnswerReceipt, CallError> {
+        self.client
+            .call(
+                AnswerInteraction(AnswerParams {
+                    target: self.target.clone(),
+                    request,
                 }),
                 options,
             )

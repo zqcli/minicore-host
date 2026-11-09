@@ -1,8 +1,8 @@
 //! One typed operation table drives direct calls and RPC dispatch.
 use minicore_host_core::{
-    AgentInfo, CallerContext, Host, HostInfo, MessageRecord, ModelTextSnapshot,
-    SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
-    TurnInfo, TurnResult, TurnSnapshot,
+    AgentInfo, CallerContext, Host, HostInfo, InteractionAnswerData, MessageRecord,
+    ModelTextSnapshot, SessionHistorySnapshot, SessionInfo, SessionSnapshot, ToolCallSnapshot,
+    ToolTextSnapshot, TurnInfo, TurnResult, TurnSnapshot,
 };
 use minicore_host_protocol::*;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -107,6 +107,13 @@ pub(crate) struct ToolReadParams {
     pub request: TextReadRequest,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct AnswerParams {
+    pub target: SessionRef,
+    pub request: InteractionAnswerRequest<InteractionAnswerData>,
+}
+
 macro_rules! operations {
     ($($name:ident, $method:literal, $params:ty => $output:ty, |$host:ident, $caller:ident, $p:ident| $body:block;)+) => {
         $(#[derive(Serialize, Deserialize)]
@@ -166,6 +173,7 @@ operations! {
     ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
     GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
     ReadToolOutput, "toolcall.output.read", ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
+    AnswerInteraction, "interaction.answer", AnswerParams => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
     Unsubscribe, "events.unsubscribe", UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
 }
 
