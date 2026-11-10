@@ -41,7 +41,9 @@ use std::sync::{
     Arc, Mutex, Weak,
     atomic::{AtomicBool, Ordering},
 };
+use std::time::Instant;
 use tokio::sync::{Notify, watch};
+use tracing::Instrument;
 
 /// A connection-scoped state subscription. It never exposes a raw watch handle
 /// that could keep receiving private state after that connection is revoked.
@@ -210,6 +212,7 @@ impl QueuedInput {
     }
 }
 struct ActiveTurn {
+    started_at: Instant,
     _activation: crate::collaboration::ActivationLease,
     tool_cleanup: tool_cleanup::ToolCleanupWork,
     context_binding: crate::context::BoundContextConfiguration,
@@ -230,8 +233,9 @@ struct ActiveTurn {
     pending_interaction: Option<crate::PendingInteractionData>,
 }
 impl ActiveTurn {
-    fn claim_terminal(&mut self, outcome: TurnOutcome, fault: Option<Fault>) {
-        if self.info.outcome.is_none() {
+    fn claim_terminal(&mut self, outcome: TurnOutcome, fault: Option<Fault>) -> bool {
+        let newly_claimed = self.info.outcome.is_none();
+        if newly_claimed {
             if self.info.state == TurnState::Cancelling {
                 self.info.outcome = Some(TurnOutcome::Cancelled);
                 self.info.cleanup_faults.extend(fault);
@@ -243,8 +247,9 @@ impl ActiveTurn {
         self._activation.expire();
         self.info.state = TurnState::Finalizing;
         self.handle = None;
+        newly_claimed
     }
-    fn claim_report(&mut self, report: &LoopReport) {
+    fn claim_report(&mut self, report: &LoopReport) -> bool {
         let (outcome, fault) = match &report.outcome {
             LoopOutcome::Completed => (TurnOutcome::Completed, None),
             LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
@@ -261,7 +266,7 @@ impl ActiveTurn {
                 )),
             ),
         };
-        self.claim_terminal(outcome, fault);
+        self.claim_terminal(outcome, fault)
     }
 }
 struct SessionState {
@@ -1202,7 +1207,7 @@ impl SessionController {
                     return;
                 }
             };
-            let (batch, records) = {
+            let (batch, records, context) = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 state.preparing = false;
                 if !self.schedulable(&state) || state.info.config_revision != preparation.1 {
@@ -1218,6 +1223,7 @@ impl SessionController {
                 let start_history = state.history.len();
                 let (activation, cleanup) = binding.activate();
                 state.active = Some(ActiveTurn {
+                    started_at: Instant::now(),
                     _activation: activation,
                     tool_cleanup: tool_cleanup::ToolCleanupWork::new(cleanup),
                     context_binding,
@@ -1275,10 +1281,13 @@ impl SessionController {
                     &active.info,
                     state.controller_revision,
                 ));
-                (batch, records)
+                let context = diagnostic::turn_context(&self.turn_identity(&active.info));
+                (batch, records, context)
             };
             diagnostic::emit(records);
-            self.run_turn(turn_id, batch, resources).await;
+            self.run_turn(turn_id, batch, resources)
+                .instrument(context.span())
+                .await;
         }
     }
     fn preparation_failed(&self, fault: Fault) {
@@ -1430,7 +1439,7 @@ impl SessionController {
                     return;
                 }
             };
-            {
+            let record = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 let active = state.active.as_mut().expect("owned active Turn");
                 active.info.requests += u64::from(report.requests);
@@ -1449,29 +1458,36 @@ impl SessionController {
                 // Failed/cancelled execution cannot become cancellable again
                 // while this owner saves its returned report or partial.
                 if report.outcome != LoopOutcome::Completed {
-                    active.claim_report(&report);
+                    let newly_claimed = active.claim_report(&report);
                     if active.info.outcome == Some(TurnOutcome::Failed) {
                         state.failure_paused = true;
                     }
                     self.publish(&mut state);
+                    self.terminal_claim_record(&state, newly_claimed)
+                } else {
+                    None
                 }
-            }
+            };
+            diagnostic::emit(record);
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
                 // A failed save blocks new work; no reappend or automatic retry.
-                {
+                let record = {
                     let mut state = self.state.lock().expect("Session mutex poisoned");
                     state.block_reason = Some(fault.clone());
+                    let mut newly_claimed = false;
                     if let Some(active) = state.active.as_mut() {
                         active.info.persistence = PersistenceState::Failed;
                         active.info.persistence_fault = Some(fault);
-                        active.claim_report(&report);
+                        newly_claimed = active.claim_report(&report);
                         if active.info.outcome == Some(TurnOutcome::Failed) {
                             state.failure_paused = true;
                         }
                     }
                     self.publish(&mut state);
-                }
+                    self.terminal_claim_record(&state, newly_claimed)
+                };
+                diagnostic::emit(record);
                 self.finish_tool_cleanup(&turn_id).await;
                 return;
             }
@@ -1498,9 +1514,14 @@ impl SessionController {
                     (Some(next), records)
                 } else {
                     let active = state.active.as_mut().expect("owned active Turn");
-                    active.claim_report(&report);
+                    let newly_claimed = active.claim_report(&report);
                     self.publish(&mut state);
-                    (None, Vec::new())
+                    (
+                        None,
+                        self.terminal_claim_record(&state, newly_claimed)
+                            .into_iter()
+                            .collect(),
+                    )
                 }
             };
             diagnostic::emit(records);

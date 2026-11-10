@@ -63,7 +63,7 @@ pub fn target(receipt: &AgentCreateReceipt) -> SessionRef {
         session_id: receipt.session_id.clone().unwrap(),
     }
 }
-pub async fn host(endpoint: &str) -> Arc<Host> {
+pub fn configuration(endpoint: &str) -> HostConfig {
     let mut config = HostConfig {
         framework_instructions: FRAMEWORK.into(),
         ..Default::default()
@@ -78,7 +78,10 @@ pub async fn host(endpoint: &str) -> Arc<Host> {
         supports_tools: true,
         request_timeout_ms: Some(5_000),
     });
-    let candidate = HostResourceBuilder::builtins()
+    config
+}
+pub async fn prepare(config: HostConfig) -> minicore_host_core::PreparedHostConfiguration {
+    HostResourceBuilder::builtins()
         .unwrap()
         .prepare_with_credentials(
             config,
@@ -88,8 +91,17 @@ pub async fn host(endpoint: &str) -> Arc<Host> {
             },
         )
         .await
-        .unwrap();
-    Host::memory_configured(candidate).unwrap()
+        .unwrap()
+}
+pub async fn host(endpoint: &str) -> Arc<Host> {
+    Host::memory_configured(prepare(configuration(endpoint)).await).unwrap()
+}
+pub async fn persistent_host(path: &std::path::Path, endpoint: &str) -> Arc<Host> {
+    Host::open_configured(path, configuration(endpoint), |config| async {
+        Ok(prepare(config).await)
+    })
+    .await
+    .unwrap()
 }
 pub async fn pipes(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
     let (send, input) = pipe::pipe().unwrap();

@@ -87,3 +87,120 @@ pub(super) fn turn_started(source: &TurnIdentity, info: &TurnInfo, revision: u64
             .attribute("config_revision", info.config_revision),
     )
 }
+
+pub(crate) fn history_failed(
+    context: Context,
+    fault: &Fault,
+    phase: &'static str,
+    revision: u64,
+) -> Record {
+    let load = fault.kind() == Some(FaultKind::SessionHistoryLoadFailed);
+    Record::new(
+        event(
+            Level::ERROR,
+            Scope::Session,
+            "session.history",
+            if load {
+                "session.history_read_failed"
+            } else {
+                "session.history_write_failed"
+            },
+            "Session history operation failed; original business fault is retained",
+            &["phase", "controller_revision"],
+        ),
+        EventData::default()
+            .context(context)
+            .fault(fault)
+            .attribute("phase", phase)
+            .attribute("controller_revision", revision),
+    )
+}
+
+fn persistence(value: PersistenceState) -> &'static str {
+    match value {
+        PersistenceState::NotApplicable => "not_applicable",
+        PersistenceState::Pending => "pending",
+        PersistenceState::Persisted => "persisted",
+        PersistenceState::Failed => "failed",
+    }
+}
+const TURN_ATTRIBUTES: &[&str] = &[
+    "phase",
+    "outcome",
+    "persistence",
+    "controller_revision",
+    "runner_revision",
+    "duration_ms",
+    "requests",
+    "tool_rounds",
+];
+fn turn_data(source: &TurnIdentity, info: &TurnInfo) -> EventData {
+    let mut data = EventData::default()
+        .context(turn_context(source))
+        .attribute("persistence", persistence(info.persistence))
+        .attribute("requests", info.requests)
+        .attribute("tool_rounds", info.tool_rounds);
+    if let Some(outcome) = info.outcome {
+        data = data.attribute(
+            "outcome",
+            match outcome {
+                TurnOutcome::Completed => "completed",
+                TurnOutcome::Cancelled => "cancelled",
+                TurnOutcome::Failed => "failed",
+            },
+        );
+    }
+    if let Some(fault) = &info.fault {
+        data = data.fault(fault);
+    }
+    data
+}
+pub(super) fn turn_finished(source: &TurnIdentity, info: &TurnInfo, start: Instant) -> Record {
+    let mut data = turn_data(source, info).attribute("phase", "finished");
+    if let Ok(duration) = u64::try_from(start.elapsed().as_millis()) {
+        data = data.attribute("duration_ms", duration);
+    }
+    Record::new(
+        event(
+            Level::INFO,
+            Scope::Turn,
+            "turn.owner",
+            "turn.finished",
+            "Turn finished after its original save and cleanup barriers",
+            TURN_ATTRIBUTES,
+        ),
+        data,
+    )
+}
+impl SessionController {
+    /// First claim is an existing outcome transition, not a logging flag.
+    /// History-caused failures already have their direct storage ERROR.
+    pub(super) fn terminal_claim_record(
+        &self,
+        state: &SessionState,
+        newly_claimed: bool,
+    ) -> Option<Record> {
+        if !newly_claimed {
+            return None;
+        }
+        let active = state.active.as_ref()?;
+        if active.info.outcome != Some(TurnOutcome::Failed) {
+            return None;
+        }
+        active.info.fault.as_ref()?;
+        Some(Record::new(
+            event(
+                Level::ERROR,
+                Scope::Turn,
+                "turn.owner",
+                "turn.failed",
+                "Turn owner claimed its primary execution failure",
+                TURN_ATTRIBUTES,
+            ),
+            turn_data(&self.turn_identity(&active.info), &active.info)
+                .attribute("phase", "finalizing")
+                .attribute("controller_revision", state.controller_revision)
+                .attribute("runner_revision", state.runner_revision),
+        ))
+    }
+}

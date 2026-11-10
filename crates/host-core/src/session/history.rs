@@ -387,6 +387,28 @@ impl SessionController {
             }
         }
         self.publish(&mut state);
+        let record = result.as_ref().err().map(|fault| {
+            let (context, phase) = match binding {
+                SaveBinding::Turn(binding) => (
+                    minicore_host_diagnostics::Context {
+                        turn_id: Some(binding.turn_id.clone()),
+                        load_id: Some(binding.load_id.clone()),
+                        ..diagnostic::session_context(&self.identity())
+                    },
+                    match binding.boundary {
+                        Boundary::Complete { .. } => "append",
+                        Boundary::Partial { .. } => "partial",
+                        Boundary::Terminal => "terminal",
+                    },
+                ),
+                SaveBinding::Compaction(_) => {
+                    (diagnostic::session_context(&self.identity()), "compaction")
+                }
+            };
+            diagnostics::history_failed(context, fault, phase, state.controller_revision)
+        });
+        drop(state);
+        diagnostic::emit(record);
         result.map(|_| ())
     }
     pub(super) async fn finalize(
@@ -395,7 +417,7 @@ impl SessionController {
         outcome: TurnOutcome,
         fault: Option<Fault>,
     ) {
-        {
+        let record = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let Some(active) = state
                 .active
@@ -404,12 +426,14 @@ impl SessionController {
             else {
                 return;
             };
-            active.claim_terminal(outcome, fault);
+            let newly_claimed = active.claim_terminal(outcome, fault);
             if active.info.outcome == Some(TurnOutcome::Failed) {
                 state.failure_paused = true;
             }
             self.publish(&mut state);
-        }
+            self.terminal_claim_record(&state, newly_claimed)
+        };
+        diagnostic::emit(record);
         // Runtime may have dropped a tool future on cancellation. Actual tool
         // workers must still be joined, even if an original history save failed.
         if !self.finish_tool_cleanup(turn_id).await {
@@ -509,6 +533,11 @@ impl SessionController {
             partials: active.partials,
         };
         self.observe_finished(&mut state, &result.info, active.report.as_deref());
+        let record = diagnostics::turn_finished(
+            &self.turn_identity(&result.info),
+            &result.info,
+            active.started_at,
+        );
         state.completion_order.push(turn_id.clone());
         let mut inputs = active.consumed_inputs;
         for id in active.bound_inputs {
@@ -520,7 +549,9 @@ impl SessionController {
         state.completed.insert(turn_id.clone(), result);
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+        let record = record.published(state.controller_revision, state.runner_revision);
         drop(state);
+        record.emit();
         self.handoff_delegation_owned();
     }
     pub(super) fn start_save_continuations(

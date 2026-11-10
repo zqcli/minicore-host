@@ -411,3 +411,53 @@ are recovered from exact visible edit/append commands for old source
 exist. Their outcomes above are historical, not a fresh validation claim. This
 isolated reconstruction starts from verified remote 8c5fe493f9b9e78e15ef831c532bc267d0c7fb53;
 new environment validation is pending. No root checkout or remote was modified.
+
+### Immediate primary failure, real completion and history save failure
+
+The existing `claim_terminal`/`claim_report` transition now returns whether this
+call first set the outcome. Its owner extracts `turn.failed` only from that
+first actual failed claim with an original business Fault. Every claim call site
+carries the scalar record beyond the Session lock before emission, including the
+report boundary that precedes a failed partial/terminal save. No logger claim
+flag, diagnostic queue, second outcome, retry or save boundary is added. A
+history-origin failure without a separate primary Fault keeps its storage ERROR.
+
+`turn.finished` is INFO after the existing actual history, tool cleanup and answer
+barriers, retaining the original outcome/Fault separately from persistence.
+Its duration uses an Instant captured only at actual binding. The final records
+use the committed Controller/Runner revisions. The run_turn future is instrumented
+with only its known Turn identity outside all locks; no entered guard crosses an
+await. `settle_save` extracts the original Fault, actual phase and retained Turn/
+Load identity for the actual failed save attempt, then emits once outside its
+lock. It neither retries nor converts a failed save into a business outcome.
+
+New permanent `diagnostic_terminal_failures` uses production resources, a real
+persistent Host/Store and loopback HTTP 401. The real opened history inode is
+replaced while HTTP is gated, so the production Journal refuses the changed
+identity. This is not a write-syscall errno or a full disk, and logging remains
+healthy. A first fixture compile failure used the old query projection shape;
+only its accessor was corrected. On unchanged pre-implementation production,
+the actual red then confirmed finalizing/Failed 4204 plus persistence Failed 3301
+but no primary ERROR before repair. Both outputs are retained separately.
+
+The same test now passes: one primary ERROR before restoring the original inode,
+no premature finished, existing explicit same-save resume, one model request,
+original failed outcome/Fault retained, persisted final state, and exactly one
+history ERROR and one final INFO. It checks no path, Role, body, response, key or
+raw provider error enters logs. Final focused actual cases passed (terminal test
+plus existing calls test), full core all-target tests passed 302 unique cases
+(counted by --list), core+transport all-target strict Clippy and core strict
+rustdoc passed, as did formatting/diff checks. Logs are
+`task053-terminal-red.log` (fixture compile), `task053-terminal-red-fixed-fixture.log`
+(actual red), `task053-terminal-green.log`, `task053-terminal-core-all-final.log`,
+`task053-terminal-clippy-fixed.log`, `task053-terminal-doc.log`, and
+`task053-terminal-core-list.log` under `/workspace/shared/`. The original lint
+failure is recorded above. This remains a scoped reconstruction, not a current
+workspace-wide or independent approval claim.
+
+Second-replacement recovery note: the preceding terminal subsection is the exact
+historical ledger append for source 5102c7e171e264869046b1b0bbcc682a831825ce.
+The production edits, test and helper edits are replayed from visible literal
+commands, then formatted with the restored official Rust 1.90 toolchain. The old
+full raw logs and Git object are unavailable. No byte-identical final tree claim
+or fresh test pass is implied. Cache restoration and new validation are pending.
