@@ -281,7 +281,10 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
             .wait_turn(registration.origin.turn_id.clone(), options())
             .await
             .unwrap();
-        assert_eq!(parent_done.data.info.unwrap().outcome, Some(TurnOutcome::Cancelled));
+        assert_eq!(
+            parent_done.data.info.unwrap().outcome,
+            Some(TurnOutcome::Cancelled)
+        );
         parent_client
             .pause(
                 SessionControlRequest {

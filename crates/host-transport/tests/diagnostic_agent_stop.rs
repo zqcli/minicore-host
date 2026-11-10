@@ -50,7 +50,10 @@ async fn agent_stop_records_only_its_first_actual_child_claim_with_original_oper
         AgentStopLifecycle::Stopping | AgentStopLifecycle::Stopped
     ));
     let done = session.wait_turn(turn.clone(), options()).await.unwrap();
-    assert_eq!(done.data.info.unwrap().outcome, Some(TurnOutcome::Cancelled));
+    assert_eq!(
+        done.data.info.unwrap().outcome,
+        Some(TurnOutcome::Cancelled)
+    );
     let repeat = OperationId::new().unwrap();
     client
         .stop_agent(

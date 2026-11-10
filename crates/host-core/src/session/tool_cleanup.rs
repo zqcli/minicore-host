@@ -79,9 +79,14 @@ impl SessionController {
         let Some(active) = state.active.as_mut().filter(|a| &a.info.id == turn_id) else {
             return false;
         };
+        let complete = unconfirmed.is_none();
+        let source = self.turn_identity(&active.info);
+        let mut records = issues
+            .iter()
+            .map(|fault| diagnostics::cleanup_failed(&source, &active.info, fault, complete))
+            .collect::<Vec<_>>();
         active.info.cleanup_faults.extend(issues);
         active.tool_cleanup.fault = unconfirmed;
-        let complete = active.tool_cleanup.fault.is_none();
         active.tool_cleanup.complete = complete;
         let released = if complete {
             for lease in active.tool_cleanup.output_leases.drain(..) {
@@ -100,9 +105,14 @@ impl SessionController {
             state.block_reason = state.active.as_ref().unwrap().tool_cleanup.fault.clone();
         }
         self.publish(&mut state);
+        records = records
+            .into_iter()
+            .map(|record| record.published(state.controller_revision, state.runner_revision))
+            .collect();
         drop(state);
         drop(released);
         diagnostic::emit(diagnostics);
+        diagnostic::emit(records);
         complete
     }
 }

@@ -1,5 +1,7 @@
 //! Scalar extraction for real Session and Turn fact boundaries.
+mod cleanup;
 mod handoff;
+pub(super) use cleanup::cleanup_failed;
 mod runtime;
 pub(super) use handoff::{handoff_data, handoff_finished};
 mod scheduling;

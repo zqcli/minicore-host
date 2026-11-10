@@ -906,3 +906,33 @@ passed. Evidence is `agent-stop-{first-build,second-build,red,green,focused,core
 in the second recovery reports directory. No full-workspace/independent claim is
 made. The saved-result worker confirmed this Session setter does not overlap its
 read-only HistoryBackend trait patch. SPEC and pinned dependencies are unchanged.
+
+### Independent cleanup faults at the real finalizing boundary
+
+The existing once-only tool cleanup owner now extracts one ERROR Record for each
+actual returned independent Fault, after its handles have been awaited. Records
+carry the original Turn/Load identity, actual outcome/persistence, cleanup
+confirmation and published revisions. They are emitted only after Session unlock
+and the existing release drop. The original primary Fault, cleanup_faults,
+unconfirmed-work retention, result gates, returns and exactly-once cleanup claim
+are unchanged. A logger does not confirm cleanup or rerun the tool.
+
+A permanent actual Host/Runtime/OpenAI-compatible local HTTP regression combines
+real HTTP 401 primary failure with an explicitly named fixture cleanup owner.
+The fixture separately returns a confirmed independent issue or unconfirmed
+cleanup. Both retain primary 4204, original cleanup diagnostic_id and one actual
+cleanup invocation. The latter remains Finalizing without a finished event or
+false result. The confirmed case finishes with its original primary and separate
+cleanup facts. The unconfirmed case does not claim clean Host shutdown. This is
+not a process wait, disk errno or real device failure injection. Existing actual
+process cleanup tests also passed unchanged.
+
+The corrected fixture first failed red on one ERROR instead of the required two
+independent causes. An earlier fixture misuse attempted to abort an already
+completed scripted HTTP server; its failure is retained separately and corrected
+to join the real completed upstream, with no production change for that failure.
+Fresh results: seven affected diagnostic cases and all 317 core all-target cases
+passed, plus strict core/transport all-target Clippy, core strict rustdoc, fmt and
+diff checks. Evidence is `cleanup-{fixture-failure,red,green,focused,core,clippy,doc}.log`
+in the second recovery reports directory. Full workspace/independent validation
+is not claimed. SPEC and pinned dependencies are unchanged.
