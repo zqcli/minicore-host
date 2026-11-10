@@ -1,6 +1,23 @@
 # Fixed recovery checkpoint
 
-## Current verified backup and open work
+## Current review target
+
+Review published `dev` [53167d3117323d2b126c453fbb53fa980bdb72ee](https://github.com/zqcli/minicore-host/commit/53167d3117323d2b126c453fbb53fa980bdb72ee), compared with preserved `ccadc3013d084a47a3a9cfcd48fcfffdeca34253`. It exactly matches source `50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8` and tree `b616d753d0d35622ccefa10dc7752b7b2df21c46`. The [99-entry mapping](recovery-publication.json) preserves all 382 commits, original raw messages and actual zqcli author/committer facts. Main is unchanged. This is a backend checkpoint, not authorization to merge or a complete first-version claim.
+
+A fresh whole-workspace gate passes **937 unique Rust tests, 4 doctests and 20 Python checks**, strict all-target Clippy/rustdoc, fmt and committed whitespace. [The manifest](checkpoint-50a1b2f-validation.json) contains exact commands and committed raw gate/inventory logs. Exact-head [CI42749273803](https://github.com/zqcli/minicore-host/actions/runs/42749273803) passed; previous ccadc CI42748451681 also passed. The older 39b CI's App Option-fixture compile failure is fixed by 0cc9e61, not erased from the history.
+
+Current corrections and review entry points:
+
+1. `session/observation/query/saved.rs` and result DTOs: actual saved result projection without old execution restoration or fabricated metadata. [Task091](../tasks/091-saved-result-review/TASK.md) approves 7b6f140 after a real restart P1 and bidirectional wire P2 were fixed.
+2. `session/compaction.rs`, Session's private automatic binding/Fault handoff, and `session/history.rs`: preserve the original 3702 through Runtime Prompt, retain separate 3301 persistence failure, maintain cancellation/cleanup barriers. [Task092](../tasks/092-compaction-review/TASK.md) approves source a07fd1d; this gate tests the composed normal published Runtime pin and query API.
+3. [Task089](../tasks/089-session-model-diagnostics-review/TASK.md): actual scheduling/cancel/Closed and report-derived attempt/usage/retry-wait diagnostics. The Runtime source 2f7aeb9 is public as 3aa47629929906832dcb309afb7d242c1ae3e53f; [its publication evidence](runtime-retry-wait-publication.json) and CI42746444546 confirm success. No new retry event field, inferred timing, local dependency override or policy change.
+4. [Task090](../tasks/090-fresh-performance/TASK.md) and [the report](performance-f36761a.md): three measured real-process runs plus a separate smoke run, exact commands and committed raw JSONL. Production source is f36761a, not the later diagnostic composition. No live model, TUI, saturation or capacity claim.
+
+Remaining 053 force/preparation/internal-message/failure-scheduling diagnostics and their independent review are not in this fixed source. Full-product external review, real authorized external-provider and actual TUI acceptance remain unperformed; TUI is explicitly deferred this round. [PROJECT.md](../PROJECT.md) provides the six-stage boundaries and explicit local-use limits. New scoped approvals and a passing full gate do not substitute for those open items.
+
+Earlier sections below are immutable-in-meaning checkpoint observations. Their then-open saved-result/compaction/timing findings are superseded by the fixed corrections above; their historic counts and dependency pins remain attached to the old sources.
+
+## Previous checkpoint cc2bf0f (historical status)
 
 Review fixed `dev` commit [cc2bf0fbd40f04920d611332ef0ff55adc724aec](https://github.com/zqcli/minicore-host/commit/cc2bf0fbd40f04920d611332ef0ff55adc724aec), compared with `2615fe00ff385a74c6ef6a302c169ccc2b6b4410`.
 It exactly preserves source `d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06` and tree

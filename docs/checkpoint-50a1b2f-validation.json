@@ -1,0 +1,123 @@
+{
+  "schema_version": 1,
+  "purpose": "Fixed composed backend gate, not final release acceptance",
+  "source_commit": "50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8",
+  "published_commit": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+  "tree": "b616d753d0d35622ccefa10dc7752b7b2df21c46",
+  "compare_published_base": "ccadc3013d084a47a3a9cfcd48fcfffdeca34253",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "target": "x86_64-unknown-linux-gnu",
+  "runtime_git": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+  "runtime_version": "0.10.0",
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "lock_sha256": "b8aa55600f443e7ff923096f37da833049d106078d5df44aa16362d70e11873b",
+  "commands": [
+    {
+      "command": "CARGO_NET_OFFLINE=true ./scripts/check.sh",
+      "exit_code": 0,
+      "unique_rust_cases": 937,
+      "doctests": 4,
+      "python_tests": 20,
+      "includes": [
+        "committed/worktree whitespace",
+        "rustfmt",
+        "workspace all-target Clippy -D warnings",
+        "workspace all-target tests",
+        "workspace doctests",
+        "workspace rustdoc -D warnings"
+      ]
+    },
+    {
+      "command": "cargo test --workspace --all-targets --locked -- --list",
+      "exit_code": 0,
+      "unique_cases": 937,
+      "nonempty_test_programs": 124,
+      "count_method": "Count each target/test name from inventory, not repeated storage child-process output"
+    }
+  ],
+  "environment": {
+    "cargo_build_jobs": 2,
+    "cargo_incremental": false,
+    "profile_dev_debug": 0,
+    "profile_test_debug": 0,
+    "cargo_net_offline": true,
+    "target_reuse": "One exclusive target for this integration worktree; no cross-worktree shared targets"
+  },
+  "logs": [
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/full-50a1b2f.log.gz",
+      "bytes": 26417,
+      "sha256": "ed1f79b94ea75683647b034227c21b3ce94d65bdb443bfec1f16415c0766081a",
+      "uncompressed_bytes": 115690,
+      "uncompressed_sha256": "e09269d6cd3db15f1b93a80df03e851d6b9a23ce327fd1fa05943d165f48f739",
+      "encoding": "gzip preserving exact original log bytes"
+    },
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/full-50a1b2f-inventory.log.gz",
+      "bytes": 24375,
+      "sha256": "b1db10675f7825f39e05e7c1faa01aceb6edc2271f3c70d1897beb9f3f23ee87",
+      "uncompressed_bytes": 92415,
+      "uncompressed_sha256": "ba5489aa5f8a53a6ca2d1472d02f3c934cf3a526925ad281c38cf246ab85a568",
+      "encoding": "gzip preserving exact original log bytes"
+    },
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/compaction-composition.log.gz",
+      "bytes": 1562,
+      "sha256": "73047d82b865aea01ffa4021ac19bea10ca80cdcc28b1fd05488d1b86aa2f3b6",
+      "uncompressed_bytes": 4961,
+      "uncompressed_sha256": "4e9da769ec6129e7f4eb2da0dc55b789ee3765e8a334624a80381aa9e2743a74",
+      "encoding": "gzip preserving exact original log bytes"
+    },
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/compaction-composition-fixed.log.gz",
+      "bytes": 939,
+      "sha256": "a66179ad544be4349d58a6c9bacb740c72fc33fba8e55891da64b29cdf292d9c",
+      "uncompressed_bytes": 3107,
+      "uncompressed_sha256": "dbc9c53b66b86a3d33ac880ac1c784dff1f64b6d85c7f77de05c6ac21092edbe",
+      "encoding": "gzip preserving exact original log bytes"
+    },
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/app-result-composition.log.gz",
+      "bytes": 1023,
+      "sha256": "059d26e68b91038ee0214f9ccfff0b5b14e94e19d5985baf87f2a8702409a0d8",
+      "uncompressed_bytes": 3671,
+      "uncompressed_sha256": "a8ab48bbdfa440a56f069f6d5ed32fd7f68ab3f5db124244dba5fc9025cea730",
+      "encoding": "gzip preserving exact original log bytes"
+    },
+    {
+      "path": "tasks/096-convergence-checkpoint/evidence/performance-integration-checks.log.gz",
+      "bytes": 697,
+      "sha256": "fc66da2ba4fc571ba163796c1b2356e14e44fe577c79c97bf1f504c1694b90e7",
+      "uncompressed_bytes": 2902,
+      "uncompressed_sha256": "6c049967a5f615a63ad82ba7dc1574da72305237c8a00d7ab9350d9249f1f7c8",
+      "encoding": "gzip preserving exact original log bytes"
+    }
+  ],
+  "hosted_ci": {
+    "run_id": 42749273803,
+    "head_sha": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+    "status_at_last_check": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/42749273803"
+  },
+  "preceding_hosted_ci": {
+    "run_id": 42748451681,
+    "head_sha": "ccadc3013d084a47a3a9cfcd48fcfffdeca34253",
+    "conclusion": "success"
+  },
+  "exclusions": [
+    "Later Task053 force/preparation/internal-message/scheduling diagnostics are not in this fixed source",
+    "Task090 performance describes f36761a production, not this newer source",
+    "No live external-model or TUI acceptance",
+    "No external final-product review or main merge"
+  ],
+  "recorded_at": "2026-11-10T03:29:56.772227+00:00",
+  "following_evidence_checks": {
+    "production_diff_from_fixed_source": "none",
+    "new_performance_parser_tests": 8,
+    "raw_verifier": "passed",
+    "current_unchanged_checksums": 28,
+    "historical_lock_verified_from_git": "f36761a164c6f3ae092c5e0bbf7ab08bbcd58891:Cargo.lock",
+    "historical_lock_sha256": "1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125"
+  }
+}
