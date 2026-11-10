@@ -165,45 +165,59 @@ async fn slow_response_and_abandoned_waiter_do_not_block_other_calls_or_revoke_c
     assert!(peer.handle.initial_info().can_operate);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn initialization_budget_covers_tls_websocket_and_authenticated_response_once() {
     let (host, _) = fixture();
     host.configure_network_access(Some(FIRST.into())).unwrap();
     let (server_tls, client_tls) = wss_common::certificates();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("wss://localhost:{}/", listener.local_addr().unwrap().port());
-    let connecting =
-        tokio::spawn(async move { HostClient::wss(&url, client_tls, FIRST, options(200)).await });
-    let (tcp, _) = listener.accept().await.unwrap();
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    let tls = TlsAcceptor::from(server_tls).accept(tcp).await.unwrap();
-    let mut socket = accept_async_with_config(tls, None).await.unwrap();
-    let Message::Text(auth) = socket.next().await.unwrap().unwrap() else {
-        panic!("no initialization");
+    let started = tokio::time::Instant::now();
+    let connecting = HostClient::wss(&url, client_tls, FIRST, options(200));
+    tokio::pin!(connecting);
+    assert!(futures_util::poll!(connecting.as_mut()).is_pending());
+    let peer = async {
+        let (tcp, _) = listener.accept().await.unwrap();
+        tokio::time::advance(Duration::from_millis(60)).await;
+        let tls = TlsAcceptor::from(server_tls).accept(tcp).await.unwrap();
+        tokio::time::advance(Duration::from_millis(60)).await;
+        let mut socket = accept_async_with_config(tls, None).await.unwrap();
+        let Message::Text(auth) = socket.next().await.unwrap().unwrap() else {
+            panic!("no initialization");
+        };
+        let auth: Value = serde_json::from_str(&auth).unwrap();
+        assert_eq!(auth["method"], "initialize");
+        let handle = host
+            .connect_network(auth["params"]["access_key"].as_str().unwrap())
+            .unwrap();
+        (socket, handle)
     };
-    let auth: Value = serde_json::from_str(&auth).unwrap();
-    let handle = host
-        .connect_network(auth["params"]["access_key"].as_str().unwrap())
-        .unwrap();
-    tokio::time::sleep(Duration::from_millis(120)).await;
-    let timed_out_before_reply = connecting.is_finished();
-    let _ = socket
-        .send(Message::Text(
-            json!({"jsonrpc":"2.0","id":auth["id"],"result":handle.initial_info()})
-                .to_string()
-                .into(),
-        ))
-        .await;
+    tokio::pin!(peer);
+    // Keep both real I/O futures progressing without Tokio auto-advancing the
+    // paused clock while the OS is still delivering TLS/WebSocket bytes.
+    let (_socket, _handle) = loop {
+        tokio::select! {
+            result = &mut connecting => panic!("initialization ended before authentication: {:?}", result.err()),
+            authenticated = &mut peer => break authenticated,
+            () = tokio::task::yield_now() => {}
+        }
+    };
+    assert_eq!(started.elapsed(), Duration::from_millis(120));
+    tokio::time::advance(Duration::from_millis(79)).await;
+    assert!(futures_util::poll!(connecting.as_mut()).is_pending());
+    tokio::time::advance(Duration::from_millis(1)).await;
+    // Leave the authenticated socket open without a reply. The outer guard
+    // fails a restarted budget instead of waiting for that later deadline.
+    let result = tokio::time::timeout_at(started + Duration::from_millis(201), connecting)
+        .await
+        .expect("initialization must finish at the original deadline");
     assert_eq!(
-        connecting.await.unwrap().err().unwrap(),
+        result.err().unwrap(),
         CallError::WaitTimeout {
             wait_timeout_ms: 200
         }
     );
-    assert!(
-        timed_out_before_reply,
-        "the initial TLS delay must count toward the same deadline"
-    );
+    assert_eq!(started.elapsed(), Duration::from_millis(200));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
