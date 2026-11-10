@@ -95,3 +95,16 @@ Four new wire tests enumerate metadata branches, LoadId association, round trips
 and invalid public-struct serialization. Composed query tests and actual
 control/Closed plus typed/pipe/WSS saved-result tests passed before commit;
 fixed-commit strict checks and independent green replay follow separately.
+
+### Composed application fixture correction
+
+Hosted CI42747321349 at remote39b115e stopped during all-workspace Clippy:
+`crates/host-app/tests/process.rs:281` still read `data.info.outcome` directly.
+The affected core/transport gate did not compile that application test target.
+This is an integration omission after optional saved-only metadata, not evidence
+that the real owner returned a missing current-run result. The process test now
+requires Some with an explicit current-run expectation before checking the same
+outcome; no production code, assertion outcome, lint or timeout is weakened.
+The raw CI job129602412890 log is retained with the coordinator validation logs.
+Whole-workspace all-target Clippy and actual application process regression are
+rerun below; a green narrow package result is not used as a whole-workspace claim.

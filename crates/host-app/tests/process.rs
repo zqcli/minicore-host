@@ -278,6 +278,7 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
             .unwrap()
             .data
             .info
+            .expect("the current-run result retains its execution metadata")
             .outcome,
         Some(TurnOutcome::Completed)
     );
