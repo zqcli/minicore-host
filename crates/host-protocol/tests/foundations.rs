@@ -157,6 +157,22 @@ fn candidate_validation_preserves_original_and_independent_snapshot() {
     };
     assert!(session.apply_patch(&patch).is_err());
     assert!(session.tools.is_empty());
+
+    // Constructed values still cross the same validation boundary on encoding.
+    let mut invalid = session.clone();
+    invalid.tools = patch.tools.unwrap();
+    assert_eq!(invalid.validate().unwrap_err().0, "duplicate tool binding");
+    assert!(serde_json::to_vec(&invalid).is_err());
+    invalid.execution.model_timeout_ms = 0;
+    assert_eq!(
+        invalid.validate().unwrap_err().0,
+        "execution timeouts must be positive milliseconds"
+    );
+    invalid.role.name.clear();
+    assert_eq!(
+        invalid.validate().unwrap_err().0,
+        "role name must be nonblank and contain no NUL"
+    );
 }
 
 #[test]

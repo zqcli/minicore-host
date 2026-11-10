@@ -50,13 +50,18 @@ macro_rules! validated_dto {
         $(#[$meta])*
         #[derive(Clone, Debug, Eq, PartialEq)]
         pub struct $name { $(pub $field: $ty),* }
-        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(serde::Deserialize)]
         #[serde(deny_unknown_fields)]
         struct $wire { $($(#[$attr])* $field: $ty),* }
         impl serde::Serialize for $name {
             fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok,S::Error> {
                 self.validate().map_err(serde::ser::Error::custom)?;
-                $wire { $($field: self.$field.clone()),* }.serialize(serializer)
+                // Keep the wire name and field attributes while borrowing the
+                // already validated values instead of cloning their payloads.
+                #[derive(serde::Serialize)]
+                #[serde(deny_unknown_fields)]
+                struct $wire<'a> { $($(#[$attr])* $field: &'a $ty),* }
+                $wire { $($field: &self.$field),* }.serialize(serializer)
             }
         }
         impl<'de> serde::Deserialize<'de> for $name {

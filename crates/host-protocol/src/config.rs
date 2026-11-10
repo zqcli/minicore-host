@@ -206,19 +206,26 @@ impl Default for SessionDefaults {
 }
 impl SessionDefaults {
     pub fn validate(&self) -> Result<(), ValidationError> {
-        self.execution.validate()?;
-        let mut names = BTreeSet::new();
-        for tool in &self.tools {
-            tool.validate()?;
-            if !names.insert(&tool.name) {
-                return Err(invalid("duplicate tool binding"));
-            }
-        }
-        if let Some(workspace) = &self.workspace {
-            workspace.validate()?;
-        }
-        Ok(())
+        validate_session_fields(&self.execution, &self.tools, self.workspace.as_ref())
     }
+}
+fn validate_session_fields(
+    execution: &ExecutionSettings,
+    tools: &[ToolBinding],
+    workspace: Option<&WorkspaceRef>,
+) -> Result<(), ValidationError> {
+    execution.validate()?;
+    let mut names = BTreeSet::new();
+    for tool in tools {
+        tool.validate()?;
+        if !names.insert(&tool.name) {
+            return Err(invalid("duplicate tool binding"));
+        }
+    }
+    if let Some(workspace) = workspace {
+        workspace.validate()?;
+    }
+    Ok(())
 }
 
 validated_dto!(#[derive(Default)] AgentConfig, AgentConfigWire, "AgentConfigWire" {
@@ -263,14 +270,7 @@ impl Default for SessionConfig {
 impl SessionConfig {
     pub fn validate(&self) -> Result<(), ValidationError> {
         self.role.validate()?;
-        SessionDefaults {
-            model: self.model.clone(),
-            reasoning: self.reasoning,
-            tools: self.tools.clone(),
-            workspace: self.workspace.clone(),
-            execution: self.execution.clone(),
-        }
-        .validate()
+        validate_session_fields(&self.execution, &self.tools, self.workspace.as_ref())
     }
     pub fn from_agent(
         agent: &AgentConfig,

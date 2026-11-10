@@ -132,15 +132,21 @@ validated_dto!(OutputDelta, OutputDeltaWire, "OutputDelta" {
 });
 impl OutputDelta {
     pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.channel.is_empty()
-            || self.end.checked_sub(self.start) != Some(self.text.len() as u64)
-        {
-            return Err(invalid(
-                "output range must match its UTF-8 byte length and name a channel",
-            ));
-        }
-        Ok(())
+        validate_output_range(&self.channel, self.start, self.end, &self.text)
     }
+}
+fn validate_output_range(
+    channel: &str,
+    start: u64,
+    end: u64,
+    text: &str,
+) -> Result<(), ValidationError> {
+    if channel.is_empty() || end.checked_sub(start) != Some(text.len() as u64) {
+        return Err(invalid(
+            "output range must match its UTF-8 byte length and name a channel",
+        ));
+    }
+    Ok(())
 }
 validated_dto!(
 /// `end` is the fixed catch-up boundary; growth after it is not part of this read.
@@ -163,13 +169,7 @@ validated_dto!(TextRangeData, TextRangeDataWire, "TextRangeData" {
 });
 impl TextRangeData {
     pub fn validate(&self) -> Result<(), ValidationError> {
-        OutputDelta {
-            channel: self.channel.clone(),
-            start: self.start,
-            end: self.end,
-            text: self.text.clone(),
-        }
-        .validate()?;
+        validate_output_range(&self.channel, self.start, self.end, &self.text)?;
         if self.has_more && self.start == self.end {
             return Err(invalid("non-tail reads must advance"));
         }

@@ -31,6 +31,16 @@ fn metadata_changes_reject_empty_unknown_and_illegal_null_values() {
     assert_eq!(clear.title, NullablePatch::Clear);
     assert_eq!(clear.config.tools, Some(vec![]));
     assert_eq!(clear.config.workspace, NullablePatch::Clear);
+    assert_eq!(
+        serde_json::to_string(&clear).unwrap(),
+        r#"{"title":null,"config":{"tools":[],"workspace":null}}"#
+    );
+    let mut omitted = clear;
+    omitted.title = NullablePatch::Unchanged;
+    assert_eq!(
+        serde_json::to_string(&omitted).unwrap(),
+        r#"{"config":{"tools":[],"workspace":null}}"#
+    );
     assert!(serde_json::to_value(AgentUpdateChanges::default()).is_err());
 }
 #[test]

@@ -30,6 +30,31 @@ fn range_contract_validates_utf8_bytes_and_nonempty_progress() {
     };
     let value = serde_json::to_value(&delta).unwrap();
     assert_eq!(serde_json::from_value::<OutputDelta>(value).unwrap(), delta);
+    assert_eq!(
+        serde_json::to_string(&delta).unwrap(),
+        r#"{"channel":"text","start":4,"end":7,"text":"中"}"#
+    );
+    let mut range = TextRangeData {
+        channel: "text".into(),
+        start: 4,
+        end: 7,
+        text: "中".into(),
+        has_more: true,
+    };
+    assert_eq!(
+        serde_json::to_string(&range).unwrap(),
+        r#"{"channel":"text","start":4,"end":7,"text":"中","has_more":true}"#
+    );
+    range.end = 5;
+    assert!(serde_json::to_vec(&range).is_err());
+    range.text.clear();
+    range.end = range.start;
+    assert!(serde_json::to_vec(&range).is_err());
+    range.has_more = false;
+    assert_eq!(
+        serde_json::to_value(&range).unwrap(),
+        json!({"channel":"text","start":4,"end":4,"text":"","has_more":false})
+    );
     assert!(
         serde_json::from_value::<OutputDelta>(
             json!({"channel":"text","start":0,"end":1,"text":"中"})
