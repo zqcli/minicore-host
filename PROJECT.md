@@ -1,48 +1,29 @@
 # MiniCore Host
 
-## Review fixes on dev
+## Current checkpoint: owner-path simplification
 
-The first two independent-review batches, **R1-R4**, are implemented at code
-checkpoint [564a4865cbd979d6dab61498c52453e322ef2aad](https://github.com/zqcli/minicore-host/commit/564a4865cbd979d6dab61498c52453e322ef2aad),
-equivalent to verified source `094d261d42449fc0612a5755763f22c086332967`, tree
-`b932ddd3c3579eff1c8080544b6d24c7a4f44cae`. The review/fix base is
-`628c17312149d76ab1d3ecc84bdb1723e6d6309a`.
+[Task101](tasks/101-owner-path-simplification/TASK.md) implements the approved
+simplification review on top of `dev`
+[`6ea03b85a318374f3dcb94c38dbe11ac1878f110`](https://github.com/zqcli/minicore-host/commit/6ea03b85a318374f3dcb94c38dbe11ac1878f110).
+Code checkpoint [`0a40a563`](https://github.com/zqcli/minicore-host/commit/0a40a5639069e39e3f304aac6fbff079adabd1d2)
+passes the complete gate: **955 unique Rust cases, 4 doctests and 28 Python checks**,
+strict Clippy/rustdoc, rustfmt and whitespace. The fixed baseline contains 953
+cases. Rust source/test lines net **-1,265** (938 non-test-source, 327 explicit
+test/support); [the manifest](tasks/101-owner-path-simplification/validation.json)
+records the exact accounting and local validation boundaries.
 
-- Session publication inherits the accepted Agent shutdown phase before creation
-  work settles, preserving actual cleanup and root-lock release barriers.
-- A repeated upstream ToolCallId within one public Turn is rejected before
-  Runtime assembly, tool execution or accepted history. Prior tool facts remain
-  intact, and failed persistent Turns and force shutdown can finish.
-- Full `agent inspect` Turn output uses the existing held/saved result path,
-  including after restart, without fabricated execution metadata.
-- Public live/held/saved/cold input history preserves actual message identity,
-  source, mode and reply association through the existing provenance records.
+The change unifies creation and owner metadata commits, reuses delegation facts
+and protocol/SDK templates, derives history-saving state from the actual save
+work, and shares duplicated integration fixtures. All 52 canonical methods and
+typed/stdio/WSS access stay in scope. Synchronous Rust creation conveniences and
+implementation-stage catalog APIs are intentionally removed; migration details
+are recorded in Task101 and the core/protocol crate guides.
 
-The integrated full gate passes **953 unique Rust tests, 4 doctests and 28 Python
-checks**, with strict Clippy/rustdoc, rustfmt and whitespace. The unique inventory
-adds 14 cases over the review baseline. All four fixes passed independent source
-review. Integration also corrected two existing test assumptions; the report
-records both failures, the controlled diagnosis and the final passing result.
-Production Rust changes are +239/-34 text lines; SPEC v4.93, Runtime 0.10.0 at
-`3aa47629929906832dcb309afb7d242c1ae3e53f`, manifests and Cargo.lock are unchanged.
-
-[Task100](tasks/100-review-r1-r4/TASK.md) and its
-[validation manifest](tasks/100-review-r1-r4/validation.json) give exact code
-objects, scope, review records and reproduction commands. Original test logs are
-retained locally and excluded from this publication after an automatic approval
-review rejected a raw-log upload. Actual TUI/external
-provider acceptance and measured long-history performance remain later review
-batches. The following entries preserve the earlier backend checkpoints.
-
-## Previous fixed backend review entry
-
-Review the backend code at **[`be0e99552d283289fb1c0cc13915874ce0ba757f`](https://github.com/zqcli/minicore-host/commit/be0e99552d283289fb1c0cc13915874ce0ba757f)** on `dev`, exact source `c22d8c8af058b756d5f37bc6d1a01f1dc7749934`, tree `a805cb4f6bf0d817fdf5d06226f8638e14ba95e6`. For whole-backend review compare with unchanged README-only `main` `b341b163e14543bfbe7f8d392ea243b4a123cdf7`; for the final diagnostic increment compare with `53167d3117323d2b126c453fbb53fa980bdb72ee`.
-
-That exact code's [hosted CI42751728862](https://github.com/zqcli/minicore-host/actions/runs/42751728862) passed. The subsequent verified documentation backup is [`b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba`](https://github.com/zqcli/minicore-host/commit/b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba), whose [CI42752176828](https://github.com/zqcli/minicore-host/actions/runs/42752176828) also passed. The [114-entry source map](docs/recovery-publication.json) records these real remote objects, 397 preserved commits, trees/raw messages and actual zqcli authors. It is a fixed publication record, not an assertion that later documentation commits are already mapped inside themselves. No coauthor, force update or main merge was used.
-
-The final local documentation/check-script composition `188c0197f9a4fa4d6cc2159a44d186f5505d09ce` passes **939 unique Rust cases, 4 doctests and 28 Python checks**, strict all-target Clippy/rustdoc, fmt and committed whitespace. Its Rust sources/tests, manifests, lock and SPEC match the published code above. Eight existing performance-parser checks were added to the ordinary gate; the preceding c22 gate passed 939/4/20 independently in the producer and coordinator worktrees. [The validation manifest](docs/backend-review-validation.json) includes exact sources, commands and compressed raw logs. Tests are not a completion percentage.
-
-The backend implementation and local integration are ready for the requested **external independent code review**, not final v4.93 acceptance. Actual TUI and real external-provider trials remain unperformed. See [the fixed handoff](docs/recovery-checkpoint-review.md) and [Task099](tasks/099-backend-review-handoff/TASK.md). Main must remain unchanged until the required final review and acceptance decisions.
+The preceding [Task100 review fixes](tasks/100-review-r1-r4/TASK.md) remain part of
+the baseline: creation/shutdown phase handoff, public-Turn ToolCallId rejection,
+saved-result `agent inspect`, and actual input provenance. SPEC v4.93, dependency
+pins and the lockfile remain unchanged. Long-history representation and measured
+performance changes are separate work.
 
 ## Implemented scope and closed findings
 
@@ -54,11 +35,18 @@ The backend implementation and local integration are ready for the requested **e
 
 The original saved-result restart P1 and invalid-wire P2 are closed by [Task091](tasks/091-saved-result-review/TASK.md). The automatic-compaction 3702→4999 replacement is closed by [Task092](tasks/092-compaction-review/TASK.md), with original utility and independent persistence Faults retained. [Task093](tasks/093-session-handoff-cleanup-review/TASK.md) gives separate scoped approvals for all final diagnostic slices. [Task094](tasks/094-convergence-audit/TASK.md) reconciles the historical 52-method audit without claiming method count proves all behavior. [Task095](tasks/095-saved-history-diagnostics/TASK.md) confirms saved-read errors were already correctly logged; no redundant production hook was added. No demonstrated production finding remains open in these scoped reviews.
 
-## Performance and running the Host
+## Running and performance evidence
 
-[The final composed-code measurement](docs/performance-c22d8c8.md) uses the real release Host, real Runtime, production provider against local HTTP/SSE, and real bash/FIFO cleanup: one separate smoke and three formal fresh-Host repetitions. Exact raw JSONL is preserved losslessly as gzip with both hashes and a read-only recomputation script. It distinguishes message/control acceptance, body observation and actual process/Turn completion. The 24.244 ms cleanup witness is retained, not filtered or explained as a proven regression. No capacity or latency guarantee is claimed. [The older f36761a report](docs/performance-f36761a.md) remains historical, not a paired A/B control.
+Use the [executable guide](crates/host-app/README.md) and
+[tool approval guide](docs/tool-approval.md). The process uses protocol-only
+stdout; builtins are agent/read/edit/write/bash. `apply_patch` is not implemented
+or required by name in SPEC. The README configuration smoke and its limits remain
+recorded in [Task097](tasks/097-usage-docs/TASK.md).
 
-Use [the executable guide](crates/host-app/README.md) and [approval guide](docs/tool-approval.md). The exact README HostConfig template also passed a real CLI initialize/info/graceful-exit smoke in [Task097](tasks/097-usage-docs/TASK.md). Stdout remains protocol-only. Default tool policy is Ask; test/measurement fixtures explicitly select Auto where stated. Configured credential exclusion is not same-user OS isolation. Builtins are agent/read/edit/write/bash; `apply_patch` is absent and not required by name in final SPEC.
+The existing [c22d8c8 measurements](docs/performance-c22d8c8.md) and
+[older f36761a report](docs/performance-f36761a.md) describe their fixed historical
+sources. Their raw evidence and recomputation scripts remain available. They are
+not measurements of this simplification or evidence of a performance increase.
 
 ## Dependencies and six-stage boundary
 
@@ -77,103 +65,28 @@ Use [the executable guide](crates/host-app/README.md) and [approval guide](docs/
 
 Local-use limits remain explicit: uncontrolled destruction is not normal stopped shutdown; unpublished-create save failure has no new recovery endpoint; workspace Git checks assume stable local configuration/attributes; Linux is the tested platform. No speculative defensive platform was added.
 
-After two workspace replacements, unavailable unpublished objects and lost old raw evidence were not represented as recovered. [Task083](tasks/083-second-workspace-recovery/TASK.md) preserves that boundary. Earlier fixed checkpoints below and in the handoff retain their original counts, pins and then-current open findings. Normal dev backups continue every five completed commits; a stage's final smaller documentation follow-up may also be published. External review, other branches/repositories and force updates are separate authorization scopes.
+## Historical review index
 
-## Historical executable checkpoints before workspace replacement
+Detailed findings, failed attempts, exact source mappings and test evidence stay
+in their original task/handoff records. Earlier status statements describe those
+checkpoints, not the current open-work list.
 
-Latest local code is `7cf8e104bf84ee599331a3d96e181bba53fdf54c`: actual input MessageId/source/reply provenance now reaches normal and compaction requests without changing native history or durable bytes. Independent review passed 790 committed cases plus three extra real HTTP probes; the combined whole-workspace gate passes **822 unique tests and 4 doctests**. [The provenance manifest](docs/executable-provenance-verification.json), [task 055](tasks/055-input-provenance/TASK.md) and the 71-entry source map preserve exact evidence. Current query contract/revision corrections, auxiliary summaries/pagination, complete business diagnostics and performance work remain open. Publication is separately frozen at the preceding 9598f8f checkpoint; no new remote result is claimed here.
+| Checkpoint or topic | Preserved record |
+| --- | --- |
+| R1-R4 fixes; code `564a4865`, documentation `6ea03b85`; 953 Rust cases | [Task100](tasks/100-review-r1-r4/TASK.md), [validation manifest](tasks/100-review-r1-r4/validation.json) |
+| Backend review `be0e9955`; 939 Rust cases; publication/source mapping | [Task099](tasks/099-backend-review-handoff/TASK.md), [fixed handoff](docs/recovery-checkpoint-review.md), [publication map](docs/recovery-publication.json), [validation](docs/backend-review-validation.json) |
+| Final diagnostic integration and contract audit | [Task053](tasks/053-business-diagnostics/TASK.md), [Task091](tasks/091-saved-result-review/TASK.md), [Task092](tasks/092-compaction-review/TASK.md), [Task093](tasks/093-session-handoff-cleanup-review/TASK.md), [Task094](tasks/094-convergence-audit/TASK.md), [Task095](tasks/095-saved-history-diagnostics/TASK.md), [Task096](tasks/096-convergence-checkpoint/TASK.md) |
+| Executable, query, saved-history and input-provenance checkpoints | [Executable handoff](docs/executable-review-handoff.md), [current method audit](docs/current-contract-audit.md) |
+| Execution integration; original 650-case checkpoint and lease correction | [Task041](tasks/041-execution-integration/TASK.md), [execution handoff](docs/execution-review-handoff.md), [linear source map](docs/execution-linear-map.json) |
+| Owner/resource integration `c6d8a5e1`; 506 Rust cases | [Task029](tasks/029-owner-resource-integration/TASK.md), [integration handoff](docs/integration-review-handoff.md), [publication map](docs/owner-integration-publication.json) |
+| Tool cleanup, terminal claim and root-lease findings | [Task033](tasks/033-turn-tool-cleanup/TASK.md), [Task034](tasks/034-history-lock-reopen/TASK.md) |
+| Initial foundation `82583b31`; 340 Rust cases | [Task028](tasks/028-host-publication/TASK.md), [foundation handoff](docs/review-handoff.md), [publication map](docs/host-publication.json) |
+| Workspace replacement and unavailable old unpublished evidence | [Task083](tasks/083-second-workspace-recovery/TASK.md) |
+| Built-in tool scope | [Task056](tasks/056-built-in-tool-scope/TASK.md) |
 
-Previous local code is `4187899ef9b7301ed5af4cf36b84b5825fb83bed`: reviewed explicit Agent/Session deletion is now composed. The normal complete gate passes **811 unique tests and 4 doctests**, with strict lint/docs, unchanged SPEC and the sole published Runtime pin. All 52 catalog methods now have real shared routes; query-shape/revision corrections and first-version acceptance remain separate unfinished work. [The deletion manifest](docs/executable-deletion-verification.json), [task 051](tasks/051-owned-deletion/TASK.md) and [the fixed handoff](docs/executable-review-handoff.md) record exact scope. The source map preserves 63 granular topic commits. No new remote publication is claimed.
-
-Previous local code is `e3d634a2b0cd9e662d8efc26284c85af82edd8e5`: the reviewed cold history.read/load correction is now composed, and the normal complete gate passes **779 unique tests and 4 doctests**. Cold reads reuse the existing journal mutex, prefer actual retained owner content after I/O, and cannot implicitly start execution. Independent review replayed the original deterministic failure, passed 276 existing cases plus 8 extra probes, and found no new actionable issue. [The new manifest](docs/executable-cold-history-verification.json) preserves the exact combined evidence; the earlier 761-case manifest is unchanged. There are 52 mapped topic commits, still 50 routed methods. The query-contract, deletion, provenance and business-diagnostics work below remains open.
-
-Fixed local code `70c17e7226bd90c7bb1e146ed141081f567e9d23` on `stage/executable-next` passes the complete gate: **761 unique tests and 4 doctests**, strict Clippy/rustdoc, formatting and committed whitespace. It combines production read/write/edit/bash, actual Host process, six workspace queries, the remaining canonical controls and context, plus independently reviewed diagnostic/storage lease corrections. Real binary tool acceptance also passed independent review. There are **50 actual shared routes**, not 52 completed contracts. [The fixed executable handoff](docs/executable-review-handoff.md), [task 048](tasks/048-executable-integration/TASK.md), [48-topic-commit source map](docs/executable-source-map.json) and [verification manifest](docs/executable-verification.json) preserve scope and exact evidence.
-
-This code is **local, not yet published or release-ready**. The last verified remote `dev` remains `a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f`. Follow-up contract probes found missing bound Turn configuration and missing/overly raw query projections; they are tracked for correction rather than hidden by the green aggregate. Cold history.read/load coordination is integrated in the latest checkpoint above; the two deletion methods are now integrated after independently reproduced acceptance and inbox-disposition fixes. Business diagnostics/health and auxiliary owner summaries remain active work; input source/reply projection is included in the latest checkpoint. The original lease failures and their deterministic fixes are preserved in tasks 047 and 049; they no longer block this fixed composition.
-
-## Earlier execution integration checkpoint
-
-The fixed local code checkpoint is `76a7bfbe7f70d7f707d48cc38190829d14c137f2` on `stage/reviewed-next-dev`, based on `810e3817a78855871d13f8127a3f0e87db821d66` (published as [a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f](https://github.com/zqcli/minicore-host/commit/a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f)). The exact code gate passes **650 unique tests and 4 doctests**. This next checkpoint is not yet published and is not the complete first version. A subsequent aggregate run exposed a diagnostic file-lease release race after a reported flush; publication is held while task 047 reproduces and corrects it. The earlier passing gate is retained, not treated as proof that this new finding is resolved.
-
-It includes canonical reload, manual/automatic Session compaction with durable coverage and typed/stdio/WSS controls, the independently reviewed ordinary-tool module, and shared diagnostics with a real writer-held file lease. There are **37 actual shared routes**, not 52 completed contracts. [The fixed execution handoff](docs/execution-review-handoff.md), [task 041](tasks/041-execution-integration/TASK.md), and [40-commit linear integration map](docs/execution-linear-map.json) record exact source checkpoints, review scope, actual commands and exclusions. The earlier 23-commit checkpoint remains preserved.
-
-Production ordinary-tool binding, actual Session output/edit retention, canonical workspace routes, the Host executable, remaining controls and context are separate topics. They are not included merely because their modules or tests exist elsewhere. The latest published documentation-only checkpoint a84e36f passed [exact-head CI 42653342131](https://github.com/zqcli/minicore-host/actions/runs/42653342131); its [mapping](docs/owner-handoff-publication.json) and the previous code handoff below remain fixed historical evidence.
-
-The first v4.93 release is **not complete or release-ready**. The owner/observation/resource checkpoint is now published on `dev` at [c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e](https://github.com/zqcli/minicore-host/commit/c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e), compared with previous published head `7900d21a8cc767f508d45a1687ade4376bc6dded`. It exactly matches frozen source `705a3e8cfc14d56e51fc08e522df04ee0adca1f6`; reviewed code `a5c4bf4451123d994bdd7cceb13787e94bbbcb99` maps to remote `4186c3d02954dabb43563b0bb0850a70db9db36e`. The [64-commit publication mapping](docs/owner-integration-publication.json) preserves every source tree, raw message and order after the original 103 published commits. Local integration and independent exact-code gates pass **506 unique tests and 3 doctests**. Exact-head [hosted CI 42650587425](https://github.com/zqcli/minicore-host/actions/runs/42650587425) and its complete quality job passed. The [fixed review handoff](docs/integration-review-handoff.md), [task 029](tasks/029-owner-resource-integration/TASK.md), [task 033](tasks/033-turn-tool-cleanup/TASK.md), and [task 034](tasks/034-history-lock-reopen/TASK.md) give scope and reproducible evidence.
-
-The earlier foundation is available on `dev` at [82583b31ac9091164da5f6dcfee6bb23e05137e5](https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5), compared with unchanged remote main `b341b163e14543bfbe7f8d392ea243b4a123cdf7`. Its exact-head Host CI passed, with 340 tests and 3 doctests. [Task 028](tasks/028-host-publication/TASK.md), the [101-commit mapping](docs/host-publication.json), and the [foundation review handoff](docs/review-handoff.md) remain fixed historical evidence. The documentation-only update at [7900d21a8cc767f508d45a1687ade4376bc6dded](https://github.com/zqcli/minicore-host/commit/7900d21a8cc767f508d45a1687ade4376bc6dded) also passed [exact-head CI](https://github.com/zqcli/minicore-host/actions/runs/42632632687); it does not include this local integration. Its [two-commit mapping](docs/host-documentation-publication.json) preserves the initial foundation history.
-
-## Historical fixed dependencies (pre-replacement checkpoint)
-
-- SPEC v4.93 remains complete and unchanged, SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
-- All Runtime dependencies and the sole lockfile select actual published Git revision `69faf9196991524b5549499d6208a1eaf567bf56`, exactly `0.10.0`, on `feat/host-history-handoff`. There is no path patch, vendor copy or bootstrap source. It adds authoritative retry-progress observation to the earlier history/partial/quota work. [Publication mapping](docs/runtime-retry-publication.json) and [CI run 42624211012](https://github.com/zqcli/minicore-runtime/actions/runs/42624211012) verify the exact tree and all seven successful jobs. Earlier Runtime `59ee8ce` remains the foundation pin, not this current pin.
-- Runtime upstream dev reference is unchanged `3fd5ecda1fb7c717ab0a39218d90268b4d97909c`.
-- Agent reference dev `f36a87366d8e2fe0a1c8216463887902e471c739` and TUI reference dev `3beeb1d8a525e58ce6352e05061f242c5580e248` remain unchanged. Both actually lock Runtime `b276d9c0a1f3a3c06e32029f831ccd100c9699c7`; no joint integration or TUI adaptation is claimed.
-
-## Implemented scope
-
-- Strict protocol contracts, direct-owner IDs, complete 52-name catalog, validated receipts/Faults and lossless unknown Fault leaves. The catalog is not 52 completed handlers; see [method coverage](docs/method-coverage.md).
-- Linux durable object/native-history storage, inode ownership, exact accepted versus persisted ranges, corruption rejection and original-save continuation. Memory objects create no files.
-- Production OpenAI-compatible HTTP/SSE model adapter, conservative retry classification and Retry-After, authoritative partial data, actual model constraints and safe credential handling.
-- Host/Agent/Session owners, independent input queues, real Runtime, same-Turn continuation, frozen execution binding, canonical controls, accepted task lifetime, save barriers, monotonic shutdown and memory reclamation.
-- Scoped observation with fixed ranges, UTF-8 catch-up, cold full history including authoritative partial records, real tool invocation reads and retry state. Typed clients, real stdio and authenticated WSS now share 52 actual routes, including subscriptions, standard interaction answers, canonical reload, compaction, context and workspace reads. Original interaction settlement follows actual answer, cancel or deadline facts. The actual process is assembled and covered by loopback provider and binary tool tests; the final query-contract audit remains open.
-- Standard six-action `agent` tool with owner-bound capabilities, early registered independent delegation results, shared input ranges, notifications through the same queues, wait and scope-close cleanup. Metadata updates support actual Agent name/Session title with durable publication.
-- Real configured workspace file/search/Git backends, six canonical query routes and Session-owned edit snapshots. Production read/write/edit/bash share the actual frozen workspace and original per-call output/cleanup leases; no no-op sink is enabled.
-- Production resource assembly from a single HostConfig: actual provider clients, static tool declarations, workspace binding, frozen Role/framework/context and versioned Host-owned reload publication. Host configuration/model/tool queries share canonical typed/stdio/WSS routes; canonical reload uses owned preparation, immutable receipts and operator-checked typed/stdio/WSS routes. Credentials are private inputs, not returned configuration.
-- Per-request legacy tool-history projection is wired into the production BoundPrompt. Complete exchanges retain their content and associations; absent old results become historical facts only in the request. Native history/JSONL are not rewritten and old tools are not re-executed.
-
-- Manual and automatic compaction use the real utility model, frozen resource binding, append-only coverage records and owner-controlled save/cancel barriers. Estimates remain estimates; reported provider usage is not invented. Same original control receipt facts are retained.
-- Shared structured diagnostics provides sanitized errors, stderr/file sinks and bounded flush observation. The actual file writer retains its own OS lease until it exits, even if waiting times out. Production application installation is included; Host health reporting is included; remaining business-event instrumentation is active work.
-
-## Validation and review
-
-At exactly `70c17e7226bd90c7bb1e146ed141081f567e9d23`, `./scripts/check.sh` passes committed/worktree whitespace, rustfmt, strict all-target Clippy, **761 unique tests**, **4 doctests** and strict rustdoc. `cargo test --workspace --all-targets --locked -- --list` verifies 761 unique target/test-name pairs across 84 nonempty targets. Locked Cargo metadata confirms the sole published Runtime pin. [The executable handoff](docs/executable-review-handoff.md) records exact commands, hashes, independent reviews and known query-contract findings. The older 650/4 checkpoint remains preserved in its own handoff; neither count substitutes for the requested final external review.
-
-### Earlier owner/resource validation
-
-At `04ba5bc`, `./scripts/check.sh` passes committed/staged/worktree whitespace, rustfmt, all-target Clippy with warnings denied, all workspace tests, 3 doctests and strict rustdoc. `cargo test --workspace --all-targets --locked -- --list` confirms **494 unique target/test-name cases**, excluding repeated storage subprocess output. `cargo metadata --locked --offline` confirms actual Runtime Git `69faf919`. Rust is pinned to 1.90.0.
-
-These checks use real owners, AgentLoop, temporary files, actual pipes and loopback TCP/HTTP/SSE/TLS with explicitly named scripted models or local provider fixtures. They are not live remote-model, production-process, TUI or capacity measurements.
-
-Independent reviews found real defects after earlier passing gates. Authoritative partial history reads and subscription teardown were fixed and re-probed. Two delegation P1 defects were corrected in source `aa76ff9`: explicit load exit now transfers a pending result before reclamation, and accepted same-relation appended input can establish the actual shared result range. Independent review passed 450 tests/3 doctests plus seven additional real probes and closed those two findings. The actual deadline interaction label was fixed separately; its independent follow-up at `d107462` passed the original probe, the 477-test/3-doctest gate and repeated actual pipe/interaction cases. A reproduced pipe BrokenPipe came from a test closing its response reader while its real unsubscribe response was in flight; deterministic half-close tests now preserve both valid orderings without changing production error handling.
-
-Independent resources/prompt review passed seven additional actual production-chain probes. Its follow-up at `04ba5bc` passed the complete 494-test/3-doctest gate and 16 original/new probes covering resource repair, pause preservation, corruption boundaries and all three query transports. These are scoped reviews, not complete product review. Integration first found a legacy HostSettings test fixture that no longer matched canonical HostConfig; only the fixture was corrected, with the failed compile and formatting run retained in task evidence.
-
-## Release gate corrections
-
-The final `dev` gate at `34641c5ab1784237cb73bdb0f36f9923697d0c34` failed two task024 setup paths before model execution: HistoryInUse after dropping the seed journal and HostStorageUnavailable/RootInUse after the seed returned. Direct child-FD evidence identified the test's sha256sum subprocess temporarily retaining another parallel test's flock. Source d2edb504, integrated as c372c65 after the sha2 dev-dependency commit ebf59d8, hashes the same bytes in process and retains every original assertion. No production lock, owner, retry, sleep or test concurrency change was made. Producer validation passed 495 unique tests/3 doctests and 200 normally parallel task024 suites; exact integrated and independent c372c65 gates also passed. Independent review repeated 100 more task024 suites. The older unrelated storage flake remains undiagnosed. Task 034 retains the original red runs and direct evidence.
-
-Further real-Runtime probes found a terminal-claim window: a returned failure was not claimed until after partial-save I/O, and an already-claimed cancellation could be replaced by a later Runtime cleanup failure. Source f410152, integrated as a5c4bf4 after generic cleanup source 704c230 (integrated e5f5478), claims non-Completed outcomes before save I/O and retains prior cancellation with later cleanup diagnostics separately. Completed still uses the existing same-Turn continuation boundary. Both original red probes and the separate cancellation-plus-save-failure case pass. Independent exact-head review passes the complete 506/3 gate, all eight real-process cleanup cases, all three claim cases, and five additional owner/queue/save probes. No unresolved finding remains in that reviewed scope.
-
-## Remaining first-version work
-
-0. Correct the independently reproduced saved-Turn-result query after persistent restart, with truthful historical metadata and no execution recovery. Re-run its real file/Runtime/provider regression and independent review.
-1. Finish and independently review business diagnostics: remaining metadata/reclaim, model retry/use, scheduling/compaction and result-handoff facts. Use actual owner identities and outcomes; do not couple log failures to business completion.
-2. Keep the reviewed deterministic real-TLS deadline fixture and re-run exact composed gates after later changes. Query/owner methods have real routes, but routing alone is not contract acceptance.
-3. Refresh the complete 52-method contract audit and process-level acceptance at the fixed final backend checkpoint. Persistent deletion, cold history/load coordination and model-input provenance are implemented, not missing simply because older historical records below once listed them as pending.
-4. Collect new performance/resource measurements with retained raw evidence. Earlier lost local measurements and test counts do not establish current capacity. Live-provider and TUI acceptance remain unperformed.
-5. Continue authorized five-commit dev backups, exact publication mapping and hosted CI verification; obtain the requested external independent review before any main merge.
-
-## Scope constraints
-
-Necessary save failures cannot become successful stopped shutdown. Repeated shutdown returns facts, not an implicit retry. No new recovery API or witness framework is added for unpublished creation save failure. Dropping the final root Host after an already-failed save without controlled shutdown is uncontrolled destruction, not successful retirement; no permanent self-cycle is introduced. Workspace Git preflight assumes stable local configuration/attributes, not atomic protection against arbitrary external mutation.
-
-Development stays on isolated topics and integrates into `dev`. Publication must preserve existing remote history and use the owner's current explicit authorization; no force update or main merge occurs. Independent review and required checks remain prerequisites for main. Workers were requested with `gpt-6-astra` and `max`; no separate runtime configuration attestation is available.
-
-minicore-agent is a code reference, not a compatibility or behavior baseline. Suitable existing implementation and tests should be reused where they fit v4.93. The standalone ordinary-tool module and its process-group/shared-binding fixes have passed scoped independent review and are included here. Production registry, output and edit-owner integration is now included in the fixed executable checkpoint above.
-
-## Historical tool cleanup ownership topic
-
-The following records the earlier task progression; its then-pending production pieces are included in the current executable checkpoint.
-
-[Task 033](tasks/033-turn-tool-cleanup/TASK.md) adds a narrow prepared-to-active Turn cleanup registration and actual-worker finalization barrier on top of `04ba5bc`. Real Host/Runtime and child-process tests distinguish Runtime future cancellation from actual child wait, including force shutdown, memory retirement, same-Turn continuation and blocked history saves. Independent cleanup diagnostics do not overwrite business outcomes. Ordinary tool production wiring, durable edit recording and output lease integration are still pending; this topic is not a complete first-version claim.
-
-The Task 033 follow-on now binds the static local declarations to the actual prepared Turn cleanup owner and adds an owner-held output lease. Its complete topic checks pass 535 unique tests and 3 doctests, including producer tests. Production local-tool activation still awaits the real Session record/persistence sink and UTF-8/binary output projection; no no-op sink is enabled.
-
-## First-version built-in tool scope
-
-[Task 056](tasks/056-built-in-tool-scope/TASK.md) records actual production
-registration: agent plus read/edit/write/bash. apply_patch is not implemented or
-advertised. SPEC does not name it as a required tool; Agent's old registry is code
-reference, not compatibility authority. Its absence remains explicit in acceptance,
-with no claim of old patch-format compatibility or a completed patch tool.
+The complete earlier project narrative remains in
+[the fixed baseline](https://github.com/zqcli/minicore-host/blob/6ea03b85a318374f3dcb94c38dbe11ac1878f110/PROJECT.md).
+Historical evidence is preserved; lost unpublished objects are not claimed as
+recovered. Development integrates into `dev` with ordinary history-preserving
+updates. External whole-product review, actual TUI/external-provider acceptance,
+and a subsequent main-branch decision remain separate work.

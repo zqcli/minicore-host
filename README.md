@@ -1,6 +1,13 @@
 # minicore-host
 
-The fixed backend review code is [be0e99552d283289fb1c0cc13915874ce0ba757f](https://github.com/zqcli/minicore-host/commit/be0e99552d283289fb1c0cc13915874ce0ba757f) on `dev`, with [exact-head CI passing](https://github.com/zqcli/minicore-host/actions/runs/42751728862). The final local documentation/check composition passes **939 unique Rust tests, 4 doctests and 28 Python checks**, with strict lint/docs and formatting. [Current status](PROJECT.md), [fixed handoff](docs/recovery-checkpoint-review.md), [source map](docs/recovery-publication.json), [raw gate evidence](docs/backend-review-validation.json) and [final-code performance](docs/performance-c22d8c8.md) provide reproducible boundaries. The backend is ready for external independent review, not complete v4.93 acceptance: real external-model and actual TUI checks remain unperformed. Main is unchanged.
+The current simplification unifies owner creation/metadata paths and shares
+facts, protocol/SDK templates and test fixtures. See [current status](PROJECT.md)
+and [Task101](tasks/101-owner-path-simplification/TASK.md) for its fixed baseline,
+intentional Rust API changes and validation. The full local gate passes **955
+unique Rust tests, 4 doctests and 28 Python checks**, with strict lint/docs. The
+preceding R1-R4 fixes remain in
+[Task100](tasks/100-review-r1-r4/TASK.md). The backend is under development against
+v4.93; actual external-provider and consuming TUI acceptance remain separate work.
 
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
@@ -38,10 +45,6 @@ The Runtime dependency is exactly `0.10.0`, pinned to published commit `3aa47629
 - [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
 - [Controller and integration evidence](tasks/005-controllers/TASK.md)
 
-The earlier foundation is published on `dev` at [82583b31ac9091164da5f6dcfee6bb23e05137e5](https://github.com/zqcli/minicore-host/commit/82583b31ac9091164da5f6dcfee6bb23e05137e5), with [exact-head Host CI passing](https://github.com/zqcli/minicore-host/actions/runs/42629644954). The [commit mapping](docs/host-publication.json) translates historical local checkpoints to GitHub commits. Remote `main` remains the README-only ancestor and has not received development changes. Live provider and TUI checks have not been run; external independent review and remaining first-version work are still required.
-
-The later owner, observation, delegation and resource checkpoint is now published at [c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e](https://github.com/zqcli/minicore-host/commit/c6d8a5e1cf1ea52c8e1e4c104efba3774efc2f5e). Its [fixed review handoff](docs/integration-review-handoff.md) and [64-commit source mapping](docs/owner-integration-publication.json) identify the exact reviewed code and limitations. Local and independent gates pass 506 unique tests and 3 doctests; [exact-head CI 42650587425](https://github.com/zqcli/minicore-host/actions/runs/42650587425) passed. Later reload/compaction/ordinary-tool/application topics are not included in that remote checkpoint.
-
-The historical pre-replacement local executable checkpoint was `7cf8e104bf84ee599331a3d96e181bba53fdf54c`: real process/configuration startup, production read/write/edit/bash, workspace routes, canonical controls, context and reviewed file-lease corrections. It also includes the reviewed cold history.read/load coordination fix. Explicit owner-backed Agent/Session deletion is also integrated. Original input provenance is projected into actual model and compaction requests without changing durable history. Its complete gate passes **822 unique tests and 4 doctests**. [The fixed handoff](docs/executable-review-handoff.md) records 52 routed methods, actual binary acceptance and remaining contract findings. At that historical checkpoint the code was not yet published. Its then-current verified published documentation checkpoint was [a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f](https://github.com/zqcli/minicore-host/commit/a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f), with [successful exact-head CI](https://github.com/zqcli/minicore-host/actions/runs/42653342131).
-
-Current reconstruction includes query projection/revision corrections, basic owner summaries/pagination, the reviewed owner diagnostics, saved-result reads and compaction Fault correction. Final diagnostic slices are implemented, scoped-reviewed and composed; external final review remains. The final-code and historical performance reports retain their separate measured sources. Earlier local checkpoints, including the 650-test execution gate and subsequent reproduced lease failures, remain recorded in their task/handoff files. A passing aggregate is not a claim that the first version or external review is complete.
+Historical checkpoints, source mappings, review findings and performance evidence
+are indexed in [PROJECT.md](PROJECT.md); detailed evidence remains in its original
+task and handoff files.
