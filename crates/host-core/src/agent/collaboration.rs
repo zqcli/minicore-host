@@ -15,7 +15,8 @@ impl AgentOwner {
                 "close requires a live Tokio runtime",
             )
         })?;
-        self.access.accept_internal_owned(|| {
+        let mut diagnostics = Vec::new();
+        let accepted = self.access.accept_internal_owned(|| {
             let first = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
                 if state.deleting_sessions.contains(id) {
@@ -25,16 +26,20 @@ impl AgentOwner {
                 }
                 state.close_running.insert(id.clone())
             };
-            if let Err(error) = child.begin_close_owned(operation) {
-                if first {
-                    self.state
-                        .lock()
-                        .expect("Agent mutex poisoned")
-                        .close_running
-                        .remove(id);
+            let records = match child.begin_close_owned(operation) {
+                Ok((_, records)) => records,
+                Err(error) => {
+                    if first {
+                        self.state
+                            .lock()
+                            .expect("Agent mutex poisoned")
+                            .close_running
+                            .remove(id);
+                    }
+                    return Err(error);
                 }
-                return Err(error);
-            }
+            };
+            diagnostics.extend(records);
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.closing.insert(id.clone());
             if first {
@@ -73,7 +78,9 @@ impl AgentOwner {
                 state.close_tasks.insert(key, task);
             }
             Ok(())
-        })?;
+        });
+        crate::diagnostics::emit(diagnostics);
+        accepted?;
         loop {
             let changed = self.changed.notified();
             tokio::pin!(changed);

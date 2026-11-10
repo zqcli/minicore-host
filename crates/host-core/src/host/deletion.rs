@@ -31,7 +31,7 @@ impl Host {
                 "deletion requires a live Tokio runtime",
             )
         })?;
-        self.access.accept_execution(caller, || {
+        let (receipt, diagnostics) = self.access.accept_execution(caller, || {
             let agent = {
                 let state = self.state.lock().expect("Host mutex poisoned");
                 if !matches!(
@@ -54,7 +54,8 @@ impl Host {
                 })?
             };
             // No Host state lock is held while the direct Agent fixes the scope.
-            let children = agent.claim_agent_delete_owned(&request.scope)?;
+            let (children, diagnostics) =
+                agent.claim_agent_delete_owned(&request.scope, &request.operation_id)?;
             let receipt = AgentDeleteReceipt {
                 kind: AgentDeleteKind::AgentDelete,
                 host_id: self.id.clone(),
@@ -87,7 +88,9 @@ impl Host {
                 owner.publish_host_state_owned();
             });
             state.delete_tasks.insert(target.agent_id.clone(), task);
-            Ok(receipt)
-        })
+            Ok((receipt, diagnostics))
+        })?;
+        crate::diagnostics::emit(diagnostics);
+        Ok(receipt)
     }
 }

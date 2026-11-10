@@ -311,7 +311,8 @@ impl AgentOwner {
         } else {
             None
         };
-        let (child, first, receipt) = self.access.accept_execution(caller, || {
+        let mut diagnostics = Vec::new();
+        let accepted = self.access.accept_execution(caller, || {
             let (child, first) = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
                 if state.deleting {
@@ -340,7 +341,10 @@ impl AgentOwner {
             };
             // Registration precedes the child call; no Agent state lock spans it.
             let receipt = match child.begin_close_owned(request.operation_id) {
-                Ok(receipt) => receipt,
+                Ok((receipt, records)) => {
+                    diagnostics.extend(records);
+                    receipt
+                }
                 Err(error) => {
                     if first {
                         self.state
@@ -358,7 +362,9 @@ impl AgentOwner {
                 .closing
                 .insert(id.clone());
             Ok((child, first, receipt))
-        })?;
+        });
+        crate::diagnostics::emit(diagnostics);
+        let (child, first, receipt) = accepted?;
         child.handoff_delegation_owned();
         if !first {
             return Ok(receipt);

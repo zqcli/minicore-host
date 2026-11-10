@@ -269,6 +269,12 @@ impl Http {
     pub fn count(&self) -> usize {
         self.calls.lock().unwrap().len()
     }
+    /// Stop only this scripted upstream fixture after the real client cancels.
+    /// No successful response or graceful provider completion is claimed.
+    pub async fn abort(self) {
+        self.task.abort();
+        assert!(self.task.await.is_err_and(|error| error.is_cancelled()));
+    }
     pub async fn finish(self) -> Vec<Value> {
         tokio::time::timeout(WAIT, self.task)
             .await

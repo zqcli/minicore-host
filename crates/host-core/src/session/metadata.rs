@@ -310,12 +310,12 @@ impl SessionController {
     pub(crate) fn begin_close_owned(
         &self,
         operation: OperationId,
-    ) -> Result<SessionCloseReceipt, Fault> {
-        let (receipt, handle) = self.close_owned(operation)?;
+    ) -> Result<(SessionCloseReceipt, Vec<Record>), Fault> {
+        let (receipt, handle, records) = self.close_owned(operation)?;
         if let Some(handle) = handle {
             handle.shutdown();
         }
-        Ok(receipt)
+        Ok((receipt, records))
     }
     pub(crate) fn set_close_fault(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");

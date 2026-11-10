@@ -4,22 +4,27 @@ use crate::persistence::disk;
 impl SessionController {
     /// The direct Agent reserves this child before asking its actual owner to
     /// fence input/control admission. No parent lock is held across this call.
-    pub(crate) fn claim_delete_owned(&self, close: bool) -> Result<SessionDeleteAccepted, Fault> {
-        self.claim_delete_state_owned(close, false)
+    pub(crate) fn claim_delete_owned(
+        &self,
+        close: bool,
+        operation: &OperationId,
+    ) -> Result<(SessionDeleteAccepted, Vec<Record>), Fault> {
+        self.claim_delete_state_owned(close, false, Some(operation.clone()))
     }
     /// A cascade already admitted normal close for every explicit child before
     /// its Agent receipt. Claim data deletion without repeating scope cleanup.
     pub(crate) fn claim_cascade_delete_owned(
         &self,
         close: bool,
-    ) -> Result<SessionDeleteAccepted, Fault> {
-        self.claim_delete_state_owned(close, close)
+    ) -> Result<(SessionDeleteAccepted, Vec<Record>), Fault> {
+        self.claim_delete_state_owned(close, close, None)
     }
     fn claim_delete_state_owned(
         &self,
         close: bool,
         close_already_claimed: bool,
-    ) -> Result<SessionDeleteAccepted, Fault> {
+        operation: Option<OperationId>,
+    ) -> Result<(SessionDeleteAccepted, Vec<Record>), Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.reclaimed {
             return Err(Fault::new(
@@ -39,6 +44,8 @@ impl SessionController {
                 "default deletion requires a closed, settled Session",
             ));
         }
+        let previous = state.lifecycle;
+        let cancellable = Self::cancellable(&state);
         state.deleting = true;
         state.deletion = Some(SessionDeletionState {
             close,
@@ -49,13 +56,17 @@ impl SessionController {
         }
         debug_assert!(!close || state.lifecycle != SessionLifecycle::Open);
         self.publish(&mut state);
-        Ok(SessionDeleteAccepted {
-            lifecycle: match state.lifecycle {
-                SessionLifecycle::Closed => SessionCloseLifecycle::Closed,
-                _ => SessionCloseLifecycle::Closing,
+        let records = self.close_records(&state, previous, cancellable, "delete", operation);
+        Ok((
+            SessionDeleteAccepted {
+                lifecycle: match state.lifecycle {
+                    SessionLifecycle::Closed => SessionCloseLifecycle::Closed,
+                    _ => SessionCloseLifecycle::Closing,
+                },
+                close,
             },
-            close,
-        })
+            records,
+        ))
     }
     /// Use normal close admission, including accepted-inbox disposition, before
     /// a queued driver can conclude memory Closed. Scope callbacks are spawned,
@@ -64,10 +75,19 @@ impl SessionController {
         self.start_scope_cleanup_locked(state, true);
         let _ = self.apply_close_locked(state);
     }
-    pub(crate) fn fence_delete_close_owned(&self) {
+    pub(crate) fn fence_delete_close_owned(&self, operation: &OperationId) -> Vec<Record> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = state.lifecycle;
+        let cancellable = Self::cancellable(&state);
         self.fence_delete_close_locked(&mut state);
         self.publish(&mut state);
+        self.close_records(
+            &state,
+            previous,
+            cancellable,
+            "delete",
+            Some(operation.clone()),
+        )
     }
     pub(crate) fn begin_delete_close_owned(&self) {
         let handle = {

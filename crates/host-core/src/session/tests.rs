@@ -1218,9 +1218,10 @@ fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
     let retained = session.clone();
     assert_eq!(session.history(&connection.caller()).unwrap().len(), 1);
     assert!(DataRoot::acquire(dir.path().join("root")).is_err());
-    session
+    let (_, records) = session
         .begin_close_owned(OperationId::new().unwrap())
         .unwrap();
+    diagnostic::emit(records);
     assert!(session.retire_closed_immediately_owned().unwrap());
     assert_eq!(
         observer.snapshot().unwrap_err().kind(),

@@ -461,3 +461,57 @@ The production edits, test and helper edits are replayed from visible literal
 commands, then formatted with the restored official Rust 1.90 toolchain. The old
 full raw logs and Git object are unavailable. No byte-identical final tree claim
 or fresh test pass is implied. Cache restoration and new validation are pending.
+
+### Close/delete admission bridge after the second replacement
+
+The recovered caller patch from task079 has the exact original SHA256
+`e439b94e2f45ba4cd9c8702d62cc371fc9b05fa6f50d83d5effd0f8b3b008c14`.
+It changes only Agent metadata/collaboration/deletion and Host deletion call sites.
+Task053 reconstructs the Session side from retained edit steps: close/delete
+return scalar Records through those callers, which emit only after the outermost
+existing admission closure has returned. The Agent cascade worker emits after
+its child call, outside its state lock. No business boundary, result, save,
+shutdown, retry or cleanup ownership is changed. Original delete operation IDs
+are borrowed through the existing chain rather than replaced with new IDs.
+
+`session.close_accepted` and `turn.cancel_claimed` come from the actual first
+state transition. A cascade's later data-deletion claim does not repeat its
+already accepted close/cancel. `session.closed` in this slice covers only an
+actual immediate memory close, not unfinished asynchronous barriers. The helper
+returns records without output in publish/observation or owner locks. The two
+private direct-call fixtures consume these returned records after their calls.
+
+The old final source `666abf29`, its complete final fixture diff and raw logs were
+lost. The preserved caller patch is byte-identical, but the combined new tree and
+reconstructed regression are not claimed to be the old complete commit. The
+current deletion fixture's tuple/operation adaptation is newly validated. This
+slice depends only on recovered `f4b105c`, not task079 creation/lifecycle changes.
+
+Fresh validation on this combined source, with official Rust 1.90 and unchanged
+locked offline dependencies:
+
+- Actual production Host/Runtime/loopback HTTP tests `diagnostic_calls`,
+  `diagnostic_terminal_failures` and `diagnostic_close_bridge`: all 3 passed.
+  The new compound case covers Session close, Session delete and Agent cascade
+  close, original operation/Turn IDs, exactly-once close/cancel/finished records,
+  immediate idle memory Closed, and private-content exclusion. It registers no
+  public observer. Its abort stops only the deliberately gated HTTP fixture
+  after the real owner has completed cancellation; it is not provider success.
+- `cargo test -p minicore-host-core --all-targets --locked --offline`: passed;
+  the corresponding `-- --list` confirms 302 unique cases in this branch.
+- Core plus transport all-target strict Clippy (`-- -D warnings`): passed.
+- Core strict rustdoc (`RUSTDOCFLAGS='-D warnings'`, `--no-deps`): passed.
+- `cargo fmt --all --check`, `git diff --check`, SPEC and lock hashes: passed.
+
+The new raw outputs are `bridge-{focused,core,core-list,clippy,doc}-new-environment.log`
+in the separately retained recovery reports directory. The earlier new-environment
+terminal/calls focused pair passed, but its following core invocation was
+interrupted during compilation; that truncated log is not a gate pass. The
+successful bridge gate above also checks the recovered terminal code. No full
+workspace or new independent approval is claimed here.
+
+Remaining Session scope includes asynchronous close completion, scheduling and
+other cancellation claims, actual tool/process completion and cleanup faults,
+history loader/cold-read failures, compaction and result handoff. Pinned Runtime
+still supplies no source retry-wait elapsed duration, so that SPEC requirement
+remains explicitly unavailable rather than estimated or filled with zero.

@@ -449,11 +449,20 @@ impl SessionController {
     pub(super) fn close_owned(
         &self,
         operation: OperationId,
-    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>), Fault> {
+    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>, Vec<Record>), Fault> {
         self.start_scope_cleanup_owned();
         let mut state = self.state.lock().expect("Session mutex poisoned");
         Self::available(&state)?;
+        let previous = state.lifecycle;
+        let cancellable = Self::cancellable(&state);
         let handle = self.apply_close_locked(&mut state);
+        let records = self.close_records(
+            &state,
+            previous,
+            cancellable,
+            "close",
+            Some(operation.clone()),
+        );
         let receipt = SessionCloseReceipt {
             kind: SessionCloseKind::SessionClose,
             host_id: self.host_id.clone(),
@@ -470,6 +479,6 @@ impl SessionController {
             },
         };
         Self::retain_control(&mut state, Receipt::SessionClose(receipt.clone()));
-        Ok((receipt, handle))
+        Ok((receipt, handle, records))
     }
 }

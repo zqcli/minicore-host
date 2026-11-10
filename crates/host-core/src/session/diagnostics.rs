@@ -204,3 +204,123 @@ impl SessionController {
         ))
     }
 }
+
+impl SessionController {
+    pub(super) fn cancellable(state: &SessionState) -> bool {
+        state.active.as_ref().is_some_and(|active| {
+            matches!(active.info.state, TurnState::Starting | TurnState::Running,)
+        })
+    }
+    pub(super) fn cancel_claim_record(
+        &self,
+        state: &SessionState,
+        claimed: bool,
+        reason: &'static str,
+        operation: Option<OperationId>,
+        published: bool,
+    ) -> Option<Record> {
+        if !claimed {
+            return None;
+        }
+        let active = state.active.as_ref()?;
+        let mut data = EventData::default()
+            .context(Context {
+                operation_id: operation,
+                ..turn_context(&self.turn_identity(&active.info))
+            })
+            .attribute("phase", "cancelling")
+            .attribute("reason", reason)
+            .attribute("persistence", persistence(active.info.persistence));
+        if published {
+            data = data
+                .attribute("controller_revision", state.controller_revision)
+                .attribute("runner_revision", state.runner_revision);
+        }
+        Some(Record::new(
+            event(
+                Level::INFO,
+                Scope::Turn,
+                "turn.owner",
+                "turn.cancel_claimed",
+                "Turn owner claimed cancellation",
+                &[
+                    "phase",
+                    "reason",
+                    "persistence",
+                    "controller_revision",
+                    "runner_revision",
+                ],
+            ),
+            data,
+        ))
+    }
+    pub(super) fn closed_record(
+        &self,
+        state: &SessionState,
+        previous: SessionLifecycle,
+    ) -> Option<Record> {
+        if !state.published
+            || previous == SessionLifecycle::Closed
+            || state.lifecycle != SessionLifecycle::Closed
+        {
+            return None;
+        }
+        Some(Record::new(
+            event(
+                Level::INFO,
+                Scope::Session,
+                "session.controller",
+                "session.closed",
+                "Session completed its actual close barriers",
+                &["mode", "controller_revision"],
+            ),
+            EventData::default()
+                .context(diagnostic::session_context(&self.identity()))
+                .attribute("controller_revision", state.controller_revision)
+                .attribute(
+                    "mode",
+                    match state.info.mode {
+                        StorageMode::Memory => "memory",
+                        StorageMode::Persistent => "persistent",
+                    },
+                ),
+        ))
+    }
+    pub(super) fn close_records(
+        &self,
+        state: &SessionState,
+        previous: SessionLifecycle,
+        was_cancellable: bool,
+        reason: &'static str,
+        operation: Option<OperationId>,
+    ) -> Vec<Record> {
+        let mut records = Vec::new();
+        if previous == SessionLifecycle::Open && state.lifecycle != SessionLifecycle::Open {
+            records.push(Record::new(
+                event(
+                    Level::INFO,
+                    Scope::Session,
+                    "session.controller",
+                    "session.close_accepted",
+                    "Session owner accepted close intent",
+                    &["reason", "controller_revision"],
+                ),
+                EventData::default()
+                    .context(Context {
+                        operation_id: operation.clone(),
+                        ..diagnostic::session_context(&self.identity())
+                    })
+                    .attribute("reason", reason)
+                    .attribute("controller_revision", state.controller_revision),
+            ));
+        }
+        let claimed = was_cancellable
+            && state
+                .active
+                .as_ref()
+                .is_some_and(|active| active.info.state == TurnState::Cancelling);
+        records.extend(self.cancel_claim_record(state, claimed, reason, operation, true));
+        records.extend(self.closed_record(state, previous));
+        records
+    }
+}

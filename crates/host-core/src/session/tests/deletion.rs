@@ -66,7 +66,11 @@ async fn task051_confirmed_file_bytes_do_not_bypass_save_callback_or_resource_re
     send(&fixture, "accepted input");
     persisted.acquire().await.unwrap().forget();
     assert!(!records(&fixture).is_empty());
-    let accepted = fixture.session.claim_delete_owned(true).unwrap();
+    let (accepted, records) = fixture
+        .session
+        .claim_delete_owned(true, &OperationId::new().unwrap())
+        .unwrap();
+    diagnostic::emit(records);
     assert_eq!(accepted.lifecycle, SessionCloseLifecycle::Closing);
     fixture.session.begin_delete_close_owned();
     let owner = fixture.session.clone();

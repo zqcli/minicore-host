@@ -17,7 +17,7 @@ impl AgentOwner {
                 "deletion requires a live Tokio runtime",
             )
         })?;
-        self.access.accept_execution(caller, || {
+        let (receipt, diagnostics) = self.access.accept_execution(caller, || {
             let child = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
                 if state.deleting
@@ -49,17 +49,18 @@ impl AgentOwner {
                 state.deleting_sessions.insert(id.clone());
                 child
             };
-            let accepted = match child.claim_delete_owned(request.close) {
-                Ok(accepted) => accepted,
-                Err(error) => {
-                    self.state
-                        .lock()
-                        .expect("Agent mutex poisoned")
-                        .deleting_sessions
-                        .remove(id);
-                    return Err(error);
-                }
-            };
+            let (accepted, diagnostics) =
+                match child.claim_delete_owned(request.close, &request.operation_id) {
+                    Ok(accepted) => accepted,
+                    Err(error) => {
+                        self.state
+                            .lock()
+                            .expect("Agent mutex poisoned")
+                            .deleting_sessions
+                            .remove(id);
+                        return Err(error);
+                    }
+                };
             let receipt = SessionDeleteReceipt {
                 kind: SessionDeleteKind::SessionDelete,
                 host_id: self.host_id.clone(),
@@ -98,8 +99,10 @@ impl AgentOwner {
                 owner.try_retire_empty_owned();
             });
             state.delete_tasks.insert(id.clone(), task);
-            Ok(receipt)
-        })
+            Ok((receipt, diagnostics))
+        })?;
+        crate::diagnostics::emit(diagnostics);
+        Ok(receipt)
     }
     async fn delete_session_work(
         self: &Arc<Self>,
@@ -123,7 +126,8 @@ impl AgentOwner {
     pub(crate) fn claim_agent_delete_owned(
         &self,
         scope: &AgentDeleteScope,
-    ) -> Result<Vec<Arc<SessionController>>, Fault> {
+        operation: &OperationId,
+    ) -> Result<(Vec<Arc<SessionController>>, Vec<crate::diagnostics::Record>), Fault> {
         scope
             .validate()
             .map_err(|error| Fault::new(FaultKind::AgentDeleteInvalid, error.to_string()))?;
@@ -193,13 +197,14 @@ impl AgentOwner {
         // The shared admission boundary is still held, but no Agent state lock
         // crosses a child call. A Retiring receipt must not leave old Turn
         // capabilities or descendant scope admission live until a worker runs.
+        let mut diagnostics = Vec::new();
         if matches!(scope, AgentDeleteScope::Sessions { close: true, .. }) {
             for child in &children {
-                child.fence_delete_close_owned();
+                diagnostics.extend(child.fence_delete_close_owned(operation));
             }
         }
         self.changed.notify_waiters();
-        Ok(children)
+        Ok((children, diagnostics))
     }
     pub(crate) async fn delete_agent_owned(
         self: &Arc<Self>,
@@ -279,7 +284,8 @@ impl AgentOwner {
             // Each child has its own admission boundary, even in a cascade.
             let result =
                 match child.claim_cascade_delete_owned(close) {
-                    Ok(_) => {
+                    Ok((_, diagnostics)) => {
+                        crate::diagnostics::emit(diagnostics);
                         let current = child.unattempted_deletion_owned();
                         {
                             let mut state = self.state.lock().expect("Agent mutex poisoned");
