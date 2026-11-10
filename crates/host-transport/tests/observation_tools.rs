@@ -235,6 +235,7 @@ async fn real_file_tool_arguments_progress_output_and_result_cross_os_pipes_and_
 async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_do_not_create_runtime()
  {
     let mut saved = Vec::new();
+    let message = input("durable input");
     for observe in [false, true] {
         let directory = tempfile::tempdir().unwrap();
         let (resources, events, mut started) = resources(1, None);
@@ -276,10 +277,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         } else {
             None
         };
-        session
-            .send(input("durable input"), options(2000))
-            .await
-            .unwrap();
+        session.send(message.clone(), options(2000)).await.unwrap();
         started.recv().await.unwrap();
         let turn = running(&session).await;
         events[0]
