@@ -90,5 +90,7 @@
       "bytes": 133652
     }
   },
-  "limits": "Local logs are identified by hashes. Historical verifiers only recompute retained evidence; no new performance measurement or live-provider/TUI acceptance. Hosted CI is checked for the actual published dev head separately."
+  "limits": "Local logs are identified by hashes. Historical verifiers only recompute retained evidence; no new performance measurement or live-provider/TUI acceptance. Hosted CI is checked for the actual published dev head separately.",
+  "published_source_checkpoint": "7152b1be236497630d79e96d64dc57316c8040db",
+  "publication_mapping": "tasks/103-project-organization/publication.json"
 }

@@ -124,9 +124,23 @@ organization, explicit projections and test coverage, not a measured speedup.
 ## Publication
 
 The owner authorized publication to `dev` after review and validation. The
-connected GitHub Git Data API will preserve the existing remote head
-`c4451653ea5f3110041bef85a5b86a55b1b203a4` as the ancestor and publish identical
-source trees with the original commit messages. The final branch update uses
-an expected old SHA and `force: false`. The source/published commit mapping is
-recorded separately once GitHub returns the actual commit identities. Hosted CI
-is checked for the resulting `dev` head; local tests are a separate result.
+connected GitHub Git Data API reproduces all nine source checkpoints in order,
+with identical trees and original commit messages. Actual author and committer
+are both `zqcli <276883664+zqcli@users.noreply.github.com>`; no co-author trailers
+are present. API-generated timestamps produce different commit IDs, recorded
+with source/tree/parent evidence in [publication.json](publication.json).
+
+- Validated release code `fa2c40043695f493cfbfbf057ec8145ec8f5f9c7` corresponds to
+  [`7152b1be236497630d79e96d64dc57316c8040db`](https://github.com/zqcli/minicore-host/commit/7152b1be236497630d79e96d64dc57316c8040db).
+- Source plus review/validation records `9dd7df53361c9fe0c282610f8bf0036e273183d3`
+  corresponds to
+  [`9b2e851a810ccf19086ef4f7001b1b24dd170ed8`](https://github.com/zqcli/minicore-host/commit/9b2e851a810ccf19086ef4f7001b1b24dd170ed8).
+- The final publication-record commit only adds these links and the mapping;
+  production source, tests, scripts, manifests, lockfile and SPEC remain identical
+  to the validated release code.
+
+The branch update preserves the original remote head
+`c4451653ea5f3110041bef85a5b86a55b1b203a4` as an ancestor and uses that observed
+expected SHA with `force: false`. Hosted CI is checked for the resulting `dev`
+head; the passing local gate above is a separate result. This release does not
+merge `main`, publish crates or claim live-provider/TUI acceptance.

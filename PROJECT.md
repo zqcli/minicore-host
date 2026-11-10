@@ -10,9 +10,12 @@ responsibilities. Shared test support is no longer owned by an old task director
 
 All 12 Host packages inherit **0.9.20** from the workspace. The 34 internal
 requirements retain their original constraint semantics; external dependency
-revisions and features are unchanged. The exact local release source checkpoint
-is `fa2c40043695f493cfbfbf057ec8145ec8f5f9c7`. Publication mapping is maintained in
-Task103; the owner explicitly authorized the final `dev` push.
+revisions and features are unchanged. The GitHub release source is
+[`7152b1be`](https://github.com/zqcli/minicore-host/commit/7152b1be236497630d79e96d64dc57316c8040db),
+with the identical tree to the validated local source `fa2c4004`.
+[Publication mapping](tasks/103-project-organization/publication.json) records
+all actual GitHub identities and preserves the original remote ancestry. The
+owner explicitly authorized this `dev` publication.
 
 Three independently assigned Astra/max workers implemented disjoint scopes and
 cross-reviewed the other scopes, with no blocking findings. These are requested

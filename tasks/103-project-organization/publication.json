@@ -1,0 +1,166 @@
+{
+  "previous_remote_dev": "c4451653ea5f3110041bef85a5b86a55b1b203a4",
+  "source_code_checkpoint": "fa2c40043695f493cfbfbf057ec8145ec8f5f9c7",
+  "published_code_checkpoint": "7152b1be236497630d79e96d64dc57316c8040db",
+  "source_head": "9dd7df53361c9fe0c282610f8bf0036e273183d3",
+  "published_source_head": "9b2e851a810ccf19086ef4f7001b1b24dd170ed8",
+  "source_tree": "b208664b21ac643819600b4600d353ad7cf989f0",
+  "method": "Connected GitHub Git Data API; every source tree is verified identical, with original commit messages and ordered parent chain. The final dev update uses the observed expected old SHA and force:false.",
+  "identity_note": "API-generated timestamps change commit IDs. Actual author/committer are recorded; source IDs remain validation evidence identifiers. No co-author trailers.",
+  "mapping": [
+    {
+      "source": "1d99f6073093b02de55ec5f47241334b6de57739",
+      "published": "84da1d6df8e601865141ba2698351c53774199e4",
+      "tree": "044f079fa51ef7a77de995acaf2a896514249648",
+      "parent": "c4451653ea5f3110041bef85a5b86a55b1b203a4",
+      "message": "refactor(workspace): centralize package metadata and dependency pins\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:22:44Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:22:44Z"
+      }
+    },
+    {
+      "source": "759b9791f6d82fe2a3aa71ca9c23c924c2ef658f",
+      "published": "378d824a710d89ae2283568c56c8f3621d81203d",
+      "tree": "0afd3f093e75c5eb5a3aef1f3228f95c2a377b3b",
+      "parent": "84da1d6df8e601865141ba2698351c53774199e4",
+      "message": "refactor(storage): separate validation and workspace edit evidence\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:24:50Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:24:50Z"
+      }
+    },
+    {
+      "source": "d0c05dc1a7f2a52b6ba8c8fa14a3503cf0bec6e2",
+      "published": "2211da9fb122f65b8c1603cc4627f755a5f9fbc7",
+      "tree": "51a866a31317a3ef35d9f663e37f3d8291de7ee3",
+      "parent": "378d824a710d89ae2283568c56c8f3621d81203d",
+      "message": "refactor(transport): organize adapters and shared protocol DTOs\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:25:06Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:25:06Z"
+      }
+    },
+    {
+      "source": "8c79081264b250cb6696c463646074f724cd049a",
+      "published": "706e5a46749e9ca942833d527b6cb7aedadbf6ee",
+      "tree": "502c78f26d3fd50abf341e3ed7e5556eacc27a0a",
+      "parent": "2211da9fb122f65b8c1603cc4627f755a5f9fbc7",
+      "message": "refactor(tools): group local bindings and isolate inspect projections\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:25:32Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:25:32Z"
+      }
+    },
+    {
+      "source": "c41e93bf465b610d8e09ea4725f256ed8b056e9d",
+      "published": "264a76f80e1c17d094356a07f5d7a213e016c96e",
+      "tree": "e01344878595e25232c561215e330779eba58f14",
+      "parent": "706e5a46749e9ca942833d527b6cb7aedadbf6ee",
+      "message": "refactor(resources): separate preparation and shared production fixtures\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:28:27Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:28:27Z"
+      }
+    },
+    {
+      "source": "5bbd090210879f913ce4935d3f1e7511fc7fd432",
+      "published": "6e6542fdebe88d0cd2a5a5cd57cc1ad8742cc435",
+      "tree": "ad516320e94efa9019fe0ee7dd83f831c4c1d3e8",
+      "parent": "264a76f80e1c17d094356a07f5d7a213e016c96e",
+      "message": "refactor(core): align modules with direct owner responsibilities\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:28:59Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:28:59Z"
+      }
+    },
+    {
+      "source": "5502e6b437bc4155ba2e7969c6132c81c650e215",
+      "published": "3e91c8b856a4ff28c5bf61538b01669bf55c05a6",
+      "tree": "32c690597482d9108501a1d836c23e48318e3933",
+      "parent": "6e6542fdebe88d0cd2a5a5cd57cc1ad8742cc435",
+      "message": "refactor(tests): share provenance assertions at workspace scope\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:29:26Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:29:26Z"
+      }
+    },
+    {
+      "source": "fa2c40043695f493cfbfbf057ec8145ec8f5f9c7",
+      "published": "7152b1be236497630d79e96d64dc57316c8040db",
+      "tree": "4fcf93c4fd62347754ef976fc4f07dec5e2817fb",
+      "parent": "3e91c8b856a4ff28c5bf61538b01669bf55c05a6",
+      "message": "chore(release): bump workspace version to 0.9.20\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:29:45Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:29:45Z"
+      }
+    },
+    {
+      "source": "9dd7df53361c9fe0c282610f8bf0036e273183d3",
+      "published": "9b2e851a810ccf19086ef4f7001b1b24dd170ed8",
+      "tree": "b208664b21ac643819600b4600d353ad7cf989f0",
+      "parent": "7152b1be236497630d79e96d64dc57316c8040db",
+      "message": "docs(project): record organization review and release validation\n",
+      "author": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:30:04Z"
+      },
+      "committer": {
+        "name": "zqcli",
+        "email": "276883664+zqcli@users.noreply.github.com",
+        "date": "2026-11-10T15:30:04Z"
+      }
+    }
+  ]
+}
+
