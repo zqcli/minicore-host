@@ -298,6 +298,20 @@ impl SessionController {
             else {
                 return;
             };
+            let data = diagnostics::handoff_data(
+                &self.identity(),
+                &slot.relation.registration,
+                slot.results
+                    .iter()
+                    .map(|result| {
+                        minicore_host_diagnostics::LogScalar::String(
+                            result.info.id.as_str().to_owned(),
+                        )
+                    })
+                    .collect(),
+                slot.inputs.len(),
+                slot.discarded.len(),
+            );
             let prepared = (
                 Arc::clone(&slot.sink),
                 DelegationCompletion {
@@ -305,6 +319,7 @@ impl SessionController {
                     inputs: std::mem::take(&mut slot.inputs),
                     discarded_inputs: std::mem::take(&mut slot.discarded),
                 },
+                data,
             );
             slot.handed_off = true;
             state.handoff_pending = true;
@@ -318,6 +333,7 @@ impl SessionController {
                     "delegation result sink panicked",
                 ))
             });
+        let record = diagnostics::handoff_finished(prepared.2, result.as_ref().err());
         let mut state = self.state.lock().expect("Session mutex poisoned");
         let previous = state.lifecycle;
         state.handoff_pending = false;
@@ -332,7 +348,9 @@ impl SessionController {
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
         let closed = self.closed_record(&state, previous);
+        let record = record.published(state.controller_revision, state.runner_revision);
         drop(state);
+        record.emit();
         diagnostic::emit(closed);
     }
     pub(crate) fn record_delegation_owned(

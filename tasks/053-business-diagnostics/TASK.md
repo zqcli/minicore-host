@@ -852,3 +852,33 @@ exactly the old/new Runtime Git source substitution, with every registry package
 unchanged. Evidence: published-runtime-timing-focused.log in the coordinator
 validation directory. The previous isolated candidate lock/config remains only
 historical local evidence. A fixed composed full gate follows later.
+
+### Actual delegation result handoff
+
+The existing sink handoff boundary now extracts only the original child Session,
+task message, originating parent Turn/tool identities and observed completion
+counts/Turn IDs. After the real sink returns, the owner records its actual
+success or fault and the final published Controller revision outside all owner
+locks. No result body, tool output, registration dump or ended parent Turn is
+reused as an active execution context. The original sink callback, handoff
+ownership, pending/close facts and failure result are unchanged; there is no new
+retry, acknowledgement, state flag or fallback.
+
+A permanent real Host/Runtime/local HTTP regression runs actual parent and child
+Turns with an explicitly named fixture delegation tool and gated fixture sink.
+The parent finishes while transfer remains pending. Releasing the sink verifies
+both successful transfer and its explicit independent failure, original task
+and tool lineage, exactly one summary, and no private body/key/Role/raw fault.
+The failure case retains its original close fault; it does not claim clean
+shutdown or successful notification. The initial missing-summary red occurred
+after the business assertions. A preceding fixture compile error for an unnamed
+lock binding was corrected and retained separately, not counted as a red test.
+
+Fresh validation on this exclusive worktree target: 9 focused diagnostic cases
+and all 317 core all-target cases passed; strict core/transport all-target Clippy,
+core rustdoc, fmt and diff checks passed. Logs are
+`handoff-{first-build,red,green,focused,core,clippy,doc}.log` in the second recovery
+reports directory. This is a handoff slice, not full workspace or independent
+approval. SPEC, Runtime pin and Cargo.lock remain unchanged. Agent-stop claims,
+remaining cleanup/failure scheduling and the separately owned compaction work
+remain open.

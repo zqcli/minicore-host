@@ -1,5 +1,7 @@
 //! Scalar extraction for real Session and Turn fact boundaries.
+mod handoff;
 mod runtime;
+pub(super) use handoff::{handoff_data, handoff_finished};
 mod scheduling;
 use super::*;
 use crate::diagnostics::{event, turn_context};
