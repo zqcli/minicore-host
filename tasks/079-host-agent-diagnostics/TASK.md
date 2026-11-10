@@ -66,3 +66,9 @@ New corrected-source checks:
 - `cargo fmt --all --check` and `git diff --check`: passed.
 - Raw logs: `/workspace/shared/recovery-079-second/p2-regression.log`, `p2-clippy.log`.
 - Unchanged three-probe replay will also run on the resulting fixed commit in a separate checkout. The independent TASK082 decision is still pending; this is not a full-workspace pass.
+
+Unchanged external probe replay completed on fixed new commit `3bd6f054bc47076c6e9a2590df8a8edffc0515f7` in a separate checkout: `cargo test -p minicore-host-core --test task082_owner_review --locked --offline -- --nocapture --test-threads=1` passed all 3 cases, exit 0. The source hash before and after is `455a3a25a4b212c913cbdd05e23ddbd8a23d5a757cde245fb7f0b16f1c996b6d`, identical to the reconstructed reviewer artifact used in the new red run. Raw output: `/workspace/shared/recovery-079-second/probes-green-3bd6f05.log`. Independent review remains separate from this producer replay.
+
+## Remaining scope
+
+The previous environment's uncommitted metadata save/reconcile and additional reclamation instrumentation was lost. It is not part of these restored commits and its old focused results are not current evidence. That work must be reconstructed and tested as a later independent slice after synchronizing with the shared close/delete bridge. No new recovery entry, automatic shutdown retry or lifecycle framework is planned.
