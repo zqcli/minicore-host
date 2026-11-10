@@ -240,6 +240,19 @@ async fn independent_cleanup_failures_do_not_replace_primary_or_falsely_finish_o
             usize::from(confirmed)
         );
         assert_eq!(cleanup.calls.load(Ordering::SeqCst), 1);
+        let changed: Vec<_> = rows
+            .iter()
+            .filter(|row| {
+                row["event"] == "session.scheduling_changed"
+                    && row["turn_id"] == turn.as_str()
+                    && row["attributes"]["reason"] == "cleanup_finished"
+            })
+            .collect();
+        assert_eq!(changed.len(), usize::from(!confirmed));
+        if !confirmed {
+            assert_eq!(changed[0]["attributes"]["blocked"], true);
+            assert_eq!(changed[0]["level"], "DEBUG");
+        }
     }
     for private in [
         PRIVATE_CLEANUP,

@@ -33,10 +33,14 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
     logging.output = Output::File(log.clone());
     let guard = minicore_host_diagnostics::install(logging).unwrap();
     let mut expected = Vec::new();
-    for closing in [false, true] {
-        let root = directory
-            .path()
-            .join(if closing { "close-data" } else { "update-data" });
+    for (closing, paused) in [(false, false), (false, true), (true, false)] {
+        let root = directory.path().join(if closing {
+            "close-data"
+        } else if paused {
+            "paused-update-data"
+        } else {
+            "update-data"
+        });
         let host = persistent_host(&root, "http://127.0.0.1:1/v1/chat/completions").await;
         let client = HostClient::in_process(host.clone()).unwrap();
         let mut creation = create(None);
@@ -44,6 +48,21 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
         let created = client.create_agent(creation, options()).await.unwrap();
         let target = target(&created);
         let session = client.session(target.clone());
+        if paused {
+            session
+                .pause(
+                    SessionControlRequest {
+                        operation_id: OperationId::new().unwrap(),
+                    },
+                    options(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                session.state(options()).await.unwrap().data.scheduling,
+                Scheduling::Paused
+            );
+        }
         let metadata = root
             .join("agents")
             .join(target.agent_id.as_str())
@@ -134,7 +153,7 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
                 .unwrap();
         }
         stop(&host).await;
-        expected.push((target, operation, resume));
+        expected.push((target, operation, resume, closing, paused));
     }
     assert_eq!(
         guard.shutdown(Duration::from_secs(2)),
@@ -145,7 +164,7 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    for (target, operation, resume) in expected {
+    for (target, operation, resume, closing, paused) in expected {
         let failures: Vec<_> = rows
             .iter()
             .filter(|row| {
@@ -154,6 +173,22 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
             })
             .collect();
         assert_eq!(failures.len(), 2);
+        if !closing {
+            let resumed: Vec<_> = rows
+                .iter()
+                .filter(|row| {
+                    row["event"] == "session.scheduling_changed"
+                        && row["operation_id"] == operation.as_str()
+                        && row["attributes"]["reason"] == "metadata_save_finished"
+                })
+                .collect();
+            assert_eq!(resumed.len(), usize::from(paused));
+            if paused {
+                assert_eq!(resumed[0]["attributes"]["paused"], false);
+                assert_eq!(resumed[0]["attributes"]["blocked"], false);
+                assert_eq!(resumed[0]["level"], "DEBUG");
+            }
+        }
         for row in failures {
             assert_eq!(row["operation_id"], operation.as_str());
             assert_ne!(row["operation_id"], resume.as_str());

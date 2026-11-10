@@ -1040,3 +1040,55 @@ in the second recovery reports directory. No full-workspace or independent
 review is claimed. SPEC, Runtime pin and Cargo.lock remain exactly the adopted
 coordinator baseline. Remaining actual failure/save-resume scheduling summaries
 will be composed separately with task088's reviewed original-Fault handoff.
+
+### Actual failure and save-continuation scheduling differences
+
+The final scheduling worktree is based on fixed coordinator
+`50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8`, including the independently approved
+compaction original-Fault handoff and its query-Option fixture composition. The
+three preceding slices were replayed without conflicts or production rewrites:
+
+- force `7bcc10e` (original `1fef32c`) -> `dcbfa00cd008a88fda61bfe0ef40d1c8b0f05c4b`;
+- preparation `55bd353` -> `06bf117ad92090e9c69a0f4c6d28853f54bf45fe`;
+- internal message errors `11e5bf5` -> `579edef82ed3e288a2b2786470e813c6037f667e`.
+
+Only one copy of each patch belongs in integration. This worktree has its own
+new target and unchanged adopted Runtime pin/lock.
+
+The existing five-scalar Schedule comparison is reused at actual failure,
+original history-save completion, explicit save continuation, metadata-save
+completion and cleanup/preparation publication boundaries. Public control/load
+summaries already covered requested scheduling changes; these additions cover
+the distinct transition into failure-paused/blocked and the actual clearing of
+that state after the original save is confirmed. No changed scalars means no
+record. Normal per-token/internal phases are not added. Existing direct Fault
+ERRORs remain separate and are not repeated by these DEBUG summaries.
+
+Only immutable scalar comparisons and post-lock Records are added. The original
+claim_report, ActiveTurn compaction failure slot, cancellation/save precedence,
+atomic publication, callbacks, I/O, returns and recovery behavior are unchanged.
+Known metadata/manual-compaction operation IDs are reused; the existing
+history-resume worker retains no operation, so that scheduling summary does not
+invent one or replace it with another caller's ID.
+
+Permanent real HTTP 401 plus real history inode-refusal/explicit restoration
+regression proves one failure-pause change, actual blocked true/false changes and
+one completed resume. The cleanup fixture verifies only unconfirmed cleanup
+creates a new block. Both additions failed before the new hooks. The metadata
+regression keeps the original unpaused update/close cases and adds a genuinely
+paused update: only the latter has a scheduling change on completion, carrying
+the original update operation. An initial overly broad assertion expected a
+change for the already-unpaused case; the failing output is retained, production
+was not altered to manufacture that record, and the original case now explicitly
+asserts no record. The added paused case establishes the real transition.
+
+Eight affected diagnostic tests pass on the composed baseline, including actual
+compaction utility/save failures, internal rejected messages/no subscriber,
+source-measured retry waits, force and resource preparation. Red/green and
+fixture-correction evidence is retained in
+`scheduling-{failure-red,terminal-red,failure-green,focused-fixture-failure,focused}.log`
+in the second recovery reports directory. The complete workspace gate and new
+unique-test inventory are pending on the fixed code commit; no full gate or
+independent approval of this final slice is claimed yet. SPEC/TUI/pins/lock are
+unchanged by the slice. The separate saved-result read-failure check belongs to
+task095, not to a new recovery or logging framework here.

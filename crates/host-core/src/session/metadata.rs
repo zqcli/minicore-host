@@ -261,9 +261,14 @@ impl SessionController {
             store.save(&saved)
         })
         .await;
-        let (updated, record) = {
+        let (updated, record, scheduling) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let previous = state.lifecycle;
+            let schedule = diagnostics::Schedule::capture(&state);
+            let operation = state
+                .record_work
+                .as_ref()
+                .and_then(|work| work.operation.clone());
             if state.record_work.as_ref().is_none_or(|work| {
                 work.candidate != candidate || work.baseline != expected_baseline
             }) {
@@ -272,7 +277,7 @@ impl SessionController {
                     "metadata completion does not match its original candidate and baseline",
                 ));
             }
-            match result {
+            let (updated, record) = match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
                     state.info.title = candidate.data.title;
@@ -317,9 +322,17 @@ impl SessionController {
                     );
                     (Err(fault), Some(record))
                 }
-            }
+            };
+            let scheduling = self.scheduling_record(
+                &state,
+                schedule,
+                "metadata_save_finished",
+                operation.as_ref(),
+            );
+            (updated, record, scheduling)
         };
         diagnostic::emit(record);
+        diagnostic::emit(scheduling);
         if updated.is_ok() {
             self.handoff_delegation_owned();
             self.wake();

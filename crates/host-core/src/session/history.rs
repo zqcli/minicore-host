@@ -320,6 +320,7 @@ impl SessionController {
                 ))
             }
         });
+        let previous = diagnostics::Schedule::capture(&state);
         state.saving = false;
         match &result {
             Ok(_) => {
@@ -414,9 +415,18 @@ impl SessionController {
             .into_iter()
             .map(|record| record.published(state.controller_revision, state.runner_revision))
             .collect::<Vec<_>>();
+        let operation = match binding {
+            SaveBinding::Compaction(compaction::CompactionBinding::Manual {
+                operation_id, ..
+            }) => Some(operation_id),
+            _ => None,
+        };
+        let scheduling =
+            self.scheduling_record(&state, previous, "history_save_finished", operation);
         drop(state);
         diagnostic::emit(record);
         diagnostic::emit(compaction_records);
+        diagnostic::emit(scheduling);
         result.map(|_| ())
     }
     pub(super) async fn finalize(
@@ -425,8 +435,9 @@ impl SessionController {
         outcome: TurnOutcome,
         fault: Option<Fault>,
     ) {
-        let record = {
+        let (record, scheduling) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            let previous = diagnostics::Schedule::capture(&state);
             let Some(active) = state
                 .active
                 .as_mut()
@@ -439,9 +450,13 @@ impl SessionController {
                 state.failure_paused = true;
             }
             self.publish(&mut state);
-            self.terminal_claim_record(&state, newly_claimed)
+            (
+                self.terminal_claim_record(&state, newly_claimed),
+                self.scheduling_record(&state, previous, "finalizing", None),
+            )
         };
         diagnostic::emit(record);
+        diagnostic::emit(scheduling);
         // Runtime may have dropped a tool future on cancellation. Actual tool
         // workers must still be joined, even if an original history save failed.
         if !self.finish_tool_cleanup(turn_id).await {
@@ -716,12 +731,17 @@ impl SessionController {
                     }
                     owner.finalize(&turn_id, outcome, fault).await;
                 }
-                {
+                let scheduling = {
                     let mut state = owner.state.lock().expect("Session mutex poisoned");
+                    let previous = diagnostics::Schedule::capture(&state);
                     if owner.finish_save_resume(&mut state) {
                         owner.publish(&mut state);
+                        owner.scheduling_record(&state, previous, "save_resume_finished", None)
+                    } else {
+                        None
                     }
-                }
+                };
+                diagnostic::emit(scheduling);
                 owner.handoff_delegation_owned();
                 owner.wake();
             },

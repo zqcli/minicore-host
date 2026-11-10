@@ -135,6 +135,13 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
             .is_none()
     );
     assert_eq!(http.count(), 1);
+    tokio::time::timeout(WAIT, async {
+        while session.state(options()).await.unwrap().data.scheduling != Scheduling::Auto {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     stop(&host).await;
     assert_eq!(
         guard.shutdown(Duration::from_secs(2)),
@@ -144,6 +151,47 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     assert_eq!(matches(&rows, "turn.failed", &turn), 1);
     assert_eq!(matches(&rows, "turn.finished", &turn), 1);
     assert_eq!(matches(&rows, "session.history_write_failed", &turn), 1);
+    let scheduling: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row["event"] == "session.scheduling_changed"
+                && row["session_id"] == target.session_id.as_str()
+        })
+        .collect();
+    assert_eq!(
+        scheduling
+            .iter()
+            .filter(|row| {
+                matches!(
+                    row["attributes"]["reason"].as_str(),
+                    Some("execution_failed" | "finalizing")
+                ) && row["attributes"]["execution_failure"] == true
+            })
+            .count(),
+        1
+    );
+    for blocked in [true, false] {
+        assert_eq!(
+            scheduling
+                .iter()
+                .filter(|row| {
+                    row["attributes"]["reason"] == "history_save_finished"
+                        && row["attributes"]["blocked"] == blocked
+                })
+                .count(),
+            1
+        );
+    }
+    let resumed: Vec<_> = scheduling
+        .iter()
+        .filter(|row| row["attributes"]["reason"] == "save_resume_finished")
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(resumed[0]["attributes"]["execution_failure"], false);
+    assert_eq!(resumed[0]["attributes"]["blocked"], false);
+    assert_eq!(resumed[0]["attributes"]["paused"], false);
+    assert!(scheduling.iter().all(|row| row["level"] == "DEBUG" && row["attributes"]["controller_revision"].is_u64()));
+
     let primary = rows
         .iter()
         .find(|row| row["event"] == "turn.failed")

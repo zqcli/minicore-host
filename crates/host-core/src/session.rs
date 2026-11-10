@@ -1365,6 +1365,7 @@ impl SessionController {
     }
     fn preparation_failed(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let schedule = diagnostics::Schedule::capture(&state);
         let previous = state.lifecycle;
         let record = (fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)).then(|| {
             diagnostics::history_failed(
@@ -1386,9 +1387,11 @@ impl SessionController {
         self.publish(&mut state);
         let record =
             record.map(|record| record.published(state.controller_revision, state.runner_revision));
+        let scheduling = self.scheduling_record(&state, schedule, "preparation_failed", None);
         let closed = self.closed_record(&state, previous);
         drop(state);
         diagnostic::emit(record);
+        diagnostic::emit(scheduling);
         diagnostic::emit(closed);
         self.handoff_delegation_owned();
     }
@@ -1526,8 +1529,9 @@ impl SessionController {
                     return;
                 }
             };
-            let (record, source, response_base) = {
+            let (record, scheduling, source, response_base) = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
+                let previous = diagnostics::Schedule::capture(&state);
                 let active = state.active.as_mut().expect("owned active Turn");
                 let source = self.turn_identity(&active.info);
                 let response_base = active.response_base;
@@ -1556,9 +1560,11 @@ impl SessionController {
                 } else {
                     None
                 };
-                (record, source, response_base)
+                let scheduling = self.scheduling_record(&state, previous, "execution_failed", None);
+                (record, scheduling, source, response_base)
             };
             diagnostic::emit(record);
+            diagnostic::emit(scheduling);
             diagnostic::emit(diagnostics::models_reported(
                 &source,
                 response_base,
@@ -1567,8 +1573,9 @@ impl SessionController {
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
                 // A failed save blocks new work; no reappend or automatic retry.
-                let record = {
+                let (record, scheduling) = {
                     let mut state = self.state.lock().expect("Session mutex poisoned");
+                    let previous = diagnostics::Schedule::capture(&state);
                     state.block_reason = Some(fault.clone());
                     let mut claim = (false, false);
                     if let Some(active) = state.active.as_mut() {
@@ -1580,9 +1587,13 @@ impl SessionController {
                         }
                     }
                     self.publish(&mut state);
-                    self.terminal_claim_record(&state, claim.0 && !claim.1)
+                    (
+                        self.terminal_claim_record(&state, claim.0 && !claim.1),
+                        self.scheduling_record(&state, previous, "execution_failed", None),
+                    )
                 };
                 diagnostic::emit(record);
+                diagnostic::emit(scheduling);
                 self.finish_tool_cleanup(&turn_id).await;
                 return;
             }

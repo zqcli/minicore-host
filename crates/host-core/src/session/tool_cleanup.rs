@@ -76,6 +76,7 @@ impl SessionController {
             }
         }
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = diagnostics::Schedule::capture(&state);
         let Some(active) = state.active.as_mut().filter(|a| &a.info.id == turn_id) else {
             return false;
         };
@@ -109,10 +110,12 @@ impl SessionController {
             .into_iter()
             .map(|record| record.published(state.controller_revision, state.runner_revision))
             .collect();
+        let scheduling = self.scheduling_record(&state, previous, "cleanup_finished", None);
         drop(state);
         drop(released);
         diagnostic::emit(diagnostics);
         diagnostic::emit(records);
+        diagnostic::emit(scheduling);
         complete
     }
 }
