@@ -1241,13 +1241,25 @@ impl SessionController {
                     if state.info.config_revision != preparation.1 {
                         continue;
                     }
+                    let schedule = diagnostics::Schedule::capture(&state);
                     state.block_reason = Some(fault);
                     state.driver_running = false;
                     let previous = state.lifecycle;
                     Self::finish_memory_close(&mut state);
                     self.publish(&mut state);
+                    let refused = self.resource_refused(
+                        &state,
+                        state
+                            .block_reason
+                            .as_ref()
+                            .expect("actual preparation failure"),
+                    );
+                    let scheduling =
+                        self.scheduling_record(&state, schedule, "resource_prepare_failed", None);
                     let closed = self.closed_record(&state, previous);
                     drop(state);
+                    refused.emit();
+                    diagnostic::emit(scheduling);
                     diagnostic::emit(closed);
                     self.handoff_delegation_owned();
                     return;

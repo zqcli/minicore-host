@@ -3,6 +3,7 @@ mod cleanup;
 mod compaction;
 mod handoff;
 pub(super) use cleanup::cleanup_failed;
+mod preparation;
 mod runtime;
 pub(super) use handoff::{handoff_data, handoff_finished};
 mod scheduling;

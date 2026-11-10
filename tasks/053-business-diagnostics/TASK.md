@@ -965,3 +965,39 @@ in the second recovery reports directory. This is not full workspace or
 independent review. SPEC and the original pinned dependencies are unchanged in
 this source slice; the next worktree adopts the coordinator's separately
 published Runtime and saved-result query baseline.
+
+### Resource preparation disposition before Turn binding
+
+The new worktree starts at coordinator integration
+`8b129d4bdd35e223f8efe80059c4c8ea7bfe1df6`, including reviewed saved-result Option
+APIs and the separately authorized published Runtime
+`3aa47629929906832dcb309afb7d242c1ae3e53f`. Its exclusive target is distinct from
+all previous worktrees. Source force `1fef32ca5d7ae7a670018afa26a22142e1ff5003`
+was replayed once as `7bcc10e`; the coordinator must not integrate both copies.
+
+At the existing final resource-preparation refusal boundary, the Session now
+records its original typed Fault and actual queued counts/configuration revision.
+Ordinary missing/configuration/lifecycle resources are WARN; unexpected failures
+are ERROR. It also records the actual scheduling block with the same published
+revision. No preallocated-but-unbound Turn ID, body, configuration or operation
+is invented. Records form under the existing lock and emit after it; stale
+configuration candidates still take the original continue path without changing
+business behavior, accepted input or retry policy.
+
+The real owner/HTTP regression uses an explicitly refusing ResourceResolver
+fixture. Both expected missing-resource and unexpected failures retain the
+original queued message without a Turn or HTTP request. Only the existing
+explicit resume for a missing resource permits the original input to bind and
+issue one actual request; the unexpected fault still rejects resume. The test
+was red on missing resource diagnostics after all those business assertions,
+then green without changing recovery behavior. No fake model or observation
+listener is used, and private Fault/body/Role/key content stays absent.
+
+Eight actual diagnostic cases passed, including source-measured retry elapsed on
+the normal published pin, force, storage and primary/cleanup failure cases.
+All 337 core all-target cases (new inventory), strict core/transport all-target
+Clippy, strict core rustdoc, fmt and diff checks passed. The inventory is
+`preparation-core-list.log`; raw outputs are
+`preparation-{red,green,focused,core,core-list,clippy,doc}.log` in the second
+recovery reports directory. Full workspace/independent review is not claimed.
+SPEC is unchanged; this slice itself changes no dependency, pin or lock bytes.
