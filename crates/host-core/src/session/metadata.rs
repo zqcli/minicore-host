@@ -72,6 +72,7 @@ impl SessionController {
             let records = {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
                 let previous = state.lifecycle;
+                let schedule = diagnostics::Schedule::capture(&state);
                 state.preparing = false;
                 let result = result.and_then(|history| {
                     if persistent {
@@ -82,7 +83,7 @@ impl SessionController {
                 let failed = result.as_ref().err().map(|fault| {
                     diagnostics::history_failed(
                         minicore_host_diagnostics::Context {
-                            operation_id: Some(operation),
+                            operation_id: Some(operation.clone()),
                             ..diagnostic::session_context(&owner.identity())
                         },
                         fault,
@@ -128,6 +129,12 @@ impl SessionController {
                     .into_iter()
                     .collect::<Vec<_>>();
                 records.extend(owner.closed_record(&state, previous));
+                records.extend(owner.scheduling_record(
+                    &state,
+                    schedule,
+                    "load_finished",
+                    Some(&operation),
+                ));
                 records
             };
             diagnostic::emit(records);

@@ -718,3 +718,39 @@ source-measured Runtime retry wait elapsed; this slice does not change its pin,
 lock, or substitute an estimate. Remaining Session controls/cancellation,
 asynchronous Closed, result handoff, cleanup-fault and compaction diagnostics
 are still open.
+
+### Public scheduling and explicit first-cancel boundaries
+
+The actual pause/resume/load/unload acceptance closure now returns a Record
+beside its unchanged receipt. A transient five-scalar before/after comparison
+(pauses, residency and blocked fact) emits only a changed scheduling projection,
+not a general state mirror or stored logging state. The record contains actual
+queue lengths, original operation, existing Load/Turn identity when present and
+the committed Controller revision. Repeated pause may still update its business
+pause generation and receipt, but does not invent another scheduling change.
+The existing load worker records its actual completion transition after publish
+and unlock, retaining the same request operation. No new waits or mutations are
+introduced for diagnostics.
+
+Session.cancel and Turn.cancel now extract the existing first Claimed fact and
+original operation before forming their receipts, then emit outside the entire
+ConnectionRegistry acceptance guard. AlreadyEnding and NotActive do not produce
+another claim. Runtime cancellation and original return values are unchanged.
+
+The new permanent real Host/Runtime/gated local HTTP regression passed all
+business assertions before its original red (no pause diagnostic). It now proves
+paused accepted input remains queued without a model call, unload/load preserve
+that input, resume publishes the same receipt revision before execution, and
+both public cancellation forms claim exactly once. The actual Turn concludes
+Cancelled and the upstream sees one original request, with no observers or
+private content in logs. The first implementation build also caught the unused
+Residency::Unloading enum arm; it was added explicitly and that failed compile
+output is retained, not reported as a business red.
+
+Validation: 8 actual diagnostic focused cases passed; core all-target 317
+unique cases passed with a new list; core/transport all-target strict Clippy,
+core strict rustdoc, fmt and diff checks passed. Logs are
+`controls-{red,first-build,green,focused,core,core-list,clippy,doc}.log` in the
+recovery reports directory. SPEC and locked Runtime remain unchanged. Agent
+stop/force claim propagation, failure/save-driven scheduling, remaining actual
+Closed/finalizing/handoff and compaction boundaries are separate pending slices.

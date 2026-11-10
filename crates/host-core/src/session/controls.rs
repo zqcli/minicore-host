@@ -192,8 +192,9 @@ impl SessionController {
         if matches!(kind, SessionControlKind::Load | SessionControlKind::Resume) {
             self.ensure_executor()?;
         }
-        let receipt = self.access.accept(caller, || {
+        let (receipt, record) = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            let previous = diagnostics::Schedule::capture(&state);
             match kind {
                 SessionControlKind::Pause => {
                     Self::open(&state)?;
@@ -283,6 +284,17 @@ impl SessionController {
                     self.publish(&mut state);
                 }
             }
+            let record = self.scheduling_record(
+                &state,
+                previous,
+                match kind {
+                    SessionControlKind::Pause => "pause",
+                    SessionControlKind::Resume => "resume",
+                    SessionControlKind::Load => "load",
+                    SessionControlKind::Unload => "unload",
+                },
+                Some(&request.operation_id),
+            );
             let receipt = SessionControlReceipt {
                 kind,
                 host_id: self.host_id.clone(),
@@ -293,8 +305,9 @@ impl SessionController {
                 result: Self::control_facts(&state),
             };
             Self::retain_control(&mut state, Receipt::SessionControl(receipt.clone()));
-            Ok(receipt)
+            Ok((receipt, record))
         })?;
+        diagnostic::emit(record);
         if kind == SessionControlKind::Resume {
             self.wake();
         }
@@ -330,7 +343,7 @@ impl SessionController {
         keep_inbox: bool,
         operation: Option<OperationId>,
     ) -> Result<(CancelResult, Option<Receipt>), Fault> {
-        let (result, receipt, handle) = self.access.accept(caller, || {
+        let (result, receipt, handle, record) = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::available(&state)?;
             if let Some(id) = target
@@ -381,6 +394,13 @@ impl SessionController {
                 None => state.active.as_ref().map(|active| &active.info),
             };
             let turn = turn.map(|turn| (turn.id.clone(), turn.state));
+            let record = self.cancel_claim_record(
+                &state,
+                status == CancelStatus::Claimed,
+                "cancel",
+                operation.clone(),
+                true,
+            );
             let receipt = operation.map(|operation_id| {
                 let receipt = if let Some(id) = target {
                     Receipt::TurnCancel(TurnCancelReceipt {
@@ -416,8 +436,9 @@ impl SessionController {
                 Self::retain_control(&mut state, receipt.clone());
                 receipt
             });
-            Ok((CancelResult { status, cleared }, receipt, handle))
+            Ok((CancelResult { status, cleared }, receipt, handle, record))
         })?;
+        diagnostic::emit(record);
         if let Some(handle) = handle {
             handle.cancel();
         }
