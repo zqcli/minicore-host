@@ -1,10 +1,17 @@
 # minicore-host
 
-Recovery development is backed up on `dev` at [5461122ea0b7b2d94ba4d9d10f9f02115b77d4fe](https://github.com/zqcli/minicore-host/commit/5461122ea0b7b2d94ba4d9d10f9f02115b77d4fe). See [task 069](tasks/069-workspace-recovery/TASK.md) and the [publication map](docs/recovery-publication.json) for exact source boundaries, scoped reviews and remaining work. Configured credential inheritance is now fixed and independently reviewed with synthetic-only real-process and cross-reload tests. Earlier automatic backup CI runs failed on query fixtures. The corrected local composition at `521c9ea9f61fde0aaab31805d668505dff852316` now passes the complete gate with 858 unique Rust cases and 4 doctests; the pipe-fixture fix also passed independent review. Owner summaries have also passed scoped independent review. Remaining business diagnostics, production tool-approval wiring and fresh performance work are still in progress. This is not a release-ready build or a restoration of the lost final checkpoint.
+Development is backed up on `dev` at [8c5fe493f9b9e78e15ef831c532bc267d0c7fb53](https://github.com/zqcli/minicore-host/commit/8c5fe493f9b9e78e15ef831c532bc267d0c7fb53). After a second workspace replacement, the public history and locked toolchain are restored; unpublished owner diagnostics and their tests are being recovered and revalidated. The latest remote CI failed on a test-only unused diagnostic Record, now corrected locally. See [the recovery record](tasks/083-second-workspace-recovery/TASK.md), [current status](PROJECT.md) and [verified publication map](docs/recovery-publication.json). Existing scoped reviews and older full-gate counts are not fresh validation of later reconstructed code. The first version is not release-ready.
 
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
 The implementation contains strict contracts, Linux durable storage, real Runtime scheduling, production HTTP/SSE resources, scoped observation/interaction adapters and the owner-bound agent tool. It is not yet the complete first version. See [PROJECT.md](PROJECT.md) for exact baselines, implemented boundaries and remaining work.
+
+## Tool approval
+
+Execution defaults to Ask. Automated callers can explicitly choose Auto;
+ReadOnly permits recognized builtin reads, inspection and waiting. See the
+[configuration and migration guide](docs/tool-approval.md). This is not an OS
+sandbox, and configured credential exclusion does not isolate same-user processes.
 
 ## Local checks
 
