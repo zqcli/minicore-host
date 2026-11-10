@@ -20,8 +20,13 @@ fn descriptor() -> ModelDescriptor {
 #[test]
 fn chat_request_preserves_multipart_history_and_exact_optional_fields() {
     let id = ToolCallId::new("original-call").unwrap();
-    let arguments = json!({"quote": "\"\\\n世界", "nested": {"enabled": true}});
-    let schema = json!({"type": "object", "properties": {"quote": {"type": "string"}}});
+    let exact_numbers: Value = serde_json::from_str(
+        r#"{"integer":18446744073709551616001,"decimal":0.12345678901234567890123456789}"#,
+    )
+    .unwrap();
+    let arguments =
+        json!({"quote": "\"\\\n世界", "nested": {"enabled": true}, "numbers": exact_numbers});
+    let schema = json!({"type": "object", "properties": {"quote": {"type": "string"}}, "examples": [exact_numbers]});
     let request = ModelRequest::new(
         vec![
             ModelMessage::system("system\n世界").unwrap(),
