@@ -1,6 +1,44 @@
 # Fixed recovery checkpoint
 
-## Current review target
+## Backend review target and companion evidence
+
+Review code [be0e99552d283289fb1c0cc13915874ce0ba757f](https://github.com/zqcli/minicore-host/commit/be0e99552d283289fb1c0cc13915874ce0ba757f), exact source c22d8c8af058b756d5f37bc6d1a01f1dc7749934/tree a805cb4f6bf0d817fdf5d06226f8638e14ba95e6. Whole-backend comparison base is main b341b163e14543bfbe7f8d392ea243b4a123cdf7; final-diagnostic comparison base is 53167d3117323d2b126c453fbb53fa980bdb72ee. [Exact-head CI42751728862](https://github.com/zqcli/minicore-host/actions/runs/42751728862) passed. No main merge or full-product acceptance is authorized by this handoff.
+
+The following fixed documentation checkpoint b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba preserves the same Rust behavior and passed CI42752176828. The [114-entry map](recovery-publication.json) records source/remote identities and 397 preserved commits at that checkpoint. This subsequent companion documentation includes the final 093 review, corrected usage guides and final-code098 performance evidence. The publisher reports its actual remote commit after publication; this file does not invent a self-referential future SHA.
+
+[The new validation manifest](backend-review-validation.json) preserves both whole-workspace gates and exact raw gzip logs. Source c22 passed 939 unique Rust/4 doctest/20 Python; documentation/check composition 188c0197f9a4fa4d6cc2159a44d186f5505d09ce passed 939/4/28, strict workspace/all-target Clippy/rustdoc/fmt/whitespace. The extra 8 are existing pure performance-parser regressions now included in the ordinary script. Rust sources/tests/manifests/lock and SPEC are unchanged between them. Future CI must be checked for its own actual head, not inferred from these results.
+
+Read these current scope reports alongside the full SPEC:
+
+- [091](../tasks/091-saved-result-review/TASK.md): saved persistent results and retained/saved wire validation, scoped APPROVE 7b6f140.
+- [092](../tasks/092-compaction-review/TASK.md): original automatic-compaction Fault survives Prompt and independent save failure, scoped APPROVE a07fd1d; integrated 1791455 and covered by the composed gates.
+- [093](../tasks/093-session-handoff-cleanup-review/TASK.md): separate approvals for 8b129d4, 11e5bf5, and 579edef..ecb8af1. Final source ecb is integrated as a28d6b1, published as 9288ae9161fb6401d9aa2bd8b7044f946417f968, with code-equivalent c22 review target above. It includes real reentrant callbacks, unconfirmed cleanup barriers and original-save recovery, not only logged-name checks.
+- [094](../tasks/094-convergence-audit/TASK.md): six stages and contract reconciliation, not completion by 52 routes. [095](../tasks/095-saved-history-diagnostics/TASK.md) proves the alleged missing saved-read error hook was already present; no redundant fix.
+- [097](../tasks/097-usage-docs/TASK.md): corrected current crate guides and actual README-template CLI smoke.
+- [098](../tasks/098-composed-performance/TASK.md) and [performance report](performance-c22d8c8.md): fresh final-code release measurements, four exact compressed traces, reproducible derivation, all slow samples retained. The fixture explicitly uses Auto tools; interactive approval is not timed. No model account, TUI, WAN, saturation or SLO claim.
+
+## Reproduction without private workspaces
+
+Use Linux, Rust 1.90.0 and full Git history. The committed normal dependency is public Runtime 3aa47629929906832dcb309afb7d242c1ae3e53f; no private patch or token is required to obtain code. Main/Agent/TUI pins and local-use limits are in PROJECT.
+
+```sh
+./scripts/check.sh
+cargo test --workspace --all-targets --locked -- --list
+python3 tasks/098-composed-performance/verify_evidence.py
+(cd tasks/098-composed-performance/evidence && sha256sum -c SHA256SUMS)
+```
+
+Gate logs are exact original bytes in gzip; `backend-review-validation.json` records compressed and original hashes. The verification script only reads retained evidence, not a new load run. To make a new measurement, build this checkout's release binary, use `scripts/task090_perf.py --source-revision "$(git rev-parse HEAD)"` with that binary and a new output directory, and preserve every failure and sample. Do not overwrite the committed sets or treat a new result as the historical run. Actual recorded commands contain the original worktree paths only as provenance.
+
+For the earlier090 evidence, original source f36761a maps to public 5f3b81c98d550d24960f132c08dd94aaae9e37cf. Its SHA256SUMS intentionally records the old Cargo.lock; verify that one file from the mapped Git commit, not this newer Runtime pin. The other 28 unchanged paths and the old read-only raw verifier remain valid. No historical checksum was rewritten.
+
+## Remaining acceptance boundary
+
+All authorized backend implementation and local convergence work is fixed; no known reproduced production defect remains open in these scoped reviews. External independent full-product review is still required. Actual TUI integration is explicitly deferred this round, and live external-provider validation was not performed. These limits, Linux/same-user isolation limits, and the declined speculative recovery boundaries are not waived by a green gate. Keep main unchanged until the separate final acceptance decision.
+
+The older sections below retain their original checkpoint context. Their once-open saved-result, compaction, timing and final-diagnostic notes are superseded above, not current unresolved findings.
+
+## Previous checkpoint 53167d3 (historical status)
 
 Review published `dev` [53167d3117323d2b126c453fbb53fa980bdb72ee](https://github.com/zqcli/minicore-host/commit/53167d3117323d2b126c453fbb53fa980bdb72ee), compared with preserved `ccadc3013d084a47a3a9cfcd48fcfffdeca34253`. It exactly matches source `50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8` and tree `b616d753d0d35622ccefa10dc7752b7b2df21c46`. The [99-entry mapping](recovery-publication.json) preserves all 382 commits, original raw messages and actual zqcli author/committer facts. Main is unchanged. This is a backend checkpoint, not authorization to merge or a complete first-version claim.
 

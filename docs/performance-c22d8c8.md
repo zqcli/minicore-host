@@ -40,7 +40,9 @@ semantic changes. Each repetition starts a fresh real Host process, data root,
 workspace and loopback HTTP/SSE model fixture. Production Host/Agent/Session,
 Runtime, provider, filesystem and bash tool code execute. Only model responses
 are scripted, using explicit dummy fixture credentials. INFO JSONL diagnostics
-use the real process-installed stderr pipeline; stdout remains RPC.
+use the real process-installed stderr pipeline; stdout remains RPC. The fixture
+explicitly selects `execution.approval = auto`; interactive Ask approval is not
+measured.
 
 There is one retained smoke repetition and three formal repetitions. Smoke is
 excluded from every reported statistic. The release executable is identical for

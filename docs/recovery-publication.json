@@ -58,12 +58,243 @@
       "observed_at": "2026-11-10T03:19:06.789Z"
     }
   },
-  "purpose": "Fixed five-commit progress backup of actual compaction diagnostics and original-fault retention; not release or stage acceptance",
-  "source_base": "0cc9e6111f3c0c273358ec04787bde1ea4d5917c",
-  "initial_remote_head": "ccadc3013d084a47a3a9cfcd48fcfffdeca34253",
-  "source_head": "50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8",
-  "remote_head": "53167d3117323d2b126c453fbb53fa980bdb72ee",
-  "tree": "b616d753d0d35622ccefa10dc7752b7b2df21c46",
+  "gzip_evidence_verification": {
+    "remote_head": "1fe82c2ae094496970fefa941908cbc07672ca58",
+    "logs": [
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/full-50a1b2f.log.gz",
+        "bytes": 26417,
+        "sha256": "ed1f79b94ea75683647b034227c21b3ce94d65bdb443bfec1f16415c0766081a",
+        "uncompressed_bytes": 115690,
+        "uncompressed_sha256": "e09269d6cd3db15f1b93a80df03e851d6b9a23ce327fd1fa05943d165f48f739"
+      },
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/full-50a1b2f-inventory.log.gz",
+        "bytes": 24375,
+        "sha256": "b1db10675f7825f39e05e7c1faa01aceb6edc2271f3c70d1897beb9f3f23ee87",
+        "uncompressed_bytes": 92415,
+        "uncompressed_sha256": "ba5489aa5f8a53a6ca2d1472d02f3c934cf3a526925ad281c38cf246ab85a568"
+      },
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/compaction-composition.log.gz",
+        "bytes": 1562,
+        "sha256": "73047d82b865aea01ffa4021ac19bea10ca80cdcc28b1fd05488d1b86aa2f3b6",
+        "uncompressed_bytes": 4961,
+        "uncompressed_sha256": "4e9da769ec6129e7f4eb2da0dc55b789ee3765e8a334624a80381aa9e2743a74"
+      },
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/compaction-composition-fixed.log.gz",
+        "bytes": 939,
+        "sha256": "a66179ad544be4349d58a6c9bacb740c72fc33fba8e55891da64b29cdf292d9c",
+        "uncompressed_bytes": 3107,
+        "uncompressed_sha256": "dbc9c53b66b86a3d33ac880ac1c784dff1f64b6d85c7f77de05c6ac21092edbe"
+      },
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/app-result-composition.log.gz",
+        "bytes": 1023,
+        "sha256": "059d26e68b91038ee0214f9ccfff0b5b14e94e19d5985baf87f2a8702409a0d8",
+        "uncompressed_bytes": 3671,
+        "uncompressed_sha256": "a8ab48bbdfa440a56f069f6d5ed32fd7f68ab3f5db124244dba5fc9025cea730"
+      },
+      {
+        "path": "tasks/096-convergence-checkpoint/evidence/performance-integration-checks.log.gz",
+        "bytes": 697,
+        "sha256": "fc66da2ba4fc571ba163796c1b2356e14e44fe577c79c97bf1f504c1694b90e7",
+        "uncompressed_bytes": 2902,
+        "uncompressed_sha256": "6c049967a5f615a63ad82ba7dc1574da72305237c8a00d7ab9350d9249f1f7c8"
+      }
+    ],
+    "verified_count": 6
+  },
+  "performance_manifest_verification": {
+    "manifest_entries": 29,
+    "current_paths_verified": 28,
+    "historical_paths_verified": 1,
+    "historical_source": "f36761a164c6f3ae092c5e0bbf7ab08bbcd58891",
+    "historical_remote": "5f3b81c98d550d24960f132c08dd94aaae9e37cf",
+    "entries": [
+      {
+        "path": "Cargo.lock",
+        "sha256": "1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125",
+        "verified_from": "5f3b81c98d550d24960f132c08dd94aaae9e37cf",
+        "historical": true
+      },
+      {
+        "path": "SPEC.md",
+        "sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "docs/performance-f36761a.md",
+        "sha256": "403a41ce21a5ab4ece9b34590d3565b1de9f2e39160551c93a442dc566a8f633",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task058_perf.py",
+        "sha256": "f332e227d6c6094d5f2856c6ee75d3685e6937a782490f00ade844c089080373",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task058_rss_test.py",
+        "sha256": "447ff75bf8a43bc99b9e6eab8deadac804fa8b5655ee7597e71048c09a3724a1",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task058_summarize.py",
+        "sha256": "19ba3e056059a8308bfc0bf0986402de85d288b99769cb74285e488023ac85d2",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task059_projection_test.py",
+        "sha256": "4b8d30524ede01124f89a9ef661b5de5cc00c28de87cf759842b258eabba8bfa",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task090_perf.py",
+        "sha256": "6c62caf417c61d5fc93807459573057847c2e80fa659a576ac3db4cc7326729f",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task090_perf_test.py",
+        "sha256": "f9e71e31e19733f3751853fa702f778af3e666365524686cf5e63a6c1856e204",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "scripts/task090_summarize.py",
+        "sha256": "199c5e708f47daa9c0ad0bd171379033934dbb365fc7b792d4c4c4d99db53ecc",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/TASK.md",
+        "sha256": "30b407f175ff40ffbf250527ae8bf83ba2bffc16f2584ef04bd20ed99078ad0d",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/build-provenance.json",
+        "sha256": "f4fa7af0fdec6aa2174148a653a9c5566eccb973e28d1f64c4d4220943550e27",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/final-checks.txt",
+        "sha256": "72e84a69cbac25df8ce61d82ad49d6d5673765563741d2ba8bbfb0c971a46048",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/harness-adaptation.diff",
+        "sha256": "c2387c3377431cb79f75f41fa606abbb8a28002d6311ca214c0641defcf243c5",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measured-aa64dc7/results.json",
+        "sha256": "33e3eb97b4698861677bde8994e31e3564a71f3a402737dc9f26684174c90c33",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measured-aa64dc7/run-01.jsonl",
+        "sha256": "6c6044d1e61978e159674ee02280e91cafa31693babea293f77ab393cc5d9032",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measured-aa64dc7/run-02.jsonl",
+        "sha256": "6b7a3b010d3dfd366e4e68876054b9ea870ab41607e747ab00f42ea8bc7fc593",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measured-aa64dc7/run-03.jsonl",
+        "sha256": "c34adccb498806c01aa1c2ac342f70d350c05e3a9da45f623c73d97eab4ae6b2",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measured-aa64dc7/summary.json",
+        "sha256": "3dc7a4f8c898e323b12269e325002f0423d6d67afeaf21623f4abd29ca9accae",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/measurement-command.txt",
+        "sha256": "7a2c26644988925692621ce9f332a704181bcda6fed86c573812a2ba63a4fca9",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/pre-measurement-python-checks.txt",
+        "sha256": "3aeafac4c4f09524fbc24f2b4ad96e3e309f98fa4d46d6ebb1b60114f290609d",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/raw-verification.txt",
+        "sha256": "5eae113bf21553b6200da862267457499b9f348f3c3f16c4a07896231c9526d3",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/release-build-time-unavailable.txt",
+        "sha256": "0778f5d52f4633b43b947fd22b1dac756c50a135fb6cad93b6c7d935a88cf423",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/release-build.txt",
+        "sha256": "78f34204c4b49376b64f85d076842df33fc2f1ae532ff678b69b6aede60a956a",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/smoke-aa64dc7/results.json",
+        "sha256": "64d94bd4e569bf517db9be99aa18b85594d4c51398409ff7ede11c52249773f0",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/smoke-aa64dc7/run-01.jsonl",
+        "sha256": "fecf508aa4405d102d0a4dee0bb9cdefb125a38f240b8c4400b53a43a7ace21a",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/smoke-aa64dc7/summary.json",
+        "sha256": "46747cbcdce51b939ef2c4755a408088f310b4b7546d05e2dd4f8215f70f95cc",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/evidence/source-before-measurement.txt",
+        "sha256": "0829044e7c6549fb2e50905fb796c741bf9bc2fad229318230b749c3ded62c8c",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      },
+      {
+        "path": "tasks/090-fresh-performance/verify_evidence.py",
+        "sha256": "4147ffe3c4c151d6a05a10d58c3da26032ca964c2b76c0b20b6601e908319d76",
+        "verified_from": "1fe82c2ae094496970fefa941908cbc07672ca58",
+        "historical": false
+      }
+    ]
+  },
+  "purpose": "Fixed five-commit documentation backup of scoped reviews, six-stage boundaries, existing saved-read diagnostics and full producer validation; not final product acceptance",
+  "source_base": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+  "initial_remote_head": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+  "source_head": "4d3e2eafb8351bdbc2a98d6004e95dbdeb1f8f4a",
+  "remote_head": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
+  "tree": "208c77d1814eeea63beaf0fcc9ac19a862377b8e",
   "mapping": {
     "b138a8f366fc87883f84bef580bad0e4a73ca2da": "9063c7adc86c7bb984d6dcf6aed91926b92f56c5",
     "6eeab3fc8bec8475bd1ff4791993a2dbdfadcb75": "9585ba4fb763231dcd7f192c295515b96d916683",
@@ -163,154 +394,169 @@
     "9e2bdf41e62450cb445dae410076b2df6fe8ea8d": "23fc7272d99a6409b4304d6fabbffeac529d6276",
     "17914556b8d7359968d143f3ef08cd7cd2885172": "2cb4b0a2c9d7fd0fb12ee3d43643ed207b312adf",
     "40bc1d5623fc2fd7e79ccd85417f6179486c66ef": "127ffb1f4c5920bb8791274461a87d109fc3f59e",
-    "50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8": "53167d3117323d2b126c453fbb53fa980bdb72ee"
+    "50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+    "b573a590ac52f37adeedb00d15f16d78be6af03d": "e35e80d988050a9fd2933186045c62b03d7ca880",
+    "5fa610500a77fd702d06b1f4cc01d9a555f2c3b1": "bb8c819cccd33aa22ebcc26a295d53735b303f66",
+    "4c10d8b7697dd8fee1004a638a54d2dc2813d906": "4005b06fe7106a0ff831a3ab72b98ee46afed747",
+    "18590f44d5c3824f6e822b314e6f5b701e97ce2c": "de8a8246739e86675a0b6509221048590d1b2ae9",
+    "33f4b2dcb593cc2aeb6965cdb2eb4829f0a2a5db": "1fe82c2ae094496970fefa941908cbc07672ca58",
+    "d712d0994cc3afec4d47112321f71bddae30a634": "45a23375c78f020bdca290f9964e5cc25545146b",
+    "bd03fbfb3c79159a13626851e4f70127f949ee12": "8a6297df3851b22a363e6c2caca170cf63674755",
+    "d57549dbb8556c9ca0cde06ed277ff08871e22a6": "ecbccde80a7d2a7273fc0c6d32513b2824dabfec",
+    "a28d6b10127677498953a1a12886f34e9892d910": "9288ae9161fb6401d9aa2bd8b7044f946417f968",
+    "c22d8c8af058b756d5f37bc6d1a01f1dc7749934": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+    "fd35c9308bf8f47ea286c50247374ea34cf8f173": "aea99705a888ab8c72b1f63d7fe50b3455d0dd24",
+    "f6440b30041cead552e6463415e3eb6cb684edb4": "b5f124e240308720d1ada2142837405551b04ed0",
+    "9e18e04e82482ef750985614f16d2aa9ea2c6d00": "100545e7d5a95c11360eb8f2ea5b61201b38aeb5",
+    "f47709ec9705c334a5fddcc1513d965c53c3c77a": "228960f86e012c6ecf4bfbdcdab57a7152a67c97",
+    "4d3e2eafb8351bdbc2a98d6004e95dbdeb1f8f4a": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba"
   },
-  "inherited_mapping_count": 94,
+  "inherited_mapping_count": 109,
   "new_commits": [
     {
-      "source_sha": "4445a698f603f8da724ffa56b0bc5755dffa9b14",
-      "source_parent": "0cc9e6111f3c0c273358ec04787bde1ea4d5917c",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794278573 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280507 +0900",
-      "remote_sha": "52b8d45b762129eace4301c79c4c495da4f07eb3",
-      "remote_parent": "ccadc3013d084a47a3a9cfcd48fcfffdeca34253",
-      "tree": "9382053f46cc46b83b386054b409bcd54cda9015",
-      "message": "test(compaction): expose missing owner diagnostic boundaries\n",
+      "source_sha": "fd35c9308bf8f47ea286c50247374ea34cf8f173",
+      "source_parent": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281646 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281988 +0900",
+      "remote_sha": "aea99705a888ab8c72b1f63d7fe50b3455d0dd24",
+      "remote_parent": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+      "tree": "b89eb78aafade99ed3d3d88efb10570e0bc7d3af",
+      "message": "docs(review): approve force preparation and message diagnostics\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:22:43Z",
+        "date": "2026-11-10T03:49:45Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280963 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282585 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:22:43Z",
+        "date": "2026-11-10T03:49:45Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280963 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282585 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/52b8d45b762129eace4301c79c4c495da4f07eb3",
+      "url": "https://github.com/zqcli/minicore-host/commit/aea99705a888ab8c72b1f63d7fe50b3455d0dd24",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "9e2bdf41e62450cb445dae410076b2df6fe8ea8d",
-      "source_parent": "4445a698f603f8da724ffa56b0bc5755dffa9b14",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794279114 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280534 +0900",
-      "remote_sha": "23fc7272d99a6409b4304d6fabbffeac529d6276",
-      "remote_parent": "52b8d45b762129eace4301c79c4c495da4f07eb3",
-      "tree": "c82865e56646797e1fc885164d78542d1afa68de",
-      "message": "feat(compaction): record actual utility and save boundaries\n",
+      "source_sha": "f6440b30041cead552e6463415e3eb6cb684edb4",
+      "source_parent": "fd35c9308bf8f47ea286c50247374ea34cf8f173",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281559 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281988 +0900",
+      "remote_sha": "b5f124e240308720d1ada2142837405551b04ed0",
+      "remote_parent": "aea99705a888ab8c72b1f63d7fe50b3455d0dd24",
+      "tree": "e9a419af5a85dac6505b31760f6eb9ae9aa46751",
+      "message": "docs(audit): reconcile fixed-source convergence and remaining scope\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:02Z",
+        "date": "2026-11-10T03:50:02Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280982 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282602 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:02Z",
+        "date": "2026-11-10T03:50:02Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280982 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282602 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/23fc7272d99a6409b4304d6fabbffeac529d6276",
+      "url": "https://github.com/zqcli/minicore-host/commit/b5f124e240308720d1ada2142837405551b04ed0",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "17914556b8d7359968d143f3ef08cd7cd2885172",
-      "source_parent": "9e2bdf41e62450cb445dae410076b2df6fe8ea8d",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280091 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280534 +0900",
-      "remote_sha": "2cb4b0a2c9d7fd0fb12ee3d43643ed207b312adf",
-      "remote_parent": "23fc7272d99a6409b4304d6fabbffeac529d6276",
-      "tree": "16f1b64cee3612614f9a3763da2bed0d17b88b40",
-      "message": "fix(compaction): retain original faults across runtime prompt reports\n",
+      "source_sha": "9e18e04e82482ef750985614f16d2aa9ea2c6d00",
+      "source_parent": "f6440b30041cead552e6463415e3eb6cb684edb4",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281478 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281988 +0900",
+      "remote_sha": "100545e7d5a95c11360eb8f2ea5b61201b38aeb5",
+      "remote_parent": "b5f124e240308720d1ada2142837405551b04ed0",
+      "tree": "64e144fc2115a745469c4be8051a3737427263a3",
+      "message": "docs(diagnostics): verify existing saved history read errors\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:22Z",
+        "date": "2026-11-10T03:50:24Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281002 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282624 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:22Z",
+        "date": "2026-11-10T03:50:24Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281002 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282624 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/2cb4b0a2c9d7fd0fb12ee3d43643ed207b312adf",
+      "url": "https://github.com/zqcli/minicore-host/commit/100545e7d5a95c11360eb8f2ea5b61201b38aeb5",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "40bc1d5623fc2fd7e79ccd85417f6179486c66ef",
-      "source_parent": "17914556b8d7359968d143f3ef08cd7cd2885172",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280339 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280534 +0900",
-      "remote_sha": "127ffb1f4c5920bb8791274461a87d109fc3f59e",
-      "remote_parent": "2cb4b0a2c9d7fd0fb12ee3d43643ed207b312adf",
-      "tree": "d81ccde3531d5ab9a37404fa5d5812c71459eb3c",
-      "message": "docs(compaction): record isolated diagnostic and fault handoff validation\n",
+      "source_sha": "f47709ec9705c334a5fddcc1513d965c53c3c77a",
+      "source_parent": "9e18e04e82482ef750985614f16d2aa9ea2c6d00",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281577 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281988 +0900",
+      "remote_sha": "228960f86e012c6ecf4bfbdcdab57a7152a67c97",
+      "remote_parent": "100545e7d5a95c11360eb8f2ea5b61201b38aeb5",
+      "tree": "cd5ad76fca58c4a8f37353e5b5b9745bb8655443",
+      "message": "docs(review): record independent saved diagnostics cross-check\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:40Z",
+        "date": "2026-11-10T03:50:40Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281020 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282640 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:23:40Z",
+        "date": "2026-11-10T03:50:40Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281020 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282640 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/127ffb1f4c5920bb8791274461a87d109fc3f59e",
+      "url": "https://github.com/zqcli/minicore-host/commit/228960f86e012c6ecf4bfbdcdab57a7152a67c97",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "50a1b2fedae73ce5c8b0a461a5bd6ed0edce68c8",
-      "source_parent": "40bc1d5623fc2fd7e79ccd85417f6179486c66ef",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280576 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794280851 +0900",
-      "remote_sha": "53167d3117323d2b126c453fbb53fa980bdb72ee",
-      "remote_parent": "127ffb1f4c5920bb8791274461a87d109fc3f59e",
-      "tree": "b616d753d0d35622ccefa10dc7752b7b2df21c46",
-      "message": "test(compaction): adapt retained result assertions after query integration\n",
+      "source_sha": "4d3e2eafb8351bdbc2a98d6004e95dbdeb1f8f4a",
+      "source_parent": "f47709ec9705c334a5fddcc1513d965c53c3c77a",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282052 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282091 +0900",
+      "remote_sha": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
+      "remote_parent": "228960f86e012c6ecf4bfbdcdab57a7152a67c97",
+      "tree": "208c77d1814eeea63beaf0fcc9ac19a862377b8e",
+      "message": "docs(diagnostics): record final producer gate and scope audit\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:24:00Z",
+        "date": "2026-11-10T03:51:18Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281040 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282678 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T03:24:00Z",
+        "date": "2026-11-10T03:51:18Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794281040 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794282678 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/53167d3117323d2b126c453fbb53fa980bdb72ee",
+      "url": "https://github.com/zqcli/minicore-host/commit/b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     }
   ],
-  "source_author_note": "All five new source commits and all reconstructed remote commits have independently recorded zqcli authors/committers. Historical source commits with other authors remain distinguished in earlier mapping evidence.",
+  "source_author_note": "Original source author/committer and actual API/raw reconstructed author/committer are recorded separately for every new commit; historical source identities are preserved without relabeling.",
   "verification": {
     "new_commits": 5,
-    "prior_commits_checked": 377,
+    "prior_commits_checked": 392,
     "prior_commit_objects_unchanged": true,
-    "known_blobs_checked": 1796,
-    "new_blobs_checked": 17,
-    "history_commit_count": 382,
+    "known_blobs_checked": 1874,
+    "new_blobs_checked": 6,
+    "history_commit_count": 397,
     "trees_modes_blob_bytes_identical": true,
     "raw_messages_identical": true,
     "single_parent_sequence_verified": true,
@@ -318,39 +564,40 @@
     "no_coauthor": true,
     "spec_unchanged": true,
     "fast_forward_verified": true,
-    "inherited_mapping_remote_ancestry_verified": 94,
+    "inherited_mapping_remote_ancestry_verified": 109,
+    "production_tests_and_scripts_unchanged": true,
     "dependency_manifests_and_lock_unchanged": true
   },
   "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
   "remote_refs": {
-    "refs/heads/dev": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+    "refs/heads/dev": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
     "refs/heads/main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7"
   },
-  "ref_verified_at": "2026-11-10T03:25:16.863Z",
+  "ref_verified_at": "2026-11-10T03:52:10.869Z",
   "branch_fetch_verified": true,
   "force": false,
   "runtime_repository_changed": false,
-  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/53167d3117323d2b126c453fbb53fa980bdb72ee",
-  "compare_url": "https://github.com/zqcli/minicore-host/compare/ccadc3013d084a47a3a9cfcd48fcfffdeca34253...53167d3117323d2b126c453fbb53fa980bdb72ee",
+  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
+  "compare_url": "https://github.com/zqcli/minicore-host/compare/be0e99552d283289fb1c0cc13915874ce0ba757f...b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
   "ci": {
-    "observed_at": "2026-11-10T03:26:17.100Z",
+    "observed_at": "2026-11-10T03:55:30.573Z",
     "waited_for_completion": false,
     "runs": [
       {
-        "id": 42749273803,
+        "id": 42752176828,
         "name": "Linux foundation CI",
-        "head_sha": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+        "head_sha": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
         "status": "in_progress",
         "conclusion": null,
-        "url": "https://github.com/zqcli/minicore-host/actions/runs/42749273803",
-        "updated_at": "2026-11-10T03:24:52Z",
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/42752176828",
+        "updated_at": "2026-11-10T03:52:07Z",
         "jobs": [
           {
-            "id": 129608772254,
+            "id": 129618106107,
             "name": "Quality gate (Linux, Rust 1.90.0)",
             "status": "in_progress",
             "conclusion": null,
-            "run_id": 42749273803,
+            "run_id": 42752176828,
             "logs_url": null,
             "steps": [
               {
@@ -390,20 +637,21 @@
     ]
   },
   "previous_checkpoint_ci": {
-    "source_head": "0cc9e6111f3c0c273358ec04787bde1ea4d5917c",
-    "remote_head": "ccadc3013d084a47a3a9cfcd48fcfffdeca34253",
-    "run_id": 42748451681,
+    "source_head": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+    "remote_head": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+    "run_id": 42751728862,
     "status": "completed",
     "conclusion": "success",
-    "url": "https://github.com/zqcli/minicore-host/actions/runs/42748451681",
-    "updated_at": "2026-11-10T03:22:52Z",
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/42751728862",
+    "updated_at": "2026-11-10T03:53:27Z",
+    "observed_at": "2026-11-10T03:55:30.573Z",
     "jobs": [
       {
-        "id": 129606079220,
+        "id": 129616664655,
         "name": "Quality gate (Linux, Rust 1.90.0)",
         "status": "completed",
         "conclusion": "success",
-        "run_id": 42748451681,
+        "run_id": 42751728862,
         "logs_url": null,
         "steps": [
           {
@@ -445,31 +693,29 @@
         ]
       }
     ],
-    "observed_at": "2026-11-10T03:26:17.100Z",
-    "scope_note": "This successful run applies to the previous published checkpoint, not to the new compaction checkpoint or full specification acceptance."
+    "source_gate_reported": {
+      "unique_rust_tests": 939,
+      "doctests": 4,
+      "python_tests": 20,
+      "result": "passed"
+    },
+    "scope_note": "The current documentation checkpoint has byte-identical production, tests, scripts, dependency and SPEC content to c22d8c8."
   },
-  "recorded_at": "2026-11-10T03:26:17.355756+00:00",
   "validation_status": {
-    "combined_workspace_gate": "The full current workspace gate had started but was not claimed complete. Automatic exact-head CI was still running when recorded.",
     "release_claimed": false,
     "stage_accepted": false,
+    "combined_workspace_gate": "Production and test content is identical to c22d8c8, whose local complete 939 Rust / 4 doctest / 20 Python gate and exact-head hosted CI passed. The newer documentation-only exact-head CI was still running when recorded.",
     "source_validation_reported": [
-      "The fixed composition passed 23 core tests and 13 real focused transport tests; formatting passed.",
-      "Independent task 092 review gave scoped approval to the underlying compaction source a07fd1d. This approval is not a claim that all current stage requirements passed.",
-      "The final source 50a1b2f mechanically adapts Option-returning query fixtures; the superseded unpublished 9b91dcf intermediate source is not included."
-    ],
-    "addressed_findings": [
-      {
-        "scope": "Automatic compaction diagnostics and original fault identity",
-        "status": "Repair, real regressions and scoped independent approval included; full-stage acceptance not claimed",
-        "changes": "Preserve original 3702 rather than replacing it with 4999 across Runtime prompt reports; retain independent persistence failure 3301. Record actual utility and save boundaries."
-      }
+      "The producer ecb8af1 independently passed the complete 939/4/20 gate and matches the composed production, dependency and SPEC bytes.",
+      "Force/preparation/internal-message scoped review, the six-stage boundary audit, and actual validation of existing saved-read error diagnostics are included in this documentation checkpoint.",
+      "The final scheduling delta 579edef..ecb8af1 subsequently received scoped APPROVE. Its review report 664fc81640125a83a7d86a8cd07c1712aa3b9dfa was integrated after this checkpoint as 26a51c1 and is reserved for the next batch. That report is not claimed to be present in this fixed source.",
+      "The final scheduling review reported five production focused cases, five independent probes and 338 core cases plus strict lint/docs passing."
     ],
     "remaining": [
-      "Complete and inspect the current full workspace gate and automatic exact-head CI.",
-      "Complete outstanding broader diagnostics review and full stage acceptance work.",
-      "TUI and real remote-model validation are not claimed."
+      "Publish the subsequent scheduling review report in its separately frozen batch; no post-4d3 source was included here.",
+      "TUI, live external-model validation, external final-product review and main merge are not claimed."
     ],
-    "publication_scope": "Only the five frozen commits 0cc9e61..50a1b2f were published. Runtime dependency pin remains 3aa4762; main and Runtime repository were not changed."
-  }
+    "publication_scope": "Only c22d8c8..4d3e2ea was published. Earlier source trees/messages were preserved; no main or Runtime repository changes. Completion of scoped review is not a claim of full product acceptance."
+  },
+  "recorded_at": "2026-11-10T03:55:30.846811+00:00"
 }

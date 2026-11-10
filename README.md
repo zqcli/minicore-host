@@ -1,6 +1,6 @@
 # minicore-host
 
-The fixed published `dev` checkpoint is [53167d3117323d2b126c453fbb53fa980bdb72ee](https://github.com/zqcli/minicore-host/commit/53167d3117323d2b126c453fbb53fa980bdb72ee), identical to source `50a1b2f`. Its complete local gate passes **937 unique Rust tests, 4 doctests and 20 Python checks**, with strict lint/docs and formatting. [Exact-head CI](https://github.com/zqcli/minicore-host/actions/runs/42749273803) passed; preceding ccadc CI also passed. Saved-result restart and automatic-compaction Fault corrections are integrated and scoped-reviewed. See [the fixed handoff](docs/recovery-checkpoint-review.md), [current status](PROJECT.md), [99-entry publication map](docs/recovery-publication.json), [raw gate evidence](docs/checkpoint-50a1b2f-validation.json) and [fresh performance report](docs/performance-f36761a.md). Final diagnostic slices and external review remain; TUI is deferred. The first version is not release-ready.
+The fixed backend review code is [be0e99552d283289fb1c0cc13915874ce0ba757f](https://github.com/zqcli/minicore-host/commit/be0e99552d283289fb1c0cc13915874ce0ba757f) on `dev`, with [exact-head CI passing](https://github.com/zqcli/minicore-host/actions/runs/42751728862). The final local documentation/check composition passes **939 unique Rust tests, 4 doctests and 28 Python checks**, with strict lint/docs and formatting. [Current status](PROJECT.md), [fixed handoff](docs/recovery-checkpoint-review.md), [source map](docs/recovery-publication.json), [raw gate evidence](docs/backend-review-validation.json) and [final-code performance](docs/performance-c22d8c8.md) provide reproducible boundaries. The backend is ready for external independent review, not complete v4.93 acceptance: real external-model and actual TUI checks remain unperformed. Main is unchanged.
 
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
@@ -21,6 +21,9 @@ The Runtime dependency is exactly `0.10.0`, pinned to published commit `3aa47629
 
 ## Components
 
+- [Executable startup/configuration](crates/host-app/README.md)
+- [Production local tools](crates/host-local-tools/README.md)
+- [Client transports](crates/host-transport/README.md)
 - [In-process owners](crates/host-core/README.md)
 - [Protocol contracts](crates/host-protocol/README.md)
 - [Provider adapter](crates/host-provider/README.md)
@@ -41,4 +44,4 @@ The later owner, observation, delegation and resource checkpoint is now publishe
 
 The historical pre-replacement local executable checkpoint was `7cf8e104bf84ee599331a3d96e181bba53fdf54c`: real process/configuration startup, production read/write/edit/bash, workspace routes, canonical controls, context and reviewed file-lease corrections. It also includes the reviewed cold history.read/load coordination fix. Explicit owner-backed Agent/Session deletion is also integrated. Original input provenance is projected into actual model and compaction requests without changing durable history. Its complete gate passes **822 unique tests and 4 doctests**. [The fixed handoff](docs/executable-review-handoff.md) records 52 routed methods, actual binary acceptance and remaining contract findings. At that historical checkpoint the code was not yet published. Its then-current verified published documentation checkpoint was [a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f](https://github.com/zqcli/minicore-host/commit/a84e36f32c9ab7340ac06f5fb3a2cc47d3ab0f0f), with [successful exact-head CI](https://github.com/zqcli/minicore-host/actions/runs/42653342131).
 
-Current reconstruction includes query projection/revision corrections, basic owner summaries/pagination, the reviewed owner diagnostics, saved-result reads and compaction Fault correction. Final diagnostic slices, their final composition and external review remain active; the new performance report is explicitly attached to its measured source. Earlier local checkpoints, including the 650-test execution gate and subsequent reproduced lease failures, remain recorded in their task/handoff files. A passing aggregate is not a claim that the first version or external review is complete.
+Current reconstruction includes query projection/revision corrections, basic owner summaries/pagination, the reviewed owner diagnostics, saved-result reads and compaction Fault correction. Final diagnostic slices are implemented, scoped-reviewed and composed; external final review remains. The final-code and historical performance reports retain their separate measured sources. Earlier local checkpoints, including the 650-test execution gate and subsequent reproduced lease failures, remain recorded in their task/handoff files. A passing aggregate is not a claim that the first version or external review is complete.

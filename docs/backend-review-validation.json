@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "purpose": "Fixed backend review evidence, not complete v4.93 acceptance or permission to merge main",
+  "code_source": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+  "published_code": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+  "code_tree": "a805cb4f6bf0d817fdf5d06226f8638e14ba95e6",
+  "full_review_base": "b341b163e14543bfbe7f8d392ea243b4a123cdf7",
+  "incremental_code_compare_base": "53167d3117323d2b126c453fbb53fa980bdb72ee",
+  "published_documentation_checkpoint": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
+  "documentation_source": "4d3e2eafb8351bdbc2a98d6004e95dbdeb1f8f4a",
+  "latest_local_full_gate": "188c0197f9a4fa4d6cc2159a44d186f5505d09ce",
+  "source_relationship": "Rust source, Rust tests, manifests, lock and SPEC match c22d8c8; later crate README, evidence and check-script changes are explicit",
+  "runtime": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "lock_sha256": "b8aa55600f443e7ff923096f37da833049d106078d5df44aa16362d70e11873b",
+  "commands": [
+    {
+      "source": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+      "commands": [
+        "CARGO_NET_OFFLINE=true ./scripts/check.sh",
+        "cargo test --workspace --all-targets --locked -- --list"
+      ],
+      "exit_code": 0,
+      "unique_rust_cases": 939,
+      "nonempty_test_programs": 126,
+      "doctests": 4,
+      "python_cases": 20
+    },
+    {
+      "source": "188c0197f9a4fa4d6cc2159a44d186f5505d09ce",
+      "commands": [
+        "CARGO_NET_OFFLINE=true ./scripts/check.sh",
+        "cargo test --workspace --all-targets --locked -- --list"
+      ],
+      "exit_code": 0,
+      "unique_rust_cases": 939,
+      "nonempty_test_programs": 126,
+      "doctests": 4,
+      "python_cases": 28,
+      "includes": [
+        "committed/worktree whitespace",
+        "fmt",
+        "strict workspace all-target Clippy",
+        "all-target tests",
+        "doctests",
+        "strict workspace rustdoc"
+      ]
+    }
+  ],
+  "environment": {
+    "rustc": "1.90.0 (1159e78c4 2025-09-14)",
+    "target": "x86_64-unknown-linux-gnu",
+    "cargo_jobs": 2,
+    "dev_debug": 0,
+    "test_debug": 0,
+    "incremental": false,
+    "offline": true,
+    "target_directory": "Exclusive to integration worktree; no cross-worktree target reuse"
+  },
+  "logs": [
+    {
+      "path": "tasks/099-backend-review-handoff/evidence/full-c22d8c8.log.gz",
+      "encoding": "gzip",
+      "bytes": 26293,
+      "sha256": "60a8c21564ca603391b39b60b7012b1d8fcc87bc38298d197ab1e235fc79ee90",
+      "uncompressed_bytes": 114796,
+      "uncompressed_sha256": "dfed41bf43bfe032b724be6b83aa3ba243776bb9dd1849769342e97516961b1a"
+    },
+    {
+      "path": "tasks/099-backend-review-handoff/evidence/full-c22d8c8-inventory.log.gz",
+      "encoding": "gzip",
+      "bytes": 24471,
+      "sha256": "bbecf9acd95401ad01cad2eaf9c3f69e26d0e5f27dccf72c2ea5aee246369f39",
+      "uncompressed_bytes": 92909,
+      "uncompressed_sha256": "e1fefd23f5db8208f0bb169fb4b36cd909e8368d11e06c9afaa51cb5eb743b58"
+    },
+    {
+      "path": "tasks/099-backend-review-handoff/evidence/full-188c019.log.gz",
+      "encoding": "gzip",
+      "bytes": 26352,
+      "sha256": "f44f03a65293c27e4c988f3dc00eaddaeda090ae83c686e20c6a04e946a6bd0a",
+      "uncompressed_bytes": 115711,
+      "uncompressed_sha256": "5a77c8cb127704355e368597b0ec5faf05030b08076c9475ff8761b7d5c48414"
+    },
+    {
+      "path": "tasks/099-backend-review-handoff/evidence/full-188c019-inventory.log.gz",
+      "encoding": "gzip",
+      "bytes": 24471,
+      "sha256": "ff9401ae7a635da792ba7c9129b355357750650da35a63c54d0cd7fd493e304e",
+      "uncompressed_bytes": 92909,
+      "uncompressed_sha256": "ce5af4261edcb1e2a888ecf153368b2c196c930c21eab1452dd6c22faa3927f3"
+    }
+  ],
+  "exact_head_ci": [
+    {
+      "head": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+      "run": 42751728862,
+      "conclusion": "success"
+    },
+    {
+      "head": "b7e730ec87b53cc66ceb6a78dfeaa56ba5f59cba",
+      "run": 42752176828,
+      "conclusion": "success"
+    },
+    {
+      "repository": "zqcli/minicore-runtime",
+      "head": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+      "run": 42746444546,
+      "conclusion": "success"
+    }
+  ],
+  "performance": {
+    "task": "098-composed-performance",
+    "source": "c22d8c8af058b756d5f37bc6d1a01f1dc7749934",
+    "published_equivalent": "be0e99552d283289fb1c0cc13915874ce0ba757f",
+    "smoke_runs": 1,
+    "formal_runs": 3,
+    "report": "docs/performance-c22d8c8.md",
+    "raw_audit": "python3 tasks/098-composed-performance/verify_evidence.py",
+    "source_report_commit": "ce9154bcbad3eaedbb3b95cd4db17a9c7f3d0608",
+    "integrated_report_commit": "b26f06efb31e46dc9eab8705c7378db56e4e81c1",
+    "root_reverification": "4 compressed/raw identities and all recomputed RPC/body/resource/cleanup facts passed; all 17 evidence checksums passed from their documented evidence directory"
+  },
+  "scope_reviews": [
+    {
+      "task": "091",
+      "source": "7b6f14080a1fa1d3ac0dbe8623dd59f641dbdadf",
+      "scope": "Saved result and retained/saved bidirectional DTO validation",
+      "verdict": "Scoped APPROVE"
+    },
+    {
+      "task": "092",
+      "source": "a07fd1d60c17cda7d5a56b7083e4d6e6259e6d16",
+      "scope": "Compaction original Fault handoff",
+      "verdict": "Scoped APPROVE"
+    },
+    {
+      "task": "093",
+      "sources": [
+        "8b129d4bdd35e223f8efe80059c4c8ea7bfe1df6",
+        "11e5bf5c05750bc4a39fd9e2c295ee8f39d0f246",
+        "579edef82ed3e288a2b2786470e813c6037f667e..ecb8af14925d0231ffd1454a88a0a64ee19da393"
+      ],
+      "scope": "Handoff/cleanup, force/preparation/internal-message, then final scheduling delta",
+      "verdict": "Scoped APPROVE"
+    }
+  ],
+  "remaining": [
+    "External final-product review",
+    "Actual TUI adaptation and integration: explicitly deferred this round",
+    "Real authorized external-provider trial; loopback production-provider integration is not live-provider validation"
+  ],
+  "limits": [
+    "Linux-tested local Host, not an OS sandbox",
+    "Configured credential exclusion does not isolate same-user processes",
+    "No speculative unpublished-create recovery API or last-Host-drop lifecycle architecture",
+    "Git preflight assumes stable local config/attributes",
+    "No performance capacity, SLO, WAN or saturation claim"
+  ],
+  "recorded_at": "2026-11-10T04:07:46.238417+00:00"
+}
