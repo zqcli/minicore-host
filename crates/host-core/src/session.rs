@@ -1453,9 +1453,11 @@ impl SessionController {
                     return;
                 }
             };
-            let record = {
+            let (record, source, response_base) = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
                 let active = state.active.as_mut().expect("owned active Turn");
+                let source = self.turn_identity(&active.info);
+                let response_base = active.response_base;
                 active.info.requests += u64::from(report.requests);
                 active.info.tool_rounds += report.tool_rounds;
                 for (index, attempts) in report.model_attempts.iter().enumerate() {
@@ -1471,7 +1473,7 @@ impl SessionController {
                 active.handle = None;
                 // Failed/cancelled execution cannot become cancellable again
                 // while this owner saves its returned report or partial.
-                if report.outcome != LoopOutcome::Completed {
+                let record = if report.outcome != LoopOutcome::Completed {
                     let newly_claimed = active.claim_report(&report);
                     if active.info.outcome == Some(TurnOutcome::Failed) {
                         state.failure_paused = true;
@@ -1480,9 +1482,15 @@ impl SessionController {
                     self.terminal_claim_record(&state, newly_claimed)
                 } else {
                     None
-                }
+                };
+                (record, source, response_base)
             };
             diagnostic::emit(record);
+            diagnostic::emit(diagnostics::models_reported(
+                &source,
+                response_base,
+                &report,
+            ));
             if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
                 // Ownership of all accepted records remains with this Session.
                 // A failed save blocks new work; no reappend or automatic retry.

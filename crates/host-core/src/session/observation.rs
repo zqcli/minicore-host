@@ -441,6 +441,18 @@ impl SessionController {
                     .attribute("loop_id", actual.to_string())
                     .attribute("request_index", u64::from(*request_index)),
             )),
+            LoopEvent::StateChanged { state: runtime } if runtime.loop_id == loop_id => runtime
+                .model_retry
+                .as_ref()
+                .filter(|retry| {
+                    matches!(
+                        retry.phase,
+                        minicore_runtime::ModelRetryPhase::Waiting { .. }
+                    )
+                })
+                .map(|retry| {
+                    diagnostics::model_retry(&source, loop_id, runtime.request_index, base, retry)
+                }),
             _ => None,
         };
         state.runner_revision = state

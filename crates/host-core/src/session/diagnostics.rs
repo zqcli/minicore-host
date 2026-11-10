@@ -1,7 +1,9 @@
 //! Scalar extraction for real Session and Turn fact boundaries.
+mod runtime;
 use super::*;
 use crate::diagnostics::{event, turn_context};
 use minicore_host_diagnostics::{Context, EventData, Scope};
+pub(super) use runtime::{model_retry, models_reported};
 use tracing::Level;
 
 const INPUT_ATTRIBUTES: &[&str] = &[

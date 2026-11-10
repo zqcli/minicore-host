@@ -615,3 +615,52 @@ in the recovery reports directory. Full workspace and independent follow-up
 review remain separate. Asynchronous memory-close paths outside these actual
 completion points, other controls/scheduling, model summaries/recovery, tool
 cleanup faults, result handoff and compaction diagnostics remain open.
+
+### Runtime model retries, attempts and usage
+
+The Session's already-owned Runtime event receiver now records actual
+RetryWaiting StateChanged events as `model.retry_scheduled`. The fixed Runtime
+source publishes this once from each real driver RetryWaiting update; the
+separate watch-state projection does not produce a second log. Attempt 2 is WARN,
+later attempts are DEBUG. No retry, deadline, state-dedup service or Model wrapper
+is added. Only the original error mapping, actual attempt/max-attempt counters,
+Loop/request identity and a supplied retry hint are recorded.
+
+Per-request `model.finished` and successful retry `model.recovered` use the actual
+joined LoopReport. The primary terminal claim is emitted first; report summary
+extraction then runs outside the owner lock and before any later history wait.
+Actual report model_attempts are paired with native Assistant/partial usage by
+the report's original request index and the retained public Turn response base.
+No potentially lagging watch count is substituted for the final count. Unknown
+usage fields stay absent. A report without a complete response is explicitly
+`no_complete_response`, not an invented failure/cancellation decision. These
+summaries arrive when the existing Runtime loop returns; they do not create a
+new completion barrier or copy/format any response body.
+
+The new actual Host/Runtime/local HTTP regression was red on 7c7efd production
+(zero model summaries after verified actual requests). It now passes across
+three Hosts sharing the process logger: HTTP 429/429/success with known usage,
+ordinary success with unknown usage, and actual bounded retry exhaustion. It
+checks original Turn/Session/Agent/Loop/request identities, attempts 3/1/3,
+WARN then DEBUG retries, one INFO recovery only for the recovered model, actual
+usage normalization, no invented unknown counts, and exactly one primary ERROR
+for exhaustion. No observer, model wrapper or fake tool/model history is used;
+private bodies, Role, credentials and provider model text remain excluded.
+
+Fresh results: all 6 actual diagnostic focused cases passed; the core all-target
+suite passed 302 unique cases (new `-- --list`); core/transport all-target strict
+Clippy, core strict rustdoc, formatting and diff checks passed. Raw outputs are
+`model-{red,green,remaining-focused,core,core-list,clippy,doc}-new-environment.log`
+in the recovery reports directory. SPEC and fixed dependencies remain unchanged.
+
+**Known SPEC difference:** recovery requires actual waiting duration, but pinned
+Runtime supplies only retry_at/retry_deadline, not source wait-start or elapsed.
+The recovery event therefore omits duration. Neither a scheduled delay, retry
+hint nor Host event-dequeue timing is falsely reported as measured wait time.
+The new regression explicitly checks this omission. No Runtime change is made,
+and this remains an acceptance limitation rather than a full first-version claim.
+
+Next, preserve the known initiating Session metadata operation through its
+existing save work and close/delete callers in a separate coordinated patch.
+Other remaining Session control, asynchronous memory-close, cleanup-fault,
+result-handoff and compaction diagnostics are still open.
