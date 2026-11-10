@@ -162,46 +162,29 @@ pub struct InputRemoveResult {
     pub controller_revision: ControllerRevision,
 }
 
-macro_rules! control_receipt {
-    ($name:ident, $kind:ident, $variant:ident, $wire:literal, $result:ty $(, $field:ident: $ty:ty)*) => {
-        #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-        pub enum $kind {
-            #[serde(rename = $wire)]
-            $variant,
-        }
-        #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-        #[serde(deny_unknown_fields)]
-        pub struct $name {
-            pub kind: $kind,
-            pub host_id: HostId,
-            pub host_incarnation: HostIncarnation,
-            pub operation_id: OperationId,
-            pub agent_id: AgentId,
-            $(pub $field: $ty,)*
-            pub result: $result,
-        }
-    };
-}
 control_receipt!(
     AgentUpdateReceipt,
     AgentUpdateKind,
     AgentUpdate,
     "agent.update",
-    MetadataUpdateResult
+    MetadataUpdateResult,
+    agent_id: AgentId
 );
-control_receipt!(SessionUpdateReceipt, SessionUpdateKind, SessionUpdate, "session.update", MetadataUpdateResult, session_id: SessionId);
+control_receipt!(SessionUpdateReceipt, SessionUpdateKind, SessionUpdate, "session.update", MetadataUpdateResult, agent_id: AgentId, session_id: SessionId);
 control_receipt!(
     AgentStartReceipt,
     AgentStartKind,
     AgentStart,
     "agent.start",
-    AgentStartResult
+    AgentStartResult,
+    agent_id: AgentId
 );
 control_receipt!(
     AgentSetDefaultSessionReceipt,
     AgentSetDefaultSessionKind,
     AgentSetDefaultSession,
     "agent.set_default_session",
-    AgentSetDefaultSessionResult
+    AgentSetDefaultSessionResult,
+    agent_id: AgentId
 );
-control_receipt!(InputRemoveReceipt, InputRemoveKind, InputRemove, "input.remove", InputRemoveResult, session_id: SessionId, message_id: MessageId);
+control_receipt!(InputRemoveReceipt, InputRemoveKind, InputRemove, "input.remove", InputRemoveResult, agent_id: AgentId, session_id: SessionId, message_id: MessageId);

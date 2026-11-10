@@ -5,10 +5,7 @@ use minicore_runtime::{LoopOptions, LoopOutcome};
 use serde_json::{Value, json};
 use std::{fs, sync::Arc};
 use support::*;
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
-};
+use tokio::net::TcpListener;
 
 fn frame(delta: Value, finish: Option<&str>) -> String {
     format!(
@@ -23,34 +20,8 @@ fn tool(id: &str, name: &str, args: Value) -> String {
     ) + &frame(json!({}), Some("tool_calls"))
         + "data: [DONE]\n\n"
 }
-async fn request(socket: &mut TcpStream) -> Value {
-    let mut bytes = Vec::new();
-    let boundary = loop {
-        if let Some(index) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
-            break index + 4;
-        }
-        let mut buffer = [0; 4096];
-        let count = socket.read(&mut buffer).await.unwrap();
-        assert!(count > 0);
-        bytes.extend(&buffer[..count]);
-    };
-    let header = std::str::from_utf8(&bytes[..boundary]).unwrap();
-    let length: usize = header
-        .lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse().unwrap())
-        })
-        .unwrap();
-    while bytes.len() < boundary + length {
-        let mut buffer = [0; 4096];
-        let count = socket.read(&mut buffer).await.unwrap();
-        assert!(count > 0);
-        bytes.extend(&buffer[..count]);
-    }
-    serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap()
-}
+#[path = "../../../tests/support/http.rs"]
+mod http;
 
 /// Scripted loopback HTTP/SSE replies exercise the production provider and
 /// actual Runtime plus local tools. This is not a live model-provider claim.
@@ -81,13 +52,8 @@ async fn production_http_provider_round_trip_executes_real_files_and_shell() {
         let mut requests = Vec::new();
         for body in replies {
             let (mut socket, _) = listener.accept().await.unwrap();
-            requests.push(request(&mut socket).await);
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.shutdown().await.unwrap();
+            requests.push(http::read_request(&mut socket).await.body);
+            http::write_sse(&mut socket, &body).await;
         }
         requests
     });

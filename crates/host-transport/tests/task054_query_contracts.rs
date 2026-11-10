@@ -507,6 +507,8 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
     // Request EOF retires the actual server before closing its response reader.
     // Drop the already-ended SDK stream only after connection cleanup, so its
     // best-effort unsubscribe cannot race the reader that would receive it.
-    server.close(&client).await;
+    server
+        .close(&client, Some(std::time::Duration::from_secs(3)))
+        .await;
     drop(outputs);
 }

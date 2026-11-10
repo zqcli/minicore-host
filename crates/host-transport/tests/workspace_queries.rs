@@ -22,7 +22,7 @@ async fn readonly_clients_read_the_explicit_session_and_utf8_pages_on_all_transp
     fs::write(second.path().join("different"), "selected second workspace").unwrap();
     let target = create(&host, &operator.caller(), Some(first.path()), vec![]).await;
     let other = create(&host, &operator.caller(), Some(second.path()), vec![]).await;
-    let peers = Clients::new(host.clone()).await;
+    let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     for client in &peers.clients {
         assert!(!client.initial_info().can_operate);
         let session = client.session(target.clone());
@@ -177,7 +177,7 @@ async fn missing_wrong_and_unsafe_targets_never_fall_back_to_an_active_session()
         vec![],
     )
     .await;
-    let peers = Clients::new(host).await;
+    let peers = Clients::new(host, compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(target.clone());
         for path in ["../secret", "/etc/passwd", "escape/secret"] {
@@ -275,7 +275,7 @@ async fn git_status_and_diffs_are_actual_workspace_facts_and_keep_live_cursor_se
     fs::write(root.path().join("file"), "after é中\n").unwrap();
     fs::write(root.path().join("unrelated"), "external\n").unwrap();
     let target = create(&host, &operator.caller(), Some(root.path()), vec![]).await;
-    let peers = Clients::new(host).await;
+    let peers = Clients::new(host, compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(target.clone());
         let status = session.workspace_status(options()).await.unwrap();
@@ -374,7 +374,7 @@ async fn nonrepo_corrupt_repo_and_external_filter_have_distinct_real_outcomes() 
     let plain = create(&host, &operator.caller(), Some(plain.path()), vec![]).await;
     let broken = create(&host, &operator.caller(), Some(broken.path()), vec![]).await;
     let filtered = create(&host, &operator.caller(), Some(filter.path()), vec![]).await;
-    let peers = Clients::new(host).await;
+    let peers = Clients::new(host, compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(plain.clone());
         assert!(

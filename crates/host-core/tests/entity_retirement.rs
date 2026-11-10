@@ -471,17 +471,23 @@ async fn accepted_creation_prevents_empty_memory_agent_retirement() {
 
 #[test]
 fn idle_memory_close_reclaims_without_a_tokio_executor() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let (resources, _, _, _) = resources();
     let host = Host::memory(resources).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let created = host
-        .create_agent(&caller, request(StorageMode::Memory))
+    let created = runtime
+        .block_on(host.create_agent_async(&caller, request(StorageMode::Memory)))
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
         session_id: created.session_id.unwrap(),
     };
+    drop(runtime);
+    assert!(tokio::runtime::Handle::try_current().is_err());
     let observer = host.session_states(&caller, &target).unwrap();
     host.close_session(&caller, &target).unwrap();
     assert!(host.session_state(&caller, &target).is_err());

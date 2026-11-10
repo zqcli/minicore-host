@@ -181,6 +181,79 @@ impl RecoveryFixture {
     }
 }
 
+#[test]
+fn synchronous_memory_metadata_does_not_need_a_current_or_retained_executor() {
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let fixture = RecoveryFixture::new(StorageMode::Memory, FaultKind::SessionResourceMissing);
+    let caller = fixture.connection.caller();
+    assert!(fixture.session.executor().is_none());
+    let patch = SessionConfigPatch {
+        role: Some(Role {
+            instructions: "updated without an executor".into(),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let updated = fixture.session.update(&caller, 0, &patch).unwrap();
+    assert_eq!(updated.config_revision, 1);
+    assert_eq!(updated.config.role, patch.role.unwrap());
+    assert!(fixture.session.executor().is_none());
+    assert_eq!(fixture.resources.attempts.load(Ordering::SeqCst), 0);
+
+    let agent = crate::agent::AgentOwner::new(
+        fixture.session.agent_id.clone(),
+        fixture.session.host_id.clone(),
+        fixture.session.incarnation.clone(),
+        "synchronous metadata fixture".into(),
+        AgentConfig::default(),
+        fixture.session.access.clone(),
+        fixture.resources.clone(),
+    );
+    let patch = AgentConfigPatch {
+        role: Some(updated.config.role),
+        ..Default::default()
+    };
+    let updated = agent.update(&caller, 0, &patch).unwrap();
+    assert_eq!(updated.config_revision, 1);
+    assert_eq!(updated.config.role, patch.role.unwrap());
+    agent.set_default(&caller, None).unwrap();
+    assert!(agent.info(&caller).unwrap().default_session_id.is_none());
+}
+
+#[test]
+fn synchronous_persistent_update_keeps_authority_and_lifecycle_refusals() {
+    let fixture = RecoveryFixture::new(StorageMode::Persistent, FaultKind::SessionResourceMissing);
+    let observer = fixture.session.access.connect().unwrap();
+    let patch = SessionConfigPatch::default();
+    assert_eq!(
+        fixture
+            .session
+            .update(&observer.caller(), 0, &patch)
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::HostAccessReadOnly),
+    );
+    let caller = fixture.connection.caller();
+    assert_eq!(
+        fixture
+            .session
+            .update(&caller, 0, &patch)
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::HostMethodUnavailable),
+    );
+    fixture.session.state.lock().unwrap().lifecycle = SessionLifecycle::Closed;
+    assert_eq!(
+        fixture
+            .session
+            .update(&caller, 0, &patch)
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::SessionLifecycleClosed),
+    );
+    assert!(fixture.session.executor().is_none());
+}
+
 async fn resume_reprepares(mode: StorageMode) {
     for kind in RESOURCE_FAULTS {
         let fixture = RecoveryFixture::new(mode, kind);
@@ -414,7 +487,7 @@ async fn real_host_revision_conflict_clears_after_session_update() {
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let created = host
-        .create_agent(
+        .create_agent_async(
             &caller,
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -425,6 +498,7 @@ async fn real_host_revision_conflict_clears_after_session_update() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),

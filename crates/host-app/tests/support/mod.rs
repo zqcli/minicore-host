@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#[path = "../../../../tests/support/http.rs"]
+pub(crate) mod http;
 use minicore_host_core::{HostConfig, OpenAiModelSettings};
 use minicore_host_protocol::*;
 use minicore_host_transport::tls;
@@ -11,11 +13,7 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::mpsc,
-};
+use tokio::{io::AsyncWriteExt, net::TcpListener, sync::mpsc};
 
 pub const MODEL_KEY: &str = "app-fixture-only-model-credential";
 pub const HOST_KEY: &str = "app-fixture-only-network-credential";
@@ -292,32 +290,8 @@ impl HttpFixture {
         let task = tokio::spawn(async move {
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
-                let mut bytes = Vec::new();
-                let boundary = loop {
-                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                        break index + 4;
-                    }
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                };
-                let head = String::from_utf8(bytes[..boundary].to_vec()).unwrap();
-                assert!(head.contains(&format!("Bearer {MODEL_KEY}")));
-                let length: usize = head
-                    .lines()
-                    .find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap();
-                while bytes.len() < boundary + length {
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                }
+                let request = http::read_request(&mut socket).await;
+                assert!(request.head.contains(&format!("Bearer {MODEL_KEY}")));
                 socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").await.unwrap();
                 let partial = format!(
                     "data: {}\n\n",
@@ -328,8 +302,7 @@ impl HttpFixture {
                     .await
                     .unwrap();
                 socket.flush().await.unwrap();
-                send.send(serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap())
-                    .unwrap();
+                send.send(request.body).unwrap();
                 if released.recv().await.is_none() {
                     return;
                 }

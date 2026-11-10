@@ -68,7 +68,7 @@ async fn host_two_turns_reach_real_http_and_keep_role_and_history_exact() {
         Reply::sse(answer("second actual fixture response")),
     ])
     .await;
-    let (host, connection, target) = http_host(&server.endpoint, "Be precise");
+    let (host, connection, target) = http_host(&server.endpoint, "Be precise").await;
     let caller = connection.caller();
     let mut message_ids = Vec::new();
     for (index, text) in ["first task", "follow-up task"].into_iter().enumerate() {
@@ -143,7 +143,7 @@ fn assert_user(message: &Value, id: &MessageId, original: &str) {
     );
 }
 
-fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, SessionRef) {
+async fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, SessionRef) {
     let descriptor = ModelDescriptor::new(
         "fixture/chat".parse().unwrap(),
         128_000,
@@ -167,7 +167,7 @@ fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, Sessio
     // This fixture verifies verbatim large history, not utility summarization.
     config.session_defaults.execution.compaction.enabled = false;
     let created = host
-        .create_agent(
+        .create_agent_async(
             &caller,
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -178,6 +178,7 @@ fn http_host(endpoint: &str, role: &str) -> (Arc<Host>, ConnectionHandle, Sessio
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
@@ -242,7 +243,7 @@ async fn host_preserves_large_input_role_response_and_next_turn_history() {
         Reply::sse(answer("follow-up complete")),
     ])
     .await;
-    let (host, connection, target) = http_host(&server.endpoint, &role);
+    let (host, connection, target) = http_host(&server.endpoint, &role).await;
     let caller = connection.caller();
     let empty = host
         .send(&caller, SendMessage::new(message(""), target.clone()))
@@ -292,7 +293,7 @@ async fn host_keeps_large_http_partial_without_fabricating_history_or_completion
         json!({"choices":[{"index":0,"delta":{"content":partial},"finish_reason":null}]})
     );
     let server = Fixture::start(vec![payload_reply(body)]).await;
-    let (host, connection, target) = http_host(&server.endpoint, "Keep partials exact");
+    let (host, connection, target) = http_host(&server.endpoint, "Keep partials exact").await;
     let caller = connection.caller();
     let result = send_turn(&host, &caller, &target, &message("partial response"), 0).await;
     assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));

@@ -81,20 +81,13 @@ impl HostShutdownResult {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum HostShutdownKind {
-    #[serde(rename = "host.shutdown")]
+crate::control_receipt!(
+    HostShutdownReceipt,
+    HostShutdownKind,
     HostShutdown,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostShutdownReceipt {
-    pub kind: HostShutdownKind,
-    pub host_id: HostId,
-    pub host_incarnation: HostIncarnation,
-    pub operation_id: OperationId,
-    pub result: HostShutdownResult,
-}
+    "host.shutdown",
+    HostShutdownResult
+);
 
 /// Requests below use the already-selected Session's trusted typed context.
 /// Independent RPC adapters must additionally carry that target SessionRef.
@@ -155,23 +148,7 @@ impl TurnCancelResult {
         }
     }
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum TurnCancelKind {
-    #[serde(rename = "turn.cancel")]
-    TurnCancel,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct TurnCancelReceipt {
-    pub kind: TurnCancelKind,
-    pub host_id: HostId,
-    pub host_incarnation: HostIncarnation,
-    pub operation_id: OperationId,
-    pub agent_id: AgentId,
-    pub session_id: SessionId,
-    pub turn_id: TurnId,
-    pub result: TurnCancelResult,
-}
+crate::control_receipt!(TurnCancelReceipt, TurnCancelKind, TurnCancel, "turn.cancel", TurnCancelResult, agent_id: AgentId, session_id: SessionId, turn_id: TurnId);
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionCloseLifecycle {
@@ -184,22 +161,7 @@ pub struct SessionCloseResult {
     pub lifecycle: SessionCloseLifecycle,
     pub controller_revision: Revision,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum SessionCloseKind {
-    #[serde(rename = "session.close")]
-    SessionClose,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SessionCloseReceipt {
-    pub kind: SessionCloseKind,
-    pub host_id: HostId,
-    pub host_incarnation: HostIncarnation,
-    pub operation_id: OperationId,
-    pub agent_id: AgentId,
-    pub session_id: SessionId,
-    pub result: SessionCloseResult,
-}
+crate::control_receipt!(SessionCloseReceipt, SessionCloseKind, SessionClose, "session.close", SessionCloseResult, agent_id: AgentId, session_id: SessionId);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -212,21 +174,7 @@ pub enum AgentStopLifecycle {
 pub struct AgentStopResult {
     pub lifecycle: AgentStopLifecycle,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum AgentStopKind {
-    #[serde(rename = "agent.stop")]
-    AgentStop,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentStopReceipt {
-    pub kind: AgentStopKind,
-    pub host_id: HostId,
-    pub host_incarnation: HostIncarnation,
-    pub operation_id: OperationId,
-    pub agent_id: AgentId,
-    pub result: AgentStopResult,
-}
+crate::control_receipt!(AgentStopReceipt, AgentStopKind, AgentStop, "agent.stop", AgentStopResult, agent_id: AgentId);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

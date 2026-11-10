@@ -67,7 +67,7 @@ fn query_timeout_disconnect_and_context_cancellation_leave_real_turn_running() {
                 .data
                 .active_turn_id
                 .unwrap();
-            let peers = Clients::new(host.clone()).await;
+            let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
 
             let cancelled = QueryContext::default();
             cancelled.cancellation.cancel();
@@ -183,7 +183,7 @@ async fn missing_binding_and_invalid_edit_continuations_are_faults_not_empty_pag
     let operator = host.connect().unwrap();
     let root = tempfile::tempdir().unwrap();
     let target = create(&host, &operator.caller(), Some(root.path()), vec![]).await;
-    let peers = Clients::new(host.clone()).await;
+    let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     let missing_root = root.path().join("removed");
     fs::create_dir(&missing_root).unwrap();
     host.update_session(

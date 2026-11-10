@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 //! Explicit model/resource fixtures. Host owners and Runtime remain real.
+#[cfg(unix)]
+pub mod pipes;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;

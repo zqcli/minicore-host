@@ -21,7 +21,7 @@ pub(super) enum SaveBinding {
 }
 pub(super) struct HistorySaveWork {
     binding: SaveBinding,
-    running: bool,
+    pub(super) running: bool,
     pub(super) fault: Option<Fault>,
 }
 impl SessionController {
@@ -248,7 +248,6 @@ impl SessionController {
             running: true,
             fault: None,
         });
-        state.saving = true;
         Ok(binding)
     }
     async fn persist_registered(
@@ -271,7 +270,6 @@ impl SessionController {
             running: true,
             fault: None,
         });
-        state.saving = true;
         binding
     }
     pub(super) fn settle_save(
@@ -321,7 +319,6 @@ impl SessionController {
             }
         });
         let previous = diagnostics::Schedule::capture(&state);
-        state.saving = false;
         match &result {
             Ok(_) => {
                 state.history_work = None;
@@ -615,7 +612,6 @@ impl SessionController {
     pub(super) fn finish_save_resume(&self, state: &mut SessionState) -> bool {
         if state.history_work.is_some()
             || state.record_work.is_some()
-            || state.saving
             || state
                 .active
                 .as_ref()
@@ -653,7 +649,7 @@ impl SessionController {
                 "there is no original history save to continue",
             )
         })?;
-        if work.running || state.saving || state.driver_running {
+        if work.running || state.driver_running {
             return Err(Fault::new(
                 FaultKind::SessionBusy,
                 "original execution or save is still returning",
@@ -704,7 +700,6 @@ impl SessionController {
             })
             .transpose()?;
         state.history_work.as_mut().expect("original save").running = true;
-        state.saving = true;
         let previous = state.history_task.take();
         let compaction = state.compaction_task.take();
         let driver = state.driver_task.take();

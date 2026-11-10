@@ -1,5 +1,5 @@
 use crate::control::{CallerContext, ConnectionRegistry};
-use crate::session::{HistoryBackend, MemoryHistory, ResourceResolver, SessionController};
+use crate::session::{MemoryHistory, ResourceResolver, SessionController};
 use crate::types::{AgentInfo, SessionLoadFailure};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
@@ -57,19 +57,6 @@ struct AgentState {
     deleting_sessions: std::collections::BTreeSet<SessionId>,
     delete_tasks: BTreeMap<SessionId, tokio::task::JoinHandle<()>>,
     deleting: bool,
-}
-struct SynchronousCreation<'a> {
-    owner: &'a AgentOwner,
-}
-impl Drop for SynchronousCreation<'_> {
-    fn drop(&mut self) {
-        self.owner
-            .state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .creating -= 1;
-        self.owner.changed.notify_waiters();
-    }
 }
 impl AgentOwner {
     pub(crate) fn new(
@@ -218,196 +205,11 @@ impl AgentOwner {
                 .collect())
         })
     }
-    pub(crate) fn create_session(
-        &self,
-        caller: &CallerContext,
-        id: SessionId,
-        options: SessionOptions,
-        make_default: bool,
-    ) -> Result<Arc<SessionController>, Fault> {
-        self.access.accept_business(caller, || {
-            self.create_session_owned(id, options, make_default)
-        })
-    }
-    pub(crate) fn create_session_owned(
-        &self,
-        id: SessionId,
-        options: SessionOptions,
-        make_default: bool,
-    ) -> Result<Arc<SessionController>, Fault> {
-        self.access.ensure_execution_owned()?;
-        if self.store().is_some() {
-            return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
-                "persistent Agent creation requires the asynchronous owner entry",
-            ));
-        }
-        // Snapshot only direct-owner values, then release this lock before child
-        // construction. Publication rechecks the actual lifecycle boundary.
-        let (config, source_revision) = {
-            let mut state = self.state.lock().expect("Agent mutex poisoned");
-            if state.info.lifecycle != AgentLifecycle::Active
-                && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
-            {
-                return Err(Fault::new(
-                    FaultKind::AgentLifecycleUnavailable,
-                    "Agent is not accepting Session creation",
-                ));
-            }
-            state
-                .info
-                .mode
-                .session_mode(options.mode)
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-            let config = SessionConfig::from_agent(
-                &state.info.config,
-                &options.overrides.unwrap_or_default(),
-            )
-            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-            state.creating += 1;
-            (config, state.info.config_revision)
-        };
-        let _creation = SynchronousCreation { owner: self };
-        self.resources_owned()?.validate(&config)?;
-        let backend: Arc<dyn HistoryBackend> = Arc::new(MemoryHistory);
-        let session = SessionController::new(
-            id.clone(),
-            self.id.clone(),
-            self.host_id.clone(),
-            self.incarnation.clone(),
-            config,
-            Arc::clone(&self.access),
-            self.resources_owned()?,
-            backend,
-            Vec::new(),
-            Arc::clone(&self.enabled),
-        );
-        let session = session
-            .hold_root(self.root_lease())
-            .notify_parent_on_change(Arc::clone(&self.changed));
-        session.set_source_revision(source_revision);
-        let mut state = self.state.lock().expect("Agent mutex poisoned");
-        self.access.ensure_execution_owned()?;
-        if state.info.lifecycle != AgentLifecycle::Active
-            && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
-        {
-            return Err(Fault::new(
-                FaultKind::AgentLifecycleUnavailable,
-                "Agent stopped before Session publication",
-            ));
-        }
-        state.sessions.insert(id.clone(), Arc::clone(&session));
-        if make_default {
-            state.info.default_session_id = Some(id);
-        }
-        drop(state);
-        session.publish_initial();
-        Ok(session)
-    }
-    pub(crate) fn set_default(
-        &self,
-        caller: &CallerContext,
-        session: Option<SessionId>,
-    ) -> Result<(), Fault> {
-        if self.store().is_some() {
-            return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
-                "persistent default updates require the asynchronous owner entry",
-            ));
-        }
-        let child = session.as_ref().map(|id| self.session(id)).transpose()?;
-        if child.as_ref().is_some_and(|child| !child.is_open_owned()) {
-            return Err(Fault::new(
-                FaultKind::AgentDefaultSessionUnavailable,
-                "default Session must be open",
-            ));
-        }
-        let diagnostic = self.access.accept_business(caller, || {
-            let mut state = self.state.lock().expect("Agent mutex poisoned");
-            Self::writable(&state)?;
-            if session
-                .as_ref()
-                .is_some_and(|id| !state.sessions.contains_key(id))
-            {
-                return Err(Fault::new(
-                    FaultKind::AgentSessionNotFound,
-                    "Session does not belong to this Agent",
-                ));
-            }
-            if session
-                .as_ref()
-                .is_some_and(|id| state.closing.contains(id))
-            {
-                return Err(Fault::new(
-                    FaultKind::AgentDefaultSessionUnavailable,
-                    "default Session is closing",
-                ));
-            }
-            state.info.default_session_id = session;
-            Ok(self.metadata_result_record(self.diagnostic_context(), &state.info, None))
-        })?;
-        diagnostic.emit();
-        Ok(())
-    }
     pub(crate) fn clear_default_if(&self, id: &SessionId) {
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         if state.info.default_session_id.as_ref() == Some(id) {
             state.info.default_session_id = None;
         }
-    }
-    pub(crate) fn update(
-        &self,
-        caller: &CallerContext,
-        expected_revision: u64,
-        patch: &AgentConfigPatch,
-    ) -> Result<AgentInfo, Fault> {
-        if self.store().is_some() {
-            return Err(Fault::new(
-                FaultKind::HostMethodUnavailable,
-                "persistent configuration updates require the asynchronous owner entry",
-            ));
-        }
-        let original = self.info(caller)?;
-        if original.config_revision != expected_revision {
-            return Err(Fault::new(
-                FaultKind::AgentConfigConflict,
-                "Agent configuration revision changed",
-            ));
-        }
-        let config = original
-            .config
-            .apply_patch(patch)
-            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        self.resources_owned()?
-            .validate(
-                &SessionConfig::from_agent(&config, &SessionOverrides::default()).map_err(
-                    |error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()),
-                )?,
-            )
-            .inspect_err(|fault| self.metadata_refusal_record(None, fault).emit())?;
-        let (info, diagnostic) = self.access.accept_business(caller, || {
-            let mut state = self.state.lock().expect("Agent mutex poisoned");
-            Self::writable(&state)?;
-            if state.info.config_revision != expected_revision {
-                return Err(Fault::new(
-                    FaultKind::AgentConfigConflict,
-                    "Agent configuration revision changed",
-                ));
-            }
-            state.info.config_revision = expected_revision.checked_add(1).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "configuration revision exhausted",
-                )
-            })?;
-            state.info.config = config;
-            Ok((
-                state.info.clone(),
-                self.metadata_result_record(self.diagnostic_context(), &state.info, None),
-            ))
-        })?;
-        diagnostic.emit();
-        Ok(info)
     }
     pub(crate) fn set_enabled(
         self: &Arc<Self>,

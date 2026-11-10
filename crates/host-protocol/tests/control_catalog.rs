@@ -225,27 +225,7 @@ fn catalog_exactly_matches_all_52_spec_methods_in_order() {
     }
 }
 #[test]
-fn unavailable_methods_are_staged_and_never_fake_success() {
-    let empty = BTreeSet::new();
-    let catalog = staged_catalog(&empty);
-    assert_eq!(catalog.len(), 52);
-    assert!(catalog.iter().all(|entry| matches!(
-        entry.availability,
-        MethodAvailability::NotImplemented { .. }
-    )));
-    assert_eq!(
-        require_implemented(Method::MessageSend, &empty)
-            .unwrap_err()
-            .kind(),
-        Some(FaultKind::HostMethodUnavailable)
-    );
-    let real = BTreeSet::from([Method::MessageSend]);
-    assert!(require_implemented(Method::MessageSend, &real).is_ok());
-    let count = staged_catalog(&real)
-        .iter()
-        .filter(|entry| matches!(entry.availability, MethodAvailability::Implemented {}))
-        .count();
-    assert_eq!(count, 1);
+fn catalog_access_distinguishes_observation_from_business_operations() {
     assert_eq!(
         Method::EventsUnsubscribe.descriptor().access,
         AccessRequirement::OwnSubscription

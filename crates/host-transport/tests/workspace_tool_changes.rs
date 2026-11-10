@@ -93,7 +93,7 @@ async fn actual_edits_remain_bound_to_original_tool_while_workspace_config_chang
         .await
         .unwrap();
     assert_eq!(updated.config_revision, 1);
-    let peers = Clients::new(host.clone()).await;
+    let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(target.clone());
         let content = session
@@ -345,7 +345,7 @@ async fn reopened_sessions_expose_missing_edit_coverage_but_current_turn_edits_a
         first.initial_info().host_incarnation,
         operator.initial_info().host_incarnation
     );
-    let peers = Clients::new(reopened).await;
+    let peers = Clients::new(reopened, compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(target.clone());
         assert_eq!(

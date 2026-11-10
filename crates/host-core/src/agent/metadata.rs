@@ -61,6 +61,59 @@ impl AgentOwner {
         }
         Ok(())
     }
+    pub(crate) fn set_default(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        target: Option<SessionId>,
+    ) -> Result<(), Fault> {
+        if self.store().is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent default updates require the asynchronous owner entry",
+            ));
+        }
+        self.accept_default(caller, target, None, |_| ())?;
+        Ok(())
+    }
+    pub(crate) fn update(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected_revision: u64,
+        patch: &AgentConfigPatch,
+    ) -> Result<AgentInfo, Fault> {
+        if self.store().is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "persistent configuration updates require the asynchronous owner entry",
+            ));
+        }
+        let original = self.info(caller)?;
+        if original.config_revision != expected_revision {
+            return Err(Fault::new(
+                FaultKind::AgentConfigConflict,
+                "Agent configuration revision changed",
+            ));
+        }
+        let config = original
+            .config
+            .apply_patch(patch)
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        self.resources_owned()?
+            .validate(
+                &SessionConfig::from_agent(&config, &SessionOverrides::default()).map_err(
+                    |error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()),
+                )?,
+            )
+            .inspect_err(|fault| self.metadata_refusal_record(None, fault).emit())?;
+        let (info, _) = self.accept_prepared_update_candidate(
+            caller,
+            expected_revision,
+            (config, original.name),
+            None,
+            |state| state.info.clone(),
+        )?;
+        Ok(info)
+    }
     pub(crate) async fn update_async(
         self: &Arc<Self>,
         caller: &CallerContext,

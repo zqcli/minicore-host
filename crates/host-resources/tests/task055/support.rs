@@ -1,6 +1,7 @@
 //! Adapted unchanged request-gating mechanism from the preserved audit fixture.
 //! Only responses are scripted; Host, Runtime, HTTP/SSE provider and storage are real.
 use super::{base, input_context};
+use base::http_server::http;
 pub(super) use base::{answer, selection, tool_answer};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -10,7 +11,6 @@ use minicore_runtime::HistoryItem;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
     sync::{mpsc, oneshot},
 };
@@ -50,43 +50,12 @@ impl Fixture {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let tx = tx.clone();
                 tokio::spawn(async move {
-                    let mut bytes = Vec::new();
-                    let boundary = loop {
-                        if let Some(index) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
-                            break index + 4;
-                        }
-                        let mut block = [0; 4096];
-                        let n = socket.read(&mut block).await.unwrap();
-                        assert!(n > 0);
-                        bytes.extend_from_slice(&block[..n]);
-                    };
-                    let headers = std::str::from_utf8(&bytes[..boundary]).unwrap();
-                    let length: usize = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (k, v) = line.split_once(':')?;
-                            k.eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse().unwrap())
-                        })
-                        .unwrap();
-                    while bytes.len() < boundary + length {
-                        let mut block = [0; 4096];
-                        let n = socket.read(&mut block).await.unwrap();
-                        assert!(n > 0);
-                        bytes.extend_from_slice(&block[..n]);
-                    }
-                    let body = serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap();
+                    let body = http::read_request(&mut socket).await.body;
                     let (reply, rx) = oneshot::channel();
                     tx.send(Captured { body, reply })
                         .unwrap_or_else(|_| panic!("fixture receiver dropped"));
                     let body = rx.await.unwrap();
-                    let headers = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                        body.len()
-                    );
-                    socket.write_all(headers.as_bytes()).await.unwrap();
-                    socket.write_all(body.as_bytes()).await.unwrap();
-                    socket.shutdown().await.unwrap();
+                    http::write_sse(&mut socket, &body).await;
                 });
             }
         });

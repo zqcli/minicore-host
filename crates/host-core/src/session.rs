@@ -366,7 +366,6 @@ struct SessionState {
     published: bool,
     history_loaded: bool,
     preparing: bool,
-    saving: bool,
     history_work: Option<history::HistorySaveWork>,
     history_task: Option<tokio::task::JoinHandle<()>>,
     resume_after_saves: Option<u64>,
@@ -407,7 +406,6 @@ pub(crate) struct SessionController {
     root_lease: Mutex<Option<Arc<dyn Send + Sync>>>,
     // A completion notification carries no parent state or mutation authority.
     parent_changed: Option<Arc<Notify>>,
-    provenance: Option<SessionRecord>,
     changed: Notify,
     snapshots: watch::Sender<SessionSnapshot>,
 }
@@ -474,7 +472,6 @@ impl SessionController {
             published: false,
             history_loaded: backend.mode() == StorageMode::Memory,
             preparing: false,
-            saving: false,
             history_work: None,
             history_task: None,
             resume_after_saves: None,
@@ -514,7 +511,6 @@ impl SessionController {
             store: Mutex::new(None),
             root_lease: Mutex::new(None),
             parent_changed: None,
-            provenance: None,
             state: Mutex::new(state),
             changed: Notify::new(),
             snapshots,
@@ -560,7 +556,7 @@ impl SessionController {
                     .map(|work| work.activity.clone())
                     .or_else(|| state.last_compaction.clone())
                     .map(Box::new),
-                saving: state.saving,
+                saving: state.history_work.as_ref().is_some_and(|work| work.running),
                 deletion: state.deletion.clone(),
                 metadata_saving: state.record_work.as_ref().is_some_and(|work| work.running),
                 metadata_fault: state
@@ -872,64 +868,6 @@ impl SessionController {
             record,
         ))
     }
-    pub(crate) fn update(
-        self: &Arc<Self>,
-        caller: &CallerContext,
-        expected_revision: u64,
-        patch: &SessionConfigPatch,
-    ) -> Result<SessionInfo, Fault> {
-        let original = self.info(caller)?;
-        if original.config_revision != expected_revision {
-            return Err(Fault::new(
-                FaultKind::SessionConfigConflict,
-                "Session configuration revision changed",
-            ));
-        }
-        let candidate = original
-            .config
-            .apply_patch(patch)
-            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.resources_owned()?.validate(&candidate)?;
-        let updated = self.access.accept_execution(caller, || {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            Self::open(&state)?;
-            if state.info.mode == StorageMode::Persistent {
-                return Err(Fault::new(
-                    FaultKind::HostMethodUnavailable,
-                    "persistent configuration updates require the asynchronous owner entry",
-                ));
-            }
-            if state.info.config_revision != expected_revision {
-                return Err(Fault::new(
-                    FaultKind::SessionConfigConflict,
-                    "Session configuration revision changed",
-                ));
-            }
-            state.info.config_revision = expected_revision.checked_add(1).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "configuration revision exhausted",
-                )
-            })?;
-            state.info.config = candidate;
-            if state.block_reason.as_ref().is_some_and(|fault| {
-                matches!(
-                    fault.kind(),
-                    Some(
-                        FaultKind::SessionResourceMissing
-                            | FaultKind::SessionConfigInvalid
-                            | FaultKind::SessionConfigConflict
-                    )
-                )
-            }) {
-                state.block_reason = None;
-            }
-            self.publish(&mut state);
-            Ok(state.info.clone())
-        })?;
-        self.wake();
-        Ok(updated)
-    }
     pub(crate) async fn wait_input_owned(
         &self,
         capability: &crate::TurnCapability,
@@ -959,7 +897,6 @@ impl SessionController {
         let state = self.state.lock().expect("Session mutex poisoned");
         state.active.is_none()
             && !state.preparing
-            && !state.saving
             && !state.driver_running
             && state.compaction.is_none()
             && state.history_work.is_none()

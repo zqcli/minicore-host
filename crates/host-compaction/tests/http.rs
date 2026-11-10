@@ -18,7 +18,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     sync::Notify,
 };
 use tokio_util::sync::CancellationToken;
@@ -85,34 +85,8 @@ fn frame(delta: Value, finish: Option<&str>) -> String {
         json!({"id":"fixture-summary-response","choices":[{"index":0,"delta":delta,"finish_reason":finish}]})
     )
 }
-async fn read_request(socket: &mut TcpStream) -> Value {
-    let mut bytes = Vec::new();
-    let boundary = loop {
-        if let Some(position) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
-            break position + 4;
-        }
-        let mut buffer = [0; 4096];
-        let count = socket.read(&mut buffer).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&buffer[..count]);
-    };
-    let headers = std::str::from_utf8(&bytes[..boundary]).unwrap();
-    let length: usize = headers
-        .lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse().unwrap())
-        })
-        .unwrap();
-    while bytes.len() < boundary + length {
-        let mut buffer = [0; 4096];
-        let count = socket.read(&mut buffer).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&buffer[..count]);
-    }
-    serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap()
-}
+#[path = "../../../tests/support/http.rs"]
+mod http;
 
 #[tokio::test]
 async fn actual_http_sse_summary_preserves_optional_usage_and_has_no_tools() {
@@ -124,7 +98,7 @@ async fn actual_http_sse_summary_preserves_optional_usage_and_has_no_tools() {
         );
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
-            let request = read_request(&mut socket).await;
+            let request = http::read_request(&mut socket).await.body;
             let mut body = frame(json!({"content":"Actual summary from SSE."}), None)
                 + &frame(json!({}), Some("stop"));
             if reported {
@@ -134,11 +108,10 @@ async fn actual_http_sse_summary_preserves_optional_usage_and_has_no_tools() {
                 );
             }
             body += "data: [DONE]\n\n";
-            let headers = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                body.len()
-            );
-            socket.write_all(headers.as_bytes()).await.unwrap();
+            socket
+                .write_all(http::sse_headers(&body).as_bytes())
+                .await
+                .unwrap();
             // Actual fragmented SSE passes through the provider parser.
             for chunk in body.as_bytes().chunks(7) {
                 socket.write_all(chunk).await.unwrap();
@@ -189,7 +162,7 @@ async fn actual_http_cancellation_closes_the_stream_without_a_candidate() {
     let server_written = written.clone();
     let server = tokio::spawn(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
-        read_request(&mut socket).await;
+        http::read_request(&mut socket).await;
         socket
             .write_all(
                 b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",

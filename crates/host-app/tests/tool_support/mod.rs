@@ -1,5 +1,5 @@
 //! Explicit loopback model replies; all Host, Runtime, file and process work is real.
-use crate::support::{self, Process, WAIT};
+use crate::support::{self, Process, WAIT, http};
 use minicore_host_core::{HostConfig, ObservationEvent, ObservationNotification};
 use minicore_host_protocol::*;
 use minicore_host_transport::{ClientSubscription, HostClient, tls};
@@ -9,7 +9,6 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{mpsc, oneshot},
     task::JoinSet,
@@ -101,47 +100,22 @@ impl Drop for Provider {
     }
 }
 async fn serve(mut socket: TcpStream, send: mpsc::UnboundedSender<ModelRequest>) {
-    let mut bytes = Vec::new();
-    let boundary = loop {
-        if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-            break at + 4;
-        }
-        let mut chunk = [0; 4096];
-        let count = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&chunk[..count]);
-    };
-    let head = std::str::from_utf8(&bytes[..boundary]).unwrap();
-    assert!(head.contains(&format!("Bearer {}", support::MODEL_KEY)));
-    let length: usize = head
-        .lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse().unwrap())
-        })
-        .unwrap();
-    while bytes.len() < boundary + length {
-        let mut chunk = [0; 4096];
-        let count = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&chunk[..count]);
-    }
+    let request = http::read_request(&mut socket).await;
+    assert!(
+        request
+            .head
+            .contains(&format!("Bearer {}", support::MODEL_KEY))
+    );
     let (response, receive) = oneshot::channel();
     send.send(ModelRequest {
-        body: serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap(),
+        body: request.body,
         response,
     })
     .unwrap_or_else(|_| panic!("request consumer is live"));
     let Ok(body) = receive.await else { return };
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    socket.write_all(header.as_bytes()).await.unwrap();
-    socket.write_all(body.as_bytes()).await.unwrap();
-    socket.shutdown().await.unwrap();
+    http::write_sse(&mut socket, &body).await;
 }
+
 pub fn tool(id: &str, name: &str, arguments: Value) -> String {
     format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",

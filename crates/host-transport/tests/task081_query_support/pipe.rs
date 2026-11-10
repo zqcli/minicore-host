@@ -14,43 +14,12 @@ use std::{
     task::{Context, Poll, ready},
     time::Duration,
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    sync::oneshot,
-    task::JoinHandle,
-};
+use tokio::{io::AsyncWrite, sync::oneshot};
 
-pub struct PipeServer {
-    requests: JoinHandle<io::Result<u64>>,
-    server: JoinHandle<io::Result<()>>,
-}
-impl PipeServer {
-    pub async fn close(self, client: &HostClient) {
-        // Keep the actual response reader alive until request EOF has retired
-        // the server and its writer. SDK close aborts both tasks without this
-        // ordering and can race a subscription's idempotent Drop cleanup.
-        self.requests.abort();
-        assert!(self.requests.await.unwrap_err().is_cancelled());
-        tokio::time::timeout(Duration::from_secs(5), self.server)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        client.close();
-    }
-}
+use crate::common::pipes::{PipeServer, ReaderLifetime, request_relay};
 
 pub async fn stdio_pipes(host: Arc<Host>) -> (HostClient, PipeServer) {
-    let (mut to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
-    let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
-    let (writer, mut requests) = tokio::io::duplex(4096);
-    let requests =
-        tokio::spawn(async move { tokio::io::copy(&mut requests, &mut to_server).await });
-    let server = tokio::spawn(serve_stdio(host, server_input, output));
-    let client = HostClient::stdio(from_server, writer, options(5000))
-        .await
-        .unwrap();
-    (client, PipeServer { requests, server })
+    crate::common::pipes::stdio(host, options(5000)).await
 }
 
 struct CleanupWriter<W> {
@@ -88,29 +57,6 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for CleanupWriter<W> {
     }
 }
 
-struct ReaderLifetime<R> {
-    reader: Option<R>,
-    dropped: Option<oneshot::Sender<()>>,
-}
-impl<R: AsyncRead + Unpin> AsyncRead for ReaderLifetime<R> {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bytes: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        Pin::new(self.reader.as_mut().unwrap()).poll_read(cx, bytes)
-    }
-}
-impl<R> Drop for ReaderLifetime<R> {
-    fn drop(&mut self) {
-        // The signal follows the real OS endpoint drop, not just task abort.
-        self.reader.take();
-        if let Some(dropped) = self.dropped.take() {
-            let _ = dropped.send(());
-        }
-    }
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn retained_query_cleanup_proves_both_pipe_close_orders() {
     for reader_first in [true, false] {
@@ -121,14 +67,12 @@ async fn retained_query_cleanup_proves_both_pipe_close_orders() {
         // Settle the original Turn through its real owner. Only assert_retained
         // below creates a subscription on this new pipe connection.
         let (finished, _) = original_terminal(&session, &owner, &resources).await;
-        let (mut to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
+        let (to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
         // Keep request EOF under test control even if SDK close aborts its
         // writer. This duplicate never writes bytes or generates requests.
         let request_lifetime = to_server.as_fd().try_clone_to_owned().unwrap();
         let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
-        let (writer, mut requests) = tokio::io::duplex(4096);
-        let requests =
-            tokio::spawn(async move { tokio::io::copy(&mut requests, &mut to_server).await });
+        let (writer, requests) = request_relay(to_server);
         let (entered, write_started) = oneshot::channel();
         let (release, gate) = oneshot::channel();
         let output = CleanupWriter {
@@ -181,7 +125,9 @@ async fn retained_query_cleanup_proves_both_pipe_close_orders() {
             eprintln!("assert_retained cleanup: ended=false, response reader first => BrokenPipe");
         } else {
             drop(request_lifetime);
-            PipeServer { requests, server }.close(&client).await;
+            PipeServer { requests, server }
+                .close(&client, Some(Duration::from_secs(5)))
+                .await;
             assert!(
                 release.send(()).is_err(),
                 "request EOF must retire the held writer"

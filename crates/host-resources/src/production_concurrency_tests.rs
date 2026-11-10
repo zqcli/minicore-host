@@ -75,7 +75,7 @@ async fn old_and_new_publications_share_workspace_mutations_across_real_sessions
     let host = Host::memory_configured(prepare(&builder, config(&a.endpoint)).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let first = create(&host, &caller, selection(&["edit"]), Some(root));
+    let first = create(&host, &caller, selection(&["edit"]), Some(root)).await;
     let mut first_events = observe(&host, &caller, &first);
     send(&host, &caller, &first, "first edit");
     assert_eq!(a.request().await["model"], "provider-A");
@@ -99,7 +99,8 @@ async fn old_and_new_publications_share_workspace_mutations_across_real_sessions
         Some(WorkspaceRef {
             path: format!("{}/.", directory.path().display()),
         }),
-    );
+    )
+    .await;
     let mut second_events = observe(&host, &caller, &second);
     send(&host, &caller, &second, "second edit");
     assert_eq!(b.request().await["model"], "provider-B");

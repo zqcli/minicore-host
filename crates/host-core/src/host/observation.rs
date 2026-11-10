@@ -327,7 +327,7 @@ mod baseline_race_tests {
         let connection = host.connect().unwrap();
         let caller = connection.caller();
         let receipt = host
-            .create_agent(
+            .create_agent_async(
                 &caller,
                 AgentCreate {
                     operation_id: OperationId::new().unwrap(),
@@ -338,6 +338,7 @@ mod baseline_race_tests {
                     initial_message: None,
                 },
             )
+            .await
             .unwrap();
         let target = SessionRef {
             agent_id: receipt.agent_id.unwrap(),

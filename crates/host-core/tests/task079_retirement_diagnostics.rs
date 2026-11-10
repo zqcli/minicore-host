@@ -10,13 +10,17 @@ use tracing::instrument::WithSubscriber;
 
 #[test]
 fn synchronous_memory_retirement_has_one_actual_close_chain_without_an_executor() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
     let (file, dispatch, guard) = logging();
     let (agent, session, operation) = tracing::dispatcher::with_default(&dispatch, || {
         let host = Host::memory(resources()).unwrap();
         let connection = host.connect().unwrap();
         let caller = connection.caller();
-        let created = host
-            .create_agent(&caller, request(StorageMode::Memory))
+        let created = runtime
+            .block_on(host.create_agent_async(&caller, request(StorageMode::Memory)))
             .unwrap();
         let agent = AgentRef {
             host_id: created.host_id,
@@ -26,6 +30,8 @@ fn synchronous_memory_retirement_has_one_actual_close_chain_without_an_executor(
             agent_id: agent.agent_id.clone(),
             session_id: created.session_id.unwrap(),
         };
+        drop(runtime);
+        assert!(tokio::runtime::Handle::try_current().is_err());
         let operation = OperationId::new().unwrap();
         host.session_close(
             &caller,

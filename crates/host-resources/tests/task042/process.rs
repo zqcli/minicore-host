@@ -41,7 +41,7 @@ async fn live_process_output_preserves_split_utf8_ranges_source_identity_and_nat
     let host = Host::memory_configured(prepare(&builder, config(&server.endpoint)).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(&["bash"]), workspace(root.path()));
+    let target = create(&host, &caller, selection(&["bash"]), workspace(root.path())).await;
     let mut events = subscribe(&host, &caller, &target);
     send(&host, &caller, &target, "emit a gated split codepoint");
     server.request().await;
@@ -210,7 +210,7 @@ async fn binary_and_incomplete_eof_keep_raw_native_bytes_without_lossy_text_or_f
     let host = Host::memory_configured(prepare(&builder, config(&server.endpoint)).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(&["bash"]), workspace(root.path()));
+    let target = create(&host, &caller, selection(&["bash"]), workspace(root.path())).await;
     send(&host, &caller, &target, "byte exact command results");
     let turn = settled(&host, &caller, &target, 1).await.remove(0);
     assert_eq!(turn.outcome, Some(TurnOutcome::Completed));
@@ -332,7 +332,10 @@ async fn stopped_process(deadline: bool) {
             .execution
             .tool_timeout_ms = 1500;
     }
-    let created = host.create_agent(&caller, create_request).unwrap();
+    let created = host
+        .create_agent_async(&caller, create_request)
+        .await
+        .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
         session_id: created.session_id.unwrap(),
@@ -452,7 +455,8 @@ async fn retained_subscriptions_do_not_keep_closed_memory_session_output_or_edit
         &caller,
         selection(&["write", "bash"]),
         workspace(root.path()),
-    );
+    )
+    .await;
     // Intentionally leave all streamed bodies queued throughout execution/close.
     let events = subscribe(&host, &caller, &target);
     let mut states = host.session_states(&caller, &target).unwrap();

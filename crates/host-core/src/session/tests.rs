@@ -442,7 +442,7 @@ async fn partial_and_terminal_acceptance_register_original_saves_before_gated_io
     assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
     assert_eq!(result.partials.len(), 1);
-    assert!(state.history_work.is_none() && !state.saving);
+    assert!(state.history_work.is_none());
 }
 
 struct FailedSave {
@@ -573,8 +573,8 @@ async fn cancellation_during_save_keeps_save_owner_and_complete_response() {
     );
 }
 
-#[test]
-fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
+#[tokio::test]
+async fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
     let host_id = HostId::new().unwrap();
     let incarnation = HostIncarnation::new().unwrap();
     let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
@@ -593,22 +593,17 @@ fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
         Arc::clone(&access),
         resources,
     );
-    let first = agent
-        .create_session(
-            &caller,
-            SessionId::new().unwrap(),
+    let create = |make_default| {
+        agent.create_session_async_owned(
+            OperationId::new().unwrap(),
             SessionOptions::default(),
-            true,
+            None,
+            make_default,
         )
-        .unwrap();
-    let child = agent
-        .create_session(
-            &caller,
-            SessionId::new().unwrap(),
-            SessionOptions::default(),
-            false,
-        )
-        .unwrap();
+    };
+    let first = create(true).await.unwrap().session_id.unwrap();
+    let child_id = create(false).await.unwrap().session_id.unwrap();
+    let child = agent.session(&child_id).unwrap();
     let baseline = Arc::strong_count(&child);
     let held = child.state.lock().unwrap();
     let setter_agent = Arc::clone(&agent);
@@ -652,7 +647,7 @@ fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
             .info(&replacement.caller())
             .unwrap()
             .default_session_id,
-        Some(first.id.clone())
+        Some(first)
     );
 }
 
@@ -722,7 +717,7 @@ async fn blocked(fixture: &Fixture) -> TurnInfo {
     until(fixture, |state| {
         !state.driver_running
             && state.history_work.is_some()
-            && !state.saving
+            && !state.history_work.as_ref().is_some_and(|work| work.running)
             && state
                 .active
                 .as_ref()
@@ -867,7 +862,7 @@ async fn report_partial_and_terminal_each_continue_once_and_keep_primary_failure
             .resume(&fixture.connection.caller())
             .unwrap();
         until(&fixture, |state| {
-            !state.saving
+            !state.history_work.as_ref().is_some_and(|work| work.running)
                 && state.history_work.is_some()
                 && backend.appends.load(Ordering::SeqCst) == expected_appends
         })
@@ -1018,7 +1013,8 @@ async fn partial_or_changed_original_bytes_remain_blocked_and_unchanged() {
                 .resume(&fixture.connection.caller())
                 .unwrap();
             until(&fixture, |state| {
-                !state.saving && backend.reconciles.load(Ordering::SeqCst) == attempt
+                !state.history_work.as_ref().is_some_and(|work| work.running)
+                    && backend.reconciles.load(Ordering::SeqCst) == attempt
             })
             .await;
             assert_eq!(std::fs::read(&path).unwrap(), before);
@@ -1271,7 +1267,10 @@ async fn synchronous_backend_panics_are_failed_saves_not_lost_owners() {
         .session
         .resume(&fixture.connection.caller())
         .unwrap();
-    until(&fixture, |state| !state.saving).await;
+    until(&fixture, |state| {
+        !state.history_work.as_ref().is_some_and(|work| work.running)
+    })
+    .await;
     let state = fixture.session.state.lock().unwrap();
     assert!(state.history_work.is_some());
     assert!(state.completed.is_empty());

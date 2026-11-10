@@ -508,6 +508,50 @@ macro_rules! session_control {
         }
     )+};
 }
+macro_rules! session_query {
+    ($(#[$meta:meta])* $name:ident, $operation:ident => $output:ty) => {
+        $(#[$meta])*
+        pub async fn $name(&self, options: CallOptions) -> Result<$output, CallError> {
+            self.client.call(
+                $operation(SessionTarget { target: self.target.clone() }), options,
+                |operation| Correlation::session(&operation.0.target),
+            ).await
+        }
+    };
+}
+macro_rules! turn_query {
+    ($name:ident, $operation:ident => $output:ty) => {
+        pub async fn $name(
+            &self,
+            turn_id: TurnId,
+            options: CallOptions,
+        ) -> Result<$output, CallError> {
+            self.client
+                .call(
+                    $operation(TurnTarget {
+                        target: self.target.clone(),
+                        turn_id,
+                    }),
+                    options,
+                    |operation| {
+                        Correlation::session(&operation.0.target).turn(&operation.0.turn_id)
+                    },
+                )
+                .await
+        }
+    };
+}
+macro_rules! session_read {
+    ($(#[$meta:meta])* $name:ident, $operation:ident, $request:ty => $output:ty) => {
+        $(#[$meta])*
+        pub async fn $name(&self, request: $request, options: CallOptions) -> Result<$output, CallError> {
+            self.client.call(
+                $operation(SessionRequest { target: self.target.clone(), request }), options,
+                |operation| Correlation::session(&operation.0.target),
+            ).await
+        }
+    };
+}
 impl SessionClient {
     pub fn target(&self) -> &SessionRef {
         &self.target
@@ -521,20 +565,7 @@ impl SessionClient {
             .send(SendMessage::new(request, self.target.clone()), options)
             .await
     }
-    pub async fn info(&self, options: CallOptions) -> Result<SessionInfo, CallError> {
-        self.client
-            .call(
-                GetSession(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
+    session_query!(info, GetSession => SessionInfo);
     /// Changes commit as one candidate. A running Turn keeps its old binding.
     pub async fn update(
         &self,
@@ -557,20 +588,7 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn inputs(&self, options: CallOptions) -> Result<InputList, CallError> {
-        self.client
-            .call(
-                ListInputs(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
+    session_query!(inputs, ListInputs => InputList);
     pub async fn remove_input(
         &self,
         request: InputRemoveRequest,
@@ -594,36 +612,12 @@ impl SessionClient {
             )
             .await
     }
-    /// Read only facts already held by the Session. Cold history stays unknown;
-    /// this call does not load, prepare resources, or invoke a model.
-    pub async fn context(&self, options: CallOptions) -> Result<SessionContextSnapshot, CallError> {
-        self.client
-            .call(
-                GetSessionContext(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn state(&self, options: CallOptions) -> Result<SessionSnapshot, CallError> {
-        self.client
-            .call(
-                SessionState(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
+    session_query!(
+        /// Read only facts already held by the Session. Cold history stays unknown;
+        /// this call does not load, prepare resources, or invoke a model.
+        context, GetSessionContext => SessionContextSnapshot
+    );
+    session_query!(state, SessionState => SessionSnapshot);
     session_control! { pause, PauseSession; resume, ResumeSession; load, LoadSession; unload, UnloadSession; }
     /// Start manual compaction at the Session owner without creating a Turn or
     /// queuing a command. The receipt records acceptance, not completion. Read
@@ -751,58 +745,9 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn turns(&self, options: CallOptions) -> Result<TurnListSnapshot, CallError> {
-        self.client
-            .call(
-                ListTurns(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn turn(
-        &self,
-        turn_id: TurnId,
-        options: CallOptions,
-    ) -> Result<TurnDetailsSnapshot, CallError> {
-        self.client
-            .call(
-                GetTurn(TurnTarget {
-                    target: self.target.clone(),
-                    turn_id,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target).turn(&request.turn_id)
-                },
-            )
-            .await
-    }
-    pub async fn wait_turn(
-        &self,
-        turn_id: TurnId,
-        options: CallOptions,
-    ) -> Result<TurnResultSnapshot, CallError> {
-        self.client
-            .call(
-                WaitTurn(TurnTarget {
-                    target: self.target.clone(),
-                    turn_id,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target).turn(&request.turn_id)
-                },
-            )
-            .await
-    }
+    session_query!(turns, ListTurns => TurnListSnapshot);
+    turn_query!(turn, GetTurn => TurnDetailsSnapshot);
+    turn_query!(wait_turn, WaitTurn => TurnResultSnapshot);
     pub async fn cancel_turn(
         &self,
         request: TurnCancelRequest,
@@ -826,25 +771,7 @@ impl SessionClient {
             )
             .await
     }
-    pub async fn turn_result(
-        &self,
-        turn_id: TurnId,
-        options: CallOptions,
-    ) -> Result<TurnResultSnapshot, CallError> {
-        self.client
-            .call(
-                GetTurnResult(TurnTarget {
-                    target: self.target.clone(),
-                    turn_id,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target).turn(&request.turn_id)
-                },
-            )
-            .await
-    }
+    turn_query!(turn_result, GetTurnResult => TurnResultSnapshot);
     pub async fn answer_interaction(
         &self,
         request: InteractionAnswerRequest<InteractionAnswerData>,
@@ -852,7 +779,7 @@ impl SessionClient {
     ) -> Result<InteractionAnswerReceipt, CallError> {
         self.client
             .call(
-                AnswerInteraction(AnswerParams {
+                AnswerInteraction(SessionRequest {
                     target: self.target.clone(),
                     request,
                 }),
@@ -930,139 +857,17 @@ impl SessionClient {
             )
             .await
     }
-    /// Read only the explicitly addressed Session's committed workspace.
-    pub async fn workspace_files(
-        &self,
-        request: FilesRequest,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<FilesResult>, CallError> {
-        self.client
-            .call(
-                WorkspaceFiles(FilesParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn workspace_read(
-        &self,
-        request: ReadRequest,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<ReadResult>, CallError> {
-        self.client
-            .call(
-                WorkspaceRead(WorkspaceReadParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn workspace_search(
-        &self,
-        request: SearchRequest,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<SearchResult>, CallError> {
-        self.client
-            .call(
-                WorkspaceSearch(SearchParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn changes_list(
-        &self,
-        request: ChangesListRequest,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<ChangesListResult>, CallError> {
-        self.client
-            .call(
-                ChangesList(ChangesListParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn changes_diff(
-        &self,
-        request: DiffRequest,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<DiffResult>, CallError> {
-        self.client
-            .call(
-                ChangesDiff(ChangesDiffParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
-    pub async fn workspace_status(
-        &self,
-        options: CallOptions,
-    ) -> Result<WorkspaceSnapshot<StatusResult>, CallError> {
-        self.client
-            .call(
-                WorkspaceStatus(SessionTarget {
-                    target: self.target.clone(),
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
+    session_read!(
+        /// Read only the explicitly addressed Session's committed workspace.
+        workspace_files, WorkspaceFiles, FilesRequest => WorkspaceSnapshot<FilesResult>
+    );
+    session_read!(workspace_read, WorkspaceRead, ReadRequest => WorkspaceSnapshot<ReadResult>);
+    session_read!(workspace_search, WorkspaceSearch, SearchRequest => WorkspaceSnapshot<SearchResult>);
+    session_read!(changes_list, ChangesList, ChangesListRequest => WorkspaceSnapshot<ChangesListResult>);
+    session_read!(changes_diff, ChangesDiff, DiffRequest => WorkspaceSnapshot<DiffResult>);
+    session_query!(workspace_status, WorkspaceStatus => WorkspaceSnapshot<StatusResult>);
 
-    pub async fn history(
-        &self,
-        request: HistoryReadRequest,
-        options: CallOptions,
-    ) -> Result<SessionHistorySnapshot, CallError> {
-        self.client
-            .call(
-                ReadHistory(HistoryParams {
-                    target: self.target.clone(),
-                    request,
-                }),
-                options,
-                |operation| {
-                    let request = &operation.0;
-                    Correlation::session(&request.target)
-                },
-            )
-            .await
-    }
+    session_read!(history, ReadHistory, HistoryReadRequest => SessionHistorySnapshot);
 }
 
 /// One observation on a shared connection. Dropping it ends only this stream,

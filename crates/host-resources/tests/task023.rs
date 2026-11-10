@@ -1,6 +1,9 @@
 //! Real Host + Runtime + production HTTP/SSE on loopback, never a live provider.
+#[path = "support/http_server.rs"]
+mod http_server;
 #[path = "../../host-core/tests/support/input_context.rs"]
 mod input_context;
+
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
@@ -20,11 +23,7 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::{Semaphore, mpsc},
-};
+use tokio::sync::{Semaphore, mpsc};
 
 struct Server {
     endpoint: String,
@@ -33,54 +32,7 @@ struct Server {
 }
 impl Server {
     async fn start(replies: Vec<(String, Option<Arc<Semaphore>>)>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!(
-            "http://{}/v1/chat/completions",
-            listener.local_addr().unwrap()
-        );
-        let (send, requests) = mpsc::unbounded_channel();
-        let task = tokio::spawn(async move {
-            for (body, gate) in replies {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut bytes = Vec::new();
-                let boundary = loop {
-                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                        break index + 4;
-                    }
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                };
-                let head = String::from_utf8(bytes[..boundary].to_vec()).unwrap();
-                let length: usize = head
-                    .lines()
-                    .find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap();
-                while bytes.len() < boundary + length {
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                }
-                send.send(serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap())
-                    .unwrap();
-                if let Some(gate) = gate {
-                    gate.acquire().await.unwrap().forget();
-                }
-                let headers = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                socket.write_all(headers.as_bytes()).await.unwrap();
-                socket.write_all(body.as_bytes()).await.unwrap();
-                socket.shutdown().await.unwrap();
-            }
-        });
+        let (endpoint, requests, task) = http_server::start(replies).await;
         Self {
             endpoint,
             requests,
@@ -179,14 +131,15 @@ fn request(tools: Vec<ToolBinding>, workspace: Option<WorkspaceRef>) -> AgentCre
         initial_message: None,
     }
 }
-fn create(
-    host: &Host,
+async fn create(
+    host: &Arc<Host>,
     caller: &CallerContext,
     tools: Vec<ToolBinding>,
     workspace: Option<WorkspaceRef>,
 ) -> SessionRef {
     let receipt = host
-        .create_agent(caller, request(tools, workspace))
+        .create_agent_async(caller, request(tools, workspace))
+        .await
         .unwrap();
     SessionRef {
         agent_id: receipt.agent_id.unwrap(),
@@ -379,7 +332,8 @@ async fn old_turn_resources_after_reload(canonical: bool) {
         Some(WorkspaceRef {
             path: directory.path().to_str().unwrap().into(),
         }),
-    );
+    )
+    .await;
     send(&host, &caller, &target, "first task");
     let first = server_a.request().await;
     let mut candidate = original.clone();
@@ -520,7 +474,7 @@ async fn removed_referenced_model_keeps_original_input_queued_and_can_be_restore
         Host::memory_configured(prepare(&builder, original.clone(), "old-key").await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, vec![], None);
+    let target = create(&host, &caller, vec![], None).await;
     let mut removed = original.clone();
     removed.models.clear();
     host.reload_configuration(&caller, 0, prepare(&builder, removed, "old-key").await)
@@ -564,7 +518,7 @@ async fn removed_tool_and_failed_workspace_binding_do_not_consume_inputs() {
         Host::memory_configured(prepare(&builder, initial.clone(), "old-key").await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(), None);
+    let target = create(&host, &caller, selection(), None).await;
     initial.tools.clear();
     host.reload_configuration(&caller, 0, prepare(&builder, initial, "old-key").await)
         .await
@@ -582,7 +536,8 @@ async fn removed_tool_and_failed_workspace_binding_do_not_consume_inputs() {
         Some(WorkspaceRef {
             path: missing.to_str().unwrap().into(),
         }),
-    );
+    )
+    .await;
     let id = send(&host, &caller, &other, "keep for workspace");
     let state = blocked(&host, &caller, &other).await;
     assert_eq!(state.data.next_turn[0].message_id, id);
@@ -740,12 +695,14 @@ async fn owned_compaction_is_available_and_unsupported_reasoning_is_explicit() {
     let connection = host.connect().unwrap();
     let mut request = request(vec![], None);
     request.config.session_defaults.execution.compaction.enabled = true;
-    host.create_agent(&connection.caller(), request.clone())
+    host.create_agent_async(&connection.caller(), request.clone())
+        .await
         .unwrap();
     request.config.session_defaults.execution.compaction.enabled = false;
     request.config.session_defaults.reasoning = ReasoningPreference::Ultra;
     assert_eq!(
-        host.create_agent(&connection.caller(), request)
+        host.create_agent_async(&connection.caller(), request)
+            .await
             .unwrap_err()
             .kind(),
         Some(FaultKind::SessionConfigInvalid)
@@ -770,7 +727,7 @@ async fn model_references_and_tool_queries_use_real_available_and_owner_selected
     let host = Host::memory_configured(prepare(&builder, initial, "old-key").await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(), None);
+    let target = create(&host, &caller, selection(), None).await;
     let models = host.model_list(&caller).unwrap();
     assert_eq!(
         models
@@ -860,7 +817,7 @@ async fn actual_tool_binding_failure_preserves_the_accepted_message() {
     let host = Host::memory_configured(prepare(&builder, initial, "old-key").await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(), None);
+    let target = create(&host, &caller, selection(), None).await;
     let id = send(&host, &caller, &target, "original binding input");
     let state = blocked(&host, &caller, &target).await;
     assert_eq!(state.data.next_turn[0].message_id, id);

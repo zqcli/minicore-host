@@ -103,9 +103,9 @@ pub(crate) struct CancelCompactParams {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct HistoryParams {
+pub(crate) struct SessionRequest<T> {
     pub target: SessionRef,
-    pub request: HistoryReadRequest,
+    pub request: T,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -127,44 +127,6 @@ pub(crate) struct ToolReadParams {
     pub target: SessionRef,
     pub tool: ToolCallRef,
     pub request: TextReadRequest,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct FilesParams {
-    pub target: SessionRef,
-    pub request: FilesRequest,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct WorkspaceReadParams {
-    pub target: SessionRef,
-    pub request: ReadRequest,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct SearchParams {
-    pub target: SessionRef,
-    pub request: SearchRequest,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ChangesListParams {
-    pub target: SessionRef,
-    pub request: ChangesListRequest,
-}
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ChangesDiffParams {
-    pub target: SessionRef,
-    pub request: DiffRequest,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct AnswerParams {
-    pub target: SessionRef,
-    pub request: InteractionAnswerRequest<InteractionAnswerData>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -246,8 +208,8 @@ macro_rules! operations {
             }
         })+
 
-        /// Resource methods with real handlers in this adapter increment.
-        /// This is not the full SPEC §8 implementation or a runtime negotiation.
+        /// Canonical resource methods backed by this adapter's real handlers.
+        /// This route list is not a runtime capability negotiation.
         pub const SUPPORTED_METHODS: &[&str] = &["events.subscribe", $($method,)+];
 
         pub(crate) async fn dispatch(host: Arc<Host>, caller: CallerContext, method: &str, params: Value) -> Result<Value, RpcError> {
@@ -308,17 +270,17 @@ operations! {
     WaitTurn, "turn.wait", TurnTarget => TurnResultSnapshot, |h, c, p| { h.wait_turn_snapshot(&c, &p.target, &p.turn_id).await };
     CancelTurn, "turn.cancel", CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
     GetTurnResult, "turn.result", TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id).await };
-    ReadHistory, "session.history.read", HistoryParams => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
+    ReadHistory, "session.history.read", SessionRequest<HistoryReadRequest> => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
     ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
     GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
     ReadToolOutput, "toolcall.output.read", ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
-    WorkspaceFiles, "workspace.files", FilesParams => WorkspaceSnapshot<FilesResult>, |h, c, p| { h.workspace_files(&c, &p.target, p.request, QueryContext::default()).await };
-    WorkspaceRead, "workspace.read", WorkspaceReadParams => WorkspaceSnapshot<ReadResult>, |h, c, p| { h.workspace_read(&c, &p.target, p.request, QueryContext::default()).await };
-    WorkspaceSearch, "workspace.search", SearchParams => WorkspaceSnapshot<SearchResult>, |h, c, p| { h.workspace_search(&c, &p.target, p.request, QueryContext::default()).await };
-    ChangesList, "changes.list", ChangesListParams => WorkspaceSnapshot<ChangesListResult>, |h, c, p| { h.changes_list(&c, &p.target, p.request, QueryContext::default()).await };
-    ChangesDiff, "changes.diff", ChangesDiffParams => WorkspaceSnapshot<DiffResult>, |h, c, p| { h.changes_diff(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceFiles, "workspace.files", SessionRequest<FilesRequest> => WorkspaceSnapshot<FilesResult>, |h, c, p| { h.workspace_files(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceRead, "workspace.read", SessionRequest<ReadRequest> => WorkspaceSnapshot<ReadResult>, |h, c, p| { h.workspace_read(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceSearch, "workspace.search", SessionRequest<SearchRequest> => WorkspaceSnapshot<SearchResult>, |h, c, p| { h.workspace_search(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesList, "changes.list", SessionRequest<ChangesListRequest> => WorkspaceSnapshot<ChangesListResult>, |h, c, p| { h.changes_list(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesDiff, "changes.diff", SessionRequest<DiffRequest> => WorkspaceSnapshot<DiffResult>, |h, c, p| { h.changes_diff(&c, &p.target, p.request, QueryContext::default()).await };
     WorkspaceStatus, "workspace.status", SessionTarget => WorkspaceSnapshot<StatusResult>, |h, c, p| { h.workspace_status(&c, &p.target, QueryContext::default()).await };
-    AnswerInteraction, "interaction.answer", AnswerParams => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
+    AnswerInteraction, "interaction.answer", SessionRequest<InteractionAnswerRequest<InteractionAnswerData>> => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
     Unsubscribe, "events.unsubscribe", UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
 }
 

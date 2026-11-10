@@ -21,7 +21,7 @@ impl SessionController {
             }),
             tools,
             preparing: state.preparing,
-            history_save: state.saving || state.history_work.is_some(),
+            history_save: state.history_work.is_some(),
             metadata_save: state.record_work.is_some(),
             compaction: state.compaction.as_ref().map(|work| OwnedCompactionWork {
                 source: work.activity.source.clone(),

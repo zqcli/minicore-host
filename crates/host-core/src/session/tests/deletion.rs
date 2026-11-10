@@ -39,7 +39,7 @@ async fn task051_confirmed_file_bytes_do_not_bypass_save_callback_or_resource_re
     let acknowledgement = Arc::new(Semaphore::new(0));
     let release_entered = Arc::new(Semaphore::new(0));
     let release = Arc::new(Semaphore::new(0));
-    let mut fixture = setup(
+    let fixture = setup(
         Arc::new(Resources {
             model: model(vec![final_events("gated actual Runtime response")]),
             tools: ToolSet::default(),
@@ -58,9 +58,6 @@ async fn task051_confirmed_file_bytes_do_not_bypass_save_callback_or_resource_re
     // The standard history fixture supplies real JournalHistory and files;
     // additionally install its actual persistent object boundary for deletion.
     let record = fixture.store.load().unwrap();
-    Arc::get_mut(&mut fixture.session)
-        .expect("unpublished fixture owner")
-        .provenance = Some(record.clone());
     *fixture.session.store.lock().unwrap() = Some(fixture.store.clone());
     fixture.session.state.lock().unwrap().record_base = Some(record);
     send(&fixture, "accepted input");
@@ -76,7 +73,16 @@ async fn task051_confirmed_file_bytes_do_not_bypass_save_callback_or_resource_re
     fixture.session.begin_delete_close_owned();
     let owner = fixture.session.clone();
     let task = tokio::spawn(async move { owner.delete_data_owned(Some(&operation)).await });
-    assert!(fixture.session.state.lock().unwrap().saving);
+    assert!(
+        fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .history_work
+            .as_ref()
+            .is_some_and(|work| work.running)
+    );
     assert!(!task.is_finished());
     assert!(fixture.store.canonical_path().join("session.json").exists());
     assert_eq!(release_entered.available_permits(), 0);

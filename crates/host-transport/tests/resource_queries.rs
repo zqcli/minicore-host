@@ -212,17 +212,7 @@ async fn prepare(builder: &HostResourceBuilder, config: HostConfig) -> PreparedH
         .await
         .unwrap()
 }
-async fn tls_server(host: Arc<Host>) -> wss_common::Server {
-    let (server_tls, client_tls) = wss_common::certificates();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(serve_wss(host, listener, server_tls));
-    wss_common::Server {
-        address,
-        client_tls,
-        task,
-    }
-}
+use wss_common::tls_server;
 async fn pipe_client(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
     let (to_server, input) = pipe::pipe().unwrap();
     let (output, from_server) = pipe::pipe().unwrap();
@@ -234,30 +224,7 @@ async fn pipe_client(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result
         task,
     )
 }
-struct QueryClients {
-    clients: [HostClient; 3],
-    pipe: JoinHandle<std::io::Result<()>>,
-    _tls: wss_common::Server,
-}
-impl QueryClients {
-    async fn new(host: Arc<Host>) -> Self {
-        let local = HostClient::in_process(host.clone()).unwrap();
-        let (stdio, pipe) = pipe_client(host.clone()).await;
-        let tls = tls_server(host).await;
-        let wss = tls.client(HOST_KEY).await.unwrap();
-        Self {
-            clients: [local, stdio, wss],
-            pipe,
-            _tls: tls,
-        }
-    }
-    async fn finish(self) {
-        for client in &self.clients {
-            client.close();
-        }
-        self.pipe.await.unwrap().unwrap();
-    }
-}
+use wss_common::Clients as QueryClients;
 fn assert_public(value: &Value) {
     let serialized = serde_json::to_string(value).unwrap();
     assert!(!serialized.contains(MODEL_KEY));
@@ -282,7 +249,7 @@ async fn readonly_queries_share_real_config_models_and_explicit_tool_selections(
     let expected_tools = resources.host.tool_list(&operator.caller()).unwrap();
     assert_eq!(expected_tools.len(), 1);
     assert_eq!(expected_tools[0].name().as_str(), "agent");
-    let peers = QueryClients::new(resources.host.clone()).await;
+    let peers = QueryClients::new(resources.host.clone(), HOST_KEY, options()).await;
     for client in &peers.clients {
         assert!(!client.initial_info().can_operate);
         let config = client.config(options()).await.unwrap();
@@ -372,7 +339,7 @@ async fn reload_queries_expose_real_removals_and_keep_missing_selections_as_faul
         .await
         .unwrap();
     let session = target(&created);
-    let peers = QueryClients::new(resources.host.clone()).await;
+    let peers = QueryClients::new(resources.host.clone(), HOST_KEY, options()).await;
     let mut next = resources.config.clone();
     next.name = "Reloaded resource set".into();
     next.models.clear();

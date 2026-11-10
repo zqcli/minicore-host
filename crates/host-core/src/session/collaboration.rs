@@ -230,7 +230,6 @@ impl SessionController {
             DelegationDisposition::ScopeClosed => {
                 relation.scope.sealed.load(Ordering::SeqCst)
                     && state.active.is_none()
-                    && !state.saving
                     && state.history_work.is_none()
             }
         };
@@ -281,7 +280,6 @@ impl SessionController {
         let prepared = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if state.active.is_some()
-                || state.saving
                 || state.history_work.is_some()
                 || state.record_work.is_some()
                 || state.preparing
@@ -576,7 +574,6 @@ impl SessionController {
             && state.active.is_none()
             && state.compaction.is_none()
             && !state.preparing
-            && !state.saving
             && state.history_work.is_none()
             && state.record_work.is_none()
             && !state.handoff_pending

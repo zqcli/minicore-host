@@ -12,5 +12,6 @@
 - Run formatting, lint, unit/integration tests, and documentation checks. Document checks that were not run or are blocked.
 - Count unique test cases with `cargo test --workspace --all-targets --locked -- --list`; nested storage subprocess probe output is not an additional test case.
 - Engineering workers for this project are requested with `gpt-6-astra` and `max` reasoning. Record the requested configuration without claiming independently verified effective runtime settings.
+- Rust Agent/Session creation uses the existing asynchronous owner entries for both storage modes. Memory metadata updates reuse owner commit methods and remain callable without an executor. Delegation fact types have one core definition; preserve separate capability and lifecycle boundaries.
 - Parallel contributors own disjoint paths. Coordinate shared manifests and public types before changing them.
 - Use minicore-agent as a code reference and reuse suitable mature components. It is not a compatibility or behavior baseline; follow this Host specification and justify necessary changes without speculative rewrites.

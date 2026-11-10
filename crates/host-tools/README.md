@@ -33,6 +33,12 @@ Saved-only results contain no fabricated Load ID, config or revision. Default
 Turn inspection and explicit output ranges retain current execution semantics;
 Turn inspect never exposes the full bound configuration.
 
+The tool layer re-exports core's factual Turn source and delegation registration,
+disposition, completion, and input-range types. The input range serializes into
+completion notifications; these facts do not grant authority. Opaque owner
+capabilities, the separate port traits, and weak scope hooks retain the actual
+acceptance checks and lifecycle boundaries.
+
 The strict actions, snapshot configuration mapping, standard Runtime Tool,
 selected ToolSet factory, ephemeral root scopes, pre-delivery registration,
 independent completion delivery, and root cleanup coordination are implemented.

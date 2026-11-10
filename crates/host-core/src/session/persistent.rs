@@ -35,7 +35,6 @@ impl SessionController {
             .store
             .get_mut()
             .expect("Session store mutex poisoned") = Some(store);
-        mutable.provenance = Some(record.clone());
         let state = mutable.state.get_mut().expect("Session mutex poisoned");
         state.record_base = Some(record.clone());
         // Edit snapshots are retained observations, not independently durable

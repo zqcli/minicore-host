@@ -49,7 +49,7 @@ async fn cancel_tail(deadline: bool) {
     if deadline {
         req.config.session_defaults.execution.tool_timeout_ms = 700;
     }
-    let created = host.create_agent(&caller, req).unwrap();
+    let created = host.create_agent_async(&caller, req).await.unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
         session_id: created.session_id.unwrap(),
@@ -261,7 +261,7 @@ async fn completes_before_model(
     let host = Host::memory_configured(prepare(&builder, config(&server.endpoint)).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(&[name]), workspace(root.path()));
+    let target = create(&host, &caller, selection(&[name]), workspace(root.path())).await;
     let mut events = subscribe(&host, &caller, &target);
     send(
         &host,

@@ -52,7 +52,7 @@ impl SessionController {
                     .or_else(|| state.last_compaction.clone()),
                 history_save: ContextHistorySave {
                     pending: state.history_work.is_some(),
-                    running: state.saving,
+                    running: state.history_work.as_ref().is_some_and(|work| work.running),
                     fault: state
                         .history_work
                         .as_ref()

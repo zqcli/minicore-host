@@ -476,7 +476,7 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
         .unwrap();
     finish(&fixture.events[0]);
     until(&fixture, |state| {
-        !state.saving
+        !state.history_work.as_ref().is_some_and(|work| work.running)
             && state.history_work.is_some()
             && state
                 .active

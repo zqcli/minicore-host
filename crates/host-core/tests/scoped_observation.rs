@@ -130,9 +130,9 @@ fn setup(
     let connection = host.connect().unwrap();
     (host, connection, inputs, starts)
 }
-fn agent(host: &Host, caller: &CallerContext) -> SessionRef {
+async fn agent(host: &Arc<Host>, caller: &CallerContext) -> SessionRef {
     let receipt = host
-        .create_agent(
+        .create_agent_async(
             caller,
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -143,6 +143,7 @@ fn agent(host: &Host, caller: &CallerContext) -> SessionRef {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     SessionRef {
         agent_id: receipt.agent_id.unwrap(),
@@ -235,7 +236,7 @@ fn complete(events: &Events, text: &str) {
 async fn initial_watermark_and_fixed_utf8_reads_stitch_real_output() {
     let (host, connection, events, mut starts) = setup(1, None);
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let mut sub = subscribe(
         &host,
         &caller,
@@ -323,8 +324,8 @@ async fn scopes_cover_new_direct_descendants_and_do_not_expand_to_siblings() {
         },
         &[EventCategory::Output],
     );
-    let first = agent(&host, &caller);
-    let second = agent(&host, &caller);
+    let first = agent(&host, &caller).await;
+    let second = agent(&host, &caller).await;
     let mut own = subscribe(
         &host,
         &caller,
@@ -349,7 +350,7 @@ async fn scopes_cover_new_direct_descendants_and_do_not_expand_to_siblings() {
 async fn subscription_cleanup_is_connection_bound_and_old_ids_do_not_end_new_scopes() {
     let (host, connection, events, mut starts) = setup(1, None);
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let read_only = host.connect().unwrap();
     let reader = read_only.caller();
     let mut old = subscribe(
@@ -429,7 +430,7 @@ async fn subscription_cleanup_is_connection_bound_and_old_ids_do_not_end_new_sco
 async fn response_indices_continue_across_internal_loops_in_one_turn() {
     let (host, connection, events, mut starts) = setup(2, None);
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let mut sub = subscribe(
         &host,
         &caller,
@@ -545,7 +546,7 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
     });
     let (host, connection, events, mut starts) = setup(4, Some(tool));
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let mut sub = subscribe(
         &host,
         &caller,
@@ -681,7 +682,7 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
 async fn retained_subscription_does_not_retain_reclaimed_source() {
     let (host, connection, events, mut starts) = setup(1, None);
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     send(&host, &caller, &target, MessageMode::FollowUp);
     starts.recv().await.unwrap();
     complete(&events[0], "retained by owner");
@@ -739,7 +740,7 @@ async fn retained_subscription_does_not_retain_reclaimed_source() {
 async fn completion_can_precede_tail_events_without_losing_original_source_bytes() {
     let (host, connection, events, _starts) = setup(1, None);
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let mut sub = subscribe(
         &host,
         &caller,
@@ -843,7 +844,7 @@ impl ResourceResolver for RetryResources {
         })
     }
 }
-fn retry_setup(
+async fn retry_setup(
     delay: std::time::Duration,
 ) -> (
     Arc<Host>,
@@ -871,7 +872,7 @@ fn retry_setup(
     }))
     .unwrap();
     let connection = host.connect().unwrap();
-    let target = agent(&host, &connection.caller());
+    let target = agent(&host, &connection.caller()).await;
     (host, connection, target, model, started)
 }
 async fn retry_state(
@@ -891,7 +892,7 @@ async fn retry_state(
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_wait_cancel_clears_authoritative_state_without_starting_attempt_two() {
     let (host, connection, target, model, mut starts) =
-        retry_setup(std::time::Duration::from_secs(30));
+        retry_setup(std::time::Duration::from_secs(30)).await;
     let caller = connection.caller();
     let mut state = subscribe(
         &host,
@@ -947,7 +948,7 @@ async fn retry_wait_cancel_clears_authoritative_state_without_starting_attempt_t
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn retry_requesting_and_clear_use_original_response_and_actual_attempts() {
     let (host, connection, target, model, mut starts) =
-        retry_setup(std::time::Duration::from_millis(1));
+        retry_setup(std::time::Duration::from_millis(1)).await;
     let caller = connection.caller();
     let mut state = subscribe(
         &host,
@@ -1017,7 +1018,7 @@ async fn interaction_observation_uses_actual_request_and_cancel_settlement() {
     });
     let (host, connection, events, mut starts) = setup(1, Some(tool));
     let caller = connection.caller();
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     let mut sub = subscribe(
         &host,
         &caller,
@@ -1280,7 +1281,7 @@ async fn session_preparation_is_not_published_as_a_registered_child() {
         },
         &[EventCategory::State],
     );
-    let target = agent(&host, &caller);
+    let target = agent(&host, &caller).await;
     host.events_unsubscribe(
         &caller,
         &UnsubscribeRequest {
@@ -1305,7 +1306,7 @@ async fn session_preparation_is_not_published_as_a_registered_child() {
 async fn agent_scope_covers_later_direct_sessions_without_rebuilding() {
     let (host, connection, _events, _starts) = setup(0, None);
     let caller = connection.caller();
-    let first = agent(&host, &caller);
+    let first = agent(&host, &caller).await;
     let host_id = host.info(&caller).unwrap().host_id;
     let mut sub = subscribe(
         &host,
@@ -1318,7 +1319,7 @@ async fn agent_scope_covers_later_direct_sessions_without_rebuilding() {
     );
     assert!(sub.result().initial_states.iter().any(|state|matches!(state,StateEvent::Session {source,..} if source.session_id==first.session_id)));
     let receipt = host
-        .create_session(
+        .create_session_async(
             &caller,
             SessionCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -1331,6 +1332,7 @@ async fn agent_scope_covers_later_direct_sessions_without_rebuilding() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     match next(&mut sub).await {
         ObservationEvent::State(StateEvent::Session { source, .. }) => {

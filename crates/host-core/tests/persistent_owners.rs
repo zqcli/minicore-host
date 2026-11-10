@@ -770,7 +770,7 @@ async fn review_root_guard_outlives_active_memory_session() {
         .unwrap();
     let connection = host.connect().unwrap();
     let receipt = host
-        .create_agent(
+        .create_agent_async(
             &connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -781,6 +781,7 @@ async fn review_root_guard_outlives_active_memory_session() {
                 initial_message: Some(input("keep working")),
             },
         )
+        .await
         .unwrap();
     assert!(receipt.session_id.is_some());
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
@@ -2938,10 +2939,10 @@ async fn pending_default_candidate_still_orders_its_target_close() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn review_lifecycle_check_child_notify_leaves_no_owner_cycle() {
     // Exercise every Session construction route wired to the parent's token:
-    // sync memory, async M/M, async P/M, async P/P, and persistent discovery.
-    for case in 0..5 {
+    // M/M, P/M, P/P, and persistent discovery.
+    for case in 0..4 {
         let directory = tempfile::tempdir().unwrap();
-        let seeded = (case == 4).then(|| seed(directory.path()));
+        let seeded = (case == 3).then(|| seed(directory.path()));
         let (resources, entered, release) = review_gate_resources();
         let host = Host::open_persistent(directory.path(), settings("notify ownership"), resources)
             .await
@@ -2960,24 +2961,20 @@ async fn review_lifecycle_check_child_notify_leaves_no_owner_cycle() {
                 },
             )
         } else {
-            let mut request = create_request(if case < 2 {
+            let mut request = create_request(if case == 0 {
                 StorageMode::Memory
             } else {
                 StorageMode::Persistent
             });
             request.default_session = Some(SessionOptions {
-                mode: Some(if case == 3 {
+                mode: Some(if case == 2 {
                     StorageMode::Persistent
                 } else {
                     StorageMode::Memory
                 }),
                 overrides: None,
             });
-            let receipt = if case == 0 {
-                host.create_agent(&caller, request).unwrap()
-            } else {
-                host.create_agent_async(&caller, request).await.unwrap()
-            };
+            let receipt = host.create_agent_async(&caller, request).await.unwrap();
             let agent_id = receipt.agent_id.unwrap();
             (
                 AgentRef {

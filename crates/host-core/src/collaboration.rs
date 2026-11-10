@@ -6,6 +6,7 @@ use crate::{
     *,
 };
 use minicore_host_protocol::*;
+use serde::Serialize;
 use std::{
     future::Future,
     pin::Pin,
@@ -17,6 +18,8 @@ use std::{
 
 pub type OwnerFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, Fault>> + Send + 'a>>;
 
+/// Factual execution identity supplied by an authenticated Turn capability.
+/// This value is not authorization and cannot be deserialized from tool JSON.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TurnSource {
     pub host_id: HostId,
@@ -273,7 +276,7 @@ pub struct DelegationRegistration {
     pub origin: ToolCallRef,
     pub temporary: bool,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct DelegationInputRange {
     pub turn: TurnRef,
     pub message_ids: Vec<MessageId>,
@@ -283,7 +286,11 @@ pub struct DelegationInputRange {
 }
 #[derive(Clone, Debug)]
 pub struct DelegationCompletion {
+    /// Actual results for the input range, including failed/cancelled facts.
+    /// Reuses the owner result and Runtime history; no fabricated final text.
     pub results: Vec<TurnResult>,
+    /// Real Turn input ranges. Normally consumed inputs; a task bound before
+    /// cancellation of the first model request also belongs to that real Turn.
     pub inputs: Vec<DelegationInputRange>,
     /// Accepted inputs explicitly removed before Runtime consumed them.
     pub discarded_inputs: Vec<MessageId>,

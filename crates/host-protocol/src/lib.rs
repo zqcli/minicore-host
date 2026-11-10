@@ -71,6 +71,28 @@ macro_rules! validated_dto {
 }
 pub(crate) use validated_dto;
 
+// Keep each operation's receipt and kind concrete while sharing its envelope.
+macro_rules! control_receipt {
+    ($name:ident, $kind:ident, $variant:ident, $wire:literal, $result:ty $(, $field:ident: $ty:ty)*) => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+        pub enum $kind {
+            #[serde(rename = $wire)]
+            $variant,
+        }
+        #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        pub struct $name {
+            pub kind: $kind,
+            pub host_id: $crate::HostId,
+            pub host_incarnation: $crate::HostIncarnation,
+            pub operation_id: $crate::OperationId,
+            $(pub $field: $ty,)*
+            pub result: $result,
+        }
+    };
+}
+pub(crate) use control_receipt;
+
 mod message;
 pub use message::*;
 

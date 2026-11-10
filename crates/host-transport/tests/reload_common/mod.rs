@@ -16,7 +16,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, ReadHalf, WriteHalf},
-    net::TcpListener,
     sync::Semaphore,
     task::JoinHandle,
 };
@@ -158,17 +157,7 @@ pub async fn revision(client: &HostClient, expected: u64) {
     .await
     .unwrap();
 }
-pub async fn tls_server(host: Arc<Host>) -> super::wss_common::Server {
-    let (server_tls, client_tls) = super::wss_common::certificates();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(serve_wss(host, listener, server_tls));
-    super::wss_common::Server {
-        address,
-        client_tls,
-        task,
-    }
-}
+pub use super::wss_common::tls_server;
 pub async fn stdio(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
     let (peer, server) = tokio::io::duplex(256);
     let (reader, writer) = tokio::io::split(peer);

@@ -73,10 +73,15 @@ unrecognized peer leaves and opaque details; `kind()` then returns `None`.
 Registered type/code/details combinations remain strictly validated.
 
 `PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 52 resource methods in SPEC §8.
-Host state events are not a new `host.state` method. `staged_catalog` requires an
-explicit set of genuinely implemented methods; all other entries report their
-remaining implementation stage. `events.unsubscribe` requires ownership of the
-observation rather than Host business-operation rights.
+Host state events are not a new `host.state` method. The catalog describes canonical
+names, interaction forms and access requirements; the transport router reports
+its supported methods. `events.unsubscribe` requires ownership of the observation
+rather than Host business-operation rights.
+
+The obsolete implementation-stage Rust API (`ImplementationStage`, `planned_stage`,
+`MethodAvailability`, `MethodCapability`, `staged_catalog`, and `require_implemented`)
+has been removed. The registered `HOST_METHOD_UNAVAILABLE` Fault remains available
+for a canonical method without an active handler.
 
 ## Validation and limits
 

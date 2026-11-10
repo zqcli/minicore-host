@@ -105,7 +105,7 @@ async fn external_scenario(name: &str, mode: ApprovalMode, decision: ApprovalAns
     let caller = connection.caller();
     let mut create = request(selection(&[name]), None);
     create.config.session_defaults.execution.approval = mode;
-    let receipt = host.create_agent(&caller, create).unwrap();
+    let receipt = host.create_agent_async(&caller, create).await.unwrap();
     let target = SessionRef {
         agent_id: receipt.agent_id.unwrap(),
         session_id: receipt.session_id.unwrap(),

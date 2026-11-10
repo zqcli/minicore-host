@@ -306,7 +306,7 @@ fn resources(calls: Vec<Option<Call>>, reject: bool, fail_command_record: bool) 
         fail_command_record,
     })
 }
-fn setup(
+async fn setup(
     resources: Arc<Resources>,
     root: &TemporaryDirectory,
     selected: &[&str],
@@ -325,7 +325,7 @@ fn setup(
         })
         .collect();
     let created = host
-        .create_agent(
+        .create_agent_async(
             &connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -336,6 +336,7 @@ fn setup(
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
@@ -444,7 +445,7 @@ async fn real_local_tools_are_selected_recorded_and_joined_under_actual_turn() {
         false,
     );
     let (host, connection, target) =
-        setup(resources.clone(), &root, &["read", "write", "edit", "bash"]);
+        setup(resources.clone(), &root, &["read", "write", "edit", "bash"]).await;
     let caller = connection.caller();
     send(&host, &caller, &target);
     let result = finish(&host, &caller, &target, 1).await;
@@ -491,7 +492,7 @@ async fn real_local_tools_are_selected_recorded_and_joined_under_actual_turn() {
 async fn rejected_candidate_cannot_execute_prepared_local_tool() {
     let root = TemporaryDirectory::new();
     let resources = resources(vec![], true, false);
-    let (host, connection, target) = setup(resources.clone(), &root, &["write"]);
+    let (host, connection, target) = setup(resources.clone(), &root, &["write"]).await;
     let caller = connection.caller();
     send(&host, &caller, &target);
     until(|| {
@@ -527,7 +528,7 @@ async fn registry_selection_restricts_both_model_declarations_and_actual_executi
         false,
         false,
     );
-    let (host, connection, target) = setup(resources.clone(), &root, &["read"]);
+    let (host, connection, target) = setup(resources.clone(), &root, &["read"]).await;
     let caller = connection.caller();
     send(&host, &caller, &target);
     let result = finish(&host, &caller, &target, 1).await;
@@ -571,7 +572,7 @@ async fn cancelled_real_bash_is_waited_before_finished_and_same_call_id_is_turn_
         false,
         false,
     );
-    let (host, connection, target) = setup(resources.clone(), &root, &["bash"]);
+    let (host, connection, target) = setup(resources.clone(), &root, &["bash"]).await;
     let caller = connection.caller();
     send(&host, &caller, &target);
     let records = until(|| resources.records.lock().unwrap().first().cloned()).await;
@@ -629,7 +630,7 @@ async fn joined_record_failure_is_diagnostic_not_unconfirmed_cleanup() {
         false,
         true,
     );
-    let (host, connection, target) = setup(resources.clone(), &root, &["bash"]);
+    let (host, connection, target) = setup(resources.clone(), &root, &["bash"]).await;
     let caller = connection.caller();
     send(&host, &caller, &target);
     let result = finish(&host, &caller, &target, 1).await;

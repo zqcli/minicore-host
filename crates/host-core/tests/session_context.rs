@@ -173,11 +173,11 @@ fn input(text: &str, mode: MessageMode) -> MessageInput {
         in_reply_to: None,
     }
 }
-fn memory(resources: Arc<Resources>) -> (Arc<Host>, ConnectionHandle, SessionRef) {
+async fn memory(resources: Arc<Resources>) -> (Arc<Host>, ConnectionHandle, SessionRef) {
     let host = Host::memory(resources).unwrap();
     let connection = host.connect().unwrap();
     let created = host
-        .create_agent(
+        .create_agent_async(
             &connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -188,6 +188,7 @@ fn memory(resources: Arc<Resources>) -> (Arc<Host>, ConnectionHandle, SessionRef
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
@@ -261,7 +262,7 @@ async fn compacted(
 async fn empty_and_queued_context_is_meaningful_read_only_and_does_not_prepare_resources() {
     let model = ScriptedModel::new(4096, vec![], None);
     let resources = Resources::new(model.clone());
-    let (host, operator, target) = memory(resources.clone());
+    let (host, operator, target) = memory(resources.clone()).await;
     let observer = host.connect().unwrap();
     assert!(!observer.initial_info().can_operate);
     let caller = operator.caller();
@@ -337,7 +338,7 @@ async fn usage_is_latest_complete_history_response_and_preserves_unknown_fields_
         ],
         None,
     );
-    let (host, connection, target) = memory(Resources::new(model));
+    let (host, connection, target) = memory(Resources::new(model)).await;
     let caller = connection.caller();
     for index in 0..3 {
         host.send(
@@ -395,7 +396,7 @@ async fn gated_active_and_continuation_bindings_remain_frozen_across_config_and_
         None,
     );
     let old_resources = Resources::new(old_model.clone());
-    let (host, connection, target) = memory(old_resources.clone());
+    let (host, connection, target) = memory(old_resources.clone()).await;
     let caller = connection.caller();
     host.send(
         &caller,
@@ -1032,7 +1033,7 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
         vec![Script::gated(first.clone()), Script::answer(None)],
         Some(utility.clone()),
     );
-    let (host, connection, target) = memory(Resources::new(model.clone()));
+    let (host, connection, target) = memory(Resources::new(model.clone())).await;
     let caller = connection.caller();
     host.update_session(
         &caller,
@@ -1155,7 +1156,7 @@ async fn accepted_history_and_save_are_published_together(mode: StorageMode) {
         let (host, connection) = persistent(directory.path(), resources).await;
         (host, connection, target)
     } else {
-        memory(resources)
+        memory(resources).await
     };
     let caller = connection.caller();
     let mut subscription = host
@@ -1277,7 +1278,7 @@ async fn incomplete_model_output_is_not_complete_context_history_and_reclaimed_i
         }],
         None,
     );
-    let (host, connection, target) = memory(Resources::new(model));
+    let (host, connection, target) = memory(Resources::new(model)).await;
     let caller = connection.caller();
     host.send(
         &caller,

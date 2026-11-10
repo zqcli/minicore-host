@@ -231,7 +231,6 @@ impl SessionController {
                 || state.preparing
                 || state.compaction.is_some()
                 || state.history_work.is_some()
-                || state.saving
             {
                 return Err(Fault::new(
                     FaultKind::SessionBusy,

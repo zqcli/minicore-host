@@ -30,7 +30,6 @@ impl SessionController {
         Self::open(state)?;
         if state.active.is_some()
             || state.preparing
-            || state.saving
             || state.compaction.is_some()
             || state.history_work.is_some()
         {
@@ -145,14 +144,51 @@ impl SessionController {
         Ok(())
     }
     fn record(&self, state: &SessionState) -> SessionRecord {
-        let mut record = self
-            .provenance
+        let mut record = state
+            .record_base
             .clone()
-            .expect("persistent Session has provenance");
+            .expect("persistent Session has a confirmed record");
         record.data.title = state.info.title.clone();
         record.data.config_revision = state.info.config_revision;
         record.data.effective_config = state.info.config.clone();
         record
+    }
+    pub(crate) fn update(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected_revision: u64,
+        patch: &SessionConfigPatch,
+    ) -> Result<SessionInfo, Fault> {
+        let original = self.info(caller)?;
+        if original.config_revision != expected_revision {
+            return Err(Fault::new(
+                FaultKind::SessionConfigConflict,
+                "Session configuration revision changed",
+            ));
+        }
+        let candidate = original
+            .config
+            .apply_patch(patch)
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
+        self.resources_owned()?.validate(&candidate)?;
+        if original.mode == StorageMode::Persistent {
+            return self.access.accept_execution(caller, || {
+                Self::open(&self.state.lock().expect("Session mutex poisoned"))?;
+                Err(Fault::new(
+                    FaultKind::HostMethodUnavailable,
+                    "persistent configuration updates require the asynchronous owner entry",
+                ))
+            });
+        }
+        let (info, _) = self.accept_prepared_update_candidate(
+            caller,
+            expected_revision,
+            candidate,
+            original.title,
+            None,
+            |state| state.info.clone(),
+        )?;
+        Ok(info)
     }
     pub(crate) async fn update_async(
         self: &Arc<Self>,
@@ -446,7 +482,9 @@ impl SessionController {
         config
             .validate()
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
-        self.ensure_executor()?;
+        if self.storage_mode() == StorageMode::Persistent {
+            self.ensure_executor()?;
+        }
         let (sender, receiver) = oneshot::channel();
         let result = self.access.accept_execution(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");

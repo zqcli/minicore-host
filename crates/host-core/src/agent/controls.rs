@@ -71,9 +71,4 @@ impl AgentOwner {
         }
         receipts
     }
-    pub(crate) fn retain_session_creation(&self, key: SessionId, receipt: SessionCreateReceipt) {
-        let mut state = self.state.lock().expect("Agent mutex poisoned");
-        state.public_creations.insert(key.clone());
-        state.creations.insert(key, receipt);
-    }
 }

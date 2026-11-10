@@ -1,11 +1,9 @@
 //! Loopback-only HTTP provider fixture. This is a scripted test server, not a
 //! model or Runtime substitute. Every request traverses reqwest and TCP.
 
-use serde_json::Value;
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
-    time::Instant,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -15,12 +13,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-#[derive(Clone, Debug)]
-pub struct Captured {
-    pub received_at: Instant,
-    pub head: String,
-    pub body: Value,
-}
+#[path = "../../../../tests/support/http.rs"]
+mod http;
+pub use http::Captured;
+use http::read_request;
 
 pub enum Reply {
     Full {
@@ -113,39 +109,6 @@ impl Fixture {
         self.shutdown.cancel();
         self.join.await.unwrap();
         self.requests.lock().unwrap().clone()
-    }
-}
-
-async fn read_request(socket: &mut TcpStream) -> Captured {
-    let mut bytes = Vec::new();
-    let boundary = loop {
-        if let Some(boundary) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
-            break boundary + 4;
-        }
-        let mut chunk = [0u8; 4096];
-        let count = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&chunk[..count]);
-    };
-    let head = String::from_utf8(bytes[..boundary].to_vec()).unwrap();
-    let len: usize = head
-        .lines()
-        .find_map(|line| {
-            let (key, value) = line.split_once(':')?;
-            key.eq_ignore_ascii_case("content-length")
-                .then(|| value.trim().parse().unwrap())
-        })
-        .unwrap();
-    while bytes.len() < boundary + len {
-        let mut chunk = [0u8; 4096];
-        let count = socket.read(&mut chunk).await.unwrap();
-        assert_ne!(count, 0);
-        bytes.extend_from_slice(&chunk[..count]);
-    }
-    Captured {
-        received_at: Instant::now(),
-        head,
-        body: serde_json::from_slice(&bytes[boundary..boundary + len]).unwrap(),
     }
 }
 

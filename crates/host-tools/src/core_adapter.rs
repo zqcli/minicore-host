@@ -12,14 +12,8 @@ pub struct CoreTurnPort {
 }
 impl CoreTurnPort {
     pub fn prepared(binding: core::PreparedTurnBinding) -> Arc<Self> {
-        let source = binding.source();
         Arc::new(Self {
-            source: ToolSource {
-                host_id: source.host_id.clone(),
-                host_incarnation: source.host_incarnation.clone(),
-                session: source.session.clone(),
-                turn: source.turn.clone(),
-            },
+            source: binding.source().clone(),
             capability: binding.capability(),
         })
     }
@@ -256,10 +250,7 @@ impl TurnPort for CoreTurnPort {
         registration: &'a DelegationRegistration,
         input: MessageInput,
     ) -> PortFuture<'a, MessageAccepted> {
-        Box::pin(async move {
-            self.capability
-                .send_delegated(&core_registration(registration), input)
-        })
+        Box::pin(async move { self.capability.send_delegated(registration, input) })
     }
     fn inspect(&self, request: InspectAction) -> PortFuture<'_, Value> {
         Box::pin(self.inspect_actual(request))
@@ -330,12 +321,10 @@ impl TurnPort for CoreTurnPort {
         sink: Arc<dyn DelegationSink>,
     ) -> PortFuture<'_, Arc<dyn DelegationPort>> {
         Box::pin(async move {
-            Ok(
-                Arc::new(CoreDelegationPort(self.capability.prepare_delegation(
-                    core_registration(&registration),
-                    Arc::new(CoreSink(sink)),
-                )?)) as Arc<dyn DelegationPort>,
-            )
+            Ok(Arc::new(CoreDelegationPort(
+                self.capability
+                    .prepare_delegation(registration, Arc::new(CoreSink(sink)))?,
+            )) as Arc<dyn DelegationPort>)
         })
     }
     fn prepare_scope(&self, hooks: Arc<dyn ScopeHooks>) -> Result<Arc<dyn ScopePort>, Fault> {
@@ -344,8 +333,7 @@ impl TurnPort for CoreTurnPort {
         )?)))
     }
     fn record_delegation(&self, origin: &ToolCallRef, registration: &DelegationRegistration) {
-        self.capability
-            .record_delegation(origin, &core_registration(registration));
+        self.capability.record_delegation(origin, registration);
     }
 }
 struct CoreCreationCleanup(core::CreationCleanupPermit);
@@ -360,16 +348,6 @@ impl DelegationPort for CoreDelegationPort {
         Box::pin(self.0.notify(input))
     }
     fn release(&self, disposition: DelegationDisposition) -> PortFuture<'_, ()> {
-        let disposition = match disposition {
-            DelegationDisposition::NotAccepted => core::DelegationDisposition::NotAccepted,
-            DelegationDisposition::Notified(receipt) => {
-                core::DelegationDisposition::Notified(receipt)
-            }
-            DelegationDisposition::NotificationFailed(error) => {
-                core::DelegationDisposition::NotificationFailed(error)
-            }
-            DelegationDisposition::ScopeClosed => core::DelegationDisposition::ScopeClosed,
-        };
         Box::pin(self.0.release(disposition))
     }
     fn close(&self, operation: OperationId) -> PortFuture<'_, ()> {
@@ -414,31 +392,7 @@ impl core::ScopeHooks for CoreHooks {
 struct CoreSink(Arc<dyn DelegationSink>);
 impl core::DelegationSink for CoreSink {
     fn handoff(&self, result: core::DelegationCompletion) -> Result<(), Fault> {
-        self.0.handoff(DelegationCompletion {
-            results: result.results,
-            discarded_inputs: result.discarded_inputs,
-            inputs: result
-                .inputs
-                .into_iter()
-                .map(|range| DelegationInputRange {
-                    turn: range.turn,
-                    message_ids: range.message_ids,
-                    delegated_message_ids: range.delegated_message_ids,
-                })
-                .collect(),
-        })
-    }
-}
-fn core_registration(value: &DelegationRegistration) -> core::DelegationRegistration {
-    core::DelegationRegistration {
-        host_id: value.host_id.clone(),
-        host_incarnation: value.host_incarnation.clone(),
-        root: value.root.clone(),
-        parent: value.parent.clone(),
-        child: value.child.clone(),
-        task_message_id: value.task_message_id.clone(),
-        origin: value.origin.clone(),
-        temporary: value.temporary,
+        self.0.handoff(result)
     }
 }
 fn encoded(value: impl Serialize) -> Result<Value, Fault> {

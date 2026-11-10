@@ -54,7 +54,7 @@ async fn pending_partial_read_does_not_confirm_its_save() {
         let state = fixture.session.state.lock().unwrap();
         let info = &state.active.as_ref().unwrap().info;
         assert_eq!(info.persistence, PersistenceState::Pending);
-        assert!(state.saving);
+        assert!(state.history_work.as_ref().is_some_and(|work| work.running));
         assert!(state.history_work.is_some());
         assert!(matches!(&state.history[..], [HistoryItem::User(_)]));
     }

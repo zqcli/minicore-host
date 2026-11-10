@@ -33,7 +33,7 @@ async fn workspace_change_refs_reject_other_or_reconfigured_roots_but_accept_sam
     let target_a = create(&host, &operator.caller(), Some(a.path()), vec![]).await;
     let target_b = create(&host, &operator.caller(), Some(b.path()), vec![]).await;
     let same_root = create(&host, &operator.caller(), Some(a.path()), vec![]).await;
-    let peers = Clients::new(host.clone()).await;
+    let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     let mut references = Vec::new();
     for client in &peers.clients {
         let listed = client

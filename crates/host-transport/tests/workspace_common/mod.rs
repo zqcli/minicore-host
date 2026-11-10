@@ -1,15 +1,13 @@
 #![allow(dead_code)]
 //! Real production owners, local HTTP/SSE fixture, OS pipes and verified TLS.
-use super::{compaction_common, wss_common};
+use super::compaction_common;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
 use minicore_host_resources::{HostCredentials, HostResourceBuilder};
-use minicore_host_transport::*;
 use minicore_host_workspace::*;
 use serde_json::{Value, json};
 use std::{path::Path, process::Command, sync::Arc};
-use tokio::{net::unix::pipe, task::JoinHandle};
 
 pub use compaction_common::{HttpFixture, fault, options};
 pub fn selection(names: &[&str]) -> Vec<ToolBinding> {
@@ -90,31 +88,11 @@ pub async fn create(
         session_id: receipt.session_id.unwrap(),
     }
 }
-pub struct Clients {
-    pub clients: [HostClient; 3],
-    pub tls: wss_common::Server,
-    pipe: JoinHandle<std::io::Result<()>>,
-}
+pub use super::wss_common::Clients;
 impl Clients {
-    pub async fn new(host: Arc<Host>) -> Self {
-        let local = HostClient::in_process(host.clone()).unwrap();
-        let (to_server, input) = pipe::pipe().unwrap();
-        let (output, from_server) = pipe::pipe().unwrap();
-        let pipe = tokio::spawn(serve_stdio(host.clone(), input, output));
-        let stdio = HostClient::stdio(from_server, to_server, options())
-            .await
-            .unwrap();
-        let tls = compaction_common::tls_server(host).await;
-        let wss = tls.client(compaction_common::KEY).await.unwrap();
-        Self {
-            clients: [local, stdio, wss],
-            tls,
-            pipe,
-        }
-    }
     /// A deliberate disconnect may close the response pipe before an already
     /// dispatched query writes its late reply. Only that known pipe outcome is
-    /// expected; ordinary completed-call teardown below remains strict.
+    /// expected; ordinary completed-call teardown remains strict.
     pub async fn finish_disconnected(self) {
         for client in &self.clients {
             client.close();
@@ -122,12 +100,6 @@ impl Clients {
         if let Err(error) = self.pipe.await.unwrap() {
             assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
         }
-    }
-    pub async fn finish(self) {
-        for client in &self.clients {
-            client.close();
-        }
-        self.pipe.await.unwrap().unwrap();
     }
 }
 pub fn files() -> FilesRequest {

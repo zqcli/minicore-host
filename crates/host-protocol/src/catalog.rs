@@ -1,6 +1,5 @@
-use crate::{Fault, FaultKind};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, fmt, str::FromStr};
+use std::{fmt, str::FromStr};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,28 +19,16 @@ pub enum AccessRequirement {
     /// Cancels only this connection's observation; it does not modify execution.
     OwnSubscription,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ImplementationStage {
-    Foundation,
-    Persistence,
-    Configuration,
-    Runtime,
-    Workspace,
-    Observation,
-}
-
 /// A method name is a scope commitment, not a claim that a handler exists.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub struct MethodDescriptor {
     pub method: Method,
     pub interaction: InteractionKind,
     pub access: AccessRequirement,
-    pub planned_stage: ImplementationStage,
 }
 
 macro_rules! methods {
-    ($($variant:ident, $name:literal, $interaction:ident, $access:ident, $stage:ident;)+) => {
+    ($($variant:ident, $name:literal, $interaction:ident, $access:ident;)+) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
         pub enum Method { $(#[serde(rename = $name)] $variant,)+ }
         impl Method {
@@ -49,7 +36,7 @@ macro_rules! methods {
             pub const fn descriptor(self) -> MethodDescriptor {
                 match self {$(Self::$variant => MethodDescriptor {
                     method:self,interaction:InteractionKind::$interaction,
-                    access:AccessRequirement::$access,planned_stage:ImplementationStage::$stage,
+                    access:AccessRequirement::$access,
                 },)+}
             }
         }
@@ -64,58 +51,58 @@ macro_rules! methods {
     }
 }
 methods! {
-    HostInfo, "host.info", Query, Read, Foundation;
-    HostConfigGet, "host.config.get", Query, Read, Configuration;
-    HostReload, "host.reload", Command, Operate, Configuration;
-    HostReceiptGet, "host.receipt.get", Query, Read, Foundation;
-    HostShutdown, "host.shutdown", Command, Operate, Foundation;
-    AgentCreate, "agent.create", CommandWithDelivery, Operate, Foundation;
-    AgentGet, "agent.get", Query, Read, Foundation;
-    AgentList, "agent.list", Query, Read, Foundation;
-    AgentUpdate, "agent.update", Command, Operate, Configuration;
-    AgentStart, "agent.start", Command, Operate, Foundation;
-    AgentStop, "agent.stop", Command, Operate, Foundation;
-    AgentSetDefaultSession, "agent.set_default_session", Command, Operate, Configuration;
-    AgentDelete, "agent.delete", Command, Operate, Persistence;
-    SessionCreate, "session.create", CommandWithDelivery, Operate, Foundation;
-    SessionGet, "session.get", Query, Read, Foundation;
-    SessionList, "session.list", Query, Read, Foundation;
-    SessionUpdate, "session.update", Command, Operate, Configuration;
-    SessionState, "session.state", Query, Read, Foundation;
-    SessionLoad, "session.load", Command, Operate, Persistence;
-    SessionUnload, "session.unload", Command, Operate, Persistence;
-    SessionPause, "session.pause", Command, Operate, Foundation;
-    SessionResume, "session.resume", Command, Operate, Foundation;
-    SessionCancel, "session.cancel", Command, Operate, Foundation;
-    SessionClose, "session.close", Command, Operate, Foundation;
-    SessionDelete, "session.delete", Command, Operate, Persistence;
-    MessageSend, "message.send", Delivery, Operate, Foundation;
-    MessageGet, "message.get", Query, Read, Foundation;
-    InputList, "input.list", Query, Read, Foundation;
-    InputRemove, "input.remove", Command, Operate, Foundation;
-    TurnGet, "turn.get", Query, Read, Runtime;
-    TurnList, "turn.list", Query, Read, Runtime;
-    TurnWait, "turn.wait", Wait, Read, Runtime;
-    TurnCancel, "turn.cancel", Command, Operate, Runtime;
-    TurnResult, "turn.result", Query, Read, Runtime;
-    TurnOutputRead, "turn.output.read", Query, Read, Runtime;
-    ModelList, "model.list", Query, Read, Configuration;
-    ToolList, "tool.list", Query, Read, Configuration;
-    SessionHistoryRead, "session.history.read", Query, Read, Persistence;
-    SessionContext, "session.context", Query, Read, Runtime;
-    SessionCompact, "session.compact", Command, Operate, Runtime;
-    SessionCompactCancel, "session.compact.cancel", Command, Operate, Runtime;
-    WorkspaceFiles, "workspace.files", Query, Read, Workspace;
-    WorkspaceRead, "workspace.read", Query, Read, Workspace;
-    WorkspaceSearch, "workspace.search", Query, Read, Workspace;
-    WorkspaceStatus, "workspace.status", Query, Read, Workspace;
-    ChangesList, "changes.list", Query, Read, Workspace;
-    ChangesDiff, "changes.diff", Query, Read, Workspace;
-    ToolcallGet, "toolcall.get", Query, Read, Runtime;
-    ToolcallOutputRead, "toolcall.output.read", Query, Read, Runtime;
-    InteractionAnswer, "interaction.answer", Command, Operate, Runtime;
-    EventsSubscribe, "events.subscribe", Subscription, Read, Observation;
-    EventsUnsubscribe, "events.unsubscribe", Command, OwnSubscription, Observation;
+    HostInfo, "host.info", Query, Read;
+    HostConfigGet, "host.config.get", Query, Read;
+    HostReload, "host.reload", Command, Operate;
+    HostReceiptGet, "host.receipt.get", Query, Read;
+    HostShutdown, "host.shutdown", Command, Operate;
+    AgentCreate, "agent.create", CommandWithDelivery, Operate;
+    AgentGet, "agent.get", Query, Read;
+    AgentList, "agent.list", Query, Read;
+    AgentUpdate, "agent.update", Command, Operate;
+    AgentStart, "agent.start", Command, Operate;
+    AgentStop, "agent.stop", Command, Operate;
+    AgentSetDefaultSession, "agent.set_default_session", Command, Operate;
+    AgentDelete, "agent.delete", Command, Operate;
+    SessionCreate, "session.create", CommandWithDelivery, Operate;
+    SessionGet, "session.get", Query, Read;
+    SessionList, "session.list", Query, Read;
+    SessionUpdate, "session.update", Command, Operate;
+    SessionState, "session.state", Query, Read;
+    SessionLoad, "session.load", Command, Operate;
+    SessionUnload, "session.unload", Command, Operate;
+    SessionPause, "session.pause", Command, Operate;
+    SessionResume, "session.resume", Command, Operate;
+    SessionCancel, "session.cancel", Command, Operate;
+    SessionClose, "session.close", Command, Operate;
+    SessionDelete, "session.delete", Command, Operate;
+    MessageSend, "message.send", Delivery, Operate;
+    MessageGet, "message.get", Query, Read;
+    InputList, "input.list", Query, Read;
+    InputRemove, "input.remove", Command, Operate;
+    TurnGet, "turn.get", Query, Read;
+    TurnList, "turn.list", Query, Read;
+    TurnWait, "turn.wait", Wait, Read;
+    TurnCancel, "turn.cancel", Command, Operate;
+    TurnResult, "turn.result", Query, Read;
+    TurnOutputRead, "turn.output.read", Query, Read;
+    ModelList, "model.list", Query, Read;
+    ToolList, "tool.list", Query, Read;
+    SessionHistoryRead, "session.history.read", Query, Read;
+    SessionContext, "session.context", Query, Read;
+    SessionCompact, "session.compact", Command, Operate;
+    SessionCompactCancel, "session.compact.cancel", Command, Operate;
+    WorkspaceFiles, "workspace.files", Query, Read;
+    WorkspaceRead, "workspace.read", Query, Read;
+    WorkspaceSearch, "workspace.search", Query, Read;
+    WorkspaceStatus, "workspace.status", Query, Read;
+    ChangesList, "changes.list", Query, Read;
+    ChangesDiff, "changes.diff", Query, Read;
+    ToolcallGet, "toolcall.get", Query, Read;
+    ToolcallOutputRead, "toolcall.output.read", Query, Read;
+    InteractionAnswer, "interaction.answer", Command, Operate;
+    EventsSubscribe, "events.subscribe", Subscription, Read;
+    EventsUnsubscribe, "events.unsubscribe", Command, OwnSubscription;
 }
 impl fmt::Display for Method {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -130,45 +117,3 @@ impl fmt::Display for UnknownMethod {
     }
 }
 impl std::error::Error for UnknownMethod {}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub enum MethodAvailability {
-    Implemented {},
-    NotImplemented { planned_stage: ImplementationStage },
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct MethodCapability {
-    pub method: Method,
-    pub availability: MethodAvailability,
-}
-
-/// The actual service explicitly lists methods backed by real handlers. Every
-/// other canonical method remains visibly staged, never a fake-success stub.
-/// This contract crate defaults to no handlers and grants no operating rights.
-pub fn staged_catalog(implemented: &BTreeSet<Method>) -> Vec<MethodCapability> {
-    PUBLIC_METHODS
-        .iter()
-        .map(|method| MethodCapability {
-            method: *method,
-            availability: if implemented.contains(method) {
-                MethodAvailability::Implemented {}
-            } else {
-                MethodAvailability::NotImplemented {
-                    planned_stage: method.descriptor().planned_stage,
-                }
-            },
-        })
-        .collect()
-}
-pub fn require_implemented(method: Method, implemented: &BTreeSet<Method>) -> Result<(), Fault> {
-    if implemented.contains(&method) {
-        Ok(())
-    } else {
-        Err(Fault::new(
-            FaultKind::HostMethodUnavailable,
-            format!("{} is not implemented in this build", method.as_str()),
-        ))
-    }
-}

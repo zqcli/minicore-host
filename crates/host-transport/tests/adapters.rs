@@ -4,7 +4,7 @@ use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
 use serde_json::json;
-use std::{sync::atomic::Ordering, time::Duration};
+use std::{collections::BTreeSet, sync::atomic::Ordering, time::Duration};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn typed_service_runtime_and_stdio_query_parity() {
@@ -526,28 +526,19 @@ async fn rpc_protocol_errors_and_notifications_do_not_dispatch_messages() {
         peer.request(json!(1), "unknown.method", json!({})).await["error"]["code"],
         -32601
     );
-    // A newly routed method now validates its actual required parameters.
+    // Routed methods validate their actual required parameters.
     assert_eq!(
         peer.request(json!(2), "agent.start", json!({})).await["error"]["code"],
         -32602
     );
-    // Every genuinely staged catalog entry still has the explicit business
-    // fault. Do not hard-code a placeholder that another topic implements.
-    for (index, method) in PUBLIC_METHODS
-        .iter()
-        .map(|method| method.as_str())
-        .filter(|method| !SUPPORTED_METHODS.contains(method))
-        .enumerate()
-    {
-        let response = peer
-            .request(json!(format!("staged-{index}")), method, json!({}))
-            .await;
-        assert_eq!(response["error"]["data"]["code"], 1401, "{method}");
-        assert_eq!(
-            response["error"]["data"]["type"], "HOST_METHOD_UNAVAILABLE",
-            "{method}"
-        );
-    }
+    assert_eq!(
+        PUBLIC_METHODS
+            .iter()
+            .map(|method| method.as_str())
+            .collect::<BTreeSet<_>>(),
+        SUPPORTED_METHODS.iter().copied().collect::<BTreeSet<_>>(),
+        "every canonical method must have an actual transport route",
+    );
     assert_eq!(
         peer.request(json!(3), "message.send", json!({})).await["error"]["code"],
         -32602

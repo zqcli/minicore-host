@@ -119,31 +119,13 @@ impl AgentDeleteAccepted {
         self.scope.validate()
     }
 }
-macro_rules! deletion_receipt {
-    ($name:ident, $kind:ident, $variant:ident, $wire:literal, $result:ty $(, $field:ident: $ty:ty)*) => {
-        #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-        pub enum $kind {
-            #[serde(rename = $wire)]
-            $variant,
-        }
-        #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-        #[serde(deny_unknown_fields)]
-        pub struct $name {
-            pub kind: $kind,
-            pub host_id: HostId,
-            pub host_incarnation: HostIncarnation,
-            pub operation_id: OperationId,
-            pub agent_id: AgentId,
-            $(pub $field: $ty,)*
-            pub result: $result,
-        }
-    };
-}
-deletion_receipt!(
+
+control_receipt!(
     AgentDeleteReceipt,
     AgentDeleteKind,
     AgentDelete,
     "agent.delete",
-    AgentDeleteAccepted
+    AgentDeleteAccepted,
+    agent_id: AgentId
 );
-deletion_receipt!(SessionDeleteReceipt, SessionDeleteKind, SessionDelete, "session.delete", SessionDeleteAccepted, session_id: SessionId);
+control_receipt!(SessionDeleteReceipt, SessionDeleteKind, SessionDelete, "session.delete", SessionDeleteAccepted, agent_id: AgentId, session_id: SessionId);

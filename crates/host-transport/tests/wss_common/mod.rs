@@ -47,15 +47,7 @@ impl Drop for Server {
 impl Server {
     pub async fn start(host: Arc<Host>) -> Self {
         host.configure_network_access(Some(FIRST.into())).unwrap();
-        let (server_tls, client_tls) = certificates();
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let task = tokio::spawn(serve_wss(host, listener, server_tls));
-        Self {
-            address,
-            client_tls,
-            task,
-        }
+        tls_server(host).await
     }
     pub fn url(&self) -> String {
         format!("wss://localhost:{}/", self.address.port())
@@ -131,5 +123,55 @@ impl RawPeer {
         })
         .await
         .unwrap();
+    }
+}
+
+/// Start the real TLS listener with the Host's already-published credentials.
+pub async fn tls_server(host: Arc<Host>) -> Server {
+    let (server_tls, client_tls) = certificates();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let task = tokio::spawn(serve_wss(host, listener, server_tls));
+    Server {
+        address,
+        client_tls,
+        task,
+    }
+}
+
+/// Shared connection lifetimes for query parity across typed, OS pipes and WSS.
+#[cfg(unix)]
+pub struct Clients {
+    pub clients: [HostClient; 3],
+    pub tls: Server,
+    pub(super) pipe: JoinHandle<std::io::Result<()>>,
+}
+#[cfg(unix)]
+impl Clients {
+    pub async fn new(host: Arc<Host>, key: &str, options: CallOptions) -> Self {
+        let local = HostClient::in_process(host.clone()).unwrap();
+        let (to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
+        let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+        let pipe = tokio::spawn(minicore_host_transport::serve_stdio(
+            host.clone(),
+            input,
+            output,
+        ));
+        let stdio = HostClient::stdio(from_server, to_server, options)
+            .await
+            .unwrap();
+        let tls = tls_server(host).await;
+        let wss = tls.client(key).await.unwrap();
+        Self {
+            clients: [local, stdio, wss],
+            tls,
+            pipe,
+        }
+    }
+    pub async fn finish(self) {
+        for client in &self.clients {
+            client.close();
+        }
+        self.pipe.await.unwrap().unwrap();
     }
 }

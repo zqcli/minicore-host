@@ -187,10 +187,10 @@ fn setup_tool(
         bindings: bound,
     }
 }
-fn agent(f: &Fixture) -> SessionRef {
+async fn agent(f: &Fixture) -> SessionRef {
     let receipt = f
         .host
-        .create_agent(
+        .create_agent_async(
             &f.connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -201,6 +201,7 @@ fn agent(f: &Fixture) -> SessionRef {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     SessionRef {
         agent_id: receipt.agent_id.unwrap(),
@@ -310,7 +311,7 @@ fn registration(
 async fn candidate_failure_never_publishes_turn_or_consumes_queued_input() {
     let gate = Arc::new(Semaphore::new(0));
     let mut f = setup(0, Some(gate.clone()), true);
-    let target = agent(&f);
+    let target = agent(&f).await;
     let task = send(&f, &target);
     let candidate = recv(&mut f.bindings).await;
     assert!(candidate.capability().check_active().is_err());
@@ -347,8 +348,8 @@ async fn candidate_failure_never_publishes_turn_or_consumes_queued_input() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn active_capability_outlives_external_connection_but_not_original_turn() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
-    let target = agent(&f);
+    let parent = agent(&f).await;
+    let target = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -371,8 +372,8 @@ async fn active_capability_outlives_external_connection_but_not_original_turn() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn busy_reuse_old_turn_cannot_finish_unconsumed_new_task() {
     let mut f = setup(3, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -412,8 +413,8 @@ async fn busy_reuse_old_turn_cannot_finish_unconsumed_new_task() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn child_handoff_survives_parent_cancel_and_notifies_paused_original_parent_once() {
     let mut f = setup(2, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -456,7 +457,7 @@ async fn child_handoff_survives_parent_cancel_and_notifies_paused_original_paren
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn wait_ignores_next_turn_and_paused_next_step_without_consuming() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -496,7 +497,7 @@ async fn wait_ignores_next_turn_and_paused_next_step_without_consuming() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn root_close_seals_receiving_and_waits_for_actual_cleanup_gate() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -613,7 +614,7 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
             sink,
         })),
     );
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     f.host
         .update_session(
             &f.connection.caller(),
@@ -692,8 +693,8 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn busy_steer_delegation_transfers_all_inputs_that_actually_shared_the_turn() {
     let mut f = setup(3, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -738,8 +739,8 @@ async fn busy_steer_delegation_transfers_all_inputs_that_actually_shared_the_tur
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn accepted_but_unconsumed_task_cancellation_hands_off_discarded_fact() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     f.host.pause(&f.connection.caller(), &child).unwrap();
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
@@ -772,7 +773,7 @@ async fn accepted_but_unconsumed_task_cancellation_hands_off_discarded_fact() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dropping_scope_close_wait_does_not_drop_actual_owner_cleanup() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -810,8 +811,8 @@ async fn dropping_scope_close_wait_does_not_drop_actual_owner_cleanup() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn cancellation_after_real_turn_binding_before_first_model_hands_off_cancelled_result() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -871,8 +872,8 @@ impl DelegationSink for GatedSink {
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn memory_closed_cannot_publish_while_sink_transfer_is_still_running() {
     let mut f = setup(2, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -931,7 +932,7 @@ async fn memory_closed_cannot_publish_while_sink_transfer_is_still_running() {
 async fn preparation_failure_cannot_finish_root_while_scope_cleanup_is_gated() {
     let preparation = Arc::new(Semaphore::new(1));
     let mut f = setup(1, Some(preparation.clone()), false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -975,7 +976,7 @@ async fn preparation_failure_cannot_finish_root_while_scope_cleanup_is_gated() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn metadata_and_config_use_one_snapshot_revision_and_conflicts_do_not_overwrite() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -1267,9 +1268,9 @@ impl ScopeHooks for ClosingHooks {
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn draining_rejects_new_reused_session_delegation_but_accepts_registered_result() {
     let mut f = setup(2, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
-    let other = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
+    let other = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -1320,8 +1321,8 @@ async fn draining_rejects_new_reused_session_delegation_but_accepts_registered_r
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn force_joins_registered_partial_handoff_and_cleanup_without_new_parent_turn() {
     let mut f = setup(2, None, false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -1372,7 +1373,7 @@ async fn persistent_partial_cancel_with_preserved_inbox_waits_for_actual_next_tu
     .await
     .unwrap();
     f.connection = f.host.connect().unwrap();
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     let created = f
         .host
         .create_agent_async(
@@ -1486,9 +1487,9 @@ async fn persistent_partial_cancel_with_preserved_inbox_waits_for_actual_next_tu
 #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
 async fn grandchild_keeps_running_after_direct_parent_release_and_never_retargets_root() {
     let mut f = setup(3, None, false);
-    let root = agent(&f);
-    let middle = agent(&f);
-    let grandchild = agent(&f);
+    let root = agent(&f).await;
+    let middle = agent(&f).await;
+    let grandchild = agent(&f).await;
     send(&f, &root);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -1589,7 +1590,7 @@ impl ScopeHooks for FailOnceHooks {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn force_cleanup_failure_only_continues_on_explicit_resume_without_business_restart() {
     let mut f = setup(1, None, false);
-    let parent = agent(&f);
+    let parent = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
@@ -1636,8 +1637,8 @@ async fn force_cleanup_failure_only_continues_on_explicit_resume_without_busines
 async fn close_during_preparation_hands_off_discarded_task(fail: bool) {
     let preparation = Arc::new(Semaphore::new(1));
     let mut f = setup(1, Some(preparation.clone()), false);
-    let parent = agent(&f);
-    let child = agent(&f);
+    let parent = agent(&f).await;
+    let child = agent(&f).await;
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;

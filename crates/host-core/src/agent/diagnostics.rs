@@ -4,18 +4,6 @@ use crate::diagnostics::{Record, event};
 use minicore_host_diagnostics::{Context, EventData, Scope};
 use tracing::Level;
 impl AgentOwner {
-    pub(crate) fn session_creation_mode(
-        &self,
-        requested: Option<StorageMode>,
-    ) -> Option<StorageMode> {
-        self.state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .info
-            .mode
-            .session_mode(requested)
-            .ok()
-    }
     pub(crate) fn diagnostic_context(&self) -> Context {
         Context {
             host_id: Some(self.host_id.clone()),

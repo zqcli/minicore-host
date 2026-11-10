@@ -205,7 +205,7 @@ async fn finished_transition_owns_a_revision_and_all_queries_keep_it_during_late
     resources.model.finish.add_permits(1);
     session.wait_turn(second, options(5000)).await.unwrap();
     assert_retained(&reader, &observed, &finished, &original).await;
-    server.close(&reader).await;
+    server.close(&reader, Some(Duration::from_secs(5))).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -267,5 +267,5 @@ async fn persistent_unload_reload_preserves_original_terminal_revision_and_load(
     resources.model.finish.add_permits(1);
     session.wait_turn(next, options(5000)).await.unwrap();
     assert_retained(&reader, &observed, &finished, &original).await;
-    server.close(&reader).await;
+    server.close(&reader, Some(Duration::from_secs(5))).await;
 }

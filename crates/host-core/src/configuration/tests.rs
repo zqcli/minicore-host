@@ -277,7 +277,7 @@ async fn turn_preparation_from_an_old_host_revision_never_consumes_the_input() {
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let created = host
-        .create_agent(
+        .create_agent_async(
             &caller,
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -288,6 +288,7 @@ async fn turn_preparation_from_an_old_host_revision_never_consumes_the_input() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),

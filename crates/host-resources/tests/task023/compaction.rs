@@ -83,7 +83,10 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
             .unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let receipt = host.create_agent(&caller, small_request(false)).unwrap();
+    let receipt = host
+        .create_agent_async(&caller, small_request(false))
+        .await
+        .unwrap();
     let target = SessionRef {
         agent_id: receipt.agent_id.unwrap(),
         session_id: receipt.session_id.unwrap(),
@@ -221,7 +224,10 @@ async fn http_automatic_compaction_runs_at_real_prompt_boundary_and_usage_stays_
             .unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let receipt = host.create_agent(&caller, small_request(true)).unwrap();
+    let receipt = host
+        .create_agent_async(&caller, small_request(true))
+        .await
+        .unwrap();
     let target = SessionRef {
         agent_id: receipt.agent_id.unwrap(),
         session_id: receipt.session_id.unwrap(),

@@ -1,4 +1,4 @@
-use crate::{ValidationError, invalid};
+use crate::{ValidationError, invalid, validated_dto};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeSet, fmt, str::FromStr};
 
@@ -68,36 +68,7 @@ pub enum ApprovalMode {
     ReadOnly,
 }
 
-// A separate wire struct ensures checked deserialization without making the
-// public in-process types inconvenient. Owners must also validate values built
-// directly in Rust, before publishing or persisting a candidate configuration.
-macro_rules! checked_struct {
-    ($(#[$meta:meta])* $name:ident, $wire:ident, $wire_name:literal { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
-        $(#[$meta])*
-        #[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
-        #[serde(try_from = $wire_name)]
-        pub struct $name { $($(#[$attr])* pub $field: $ty),* }
-        #[derive(Serialize, Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct $wire { $($(#[$attr])* $field: $ty),* }
-        impl Serialize for $name {
-            fn serialize<S: Serializer>(&self, serializer:S) -> Result<S::Ok,S::Error> {
-                self.validate().map_err(serde::ser::Error::custom)?;
-                $wire { $($field:self.$field.clone()),* }.serialize(serializer)
-            }
-        }
-        impl TryFrom<$wire> for $name {
-            type Error = ValidationError;
-            fn try_from(wire: $wire) -> Result<Self, Self::Error> {
-                let value = Self { $($field: wire.$field),* };
-                value.validate()?;
-                Ok(value)
-            }
-        }
-    };
-}
-
-checked_struct!(Role, RoleWire, "RoleWire" {
+validated_dto!(Role, RoleWire, "RoleWire" {
     name: String,
     description: String,
     instructions: String,
@@ -117,20 +88,20 @@ impl Default for Role {
     }
 }
 
-checked_struct!(ToolBinding, ToolBindingWire, "ToolBindingWire" { name: String });
+validated_dto!(ToolBinding, ToolBindingWire, "ToolBindingWire" { name: String });
 impl ToolBinding {
     pub fn validate(&self) -> Result<(), ValidationError> {
         nonblank(&self.name, "tool name")
     }
 }
-checked_struct!(WorkspaceRef, WorkspaceRefWire, "WorkspaceRefWire" { path: String });
+validated_dto!(WorkspaceRef, WorkspaceRefWire, "WorkspaceRefWire" { path: String });
 impl WorkspaceRef {
     pub fn validate(&self) -> Result<(), ValidationError> {
         nonblank(&self.path, "workspace path")
     }
 }
 
-checked_struct!(CompactionSettings, CompactionSettingsWire, "CompactionSettingsWire" {
+validated_dto!(CompactionSettings, CompactionSettingsWire, "CompactionSettingsWire" {
     enabled: bool,
     trigger_percent: u8,
     target_percent: u8,
@@ -159,7 +130,7 @@ impl CompactionSettings {
     }
 }
 
-checked_struct!(
+validated_dto!(
     /// Supported execution values only. No application capacities, counts,
     /// entity quotas, input-size caps, or mutable process-global directory.
     ExecutionSettings, ExecutionSettingsWire, "ExecutionSettingsWire" {
@@ -210,7 +181,7 @@ impl ExecutionSettings {
     }
 }
 
-checked_struct!(SessionDefaults, SessionDefaultsWire, "SessionDefaultsWire" {
+validated_dto!(SessionDefaults, SessionDefaultsWire, "SessionDefaultsWire" {
     model: ModelRef,
     reasoning: ReasoningPreference,
     tools: Vec<ToolBinding>,
@@ -250,7 +221,7 @@ impl SessionDefaults {
     }
 }
 
-checked_struct!(#[derive(Default)] AgentConfig, AgentConfigWire, "AgentConfigWire" {
+validated_dto!(#[derive(Default)] AgentConfig, AgentConfigWire, "AgentConfigWire" {
     role: Role,
     session_defaults: SessionDefaults,
 });
@@ -274,7 +245,7 @@ impl AgentConfig {
     }
 }
 
-checked_struct!(SessionConfig, SessionConfigWire, "SessionConfigWire" {
+validated_dto!(SessionConfig, SessionConfigWire, "SessionConfigWire" {
     role: Role,
     model: ModelRef,
     reasoning: ReasoningPreference,

@@ -133,7 +133,7 @@ async fn ordinary_tools_execute_and_retain_actual_results_edits_and_output_witho
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let selected = selection(&["read", "write", "edit", "bash"]);
-    let target = create(&host, &caller, selected.clone(), workspace(root.path()));
+    let target = create(&host, &caller, selected.clone(), workspace(root.path())).await;
     send(&host, &caller, &target, "exercise actual files and process");
     let turn = settled(&host, &caller, &target, 1).await.remove(0);
     assert_eq!(turn.outcome, Some(TurnOutcome::Completed));
@@ -283,7 +283,7 @@ async fn unselected_registered_write_is_rejected_before_any_filesystem_side_effe
     let host = Host::memory_configured(prepare(&builder, config(&server.endpoint)).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let target = create(&host, &caller, selection(&["read"]), workspace(root.path()));
+    let target = create(&host, &caller, selection(&["read"]), workspace(root.path())).await;
     send(&host, &caller, &target, "selected read only");
     let request = server.request().await;
     assert_eq!(request["tools"].as_array().unwrap().len(), 1);
@@ -334,7 +334,8 @@ async fn repeated_provider_call_ids_keep_distinct_turn_results_and_edit_records(
         &caller,
         selection(&["write"]),
         workspace(root.path()),
-    );
+    )
+    .await;
     send(&host, &caller, &target, "first task");
     let first = settled(&host, &caller, &target, 1).await.remove(0);
     for _ in 0..2 {
@@ -419,7 +420,8 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
         &caller,
         selection(&["read", "write"]),
         workspace(a.path()),
-    );
+    )
+    .await;
     send(&host, &caller, &target, "old task");
     let first_request = old.request().await;
     let mut candidate = original;

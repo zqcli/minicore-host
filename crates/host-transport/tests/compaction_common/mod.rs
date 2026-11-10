@@ -310,17 +310,7 @@ pub fn subscription(target: &SessionRef) -> SubscribeRequest {
         categories: [EventCategory::State].into_iter().collect(),
     }
 }
-pub async fn tls_server(host: Arc<Host>) -> super::wss_common::Server {
-    let (server_tls, client_tls) = super::wss_common::certificates();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(serve_wss(host, listener, server_tls));
-    super::wss_common::Server {
-        address,
-        client_tls,
-        task,
-    }
-}
+pub use super::wss_common::tls_server;
 pub struct Connected {
     pub client: HostClient,
     pipe: Option<JoinHandle<std::io::Result<()>>>,

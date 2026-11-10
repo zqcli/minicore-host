@@ -1179,7 +1179,7 @@ async fn compaction_partial_marker_failure_stays_blocked_and_force_does_not_rele
             .history_work
             .as_ref()
             .is_some_and(|work| work.fault.is_some())
-            && !state.saving
+            && !state.history_work.as_ref().is_some_and(|work| work.running)
     })
     .await;
     assert_eq!(

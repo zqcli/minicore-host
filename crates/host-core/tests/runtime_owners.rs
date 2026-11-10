@@ -106,7 +106,7 @@ impl ResourceResolver for Resources {
         })
     }
 }
-fn setup(
+async fn setup(
     rounds: Vec<Round>,
 ) -> (
     Arc<Host>,
@@ -135,7 +135,7 @@ fn setup(
     config.session_defaults.model = "test/model".parse().unwrap();
     config.role.instructions = "old role".into();
     let receipt = host
-        .create_agent(
+        .create_agent_async(
             &connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -146,6 +146,7 @@ fn setup(
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     receipt.validate_call_return().unwrap();
     let target = SessionRef {
@@ -280,7 +281,8 @@ async fn wait_reclaimed(host: &Host, caller: &CallerContext, target: &SessionRef
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn initial_batch_uses_two_independent_queues_once() {
-    let (host, connection, target, mut seen) = setup(vec![final_round("one"), final_round("two")]);
+    let (host, connection, target, mut seen) =
+        setup(vec![final_round("one"), final_round("two")]).await;
     let caller = connection.caller();
     host.pause(&caller, &target).unwrap();
     let f1 = send(&host, &caller, &target, MessageMode::FollowUp, "F1");
@@ -323,7 +325,8 @@ async fn steer_before_final_claim_continues_same_turn_but_follow_up_does_not() {
         },
         final_round("second"),
         final_round("next"),
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "root");
     next_request(&mut seen).await;
@@ -366,7 +369,8 @@ async fn steer_after_final_claim_creates_new_turn_without_lost_wake() {
             gate: Some(second_gate.clone()),
             partial: false,
         },
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     let first = send(&host, &caller, &target, MessageMode::FollowUp, "first");
     next_request(&mut seen).await;
@@ -416,7 +420,8 @@ async fn cancellation_keeps_later_messages_and_does_not_pause() {
             partial: true,
         },
         final_round("next"),
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "first");
     next_request(&mut seen).await;
@@ -461,7 +466,7 @@ async fn cancellation_keeps_later_messages_and_does_not_pause() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn connection_lifetime_not_a_caller_clone_controls_operation_rights() {
-    let (host, operator, target, _) = setup(Vec::new());
+    let (host, operator, target, _) = setup(Vec::new()).await;
     let old = operator.caller();
     let observer = host.connect().unwrap();
     assert!(!observer.initial_info().can_operate);
@@ -492,7 +497,8 @@ async fn accepted_execution_outlives_its_connection() {
         text: "done",
         gate: Some(gate.clone()),
         partial: false,
-    }]);
+    }])
+    .await;
     send(
         &host,
         &connection.caller(),
@@ -519,7 +525,8 @@ async fn configuration_stays_bound_across_internal_loops() {
         },
         final_round("continue"),
         final_round("new"),
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "root");
     assert_eq!(
@@ -566,13 +573,14 @@ async fn slow_session_does_not_block_another_session_or_receipts() {
             partial: false,
         },
         final_round("fast"),
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &first, MessageMode::FollowUp, "slow");
     next_request(&mut seen).await;
     let info = host.info(&caller).unwrap();
     let created = host
-        .create_session(
+        .create_session_async(
             &caller,
             SessionCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -585,6 +593,7 @@ async fn slow_session_does_not_block_another_session_or_receipts() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let second = SessionRef {
         agent_id: first.agent_id.clone(),
@@ -609,7 +618,8 @@ async fn slow_session_does_not_block_another_session_or_receipts() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn close_clears_default_and_unload_preserves_memory_history() {
-    let (host, connection, target, mut seen) = setup(vec![final_round("one"), final_round("two")]);
+    let (host, connection, target, mut seen) =
+        setup(vec![final_round("one"), final_round("two")]).await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "one");
     next_request(&mut seen).await;
@@ -625,7 +635,7 @@ async fn close_clears_default_and_unload_preserves_memory_history() {
     // Keep another child open so the default check does not depend on retaining
     // an otherwise empty memory Agent. Closing never selects this child instead.
     let remaining = host
-        .create_session(
+        .create_session_async(
             &caller,
             SessionCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -635,6 +645,7 @@ async fn close_clears_default_and_unload_preserves_memory_history() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     host.close_session(&caller, &target).unwrap();
     wait_reclaimed(&host, &caller, &target).await;
@@ -724,7 +735,7 @@ async fn review_close_during_preparation_must_finish_after_resolution() {
     let mut config = AgentConfig::default();
     config.session_defaults.model = "test/model".parse().unwrap();
     let created = host
-        .create_agent(
+        .create_agent_async(
             &caller,
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -735,6 +746,7 @@ async fn review_close_during_preparation_must_finish_after_resolution() {
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: created.agent_id.unwrap(),
@@ -760,7 +772,7 @@ async fn review_close_during_preparation_must_finish_after_resolution() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn review_closed_connection_must_not_keep_receiving_session_updates() {
-    let (host, operator, target, _seen) = setup(Vec::new());
+    let (host, operator, target, _seen) = setup(Vec::new()).await;
     let observer = host.connect().unwrap();
     let mut subscription = host.session_states(&observer.caller(), &target).unwrap();
     subscription.snapshot().unwrap();
@@ -775,7 +787,7 @@ async fn review_closed_connection_must_not_keep_receiving_session_updates() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn review_idle_agent_stop_must_reach_stopped() {
-    let (host, connection, target, _seen) = setup(Vec::new());
+    let (host, connection, target, _seen) = setup(Vec::new()).await;
     let caller = connection.caller();
     let agent = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
@@ -793,7 +805,7 @@ async fn review_idle_agent_stop_must_reach_stopped() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn review_session_update_must_reject_missing_resource_before_commit() {
-    let (host, connection, target, _seen) = setup(Vec::new());
+    let (host, connection, target, _seen) = setup(Vec::new()).await;
     let caller = connection.caller();
     let old = host.session_info(&caller, &target).unwrap();
     let result = host.update_session(
@@ -843,7 +855,7 @@ impl Model for FailOnceModel {
         })
     }
 }
-fn setup_with_resources(
+async fn setup_with_resources(
     resources: Arc<dyn ResourceResolver>,
 ) -> (Arc<Host>, ConnectionHandle, SessionRef) {
     let host = Host::memory(resources).unwrap();
@@ -851,7 +863,7 @@ fn setup_with_resources(
     let mut config = AgentConfig::default();
     config.session_defaults.model = "test/model".parse().unwrap();
     let receipt = host
-        .create_agent(
+        .create_agent_async(
             &connection.caller(),
             AgentCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -862,6 +874,7 @@ fn setup_with_resources(
                 initial_message: None,
             },
         )
+        .await
         .unwrap();
     let target = SessionRef {
         agent_id: receipt.agent_id.unwrap(),
@@ -885,7 +898,8 @@ async fn review_failed_model_must_pause_before_consuming_next_turn() {
     });
     let (host, connection, target) = setup_with_resources(Arc::new(Resources {
         model: model.clone(),
-    }));
+    }))
+    .await;
     let caller = connection.caller();
     host.pause(&caller, &target).unwrap();
     send(
@@ -930,7 +944,7 @@ impl ResourceResolver for PanickingResources {
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn review_preparation_panic_must_be_reported_and_close_settle() {
-    let (host, connection, target) = setup_with_resources(Arc::new(PanickingResources));
+    let (host, connection, target) = setup_with_resources(Arc::new(PanickingResources)).await;
     let caller = connection.caller();
     send(
         &host,
@@ -957,7 +971,12 @@ async fn review_preparation_panic_must_be_reported_and_close_settle() {
 
 #[test]
 fn review_send_outside_tokio_must_not_panic_after_acceptance() {
-    let (host, connection, target, _seen) = setup(Vec::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let (host, connection, target, _seen) = runtime.block_on(setup(Vec::new()));
     let caller = connection.caller();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         host.send(
@@ -980,15 +999,20 @@ fn review_send_outside_tokio_must_not_panic_after_acceptance() {
 
 #[test]
 fn review_memory_default_close_orders_remain_authoritative() {
-    let (host, connection, first, _) = setup(Vec::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let (host, connection, first, _) = runtime.block_on(setup(Vec::new()));
     let caller = connection.caller();
     let agent = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
         agent_id: first.agent_id.clone(),
     };
     let make_child = || {
-        let receipt = host
-            .create_session(
+        let receipt = runtime
+            .block_on(host.create_session_async(
                 &caller,
                 SessionCreate {
                     operation_id: OperationId::new().unwrap(),
@@ -997,7 +1021,7 @@ fn review_memory_default_close_orders_remain_authoritative() {
                     overrides: None,
                     initial_message: None,
                 },
-            )
+            ))
             .unwrap();
         SessionRef {
             agent_id: first.agent_id.clone(),
@@ -1039,15 +1063,20 @@ fn review_memory_default_close_orders_remain_authoritative() {
 
 #[test]
 fn review_memory_default_close_race_preserves_actual_acceptance_order() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(tokio::runtime::Handle::try_current().is_err());
     for _ in 0..128 {
-        let (host, connection, first, _) = setup(Vec::new());
+        let (host, connection, first, _) = runtime.block_on(setup(Vec::new()));
         let caller = connection.caller();
         let agent = AgentRef {
             host_id: host.info(&caller).unwrap().host_id,
             agent_id: first.agent_id.clone(),
         };
-        let created = host
-            .create_session(
+        let created = runtime
+            .block_on(host.create_session_async(
                 &caller,
                 SessionCreate {
                     operation_id: OperationId::new().unwrap(),
@@ -1056,7 +1085,7 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
                     overrides: None,
                     initial_message: None,
                 },
-            )
+            ))
             .unwrap();
         let target = SessionRef {
             agent_id: first.agent_id,
@@ -1099,15 +1128,20 @@ fn review_memory_default_close_race_preserves_actual_acceptance_order() {
 
 #[test]
 fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
-    let (host, operator, first, _) = setup(Vec::new());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    assert!(tokio::runtime::Handle::try_current().is_err());
+    let (host, operator, first, _) = runtime.block_on(setup(Vec::new()));
     let caller = operator.caller();
     let agent = AgentRef {
         host_id: host.info(&caller).unwrap().host_id,
         agent_id: first.agent_id.clone(),
     };
     let observer = host.connect().unwrap();
-    let created = host
-        .create_session(
+    let created = runtime
+        .block_on(host.create_session_async(
             &caller,
             SessionCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -1116,7 +1150,7 @@ fn review_memory_default_revocation_does_not_revoke_accepted_facts() {
                 overrides: None,
                 initial_message: None,
             },
-        )
+        ))
         .unwrap();
     let selected = created.session_id.unwrap();
     assert_eq!(
@@ -1173,7 +1207,7 @@ fn assert_receipt(host: &Host, caller: &CallerContext, expected: Receipt) {
 
 #[tokio::test]
 async fn canonical_session_controls_freeze_actual_acceptance_facts() {
-    let (host, connection, target, _) = setup(Vec::new());
+    let (host, connection, target, _) = setup(Vec::new()).await;
     let caller = connection.caller();
     let paused = host
         .session_pause(&caller, &target, control_request())
@@ -1230,7 +1264,7 @@ async fn canonical_session_controls_freeze_actual_acceptance_facts() {
 
 #[tokio::test]
 async fn canonical_reused_operation_ids_keep_independent_owner_facts() {
-    let (host, connection, target, _) = setup(Vec::new());
+    let (host, connection, target, _) = setup(Vec::new()).await;
     let caller = connection.caller();
     let request = control_request();
     let first = host
@@ -1296,7 +1330,8 @@ async fn canonical_turn_cancellation_never_retargets_or_clears_later_input() {
             gate: Some(Arc::new(Semaphore::new(0))),
             partial: true,
         },
-    ]);
+    ])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "first");
     next_request(&mut seen).await;
@@ -1429,7 +1464,8 @@ async fn canonical_session_cancel_reports_idle_and_exact_current_turn() {
         text: "partial",
         gate: Some(Arc::new(Semaphore::new(0))),
         partial: true,
-    }]);
+    }])
+    .await;
     let caller = connection.caller();
     host.pause(&caller, &target).unwrap();
     let queued = send(
@@ -1512,7 +1548,7 @@ async fn canonical_session_cancel_reports_idle_and_exact_current_turn() {
 
 #[tokio::test]
 async fn canonical_close_returns_accepted_facts_even_when_memory_is_reclaimed() {
-    let (host, connection, target, _) = setup(Vec::new());
+    let (host, connection, target, _) = setup(Vec::new()).await;
     let caller = connection.caller();
     let receipt = host
         .session_close(
@@ -1541,7 +1577,8 @@ async fn canonical_agent_stop_preserves_queues_and_formed_lifecycle() {
         text: "partial",
         gate: Some(Arc::new(Semaphore::new(0))),
         partial: true,
-    }]);
+    }])
+    .await;
     let caller = connection.caller();
     send(&host, &caller, &target, MessageMode::FollowUp, "running");
     next_request(&mut seen).await;
@@ -1596,7 +1633,7 @@ async fn canonical_agent_stop_preserves_queues_and_formed_lifecycle() {
 
 #[tokio::test]
 async fn canonical_receipts_require_live_read_authority_and_current_write_authority() {
-    let (host, operator, target, _) = setup(Vec::new());
+    let (host, operator, target, _) = setup(Vec::new()).await;
     let observer = host.connect().unwrap();
     let request = control_request();
     assert_eq!(
@@ -1631,7 +1668,7 @@ async fn canonical_receipts_require_live_read_authority_and_current_write_author
 
 #[tokio::test]
 async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
-    let (host, connection, target, _) = setup(Vec::new());
+    let (host, connection, target, _) = setup(Vec::new()).await;
     let caller = connection.caller();
     host.pause(&caller, &target).unwrap();
     send(
@@ -1680,9 +1717,9 @@ async fn canonical_shutdown_receipts_keep_each_invocations_strategy() {
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
 }
 
-#[test]
-fn canonical_receipt_lookup_distinguishes_absence_ambiguity_and_unavailable_method() {
-    let (host, connection, target, _) = setup(Vec::new());
+#[tokio::test]
+async fn canonical_receipt_lookup_distinguishes_absence_and_ambiguity() {
+    let (host, connection, target, _) = setup(Vec::new()).await;
     let caller = connection.caller();
     let operation = OperationId::new().unwrap();
     let agent = AgentRef {
@@ -1713,7 +1750,4 @@ fn canonical_receipt_lookup_distinguishes_absence_ambiguity_and_unavailable_meth
     assert_eq!(ambiguous.kind(), Some(FaultKind::HostReceiptAmbiguous));
     assert_eq!(ambiguous.code(), 1203);
     assert_eq!(host.receipts(&caller, &operation).unwrap().len(), 2);
-    let unsupported = require_implemented(Method::HostReceiptGet, &BTreeSet::new()).unwrap_err();
-    assert_eq!(unsupported.kind(), Some(FaultKind::HostMethodUnavailable));
-    assert_eq!(unsupported.code(), 1401);
 }

@@ -138,7 +138,6 @@ impl SessionController {
         state.active.is_none()
             && state.compaction.is_none()
             && !state.preparing
-            && !state.saving
             && !state.driver_running
             && state.history_work.is_none()
             && state.record_work.is_none()

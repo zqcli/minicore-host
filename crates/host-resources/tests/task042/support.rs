@@ -1,15 +1,14 @@
 //! Explicit HTTP/SSE fixture. Production Host, provider, Runtime and tools are real.
+#[path = "../support/http_server.rs"]
+pub(crate) mod http_server;
+
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
 use minicore_host_resources::{HostCredentials, HostResourceBuilder};
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpListener,
-    sync::{Semaphore, mpsc},
-};
+use tokio::sync::{Semaphore, mpsc};
 
 pub(crate) struct Server {
     pub(crate) endpoint: String,
@@ -18,54 +17,7 @@ pub(crate) struct Server {
 }
 impl Server {
     pub(crate) async fn start(replies: Vec<(String, Option<Arc<Semaphore>>)>) -> Self {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let endpoint = format!(
-            "http://{}/v1/chat/completions",
-            listener.local_addr().unwrap()
-        );
-        let (send, requests) = mpsc::unbounded_channel();
-        let task = tokio::spawn(async move {
-            for (body, gate) in replies {
-                let (mut socket, _) = listener.accept().await.unwrap();
-                let mut bytes = Vec::new();
-                let boundary = loop {
-                    if let Some(index) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                        break index + 4;
-                    }
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                };
-                let head = String::from_utf8(bytes[..boundary].to_vec()).unwrap();
-                let length: usize = head
-                    .lines()
-                    .find_map(|line| {
-                        let (key, value) = line.split_once(':')?;
-                        key.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse().unwrap())
-                    })
-                    .unwrap();
-                while bytes.len() < boundary + length {
-                    let mut chunk = [0; 4096];
-                    let count = socket.read(&mut chunk).await.unwrap();
-                    assert_ne!(count, 0);
-                    bytes.extend_from_slice(&chunk[..count]);
-                }
-                send.send(serde_json::from_slice(&bytes[boundary..boundary + length]).unwrap())
-                    .unwrap();
-                if let Some(gate) = gate {
-                    gate.acquire().await.unwrap().forget();
-                }
-                let headers = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                    body.len()
-                );
-                socket.write_all(headers.as_bytes()).await.unwrap();
-                socket.write_all(body.as_bytes()).await.unwrap();
-                socket.shutdown().await.unwrap();
-            }
-        });
+        let (endpoint, requests, task) = http_server::start(replies).await;
         Self {
             endpoint,
             requests,
@@ -171,14 +123,15 @@ pub(crate) fn request(tools: Vec<ToolBinding>, workspace: Option<WorkspaceRef>) 
         initial_message: None,
     }
 }
-pub(crate) fn create(
-    host: &Host,
+pub(crate) async fn create(
+    host: &Arc<Host>,
     caller: &CallerContext,
     tools: Vec<ToolBinding>,
     workspace: Option<WorkspaceRef>,
 ) -> SessionRef {
     let receipt = host
-        .create_agent(caller, request(tools, workspace))
+        .create_agent_async(caller, request(tools, workspace))
+        .await
         .unwrap();
     SessionRef {
         agent_id: receipt.agent_id.unwrap(),

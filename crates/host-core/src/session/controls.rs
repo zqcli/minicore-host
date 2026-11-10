@@ -265,7 +265,6 @@ impl SessionController {
                         || state.compaction.is_some()
                         || state.history_work.is_some()
                         || state.preparing
-                        || state.saving
                         || state.record_work.as_ref().is_some_and(|work| work.running)
                     {
                         return Err(Fault::new(
