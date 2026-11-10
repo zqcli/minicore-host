@@ -2,7 +2,7 @@
 
 `minicore-host-core` composes the real Host -> Agent -> SessionController ownership path with Runtime. Memory and persistent Sessions use the same queues, configuration binding, Runtime loop and result handling. A connection grants access; it never replaces the target's direct owner.
 
-This crate is an in-process foundation, not the complete v4.93 canonical service or a transport server. Runtime integration requires the extended Runtime revision pinned by the workspace. The workspace pins the published Runtime Git revision; no local dependency patch is needed.
+This crate implements the in-process business owners; transport servers and executable assembly live in `host-transport` and `host-app`. Runtime integration uses the published Git revision pinned by the workspace; no local dependency patch is needed. Implemented APIs do not by themselves establish live-provider or TUI acceptance.
 
 ## Persistent initialization
 
@@ -62,9 +62,15 @@ The first version has no recovery entry for an unpublished creation whose necess
 
 Tests use temporary files, production owners, real Runtime and explicitly named scripted/gated model fixtures. The HTTP integration test uses the real provider adapter against a local test server. These are not live-provider or TUI validation.
 
-Run formatting, workspace tests, all-target Clippy with warnings denied, and rustdoc with warnings denied in the configured development checkout. Detailed checkpoints and commands are in tasks 006, 008, 009 and 012 at the repository root. The integrated canonical-control correction checkpoint `b961f9f` passed all 254 unit/integration tests and 2 doctests, with strict lint/documentation gates. A separate scoped review exercised 12 additional public-API acceptance cases; it is not the requested external review.
+Run `scripts/check.sh` from the workspace root for formatting, tests, strict
+all-target Clippy and rustdoc. Tasks 006, 008, 009 and 012 preserve their original
+checkpoints; current composed results and remaining acceptance work are recorded
+in `../../PROJECT.md`, not inferred from those older counts.
 
-Not implemented here: complete Host execution-resource configuration/reload, phased directory deletion, the complete canonical operation surface, transport/SDK adapters, DSH, full output/event reads, standard interaction. API/type presence is not evidence that these features are complete.
+Current owner modules implement configuration/reload, explicit owned deletion,
+canonical controls, delegation/result handoff, output/event reads and running
+interaction answers. `host-transport` provides the shared typed/stdio/WSS routes.
+These implementation boundaries do not claim actual TUI integration.
 
 ## Session-owned compaction
 
@@ -91,15 +97,15 @@ history callback to accept a competing batch. An explicit `session_resume`
 continues only the original failed save and candidate without rerunning utility
 or tools. Force/close and resource retirement retain their real worker joins.
 
-Task 037 records the deterministic owner, journal, Runtime and loopback HTTP/SSE
-coverage. Transport routing and independent review remain separate acceptance
-steps; no live-model or TUI validation is claimed.
+Tasks 037/040 record owner and typed/stdio/WSS coverage; tasks 088/092 cover the
+later diagnostic and original-Fault handoff changes. No live-model or TUI
+validation is claimed.
 
 ## Source-owned observation
 
 `Host::events_subscribe` returns a local `EventSubscription` with its fixed
-`SubscribeResult` baseline and a `recv` stream. The same core payloads are ready
-for transport adapters; wire push routing is a separate integration step.
+`SubscribeResult` baseline and a `recv` stream. `host-transport` carries these
+same payloads through typed subscriptions and stdio/WSS push notifications.
 Registration is connection-bound and precedes per-owner baseline collection.
 Host/Agent/Session/Turn scopes continue covering later direct descendants.
 Dropping a handle or ending its connection never cancels Session work.
@@ -131,5 +137,13 @@ reads use the real SessionStore read path without creating a Runner, changing
 residency or restoring old Turn/ToolCall/output objects. The response does not
 expose JSONL rows or internal Loop identities. Public interaction IDs are stable
 Host-format IDs mapped by the original Session to actual Runtime interactions;
-request, state and settlement projections reuse them. Public answer routing is
-not implemented by this module.
+request, state and settlement projections reuse them. `Host::answer_interaction`
+routes through the original Session interaction owner and is exposed by the
+shared transport operation table.
+
+`Host::turn_result_snapshot` and `wait_turn_snapshot` also read actual saved
+terminal results after persistent reopen, without restoring old execution.
+Retained results include their original state/config/LoadId; saved-only results
+carry `saved_terminal` and stored content, not invented execution metadata.
+Current active/finalizing ownership takes precedence over disk reads. See
+`tests/task087_saved_result_restart.rs` and the validated branches in `src/query.rs`.

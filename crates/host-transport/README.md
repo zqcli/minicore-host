@@ -107,35 +107,46 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` lists these 43 real routes:
+`SUPPORTED_METHODS` contains the 52 SPEC §8 resource routes:
 
 - Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
 - Workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
 - Changes: `changes.list`, `changes.diff`.
-- Agent: `agent.create`, `agent.get`, `agent.list`, `agent.stop`.
-- Session: `session.create`, `session.get`, `session.list`, `session.state`,
+- Agent: `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.start`,
+  `agent.stop`, `agent.set_default_session`, `agent.delete`.
+- Session: `session.create`, `session.get`, `session.list`, `session.update`, `session.state`,
   `session.load`, `session.unload`, `session.pause`, `session.resume`,
-  `session.cancel`, `session.close`, `session.history.read`, `session.compact`,
-  `session.compact.cancel`.
+  `session.cancel`, `session.close`, `session.delete`, `session.history.read`,
+  `session.context`, `session.compact`, `session.compact.cancel`.
 - Message: `message.send`, `message.get`.
+- Input: `input.list`, `input.remove`.
 - Turn: `turn.get`, `turn.list`, `turn.wait`, `turn.cancel`, `turn.result`, `turn.output.read`.
 - Tool calls: `toolcall.get`, `toolcall.output.read`.
 - Observations: `events.subscribe`, `events.unsubscribe`.
 - Interactions: `interaction.answer`.
 
-The count describes adapters for current core primitives, not completion of all
-SPEC §8. Lists retain basic current-owner results. `turn.get` returns
+The list describes actual routing, not complete product acceptance. Ordinary
+operations share `src/operations.rs`; `events.subscribe` uses the real client/RPC
+subscription path. Lists retain basic current-owner results. `turn.get` returns
 `TurnDetailsSnapshot { source, data }` with the actual Turn identity flattened
 on the wire. Its data combines the same authoritative `TurnStateData` used by
 `turn.state` with the complete original bound Session configuration; later
 Session updates do not replace it. State subscriptions stay lightweight.
 `message.get`, `turn.list`, `turn.result` and `turn.wait` also return actual
-Host/incarnation/target identity and a `data` envelope. Lists preserve completion
+Host/incarnation/target identity and a `data` envelope. Turn lists preserve completion
 order followed by the active Turn. Results project complete native history and
 separate unfinished partials, exposing actual public response indexes but no
 Runtime Loop IDs, request indexes or provider replay payloads. These snapshots
 read the existing direct owner and do not extend memory retention.
+
+After persistent reopen, `turn.result` and `turn.wait` can project saved terminal
+content without loading or restarting execution. Retained results contain
+`data.info` and `data.config` with their original LoadId; saved-only results use
+`data.saved_terminal` instead and omit LoadId. Invalid mixed/missing branches
+are rejected, not filled with invented configuration or counters. See
+`tests/task087_saved_result_contract.rs`.
+
 `session.history.read` takes `{ target, request: { cursor, limit } }` and returns
 `SessionHistorySnapshot`; it reads real retained/cold persistent history without
 creating a Runner or restoring old Turns. Text reads take the original Session,
@@ -243,8 +254,9 @@ visible to the caller; already received text is preserved. It does not silently
 retry, resubscribe, retain source owners or invent missing content. Callers apply
 state snapshots by the documented controller/Runner revisions, not output offsets.
 
-Not implemented here: the remaining §8 routes, complete production
-process/configuration loading, live-provider operation, or TUI changes/validation.
+Production process/configuration loading is assembled by `host-app`, not this
+transport library. Live-provider operation and actual TUI integration remain
+outside the validation described here.
 Tests use real Host/Runtime owners, actual OS pipes and loopback TLS with named,
 gated model/tool fixtures. Ordering relays delay genuine Host frames rather than
 manufacturing their business contents. Correlation unit tests are distinguished

@@ -66,13 +66,14 @@ failures retryable.
 ## Validation baseline
 
 The production manifest and the workspace's sole `Cargo.lock` pin published Runtime
-`18a6ac9b82d003330cd870275efca793cdcc9a96`. It provides authoritative history/partial
-reporting and retains complete Unknown responses before failing them. The earlier
+`3aa47629929906832dcb309afb7d242c1ae3e53f` (`0.10.0`). It provides authoritative history/partial
+reporting, retains complete Unknown responses before failing them, and reports
+actual per-request retry-wait elapsed time. The earlier
 isolated-crate checks used a local handoff patch; that is historical provenance,
 not a current build prerequisite. No local Runtime patch is required now.
 
-Focused provider validation passes 5 unit tests, 31 HTTP/SSE integration tests
-and 1 compiling doctest with the published Runtime source. The added streamed
+Task 010's historical focused provider checkpoint passed 5 unit tests, 31 HTTP/SSE
+integration tests and 1 compiling doctest with its stated Runtime source. Its streamed
 rejection regressions first failed against Host `6d29cdc`, despite the earlier
 workspace gate passing. They exercise real loopback TCP requests and Runtime,
 including measured retry lower bounds and controlled retry-wait cancellation

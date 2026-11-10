@@ -12,13 +12,31 @@ After acceptance, Host owns the original configuration save and publication inde
 
 Successful publication replaces one immutable resource snapshot and changes network authentication at the same boundary. Only actual network key changes revoke old network connections. Trusted local connections and already accepted work continue. A Turn retains its original execution clients/tools/prompt; removal of referenced resources blocks the next preparation without consuming accepted input. Successful explicit Session configuration correction is the existing way to retry resource-missing input.
 
+## Tool policy and credentials
+
+`SessionConfig.execution.approval` is frozen per Turn: omitted/`ask` requests
+approval for each mutating call, `auto` permits it without that interaction, and
+`read_only` rejects it. Only the actual builtin `read` and builtin `agent`
+inspect/wait actions are read-only exemptions; an external factory with the same
+name does not acquire them. Approval uses the existing Runtime interaction and
+`interaction.answer`, with no remembered allow-once decision. See
+[`approval.rs`](src/approval.rs) and the [actual-binary tests](../host-app/tests/tool_approval.rs).
+
+Production command bindings exclude configured model/network credential source
+names at each spawn. Successful publications accumulate names for the Host
+lifetime, including for later commands in an already-bound Turn. Failed
+candidates do not change that set. This does not alter the parent environment,
+already-started children or tool output, and is not filesystem/process isolation.
+The [executable regression](../host-app/tests/credential_environment.rs) checks
+that boundary; standalone local-tool callers choose their own environment policy.
+
 ## Current limits
 
-- This is production library composition, not the Host executable, CLI/config-file frontend, WSS listener startup, or completed `host.reload` transport route/operation receipt contract.
+- Executable/CLI/config-file and listener startup live in `host-app`; canonical `host.reload` receipts and publication live in `host-core` and route through `host-transport`. This crate prepares resources, not those entrypoints.
 - The Session owner supports automatic compaction at Runtime prompt boundaries using the original bound model/settings. Manual compaction prepares model, reasoning, selected ToolSpecs and the framework/Role/workspace prompt without creating a Turn or binding tools. Enabling compaction is supported; actual utility calls and their persistence can still fail and report their own facts.
 - Local tools bind the actual selected implementations to the original prepared Turn, Session output/edit owner, and canonical Workspace. Old and new resource publications share a builder-owned weak Workspace map, so overlapping Turns on the same root share the existing mutation guard without extending unused roots' lifetime. Arbitrary shell scripts and outside processes are not coordinated by that guard.
 - Public tool Finished state and completion wait for the actual per-call file/process cleanup, with final output positions. Native results enter history immediately; normal completed tools and argument rejection do not wait for Turn completion. The existing Turn collector still owns actual worker joins and blocks finalization on unconfirmed cleanup.
-- Actual edits enter the Session-owned EditJournal; process text enters the existing output store. Native ToolResults still use existing history save barriers. Edit snapshots and process observations survive unload but not source reclamation or restart. The owner provides retained-edit query hooks, not new `workspace.*`/`changes.*` transport routes or a permanent edit database.
+- Actual edits enter the Session-owned EditJournal; process text enters the existing output store. Native ToolResults still use existing history save barriers. Edit snapshots and process observations survive unload but not source reclamation or restart. `host-core` and `host-transport` expose the existing `workspace.*`/`changes.*` queries; there is no permanent edit database.
 - Public output contains unchanged UTF-8 prefixes, including code points split across actual pipe chunks. Binary or incomplete EOF bytes are never replaced; text reads crossing that prefix explicitly fail. Successful native CommandResult preserves all raw bytes. Empty observed stdout/stderr is distinct from a missing source.
 - Model capabilities are explicit configuration declarations. Lists do not invent values for other, unknown capabilities. Full ModelRef strings and actual ToolSpec declarations are retained, without new model/tool IDs or a plugin platform.
 - Historical incomplete-tool projection preserves complete native exchanges and explains genuinely missing old results in the model prompt. Compaction does not rewrite original history or invent tool results.

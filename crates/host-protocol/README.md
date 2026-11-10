@@ -49,9 +49,10 @@ actual Host references without sending model requests, executing tools, replacin
 resources, changing process cwd or granting permissions. Production owners must
 perform this check and appropriate version/state checks before publishing values.
 
-Supported execution settings are existing Runtime timeouts/retry values and
-compaction settings. No event capacity, tool-round cap, entity limit, input-size
-limit or application quota is introduced. The inherited Runtime ModelRef grammar
+Supported execution settings include Runtime timeouts/retry values, compaction
+and per-Turn tool approval. `execution.approval` defaults to `ask`; `auto` and
+`read_only` are explicit alternatives. No event capacity, tool-round cap, entity
+limit, input-size limit or application quota is introduced. The inherited Runtime ModelRef grammar
 (1–256 bytes) and model retry/deadline legal ranges are documented constraints of
 that dependency, not new Host admission controls.
 
@@ -67,8 +68,9 @@ JSON-RPC message.send params are exactly SendMessage. A normal result contains
 the full receipt, without a serialized Rust Result wrapper. `RpcResponse<T>`
 rejects simultaneous result/error. Business Faults are error.data and retain their
 own code separately from the JSON-RPC code. Timeout/connection errors remain local.
-Unknown future Fault leaves still require a preserving client-adapter decode path;
-the server-side Fault union intentionally accepts only registered leaves.
+Owners construct registered Fault leaves. Deserialization also preserves newer
+unrecognized peer leaves and opaque details; `kind()` then returns `None`.
+Registered type/code/details combinations remain strictly validated.
 
 `PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 52 resource methods in SPEC §8.
 Host state events are not a new `host.state` method. `staged_catalog` requires an
@@ -84,6 +86,5 @@ receipt combinations; Fault registry and typed details; connection/control facts
 method completeness; and local/RPC wire equivalence. These are contract tests, not
 live provider, Runtime, storage durability, WSS or TUI acceptance tests.
 
-The temporary standalone `[workspace]` in this crate manifest is removed by the
-integration owner when adding the root workspace. The generated standalone lock
-is intentionally untracked; the integrated repository commits its root lock.
+This crate is a member of the root workspace and uses its committed `Cargo.lock`.
+No standalone workspace, lockfile or local Runtime patch is required.

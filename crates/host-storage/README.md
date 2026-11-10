@@ -217,8 +217,8 @@ does not undo that unlink. An explicit retry can continue when the original
 closed ownership record remains. If that record is already removed but directory
 cleanup failed, this convenience API does not reconstruct deletion authority or
 claim completion; the business owner must retain and resolve the accepted
-operation's partial facts. A future owner-level phased-deletion handle is not
-implemented here.
+operation's partial facts. The public owner-level deletion lifecycle and receipts
+are implemented in `host-core`; these storage conveniences do not own that work.
 
 ## Verification
 

@@ -45,14 +45,15 @@ Diffs compare file content, including link text for a Git symlink without follow
 
 `EditJournal` is a plain append-only value owned by one Session, with no I/O, locks, tasks or implicit saving. `EditRecord` retains the actual `ToolCallRef`, path, before/after snapshots and observed `Applied` / `NotApplied` / `Unknown` outcome. Each stored position plus the bound Session/ToolCall identifies a record; repeated edits of one file remain separate observations.
 
-The future write/edit tool owner must:
+The integrated write/edit tool owner in `host-local-tools` and its Session sink
+follow this handoff:
 
 1. Capture the actual before state (or explicitly retain `Unknown` if capture failed).
 2. Carry the real write and its completion/uncertain outcome under that tool's existing owner. Dropping a caller must not drop this observation.
 3. Append the actual after observation and outcome once, without turning intended bytes into proof of a completed write.
-4. Keep/save the records with the Session's actual tool records. `records()` is serializable and `from_records` reconstructs the same order; this module does not invent a persistence format or recovery service.
+4. Retain observations under the actual Session owner. Native ToolResults use its normal history save boundary; edit snapshots themselves are not independently persisted. `records()` is serializable and `from_records` reconstructs the same order, but this is not an automatic persistence or recovery service.
 
-For a diff, use `EditJournal::get` while accessing Session state, clone the returned `Arc<EditRecord>`, release the lock, then call `diff_edit` with the same validated reference. Unknown snapshots fail explicitly; they are never treated as empty files. Capturing or listing current Git state cannot reconstruct missing historical tool observations. Session wiring, real write-tool capture/persistence, public Fault mapping and TUI routing remain integration work, so standalone module tests do not establish canonical end-to-end readiness.
+For a diff, use `EditJournal::get` while accessing Session state, clone the returned `Arc<EditRecord>`, release the lock, then call `diff_edit` with the same validated reference. Unknown snapshots fail explicitly; they are never treated as empty files. Capturing or listing current Git state cannot reconstruct missing historical tool observations. Session capture and public Fault mapping are integrated, and `host-transport` exposes the six queries on typed/stdio/WSS connections. `host-transport/tests/workspace_tool_changes.rs` covers real tool edits and missing old coverage after reopen. Actual TUI integration remains unverified.
 
 ## Verification
 

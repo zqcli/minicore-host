@@ -50,6 +50,25 @@ are private preparation inputs, not saved Host JSON. The process does not scan
 arbitrary environment variables, call a model at startup, or install tools.
 Selected tools must exist in the compiled production registry.
 
+The builtins are `read`, `write`, `edit`, Unix `bash`, and the six-action `agent`
+tool. `apply_patch` is not registered. Registration does not enable tools:
+`HostConfig.tools` selects available definitions and each Session's `tools`
+selects its bound set, both using entries such as `{"name":"read"}`. The
+template's empty list intentionally enables none. Local tools require a bound
+workspace; they do not use the process's current directory as a fallback.
+
+Session `execution.approval` defaults to `"ask"`, including when omitted.
+Mutating calls request approval with `allow_once`/`deny` answers; builtin
+`read` and `agent` inspect/wait do not. `"auto"` and `"read_only"` are explicit
+alternatives. The policy stays frozen through the current Turn. See
+[resource assembly](../host-resources/README.md) for policy and binding details.
+
+Production bash children omit configured model/network credential environment
+names, including previously published names for this Host lifetime. This is
+name-based environment exclusion, not output redaction or same-user OS
+isolation; already running children are unchanged. See the
+[local-tool boundary](../host-local-tools/README.md).
+
 The default configuration permits management but has no model selections. Create
 Agents and Sessions using canonical RPC with a configured model. On stdio, send
 one UTF-8 JSON-RPC object per LF-terminated line and first complete `initialize`
@@ -72,8 +91,9 @@ has a narrow non-serializable lifecycle capability and never takes a hidden
 client/operator slot. Disconnect ends only that connection. Existing observers
 do not automatically become operators; a later initialized connection may.
 
-Port zero is supported. The `host.started` diagnostic includes the actual
-`listen_port`, without logging configured addresses, paths or keys.
+Port zero is supported. The `host.started` diagnostic with
+`component="host.process"` includes the actual `listen_port`, without logging
+configured addresses, paths or keys. The owner startup record is a separate fact.
 
 ## Controlled exit
 
@@ -115,10 +135,17 @@ A dedicated directory such as `data-root/logs` is allowed; create it explicitly.
 This startup check is not a filesystem sandbox or protection against arbitrary
 external hardlinks and concurrent path replacement.
 
-Process events cover actual startup, shutdown requests/state, stopped cleanup,
-stdio disconnect, transport failure and owner shutdown faults. These are not
-complete Host/Agent/Session/Turn instrumentation. Logging health is not yet wired
-to `host.info`; process events and a successful flush do not prove business saves.
+`host.process` events cover actual startup, shutdown requests/state, transport
+failures and process cleanup. They complement the direct Host/Agent/Session/Turn,
+model, tool, compaction and result-handoff diagnostics; they do not replace them.
+Match both `component` and `event` when selecting a boundary: for example,
+`host.owner` and `host.process` each report their own actual `host.stopped` fact.
+
+`host.info.logging` reads the installed pipeline's process-wide health, with
+`status` and available `dropped_records`/`write_failures` counters. Embeddings
+without a bound health handle report disabled with unknown counters omitted.
+The real executable binding is covered by [diagnostic_health.rs](tests/diagnostic_health.rs).
+Health, process events and successful diagnostic flush do not prove business saves.
 
 The subprocess suite uses the real executable, OS pipes and signals, filesystem
 leases, production HTTP adapter against a gated local HTTP/SSE fixture, and
@@ -132,4 +159,5 @@ cargo test --locked -p minicore-host --all-targets
 cargo clippy --locked -p minicore-host --all-targets -- -D warnings
 ```
 
-Task 043 records immutable validation checkpoints and remaining integration work.
+Task 043 records the original immutable executable checkpoint; current composed
+validation and remaining live-provider/TUI work are tracked in `../../PROJECT.md`.

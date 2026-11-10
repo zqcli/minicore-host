@@ -1,7 +1,7 @@
 # Host compaction engine
 
 The calculation layer for Host-owned compaction. Runtime is fixed at
-`69faf9196991524b5549499d6208a1eaf567bf56` (`0.10.0`); it supplies the actual
+`3aa47629929906832dcb309afb7d242c1ae3e53f` (`0.10.0`); it supplies the actual
 Model port, request/response/history types and exchange validation, not a
 compactor. This crate has no Session locks, filesystem access, public Turn,
 control/input queue, retry service or durable operation state.
