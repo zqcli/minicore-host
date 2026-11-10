@@ -141,7 +141,7 @@ async fn graceful_process_shutdown_keeps_root_until_accepted_http_work_really_fi
     let receipt = child.rpc("host.shutdown", shutdown("graceful")).await;
     assert_eq!(receipt["result"]["lifecycle"], "draining");
     child.signal("-TERM");
-    child.event("host.shutdown_requested").await;
+    child.event("host.process", "host.shutdown_requested").await;
     let facts = child.rpc("host.info", json!({})).await;
     assert_eq!(facts["lifecycle"], "draining");
     assert_eq!(facts["shutdown_strategy"], "graceful");
@@ -172,7 +172,7 @@ async fn configured_wss_requires_valid_tls_and_key_and_first_real_client_gets_ri
     assert!(missing_tls.stdout.is_empty());
     assert!(!root.join("host.json").exists());
     let mut child = Process::start(&root, Some(&path), false, Some((&cert, &key)));
-    let started = child.event("host.started").await;
+    let started = child.event("host.process", "host.started").await;
     let port = started["attributes"]["listen_port"].as_u64().unwrap();
     let url = format!("wss://localhost:{port}/");
     let untrusted = Arc::new(
@@ -238,7 +238,7 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
     let mut child = Process::start(&root, Some(&path), true, Some((&cert, &key)));
     let initial = child.rpc("initialize", json!({})).await;
     assert_eq!(initial["can_operate"], true);
-    let started = child.event("host.started").await;
+    let started = child.event("host.process", "host.started").await;
     let url = format!("wss://localhost:{}/", started["attributes"]["listen_port"]);
     let observer = HostClient::wss(&url, tls.clone(), HOST_KEY, options())
         .await
@@ -254,7 +254,9 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
         .await;
     http.request().await;
     child.close_input();
-    child.event("transport.stdio_disconnected").await;
+    child
+        .event("host.process", "transport.stdio_disconnected")
+        .await;
     assert!(child.alive());
     assert_eq!(
         observer.info(options()).await.unwrap().lifecycle,
@@ -316,7 +318,7 @@ async fn repeated_signals_do_not_force_paused_backlog_but_explicit_rpc_force_fin
         .await;
     for signal in ["-TERM", "-INT"] {
         child.signal(signal);
-        child.event("host.shutdown_requested").await;
+        child.event("host.process", "host.shutdown_requested").await;
         let info = child.rpc("host.info", json!({})).await;
         assert_eq!(info["lifecycle"], "draining");
         assert_eq!(info["shutdown_strategy"], "graceful");
@@ -346,7 +348,7 @@ async fn failed_original_save_stays_stopping_and_external_kill_is_not_logged_as_
     let receipt = child.rpc("agent.create", agent_request()).await;
     assert!(receipt["agent_id"].is_null());
     child.rpc("host.shutdown", shutdown("force")).await;
-    child.event("host.shutdown_blocked").await;
+    child.event("host.process", "host.shutdown_blocked").await;
     std::fs::remove_file(root.join("agents")).unwrap();
     let repeated = child.rpc("host.shutdown", shutdown("graceful")).await;
     assert_eq!(repeated["result"]["strategy"], "force");
@@ -479,10 +481,12 @@ async fn broken_stdio_frame_does_not_shutdown_the_host_or_disable_the_wss_listen
         Some((&cert, &key)),
     );
     child.rpc("initialize", json!({})).await;
-    let started = child.event("host.started").await;
+    let started = child.event("host.process", "host.started").await;
     child.raw_input(b"{\"jsonrpc\":");
     child.close_input();
-    child.event("transport.stdio_disconnected").await;
+    child
+        .event("host.process", "transport.stdio_disconnected")
+        .await;
     let url = format!("wss://localhost:{}/", started["attributes"]["listen_port"]);
     let client = HostClient::wss(&url, tls, HOST_KEY, options())
         .await

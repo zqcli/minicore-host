@@ -217,7 +217,7 @@ impl App {
     }
 }
 pub async fn connect(process: &mut Process, tls: Arc<tls::ClientConfig>) -> HostClient {
-    let started = process.event("host.started").await;
+    let started = process.event("host.process", "host.started").await;
     let port = started["attributes"]["listen_port"].as_u64().unwrap();
     HostClient::wss(
         &format!("wss://localhost:{port}/"),

@@ -201,15 +201,15 @@ impl Process {
         .await
         .unwrap()
     }
-    pub async fn event(&mut self, name: &str) -> Value {
+    pub async fn event(&mut self, component: &str, name: &str) -> Value {
         tokio::time::timeout(WAIT, async {
             loop {
-                let line = self
-                    .stderr
-                    .recv()
-                    .await
-                    .unwrap_or_else(|| panic!("process closed stderr before {name}"));
+                let line =
+                    self.stderr.recv().await.unwrap_or_else(|| {
+                        panic!("process closed stderr before {component}/{name}")
+                    });
                 if let Ok(record) = serde_json::from_str::<Value>(&line)
+                    && record["component"] == component
                     && record["event"] == name
                 {
                     return record;
