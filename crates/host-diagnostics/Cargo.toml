@@ -1,13 +1,13 @@
 [package]
 name = "minicore-host-diagnostics"
-version = "0.1.0"
+version = "0.9.10"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Process-owned structured diagnostics for MiniCore Host"
 
 [dependencies]
-minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
+minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["registry", "std"] }
 time = { version = "=0.3.55", features = ["formatting"] }

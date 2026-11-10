@@ -1,13 +1,13 @@
 [package]
 name = "minicore-host-provider"
-version = "0.1.0"
+version = "0.9.10"
 edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 description = "OpenAI-compatible HTTP/SSE Model adapter for MiniCore Host"
 
 [dependencies]
-minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.1.0" }
+minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.9.10" }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 bytes = "=1.12.1"

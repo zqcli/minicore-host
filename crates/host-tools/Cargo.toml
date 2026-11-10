@@ -1,16 +1,16 @@
 [package]
 name = "minicore-host-tools"
-version = "0.1.0"
+version = "0.9.10"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 description = "Session-bound agent tool and ephemeral delegation scopes for MiniCore Host"
 
 [dependencies]
-minicore-host-local-tools = { path = "../host-local-tools", version = "0.1.0" }
-minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
-minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
-minicore-host-core = { path = "../host-core", version = "0.1.0" }
+minicore-host-local-tools = { path = "../host-local-tools", version = "0.9.10" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.9.10" }
+minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
+minicore-host-core = { path = "../host-core", version = "0.9.10" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
 serde_json = "=1.0.154"

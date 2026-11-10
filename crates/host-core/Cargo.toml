@@ -1,18 +1,18 @@
 [package]
 name = "minicore-host-core"
-version = "0.1.0"
+version = "0.9.10"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 description = "Direct-owner Host, Agent, and Session controllers for MiniCore"
 
 [dependencies]
-minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.1.0" }
+minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.9.10" }
 tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
-minicore-host-compaction = { path = "../host-compaction", version = "0.1.0" }
-minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
-minicore-host-storage = { path = "../host-storage", version = "0.1.0" }
-minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
+minicore-host-compaction = { path = "../host-compaction", version = "0.9.10" }
+minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
+minicore-host-storage = { path = "../host-storage", version = "0.9.10" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.9.10" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 serde = { version = "=1.0.229", features = ["derive", "rc"] }
 serde_json = "=1.0.154"
@@ -24,7 +24,7 @@ futures-util = "=0.3.34"
 
 [dev-dependencies]
 sha2 = "=0.10.9"
-minicore-host-provider = { path = "../host-provider", version = "0.1.0" }
+minicore-host-provider = { path = "../host-provider", version = "0.9.10" }
 tempfile = "=3.27.0"
 
 [lints.rust]

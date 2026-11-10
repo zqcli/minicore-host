@@ -1,17 +1,17 @@
 [package]
 name = "minicore-host-resources"
-version = "0.1.0"
+version = "0.9.10"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
 description = "Production execution resources for MiniCore Host"
 
 [dependencies]
-minicore-host-core = { path = "../host-core", version = "0.1.0" }
-minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
-minicore-host-provider = { path = "../host-provider", version = "0.1.0" }
-minicore-host-tools = { path = "../host-tools", version = "0.1.0" }
-minicore-host-workspace = { path = "../host-workspace", version = "0.1.0" }
+minicore-host-core = { path = "../host-core", version = "0.9.10" }
+minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
+minicore-host-provider = { path = "../host-provider", version = "0.9.10" }
+minicore-host-tools = { path = "../host-tools", version = "0.9.10" }
+minicore-host-workspace = { path = "../host-workspace", version = "0.9.10" }
 minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
