@@ -73,7 +73,8 @@ separate minimal exact-bound business-Fault handoff; its code and regression
 will be a separate fix commit, with the original diagnostic change kept reviewable.
 
 Validation paused for the parent's shared-machine performance quiet window.
-No Cargo/dependency or compiler process is left running by TASK088 during it.
+TASK088 left no Cargo/dependency/compiler process running during it, then
+resumed only after the parent released the window.
 
 
 ## Separate original-Fault handoff fix
@@ -150,7 +151,27 @@ All commands run with the recorded exclusive task088 environment and
   zero core examples and one transport compile example (doctest.log).
 - `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core
   -p minicore-host-transport --no-deps`: pass (doc.log).
-- Workspace unique-case inventory and final whitespace/protected-file checks
-  are being completed. Parent owns the final composed all-tests gate and
-  independent review. This task does not claim live-provider, performance or
-  TUI acceptance, nor the parent's subsequently updated query API/Runtime pin.
+- `cargo test --workspace --all-targets --locked --offline -- --list` completes:
+  919 unique cases across 118 nonempty test executables, 919 listed rows
+  (workspace-inventory.log and inventory-summary.json). This is an inventory,
+  not a workspace execution pass; nested subprocess output is not counted.
+- The Cargo-resolved diagnostic_compaction executable passes 10/10 complete
+  repeats (test-artifacts.jsonl, diagnostic-binary.txt, repeat-diagnostic-10.log).
+- Final affected strict Clippy and formatting checks pass again after all
+  source and shared-seam formatting changes (clippy-final.log, fmt-final.log).
+- check-whitespace.sh and git diff --check pass (whitespace-final.log).
+- Filtered Linux offline metadata confirms Runtime 0.10.0 at the original
+  69faf9196991524b5549499d6208a1eaf567bf56, with no manifest/lock/TUI/SPEC edits.
+  SPEC SHA-256 remains the required f044519f…; Cargo.lock SHA-256 is
+  1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125
+  (metadata-linux.json and protected-files.json).
+
+Original-Fault repair commit:
+`a07fd1d60c17cda7d5a56b7083e4d6e6259e6d16`.
+The later task-record commit changes documentation only. Worktree is clean
+at delivery; no push or other remote action was taken. Parent owns integration,
+PROJECT.md, the final composed all-tests gate and independent review. This task
+does not claim live-provider, performance or TUI acceptance, nor verification
+of the parent's subsequently updated saved-result query API or Runtime pin.
+The query fixture Option/async changes at integration are mechanical; preserve
+the exact original-Fault slot/claim logic while combining shared Session files.
