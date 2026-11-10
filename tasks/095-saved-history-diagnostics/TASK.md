@@ -126,3 +126,13 @@ scripts, selected artifacts, probe binary and the fixture correction log too.
 | `probe.log` | `c0a7aef056a79236b0a5ff3da2db16446ee1fb56946400c52f20771445a10621` |
 | `probe-repeat.log` | `ef8fa22b19ab79e9d9e887ca2a09e06f212a95c38141e3f3321f0c0b3c47b008` |
 | `final-checks.log` | `1a7d32a114d9bd3a7af3aa53542af83fc21b126223068bffab5dccc1847fdbf2` |
+
+## Independent cross-check
+
+A separate read-only verifier independently checked fixed source, commit
+provenance, docs-only diff and all evidence hashes, and reran the existing
+compiled real probe successfully. It agrees that no production change is needed
+and found no blocker. This is static independent review plus an artifact rerun,
+not an independently rebuilt binary or full gate. Its retained report is
+`independent-review.txt`, SHA-256
+`47fe0e7f7b9f6619cab36fef66ca505ded6871730d21ee1e86cea2b6b69f02ce`.
