@@ -43,3 +43,31 @@ and automatic utility scenarios (`red.log`). This is a genuine missing-boundary
 red. The initial fixture-only compile mistakes (wrong Turn result identity
 field, unsupported Current import, missing CompactionSource import, extra borrow)
 were corrected first; `fixture-compile.log` is not production-failure evidence.
+
+## Implementation checkpoint and newly exposed propagation gap
+
+`7527f99fa700f9f1f0b1b19f051c9dc917483792` is the original missing-boundary
+red integration test and task record. The ordinary diagnostic change adds
+started, cancellation-claimed, committing, finished and DEBUG actual utility
+request/usage facts. Its own stored addition is only a monotonic Instant, not a
+Span, retained body, logger, dedup flag or event queue.
+
+TASK053 applied the two shared seams in this worktree and authorized including
+them with the ordinary diagnostic change. The reproducible shared patch is
+`/workspace/shared/recovery-second/task088/applied-shared-seams.patch`, SHA-256
+`015d21c9f5a9efefaa6bda0c825925942cf6ffd8317a3c243ba7ee11bae60545`.
+The original hand-written patch had an insufficient-context hunk and was not
+applied; this was a patch-format issue, not a production conflict.
+
+A subsequent real automatic-HTTP401 probe exposes existing primary-Fault
+projection loss: utility failure is SESSION_COMPACTION_FAILED (3702), retained
+by compaction; SessionPrompt maps its completion Err to InvalidHistory; Runtime
+returns Prompt failure; the existing Host map creates TURN_INTERNAL_UNEXPECTED
+(4999). New compaction diagnostics plus existing Turn diagnostics then log two
+ERRORs for one failure. See `automatic-forwarding-red.log` (expected one, actual
+two). This is not solved by hiding a log. Parent and TASK053 are coordinating a
+separate minimal exact-bound business-Fault handoff; its code and regression
+will be a separate fix commit, with the original diagnostic change kept reviewable.
+
+Validation paused for the parent's shared-machine performance quiet window.
+No Cargo/dependency or compiler process is left running by TASK088 during it.

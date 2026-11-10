@@ -51,6 +51,7 @@ pub(super) struct CompactionWork {
     cancellation: CancellationToken,
     candidate: Option<CompactionProjection>,
     completion: watch::Sender<Option<Result<(), Fault>>>,
+    started: Instant,
     #[cfg(test)]
     pub(super) history_waiting: Arc<tokio::sync::Semaphore>,
 }
@@ -75,6 +76,7 @@ impl CompactionWork {
             cancellation,
             candidate: None,
             completion: watch::channel(None).0,
+            started: Instant::now(),
             #[cfg(test)]
             history_waiting: Arc::new(tokio::sync::Semaphore::new(0)),
         }
@@ -192,7 +194,7 @@ impl SessionController {
         let preparation = self
             .resources_owned()?
             .resolve_for_compaction(info.config.clone());
-        self.access.accept_business(caller, || {
+        let (receipt, record) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
             self.access.ensure_execution_owned()?;
@@ -251,6 +253,16 @@ impl SessionController {
             self.publish(&mut state);
             let receipt = self.compact_receipt(&state, request.operation_id);
             Self::retain_control(&mut state, Receipt::Compact(receipt.clone()));
+            let record = diagnostics::compaction_started(
+                &self.identity(),
+                &binding,
+                &state
+                    .compaction
+                    .as_ref()
+                    .expect("accepted compaction")
+                    .activity,
+            )
+            .published(state.controller_revision, state.runner_revision);
             let previous = state.compaction_task.take();
             let owner = Arc::clone(self);
             state.compaction_task = Some(state.executor.as_ref().expect("checked executor").spawn(
@@ -273,8 +285,10 @@ impl SessionController {
                     owner.wake();
                 },
             ));
-            Ok(receipt)
-        })
+            Ok((receipt, record))
+        })?;
+        record.emit();
+        Ok(receipt)
     }
     fn compact_receipt(&self, state: &SessionState, operation_id: OperationId) -> CompactReceipt {
         let work = state.compaction.as_ref().expect("accepted compaction");
@@ -303,7 +317,7 @@ impl SessionController {
         caller: &CallerContext,
         request: CompactCancelRequest,
     ) -> Result<CompactCancelReceipt, Fault> {
-        self.access.accept(caller, || {
+        let (receipt, record) = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::available(&state)?;
             let targets = state
@@ -338,6 +352,19 @@ impl SessionController {
             });
             let claimed = current && Self::cancel_compaction_locked(&mut state);
             self.publish_compaction(&mut state);
+            let record = claimed.then(|| {
+                let work = state
+                    .compaction
+                    .as_ref()
+                    .expect("claimed original cancellation");
+                diagnostics::compaction_cancelled(
+                    &self.identity(),
+                    &work.binding,
+                    &work.activity,
+                    Some(&request.operation_id),
+                )
+                .published(state.controller_revision, state.runner_revision)
+            });
             let target = if current {
                 Self::compact_facts(
                     &state,
@@ -370,8 +397,10 @@ impl SessionController {
                 },
             };
             Self::retain_control(&mut state, Receipt::CompactCancel(receipt.clone()));
-            Ok(receipt)
-        })
+            Ok((receipt, record))
+        })?;
+        diagnostic::emit(record);
+        Ok(receipt)
     }
     pub(super) fn cancel_compaction_locked(state: &mut SessionState) -> bool {
         let Some(work) = &mut state.compaction else {
@@ -511,15 +540,16 @@ impl SessionController {
             work.activity.state = CompactionState::Summarizing {};
             self.publish_compaction(&mut state);
         }
+        let utility_loop = context.loop_id;
         let candidate = match engine::generate(&plan, model.as_ref(), context).await {
             Ok(candidate) => candidate,
             Err(error) => {
-                self.record_utility(binding, &error.utility_usage);
+                self.record_utility(binding, utility_loop, &error.utility_usage);
                 self.fail_compaction(binding, failure(error.error.to_string()));
                 return;
             }
         };
-        self.record_utility(binding, &candidate.utility_usage);
+        self.record_utility(binding, utility_loop, &candidate.utility_usage);
         let save = match self.claim_compaction_commit(binding, &candidate) {
             Ok(save) => save,
             Err(fault) => {
@@ -530,24 +560,38 @@ impl SessionController {
         let result = history::checked_save(async { self.backend.append(vec![save.1]).await }).await;
         let _ = self.settle_save(&save.0, result);
     }
-    fn record_utility(&self, binding: &CompactionBinding, usage: &[engine::UtilityUsage]) {
+    fn record_utility(
+        &self,
+        binding: &CompactionBinding,
+        loop_id: LoopId,
+        usage: &[engine::UtilityUsage],
+    ) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        if let Some(work) = state
+        let Some(work) = state
             .compaction
             .as_mut()
             .filter(|work| &work.binding == binding)
-        {
-            work.activity.utility_usage = usage
-                .iter()
-                .map(|value| CompactionUsage {
-                    request_index: value.request_index,
-                    usage: value.usage,
-                    completed: value.completed,
-                })
-                .collect();
-            work.activity.state = CompactionState::Merging {};
-            self.publish_compaction(&mut state);
-        }
+        else {
+            return;
+        };
+        work.activity.utility_usage = usage
+            .iter()
+            .map(|value| CompactionUsage {
+                request_index: value.request_index,
+                usage: value.usage,
+                completed: value.completed,
+            })
+            .collect();
+        work.activity.state = CompactionState::Merging {};
+        let records =
+            diagnostics::compaction_utilities(&self.identity(), binding, &work.activity, loop_id);
+        self.publish_compaction(&mut state);
+        let records = records
+            .into_iter()
+            .map(|record| record.published(state.controller_revision, state.runner_revision))
+            .collect::<Vec<_>>();
+        drop(state);
+        diagnostic::emit(records);
     }
     fn claim_compaction_commit(
         &self,
@@ -620,6 +664,18 @@ impl SessionController {
         };
         let save = self.register_compaction_save(&mut state, binding.clone());
         self.publish_compaction(&mut state);
+        let record = diagnostics::compaction_committing(
+            &self.identity(),
+            binding,
+            &state
+                .compaction
+                .as_ref()
+                .expect("original candidate")
+                .activity,
+        )
+        .published(state.controller_revision, state.runner_revision);
+        drop(state);
+        record.emit();
         Ok((save, entry))
     }
     pub(super) fn settle_compaction_save(
@@ -627,7 +683,7 @@ impl SessionController {
         state: &mut SessionState,
         binding: &CompactionBinding,
         result: &Result<PersistenceState, Fault>,
-    ) -> Result<(), Fault> {
+    ) -> Result<Vec<Record>, Fault> {
         let work = state
             .compaction
             .as_mut()
@@ -641,7 +697,7 @@ impl SessionController {
         else {
             return Err(stale());
         };
-        match result {
+        let records = match result {
             Ok(confirmed) => {
                 let result = CompactionOutcome::Compacted {
                     change: change.clone(),
@@ -661,16 +717,17 @@ impl SessionController {
                     .push(HistoryItemData::Summary {
                         text: summary.content.as_str().to_owned(),
                     });
-                self.complete_compaction_locked(state, binding, result, Ok(()));
+                self.complete_compaction_locked(state, binding, result, Ok(()))
             }
             Err(error) => {
                 *persistence = PersistenceState::Failed;
                 *fault = Some(error.clone());
                 let _ = work.completion.send_replace(Some(Err(error.clone())));
                 self.publish_compaction(state);
+                Vec::new()
             }
-        }
-        Ok(())
+        };
+        Ok(records)
     }
     fn fail_compaction(&self, binding: &CompactionBinding, fault: Fault) {
         self.complete_compaction(
@@ -688,7 +745,9 @@ impl SessionController {
         completion: Result<(), Fault>,
     ) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        self.complete_compaction_locked(&mut state, binding, result, completion);
+        let records = self.complete_compaction_locked(&mut state, binding, result, completion);
+        drop(state);
+        diagnostic::emit(records);
     }
     fn complete_compaction_locked(
         &self,
@@ -696,16 +755,16 @@ impl SessionController {
         binding: &CompactionBinding,
         mut result: CompactionOutcome,
         mut completion: Result<(), Fault>,
-    ) {
+    ) -> Vec<Record> {
         let Some(work) = state
             .compaction
             .as_ref()
             .filter(|work| &work.binding == binding)
         else {
-            return;
+            return Vec::new();
         };
         if work.committing() && !matches!(result, CompactionOutcome::Compacted { .. }) {
-            return;
+            return Vec::new();
         }
         if !work.committing() && work.cancellation.is_cancelled() {
             result = CompactionOutcome::Cancelled;
@@ -729,10 +788,20 @@ impl SessionController {
             );
         }
         work.activity.state = CompactionState::Finished { result };
+        let record = diagnostics::compaction_finished(
+            &self.identity(),
+            binding,
+            &work.activity,
+            work.started,
+        );
         work.completion.send_replace(Some(completion));
         state.last_compaction = Some(work.activity.clone());
+        let previous = state.lifecycle;
         Self::finish_memory_close(state);
         self.publish(state);
+        let mut records = vec![record.published(state.controller_revision, state.runner_revision)];
+        records.extend(self.closed_record(state, previous));
+        records
     }
     /// Runtime's terminal callback runs before join, even when its prompt
     /// future was dropped. Fence it before touching the accepted raw cursor.
@@ -870,6 +939,16 @@ impl SessionController {
         let completion = work.completion.subscribe();
         state.compaction = Some(work);
         self.publish_compaction(&mut state);
+        let record = diagnostics::compaction_started(
+            &self.identity(),
+            &binding,
+            &state
+                .compaction
+                .as_ref()
+                .expect("accepted compaction")
+                .activity,
+        )
+        .published(state.controller_revision, state.runner_revision);
         let previous = state.compaction_task.take();
         let owner = Arc::clone(self);
         state.compaction_task = Some(
@@ -894,6 +973,8 @@ impl SessionController {
                     owner.handoff_delegation_owned();
                 }),
         );
+        drop(state);
+        record.emit();
         Ok(completion)
     }
 }

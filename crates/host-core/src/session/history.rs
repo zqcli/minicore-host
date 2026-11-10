@@ -342,6 +342,7 @@ impl SessionController {
                 state.block_reason = Some(fault.clone());
             }
         }
+        let mut compaction_records = Vec::new();
         match binding {
             SaveBinding::Turn(binding) => {
                 let active = state.active.as_mut().expect("checked Turn");
@@ -384,7 +385,7 @@ impl SessionController {
                         };
                     }
                 }
-                self.settle_compaction_save(&mut state, binding, &result)?;
+                compaction_records = self.settle_compaction_save(&mut state, binding, &result)?;
             }
         }
         self.publish(&mut state);
@@ -402,14 +403,19 @@ impl SessionController {
                         Boundary::Terminal => "terminal",
                     },
                 ),
-                SaveBinding::Compaction(_) => {
-                    (diagnostic::session_context(&self.identity()), "compaction")
+                SaveBinding::Compaction(binding) => {
+                    (diagnostics::compaction_context(&self.identity(), binding), "compaction")
                 }
             };
             diagnostics::history_failed(context, fault, phase, state.controller_revision)
         });
+        let compaction_records = compaction_records
+            .into_iter()
+            .map(|record| record.published(state.controller_revision, state.runner_revision))
+            .collect::<Vec<_>>();
         drop(state);
         diagnostic::emit(record);
+        diagnostic::emit(compaction_records);
         result.map(|_| ())
     }
     pub(super) async fn finalize(

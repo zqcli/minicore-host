@@ -1,5 +1,6 @@
 //! Scalar extraction for real Session and Turn fact boundaries.
 mod cleanup;
+mod compaction;
 mod handoff;
 pub(super) use cleanup::cleanup_failed;
 mod runtime;
@@ -8,6 +9,10 @@ mod scheduling;
 use super::*;
 use crate::diagnostics::{event, turn_context};
 use minicore_host_diagnostics::{Context, EventData, Scope};
+pub(super) use compaction::{
+    compaction_cancelled, compaction_committing, compaction_context, compaction_finished,
+    compaction_started, compaction_utilities,
+};
 pub(super) use runtime::{model_retry, models_reported};
 pub(super) use scheduling::Schedule;
 use tracing::Level;
