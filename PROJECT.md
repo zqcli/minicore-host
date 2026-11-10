@@ -1,12 +1,37 @@
 # MiniCore Host
 
-## Current work: performance optimization
+## Current performance checkpoint
 
-[Task104](tasks/104-performance/TASK.md) records the owner-authorized static
-performance analysis and selected implementation plan against dev `4ee5e819`.
-Three requested Astra/max workers own disjoint scopes; root integrates provider
-encoding, measurement, independent review and dev publication. Implementation
-and fresh performance evidence are in progress; no speedup is claimed yet.
+[Task104](tasks/104-performance/TASK.md) implements eight selected optimizations
+against dev `4ee5e819`: compaction request sizing, protocol/provider/RPC encoding,
+strict JSON decoding and history/workspace paging. Three requested Astra/max
+workers implemented disjoint scopes and cross-reviewed the integrated changes.
+Version 0.9.20, SPEC, dependency pins and historical evidence are preserved.
+
+[The performance report](tasks/104-performance/REPORT.md) records all 61 cases
+from four paired release-probe rounds (240 commands), including regressions and
+measurement limits. The deterministic 1,024-group compaction fixture changes
+prepare + generate median time from 6,159.14 ms to 19.39 ms, with a median paired
+reduction of 99.67%; this excludes live-model inference. No general Host speedup
+is claimed. Fresh real-Host scenarios pass in three runs per version, with mixed
+timings and materially different system load.
+
+Code checkpoint `dccb62be` passes 964 Rust cases, 4 doctests and 28 Python checks,
+plus formatting, strict Clippy/rustdoc and whitespace. All 956 baseline cases
+remain. [Validation](tasks/104-performance/validation.json) and
+[publication mapping](tasks/104-performance/publication.json) retain exact
+source/tree identities. The planned publication contains the reviewed optimized
+code, tests, probes, measurement runner and auditors, all 61 aggregate results,
+and a [checksum-only evidence manifest](tasks/104-performance/evidence-manifest.json).
+
+The raw evidence package is retained separately and withheld from publication
+after automatic approval review rejected public upload of opaque gzip/base64
+payloads. Its reviewed contents contain synthetic fixtures, compiler/test output,
+machine paths, PIDs and resource counters; no credentials were identified. The
+automatic review decision remains binding, and raw-evidence publication awaits
+explicit owner authorization. Recomputing the recorded summaries requires the
+separately supplied full `evidence/` package; the public report and manifest alone
+do not supply those inputs.
 
 ## Current checkpoint: 0.9.20
 

@@ -1,0 +1,65 @@
+{
+  "baseline": "4ee5e819798c2b165f9b03cf69dcdfb4a82e2cb4",
+  "integrated_code_checkpoint": "dccb62beb676f38e089f1523410d294a3b8d4d82",
+  "requested_worker_configuration": {
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max",
+    "effective_runtime_independently_attested": false
+  },
+  "reviews": [
+    {
+      "reviewer": "perf_transport",
+      "scope": "provider request projections",
+      "commit": "3fb08cae9c83df68a95b8b9a127643ad04cff869",
+      "result": "approved; no blocking source findings",
+      "evidence": "Borrowed lifetimes end in synchronous encoding; decoded shape, concatenation, null/omission, replay/opaque rejection, original tool IDs and arbitrary-precision schema semantics preserved. Follow-up dccb62b only extends the existing exact-number fixture.",
+      "limits": "Object member order and equivalent floating exponent spelling can differ; no byte-identical HTTP body claim."
+    },
+    {
+      "reviewer": "perf_io",
+      "scope": "protocol borrowed serialization and direct RPC encoding",
+      "commits": [
+        "224f3379d7e2d06f5679973690d314d6acd8cf68",
+        "c4d4fc2971b44c14fc074c59c4476cbaf8883e27"
+      ],
+      "result": "approved; no blocking source findings",
+      "evidence": "Actual generic wire struct names, field attributes, owned deserialization, validation order and errors retained. Complete response encoding or sanitized -32603 precedes queue send; subscriptions and 16 diagnostic roots unchanged.",
+      "limits": "RPC object member order can differ. Ordinary successful-operation diagnostic elapsed time now includes final response encoding rather than stopping after Value construction; initialization, subscription setup and error timing positions remain unchanged."
+    },
+    {
+      "reviewer": "perf_core",
+      "scope": "strict JSON and workspace diff/edit paging",
+      "commits": [
+        "f9d66d156b12c80eb4a14010a254a157be7d0087",
+        "9bc8e5222bd3f6fbea9334e2a2e809c89dd1495b"
+      ],
+      "result": "approved; no blocking source findings",
+      "evidence": "Borrowed raw subtrees retain duplicate detection, exact numeric parsing and complete preservation check. Diff fingerprint/group coordinates/UTF-8 cursor rules remain; edit indices stay absolute and arithmetic follows cursor bounds.",
+      "limits": "Diff still hashes and computes the full source. Probe setup includes complete diff reads; process RSS is not isolated page-allocation evidence."
+    },
+    {
+      "reviewer": "perf_transport",
+      "scope": "compaction sizing and cold history projection",
+      "commits": [
+        "77933c0bed666ce7411327278829dd4990ee611d",
+        "c622da35889e01ec7e80a3c8692e76bc02ea2b9d"
+      ],
+      "result": "approved; no blocking source findings",
+      "evidence": "Exact two-level escaping, raw byte saturation and whole-request rounding; invalid rejected candidate still fails before a utility call. Actual final request builder unchanged. Full-file validation, source lifetime/read access, public cursors and newer retained-history precedence preserved.",
+      "limits": "Cold storage I/O and validation still examine complete history; only unrequested DTO projection is removed."
+    }
+  ],
+  "static_test_inventory": {
+    "baseline": 956,
+    "candidate": 964,
+    "added": 8,
+    "removed": 0,
+    "original_direct_attributes_changed": 0
+  },
+  "compiled_test_inventory": {
+    "unique_cases": 964,
+    "targets": 126,
+    "nonempty_targets": 124
+  },
+  "limits": "Independent reviews were read-only source/contract/probe reviews. The integrated local gate passed separately; hosted CI is checked after publication. No live-provider or TUI acceptance."
+}

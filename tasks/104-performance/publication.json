@@ -1,0 +1,111 @@
+{
+  "schema": "task104.publication.v1",
+  "repository": "zqcli/minicore-host",
+  "branch": "dev",
+  "version": "0.9.20",
+  "baseline_dev": "4ee5e819798c2b165f9b03cf69dcdfb4a82e2cb4",
+  "validated_code": {
+    "source_commit": "dccb62beb676f38e089f1523410d294a3b8d4d82",
+    "published_commit": "206b911eaf5c5b061cbf5eab457c2e41a5e46bc5",
+    "tree": "d4798e4475cae3c78fdef513c19be69881de26dd"
+  },
+  "mapped_commits": [
+    {
+      "source_commit": "129be902d36897b8812ce620164521bd435d24ee",
+      "published_commit": "bb74f1e248b84a9cb61c8b6c4c14750f096285ac",
+      "tree": "49d6598684449a3327a67ea71fcab8c768c07bc3",
+      "parent": "4ee5e819798c2b165f9b03cf69dcdfb4a82e2cb4",
+      "subject": "docs(perf): record static analysis and optimization scope"
+    },
+    {
+      "source_commit": "3fb08cae9c83df68a95b8b9a127643ad04cff869",
+      "published_commit": "7bcafc67fd2349e41379cdc3d680150350a38508",
+      "tree": "8b0c8f01ada6d55fe81426ef5e2b51ac45df44eb",
+      "parent": "bb74f1e248b84a9cb61c8b6c4c14750f096285ac",
+      "subject": "perf(provider): serialize borrowed model request projections"
+    },
+    {
+      "source_commit": "0d8f69dd51f7cacbf5b6b82e779ebe3ce23e34bb",
+      "published_commit": "b8008ed419f55ec357b06c10e2d486ac8f731189",
+      "tree": "8b80e3669a728f00c56533d044db971470fa419d",
+      "parent": "7bcafc67fd2349e41379cdc3d680150350a38508",
+      "subject": "perf(protocol): borrow validated values during serialization"
+    },
+    {
+      "source_commit": "9932c3401380d6782e4e82310c1b5f3b5f8ec294",
+      "published_commit": "d30d45fa0d67cefd2cc2d2f04ae71e617f5f62af",
+      "tree": "aa548aa7c4f67b71d8ced3aceeaa5385339f11fd",
+      "parent": "b8008ed419f55ec357b06c10e2d486ac8f731189",
+      "subject": "perf(transport): encode typed RPC results directly"
+    },
+    {
+      "source_commit": "fb059b3dcbcd0fba78713b0e275632aeaec6e6cb",
+      "published_commit": "bcea5ddfbfb7bb822ee5b9a55ce10888f81ae2cd",
+      "tree": "b6822cd361ce163df74fea7884fc1f3c910be556",
+      "parent": "d30d45fa0d67cefd2cc2d2f04ae71e617f5f62af",
+      "subject": "perf(storage): borrow strict JSON decoding inputs"
+    },
+    {
+      "source_commit": "b4df3394e18f040f87f704d28b64f18548bea607",
+      "published_commit": "26a3090a7d0c960c1c0c8c583e2053bf78e8036c",
+      "tree": "f8befdb798b5f700db3f1841214a9edf0c65eb76",
+      "parent": "bcea5ddfbfb7bb822ee5b9a55ce10888f81ae2cd",
+      "subject": "perf(workspace): materialize requested diff pages only"
+    },
+    {
+      "source_commit": "c3e50d7dc5c578e20560f332a054fd1bb788f91b",
+      "published_commit": "71426062fc38d3af54f54d189513861ccb11d67a",
+      "tree": "46eb6c3c390ec88b68aa0d050e997cabaf21eb5e",
+      "parent": "26a3090a7d0c960c1c0c8c583e2053bf78e8036c",
+      "subject": "perf(compaction): count utility chunk bytes incrementally"
+    },
+    {
+      "source_commit": "15416f1a7ef196c097dff38c65aba8f0c872d975",
+      "published_commit": "698f2185f1b21ac57e152154f19cf0732235f4d8",
+      "tree": "ba6b33f768b67c00f3efb36790a74bb73cb21fe4",
+      "parent": "71426062fc38d3af54f54d189513861ccb11d67a",
+      "subject": "perf(core): project only requested cold history pages"
+    },
+    {
+      "source_commit": "dccb62beb676f38e089f1523410d294a3b8d4d82",
+      "published_commit": "206b911eaf5c5b061cbf5eab457c2e41a5e46bc5",
+      "tree": "d4798e4475cae3c78fdef513c19be69881de26dd",
+      "parent": "698f2185f1b21ac57e152154f19cf0732235f4d8",
+      "subject": "test(provider): preserve exact numeric request payloads"
+    },
+    {
+      "source_commit": "65ef0c356cf7d74e8527e952ffaa947faec3d8bc",
+      "published_commit": "f402c1657c9de5f25f6b4c2c2f23296ef2835cea",
+      "tree": "ae2488c1a8f6a3f0f93764450f1013a05cc181a7",
+      "parent": "206b911eaf5c5b061cbf5eab457c2e41a5e46bc5",
+      "subject": "test(perf): add paired measurement evidence audit"
+    },
+    {
+      "source_commit": "44d16e6372dd4d713a75a1172ef672fa0af84616",
+      "published_commit": "901dcd5ae65cb13f8e32c19aa777697296c2347d",
+      "tree": "f1dc80e6c92e3a575a7a59d40859e2fbd9a891d6",
+      "parent": "f402c1657c9de5f25f6b4c2c2f23296ef2835cea",
+      "subject": "test(perf): verify archived measurement evidence"
+    }
+  ],
+  "identity": {
+    "author": "zqcli <276883664+zqcli@users.noreply.github.com>",
+    "committer": "zqcli <276883664+zqcli@users.noreply.github.com>",
+    "co_author_trailers": false
+  },
+  "verification": {
+    "all_mapped_trees_equal": true,
+    "single_parent_ancestry_preserved": true,
+    "method": "GitHub connected API; create_tree on the verified parent tree with changed entries only, then create_commit. Ref update uses expected baseline and force=false.",
+    "final_documentation_commit": "Contains this manifest and the public report; its own identity is supplied by Git history and exact-head CI, not a self-referential field."
+  },
+  "evidence_publication": {
+    "state": "withheld_after_automatic_approval_rejection",
+    "manifest": "evidence-manifest.json",
+    "manifest_sha256": "d0f87bfdec681338e3424d257a65e389ba3d01ecb876922f6c23ef7f85ccada1",
+    "retained_local_checkpoint": "d19c8f2e8f81a9856201d5cf5de79183cd28a0e8",
+    "raw_archive_member_files": 33,
+    "public_contents": "Reviewed production/test changes, task probes and audit scripts, complete numerical report, review/validation records and checksum manifest. No raw archive member is included.",
+    "reason": "Automatic approval rejected opaque compressed evidence uploads; publication of the complete raw package requires explicit owner authorization. The original local archive and reviewed source remain intact."
+  }
+}
