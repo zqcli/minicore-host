@@ -2,12 +2,12 @@
   "schema_version": 3,
   "repository": "zqcli/minicore-host",
   "branch": "dev",
-  "purpose": "Fixed five-commit progress backup; not completed-stage acceptance",
-  "source_base": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
-  "initial_remote_head": "9f75d0e770b39b99614530fa126fd90952f95fe7",
-  "source_head": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
-  "remote_head": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
-  "tree": "03aad0d4af62a0b89fadcb3d3dc78d63d12425b9",
+  "purpose": "Fixed five-commit progress backup with a documented open saved-result P1; not release or stage acceptance",
+  "source_base": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+  "initial_remote_head": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+  "source_head": "d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06",
+  "remote_head": "cc2bf0fbd40f04920d611332ef0ff55adc724aec",
+  "tree": "34266ef4a0566e3695fe3e3eaa0aad92ef8fb7d2",
   "main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7",
   "source_chain_restart": {
     "base_is_actual_published_commit": true,
@@ -115,142 +115,147 @@
     "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
     "eb1065df9aa948478b907bd06407b56665eea955": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
     "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93": "c793fa6a999208206447ddd5a4811bbab5471b1b",
-    "587318b69a2e1f72d0f82999d3f6f6badacfe0e4": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410"
+    "587318b69a2e1f72d0f82999d3f6f6badacfe0e4": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+    "9cbf426a54ce68bb43128b62f25dfa2320f60305": "e60d62373d38288b3cb98b075420f773f153b1db",
+    "26fc72ab97b978cd3a0739eb88ae7e7a9d5cbe55": "433e87b11d2f854e1a1f1edf9dd7645d0a99869a",
+    "5e541dd78227966c5e28f0e4f2178f470011f842": "05ff654c75f0df832a46767911d3841531814c18",
+    "d9ce4e9727204e0727943dc83d366dba9142604d": "fb3e64a479c8c411008ff0d6be8f7f28de29816e",
+    "d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06": "cc2bf0fbd40f04920d611332ef0ff55adc724aec"
   },
-  "inherited_mapping_count": 70,
+  "inherited_mapping_count": 75,
   "new_commits": [
     {
-      "source_sha": "ac181fcdf6b1a43775771d9b2468558d41e64578",
-      "source_parent": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275730 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
-      "remote_sha": "acc8090d01b011841ca9f194a474a7cbe7f99d53",
-      "remote_parent": "9f75d0e770b39b99614530fa126fd90952f95fe7",
-      "tree": "7eaee6f702604c8cd5b107c8f0b8cb041929afb8",
-      "message": "docs(app): record fixed-source fixture validation\n",
+      "source_sha": "9cbf426a54ce68bb43128b62f25dfa2320f60305",
+      "source_parent": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+      "source_author_raw": "Codex <codex@openai.com> 1794276581 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276896 +0900",
+      "remote_sha": "e60d62373d38288b3cb98b075420f773f153b1db",
+      "remote_parent": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+      "tree": "bc299f2c821e15978dffee57b878f9390587cc9a",
+      "message": "feat(session): summarize actual model retries and usage\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:09:44Z",
+        "date": "2026-11-10T02:31:39Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276584 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277899 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:09:44Z",
+        "date": "2026-11-10T02:31:39Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276584 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277899 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/acc8090d01b011841ca9f194a474a7cbe7f99d53",
+      "url": "https://github.com/zqcli/minicore-host/commit/e60d62373d38288b3cb98b075420f773f153b1db",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf",
-      "source_parent": "ac181fcdf6b1a43775771d9b2468558d41e64578",
-      "source_author_raw": "Codex <codex@openai.com> 1794276012 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
-      "remote_sha": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
-      "remote_parent": "acc8090d01b011841ca9f194a474a7cbe7f99d53",
-      "tree": "ff57887924cacf85993ee084340d50b2aea36788",
-      "message": "feat(session): report actual history and metadata failures\n",
+      "source_sha": "26fc72ab97b978cd3a0739eb88ae7e7a9d5cbe55",
+      "source_parent": "9cbf426a54ce68bb43128b62f25dfa2320f60305",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277051 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277143 +0900",
+      "remote_sha": "433e87b11d2f854e1a1f1edf9dd7645d0a99869a",
+      "remote_parent": "e60d62373d38288b3cb98b075420f773f153b1db",
+      "tree": "b8ec5a5762e24ddaa674c8466c648598ed44db1d",
+      "message": "feat(core): diagnose owner reclamation and resource release\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:03Z",
+        "date": "2026-11-10T02:31:56Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276603 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277916 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:03Z",
+        "date": "2026-11-10T02:31:56Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276603 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277916 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/6430ff0f26587069fc85a0c43a14f862e1d1eb73",
+      "url": "https://github.com/zqcli/minicore-host/commit/433e87b11d2f854e1a1f1edf9dd7645d0a99869a",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "eb1065df9aa948478b907bd06407b56665eea955",
-      "source_parent": "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276083 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
-      "remote_sha": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
-      "remote_parent": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
-      "tree": "51bc2420f03bdefe084e0304f9d3ad2307ef41f8",
-      "message": "feat(agent): diagnose metadata saves and reconciliation\n",
+      "source_sha": "5e541dd78227966c5e28f0e4f2178f470011f842",
+      "source_parent": "26fc72ab97b978cd3a0739eb88ae7e7a9d5cbe55",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277147 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277206 +0900",
+      "remote_sha": "05ff654c75f0df832a46767911d3841531814c18",
+      "remote_parent": "433e87b11d2f854e1a1f1edf9dd7645d0a99869a",
+      "tree": "7781da20f7f5d1f78d57b32f2d9ebb2be6679c9e",
+      "message": "docs(core): record diagnostic review and final handoff\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:23Z",
+        "date": "2026-11-10T02:32:12Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276623 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277932 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:23Z",
+        "date": "2026-11-10T02:32:12Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276623 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277932 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
+      "url": "https://github.com/zqcli/minicore-host/commit/05ff654c75f0df832a46767911d3841531814c18",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93",
-      "source_parent": "eb1065df9aa948478b907bd06407b56665eea955",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
-      "remote_sha": "c793fa6a999208206447ddd5a4811bbab5471b1b",
-      "remote_parent": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
-      "tree": "578137d0733fc8589e0612eb30654ed23ad04d6c",
-      "message": "docs(recovery): publish verified checkpoint and six-stage status\n",
+      "source_sha": "d9ce4e9727204e0727943dc83d366dba9142604d",
+      "source_parent": "5e541dd78227966c5e28f0e4f2178f470011f842",
+      "source_author_raw": "Codex <codex@openai.com> 1794277268 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277330 +0900",
+      "remote_sha": "fb3e64a479c8c411008ff0d6be8f7f28de29816e",
+      "remote_parent": "05ff654c75f0df832a46767911d3841531814c18",
+      "tree": "ed015cafed87f04a2a868734c98f06c5a0801968",
+      "message": "fix(session): retain original metadata operation in diagnostics\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:40Z",
+        "date": "2026-11-10T02:32:28Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276640 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277948 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:40Z",
+        "date": "2026-11-10T02:32:28Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276640 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277948 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/c793fa6a999208206447ddd5a4811bbab5471b1b",
+      "url": "https://github.com/zqcli/minicore-host/commit/fb3e64a479c8c411008ff0d6be8f7f28de29816e",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
-      "source_parent": "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276370 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
-      "remote_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
-      "remote_parent": "c793fa6a999208206447ddd5a4811bbab5471b1b",
-      "tree": "03aad0d4af62a0b89fadcb3d3dc78d63d12425b9",
-      "message": "test(transport): control WSS initialization deadline clock\n",
+      "source_sha": "d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06",
+      "source_parent": "d9ce4e9727204e0727943dc83d366dba9142604d",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277710 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277710 +0900",
+      "remote_sha": "cc2bf0fbd40f04920d611332ef0ff55adc724aec",
+      "remote_parent": "fb3e64a479c8c411008ff0d6be8f7f28de29816e",
+      "tree": "34266ef4a0566e3695fe3e3eaa0aad92ef8fb7d2",
+      "message": "docs(review): record verified gates and saved-result query gap\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:59Z",
+        "date": "2026-11-10T02:32:45Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276659 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277965 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T02:10:59Z",
+        "date": "2026-11-10T02:32:45Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276659 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794277965 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+      "url": "https://github.com/zqcli/minicore-host/commit/cc2bf0fbd40f04920d611332ef0ff55adc724aec",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     }
@@ -261,14 +266,14 @@
   "actual_remote_committers": [
     "zqcli <276883664+zqcli@users.noreply.github.com>"
   ],
-  "source_author_note": "Source 32a3820 retains a Codex author. Local source author/committer and actual API/raw remote author/committer are recorded separately for every new commit.",
+  "source_author_note": "Source 9cbf426 and d9ce4e9 retain Codex authors. Local source author/committer and actual API/raw remote author/committer are recorded separately for every new commit.",
   "verification": {
     "new_commits": 5,
-    "prior_commits_checked": 353,
+    "prior_commits_checked": 358,
     "prior_commit_objects_unchanged": true,
-    "known_blobs_checked": 1640,
-    "new_blobs_checked": 25,
-    "history_commit_count": 358,
+    "known_blobs_checked": 1665,
+    "new_blobs_checked": 39,
+    "history_commit_count": 363,
     "trees_modes_blob_bytes_identical": true,
     "raw_messages_identical": true,
     "single_parent_sequence_verified": true,
@@ -279,45 +284,46 @@
   },
   "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
   "remote_refs": {
-    "refs/heads/dev": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+    "refs/heads/dev": "cc2bf0fbd40f04920d611332ef0ff55adc724aec",
     "refs/heads/main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7"
   },
-  "ref_verified_at": "2026-11-10T02:12:08.743Z",
+  "ref_verified_at": "2026-11-10T02:33:51.658Z",
   "branch_fetch_verified": true,
   "force": false,
+  "runtime_repository_changed": false,
   "branch_url": "https://github.com/zqcli/minicore-host/tree/dev",
-  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
-  "compare_url": "https://github.com/zqcli/minicore-host/compare/9f75d0e770b39b99614530fa126fd90952f95fe7...2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/cc2bf0fbd40f04920d611332ef0ff55adc724aec",
+  "compare_url": "https://github.com/zqcli/minicore-host/compare/2615fe00ff385a74c6ef6a302c169ccc2b6b4410...cc2bf0fbd40f04920d611332ef0ff55adc724aec",
   "ci": {
-    "observed_at": "2026-11-10T02:12:59.421Z",
+    "observed_at": "2026-11-10T02:34:37.749Z",
     "waited_for_completion": false,
     "runs": [
       {
-        "id": 42741046081,
+        "id": 42743579503,
         "name": "Linux foundation CI",
-        "head_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+        "head_sha": "cc2bf0fbd40f04920d611332ef0ff55adc724aec",
         "status": "in_progress",
         "conclusion": null,
-        "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081",
-        "updated_at": "2026-11-10T02:11:49Z"
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/42743579503",
+        "updated_at": "2026-11-10T02:33:32Z"
       }
     ]
   },
   "previous_checkpoint_ci": {
-    "source_head": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
-    "remote_head": "9f75d0e770b39b99614530fa126fd90952f95fe7",
-    "run_id": 42739672016,
+    "source_head": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+    "remote_head": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+    "run_id": 42741046081,
     "status": "completed",
     "conclusion": "success",
-    "url": "https://github.com/zqcli/minicore-host/actions/runs/42739672016",
-    "updated_at": "2026-11-10T02:07:47Z",
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081",
+    "updated_at": "2026-11-10T02:18:05Z",
     "jobs": [
       {
-        "id": 129577353054,
+        "id": 129581876745,
         "name": "Quality gate (Linux, Rust 1.90.0)",
         "status": "completed",
         "conclusion": "success",
-        "run_id": 42739672016,
+        "run_id": 42741046081,
         "logs_url": null,
         "steps": [
           {
@@ -362,38 +368,49 @@
     "reported_source_gate": {
       "command": "./scripts/check.sh",
       "result": "passed",
-      "unique_rust_tests": 899,
+      "unique_rust_tests": 908,
       "doctests": 4,
       "python_tests": 20
     },
-    "scope_note": "These successful results apply to source 101abcb and remote 9f75d0e only, not to the newer source checkpoint.",
-    "observed_at": "2026-11-10T02:12:59.421Z"
+    "scope_note": "These results apply to source 587318b and remote 2615fe0. The later saved-result restart audit found a P1 not covered by this green gate.",
+    "observed_at": "2026-11-10T02:34:37.750Z"
   },
   "validation_status": {
-    "combined_workspace_gate": "not yet run for this newer fixed source at backup time",
+    "combined_workspace_gate": "not claimed for this newer fixed five-commit checkpoint",
     "release_claimed": false,
     "stage_accepted": false,
+    "open_issues": [
+      {
+        "severity": "P1",
+        "scope": "saved persistent Turn-result queries after restart",
+        "status": "open",
+        "finding": "A real restart audit cannot retrieve the saved turn.result despite the persisted JSONL. The green gate does not cover this gap.",
+        "documented_in": [
+          "README.md",
+          "PROJECT.md"
+        ]
+      }
+    ],
     "source_validation_reported": [
-      "Eleven focused metadata cases, strict all-target core/transport Clippy, formatting and committed whitespace checks passed.",
-      "Producer metadata scope: 317 cases passed; transport scope: 143 cases passed.",
-      "Deterministic WSS deadline fixture passed producer repetitions of 100 and 25; static review passed and root focused rerun was starting."
+      "The source through d9ce4e9 passed 20 focused integration cases, strict all-target core/transport Clippy, formatting and committed whitespace checks.",
+      "The owner reclamation scope received independent approval; Session history and original-operation review was finishing."
     ],
     "remaining": [
-      "Complete independent review of the new metadata diagnostics.",
-      "Complete root WSS focused validation and the newer combined full workspace gate.",
-      "Complete remaining stage work and performance validation."
+      "Resolve the saved persistent turn.result restart P1 and validate the real restart path.",
+      "Complete remaining independent reviews and the new combined full workspace gate.",
+      "Complete remaining stage work and fresh performance validation."
     ]
   },
-  "recorded_at": "2026-11-10T02:12:59.715374+00:00",
+  "recorded_at": "2026-11-10T02:34:38.012203+00:00",
   "post_publication_validation": {
-    "local_fixed_source_gate": "docs/checkpoint-587318b-validation.json",
     "hosted_ci": {
-      "run_id": 42741046081,
-      "head_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+      "run_id": 42743579503,
+      "head_sha": "cc2bf0fbd40f04920d611332ef0ff55adc724aec",
       "status_at_last_check": "completed",
       "conclusion": "success",
-      "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081"
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/42743579503"
     },
-    "recorded_at": "2026-11-10T02:24:07.575949+00:00"
+    "recorded_at": "2026-11-10T02:47:28.774396+00:00",
+    "scope_note": "Exact-head hosted gate succeeded. Saved Turn-result restart P1 remains open; no full first-version or external-review approval is claimed. The separate earlier 908/4/20 local gate applies to source 587318b."
   }
 }

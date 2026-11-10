@@ -1,5 +1,36 @@
 # Fixed recovery checkpoint
 
+## Current verified backup and open work
+
+Review fixed `dev` commit [cc2bf0fbd40f04920d611332ef0ff55adc724aec](https://github.com/zqcli/minicore-host/commit/cc2bf0fbd40f04920d611332ef0ff55adc724aec), compared with `2615fe00ff385a74c6ef6a302c169ccc2b6b4410`.
+It exactly preserves source `d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06` and tree
+`34266ef4a0566e3695fe3e3eaa0aad92ef8fb7d2`. The [80-entry mapping](recovery-publication.json)
+retains the previous 75 entries, original messages and parent order. All 363 remote
+commits and unchanged README-only main are preserved; author/committer is verified
+as zqcli, not inferred from the local author. Exact-head
+[CI42743579503](https://github.com/zqcli/minicore-host/actions/runs/42743579503) passed.
+
+The five-commit backup adds original model attempt/usage facts, owner reclamation,
+original Session metadata operation retention and the previous verified handoff.
+Source through d9ce4e9 passed 20 focused combined cases and strict core/transport
+all-target lint. Reclamation and Session metadata have scoped independent
+approvals in tasks082/080; the preceding full local 908/4/20 gate below remains
+attached to source 587318b rather than asserted for each later commit.
+
+**Open P1:** real saved persistent `turn.result` still fails after controlled
+restart in this checkpoint. [The 52-method audit](current-contract-audit.md) records
+the actual failing probe and per-method boundaries, not an acceptance percentage.
+Task087 is implementing and validating a read-only projection of actual saved
+facts; unavailable old execution metadata must remain absent. Later local
+scheduling/Closed diagnostics at f36761a, compaction/result-handoff diagnostics,
+Runtime elapsed-time integration and fresh performance evidence are separate
+work. Runtime 2f7aeb9 received scoped independent approval but has not been pushed
+or pinned; no public event timing expansion is claimed. TUI/live-provider and
+external final acceptance remain unperformed. No main merge is authorized here.
+
+Earlier checkpoint descriptions below are preserved historical observations;
+the current status above supersedes their then-pending review/CI descriptions.
+
 ## Later verified checkpoint
 
 The next five-commit backup is published as
@@ -18,7 +49,7 @@ lint/docs, fmt and whitespace. Exact-head
 passed. The previous 9f75 CI also completed successfully after its earlier
 in-progress observation below.
 
-Scoped independent review now approves the tool/process slice at source101abcb,
+Scoped independent review now approves the tool/process slice at source 101abcb,
 the Agent metadata slice at19e7bbb, and the WSS test-only correction atf931bcc
 (integrated587318b). See [task080](../tasks/080-session-diagnostics-review/TASK.md)
 and [task082](../tasks/082-owner-diagnostics-review/TASK.md) for exact boundaries.

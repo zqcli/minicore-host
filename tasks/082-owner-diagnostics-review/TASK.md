@@ -54,7 +54,12 @@ acceptance, or an unpublished Session ID. Subscriber callbacks re-enter all
 three owner query boundaries without blocking. Existing invalid empty-cascade
 retry was first mis-modelled by the test, then correctly asserted as a refusal;
 no production fallback was added. Join/panic branches received source review
-only, not claimed dynamic coverage. The evidence package is being finalized.
+only, not claimed dynamic coverage.
+
+Evidence archive `task082-reclamation-review-28a09dc.tar.gz`, SHA-256
+`4135de500d54899dcc25283b2aa837854418396f601eea09411445b3878e62ad`, contains
+the report, probe source, actual logs, hashes and replay commands. This is a
+workspace evidence identifier, not a public download link.
 
 No approval above extends to the later combined root or Session-operation patch.
 No main merge, push, TUI/live-provider or complete product approval occurred.

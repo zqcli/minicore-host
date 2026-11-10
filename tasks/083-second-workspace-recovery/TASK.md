@@ -104,3 +104,23 @@ Next source `eb1065df9aa948478b907bd06407b56665eea955` integrates
 `ac181fc`. The focused diagnostic-storage, Agent metadata and callback-lock targets
 pass, as do strict core/transport all-target Clippy, fmt and whitespace. Their
 combined gate and independent new-scope review remain separate pending work.
+
+## Verified next backup and subsequent work
+
+Local d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06 maps to remote dev
+cc2bf0fbd40f04920d611332ef0ff55adc724aec with identical tree
+34266ef4a0566e3695fe3e3eaa0aad92ef8fb7d2. Exact-head CI42743579503 completed
+successfully. The mapping now contains 80 entries and retains all previous 75;
+main and all 363 remote commits are unchanged. Earlier logs/counts are not
+retroactively assigned to this later source.
+
+Subsequent integrated code f36761a adds actual control/Closed diagnostic facts;
+34a0517 adds the fixed-source 52-method audit with its open saved-result P1.
+Tasks 087/088/089/090 own saved-result correction, compaction diagnostics,
+independent Session/model review and fresh performance evidence. Runtime 2f7aeb9
+is independently reviewed locally, not published/pinned. Its isolated Host
+consumer e4be354 remains separate, without a committed Cargo path override.
+
+This documentation update validates 80 ordered mapping records, source/remote
+head/tree, preserved prefix, JSON, links, SPEC/lock identity and whitespace.
+It does not claim a new full source gate or closure of the saved-result P1.

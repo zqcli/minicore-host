@@ -1,6 +1,6 @@
 # minicore-host
 
-The fixed published checkpoint is [2615fe00ff385a74c6ef6a302c169ccc2b6b4410](https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410) on `dev`, tree-identical to source `587318b69a2e1f72d0f82999d3f6f6badacfe0e4`. Its fresh complete local gate passes **908 unique Rust tests, 4 doctests and 20 Python checks**, plus strict lint/docs and formatting; [exact-head hosted CI](https://github.com/zqcli/minicore-host/actions/runs/42741046081) also passed. A later independent restart probe found an open **P1 in saved Turn-result queries**; that gap is not covered by the green gate. See [the fixed recovery handoff](docs/recovery-checkpoint-review.md), [current status](PROJECT.md) and [75-entry publication map](docs/recovery-publication.json). Later owner/model diagnostics, Runtime actual retry-wait timing, final contract review and fresh performance measurements remain active; TUI remains deferred. The first version is not release-ready.
+The fixed published checkpoint is [cc2bf0fbd40f04920d611332ef0ff55adc724aec](https://github.com/zqcli/minicore-host/commit/cc2bf0fbd40f04920d611332ef0ff55adc724aec) on `dev`, tree-identical to source `d2d0c97c2d970cf05e294db71fd4bdd5c0dbdd06`. [Exact-head hosted CI](https://github.com/zqcli/minicore-host/actions/runs/42743579503) passed. The preceding source `587318b` has a fresh full local gate of **908 unique Rust tests, 4 doctests and 20 Python checks**, plus strict lint/docs and formatting. A later independent restart probe found an open **P1 in saved Turn-result queries**; green gates do not cover that gap. See [the fixed handoff](docs/recovery-checkpoint-review.md), [current status](PROJECT.md), the [80-entry publication map](docs/recovery-publication.json) and [52-method audit](docs/current-contract-audit.md). Saved-result correction, remaining diagnostics, Runtime actual retry-wait timing and fresh performance evidence are active; TUI remains deferred. The first version is not release-ready.
 
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
@@ -26,7 +26,8 @@ The Runtime dependency is exactly `0.10.0`, pinned to published commit `69faf919
 - [Provider adapter](crates/host-provider/README.md)
 - [Storage schema](crates/host-storage/README.md)
 - [Workspace and change-reading backend](crates/host-workspace/README.md)
-- [Public method implementation map](docs/method-coverage.md)
+- [Current fixed-source method audit](docs/current-contract-audit.md)
+- [Historical method implementation map](docs/method-coverage.md)
 - [Current local executable review handoff](docs/executable-review-handoff.md)
 - [Earlier local execution review handoff](docs/execution-review-handoff.md)
 - [Published owner/resource review handoff](docs/integration-review-handoff.md)

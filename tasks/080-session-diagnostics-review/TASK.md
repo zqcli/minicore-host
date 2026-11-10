@@ -48,10 +48,34 @@ The controlled red proves the CI failure mechanism, not an unchanged local
 reproduction of CI scheduling. No production, timeout-policy or error changes.
 Report: coordinator `task080-wss-deadline-review/REVIEW.md`.
 
+## Session history and original metadata operation
+
+Scoped APPROVE at root `d9ce4e9727204e0727943dc83d366dba9142604d`, tree
+`ed015cafed87f04a2a868734c98f06c5a0801968`. One independently authored compound
+real Host/Runtime/Store/loopback-HTTP probe and two unchanged producer cases pass
+twice in a fresh exclusive target. Strict core lib and focused transport Clippy,
+formatting and whitespace pass; no new full gate is claimed.
+
+The probe records three actual history-read ERRORs, four actual metadata-save
+ERRORs and one actual persistent Closed INFO. It checks unchanged saved bytes,
+no false Turn/LoadId on automatic-load failure, original operation across resume,
+real close-save refusal and repair, no duplicate model work, callback re-entry
+across all owners, and closed/no logging. Stale source/body/path/key fields are
+absent. A first draft probe failed compilation on nonexistent SessionSnapshot.source;
+that was a fixture error, not a production defect. Agent review scope includes
+only the three original-operation forwarding sites, not unrelated reclamation.
+
+Evidence: `task080-storage-diagnostics-review/REVIEW.md`, SHA-256
+`a9b066240198c85a934de5416665c795adb543ac104334b1497ec65c6fdf4b87`, and
+EVIDENCE.json SHA-256
+`a38c8cd51d6f50474c5ae971436aa107d6e618d1425b5785ac90b2f7607560f4`.
+The adjacent source/patch, raw JSONL and command logs remain replayable in the
+coordinator workspace; these names are not public download links.
+
 ## Continuing scope
 
-History/Session metadata original-operation review targets the newer fixed
-composition `d9ce4e9727204e0727943dc83d366dba9142604d`; it has not yet completed.
-Static inspection of model attempt/usage summaries found no new confirmed issue,
-but actual Runtime wait timing and its Host integration require their own final
-verification. Do not expand either approval above to those later changes.
+Later scheduling/Closed diagnostics and model retry timing are being reviewed
+separately. Static inspection of initial model attempt/usage summaries found no
+new confirmed issue, but is not dynamic approval of the Host elapsed-time
+consumer. No approval here extends to the saved-result restart correction,
+later compaction/result handoff or final product acceptance.
