@@ -56,7 +56,7 @@ impl AgentOwner {
                             } else {
                                 owner.clear_default_if(&id);
                             }
-                            target.finish_close_owned().await?;
+                            target.finish_close_owned(Some(&operation)).await?;
                             target.join_close_owned().await?;
                             if target.storage_mode() == StorageMode::Memory {
                                 target.retire_closed_owned().await?;

@@ -664,3 +664,57 @@ Next, preserve the known initiating Session metadata operation through its
 existing save work and close/delete callers in a separate coordinated patch.
 Other remaining Session control, asynchronous memory-close, cleanup-fault,
 result-handoff and compaction diagnostics are still open.
+
+### Original Session metadata operation across explicit continuation
+
+This slice is based on fixed integration `587318b69a2e1f72d0f82999d3f6f6badacfe0e4`
+plus `79cfc90b734ed55ef3541e4f29e8de344289e4e4`, the exact replay of model
+source `0a7ed6254120868b7168ff02ae9479388b371665`. The earlier source branch is
+retained. This worktree has a new exclusive target; no cross-worktree build
+artifacts are reused.
+
+The existing Session record work now retains only its optional original
+OperationId. Public update supplies its actual request ID; direct Agent close
+and delete workers pass the original operation already in their own work.
+Explicit same-save resume/reconcile preserves that original scalar, including
+an originally unknown identity. It never substitutes the later resume ID.
+Candidate/baseline matching, storage calls, fault/result publication and recovery
+remain unchanged. The completion still forms a scalar Record under the Session
+lock and emits only after the lock and all caller admission guards have ended.
+The legacy internal update API has no operation, so it still leaves it absent.
+
+The three Agent caller edits are the exact task079-provided patch with SHA-256
+`680218bba204f0703b151cb5be85c6ecc77413b67d0bdefaee744c3b5b51a839`.
+Only the matching Session parameters, save metadata, existing deletion fixture
+and new permanent regression are added here. No public API, new recovery entry,
+span lifetime, retry policy or logging deduplication state is introduced.
+
+The actual production Host/resources/Store regression first failed on the
+missing operation field after all business assertions had passed. It replaces
+the real session.json with a directory, separately exercising accepted update
+and persistent close. Each failed save retains original 3301 and unchanged live
+configuration. A second explicitly requested attempt while the same filesystem
+refusal remains produces one further actual failure, still with the initiating
+operation. Restoring the original file and using existing resume commits the
+original update or Closed marker. The test verifies no Turn is fabricated and
+no title, Role, key, framework instruction or path enters logs. This is a real
+Store non-file validation refusal, not disk exhaustion or an asserted syscall
+errno.
+
+Fresh commands use Rust 1.90 and the unchanged locked dependencies:
+
+- `cargo test -p minicore-host-transport --locked --offline --test diagnostic_metadata_operations -- --nocapture`: retained red before production changes, then green.
+- Seven actual diagnostic focused cases: calls, close bridge, terminal failures,
+  tools, storage, model and metadata operations all passed.
+- `cargo test -p minicore-host-core --all-targets --locked --offline`: 317 unique
+  cases passed, separately confirmed by `-- --list`.
+- Core/transport all-target strict Clippy, core strict rustdoc, formatting and
+  diff checks passed.
+
+Raw outputs are `metadata-operation-{red,green,focused,core,core-list,clippy,doc}.log`
+in the second recovery reports directory. These results do not claim full
+workspace or independent approval. The coordinator is separately arranging
+source-measured Runtime retry wait elapsed; this slice does not change its pin,
+lock, or substitute an estimate. Remaining Session controls/cancellation,
+asynchronous Closed, result handoff, cleanup-fault and compaction diagnostics
+are still open.

@@ -139,9 +139,12 @@ impl SessionController {
             changed.await;
         }
     }
-    pub(crate) async fn delete_data_owned(self: &Arc<Self>) -> Result<DataDeletion, Fault> {
+    pub(crate) async fn delete_data_owned(
+        self: &Arc<Self>,
+        operation: Option<&OperationId>,
+    ) -> Result<DataDeletion, Fault> {
         self.settle_delete_owned().await?;
-        self.finish_close_owned().await?;
+        self.finish_close_owned(operation).await?;
         self.join_close_owned().await?;
         let store = self.store_owned();
         let mode = self.storage_mode();

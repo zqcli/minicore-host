@@ -424,7 +424,7 @@ impl AgentOwner {
             async move {
                 let result = async {
                     owner.clear_default_before_close(&id, &operation).await?;
-                    child.finish_close_owned().await?;
+                    child.finish_close_owned(Some(&operation)).await?;
                     child.join_close_owned().await?;
                     if child.storage_mode() == StorageMode::Memory {
                         child.retire_closed_owned().await?;

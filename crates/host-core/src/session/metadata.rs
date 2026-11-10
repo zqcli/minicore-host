@@ -7,6 +7,7 @@ use tokio::sync::oneshot;
 pub(super) struct SessionRecordWork {
     candidate: SessionRecord,
     baseline: SessionRecord,
+    operation: Option<OperationId>,
     pub(super) running: bool,
     pub(super) fault: Option<Fault>,
 }
@@ -190,13 +191,14 @@ impl SessionController {
     ) {
         let (sender, receiver) = oneshot::channel();
         drop(receiver); // Waiting is not ownership. The accepted owner task persists.
-        self.spawn_record_save(state, candidate, sender);
+        self.spawn_record_save(state, candidate, sender, None);
     }
     fn spawn_record_save(
         self: &Arc<Self>,
         state: &mut SessionState,
         candidate: SessionRecord,
         sender: oneshot::Sender<Result<SessionInfo, Fault>>,
+        operation: Option<OperationId>,
     ) {
         let baseline = state
             .record_work
@@ -204,7 +206,14 @@ impl SessionController {
             .map(|work| work.baseline.clone())
             .or_else(|| state.record_base.clone())
             .expect("persistent metadata baseline");
+        // Continuation belongs to the original accepted save, not the later
+        // caller that explicitly resumes it. Unknown original identity stays unknown.
+        let operation = state
+            .record_work
+            .as_ref()
+            .map_or(operation, |work| work.operation.clone());
         state.record_work = Some(SessionRecordWork {
+            operation,
             candidate: candidate.clone(),
             baseline,
             running: true,
@@ -292,6 +301,10 @@ impl SessionController {
                     self.publish(&mut state);
                     let record = diagnostics::metadata_failed(
                         &self.identity(),
+                        state
+                            .record_work
+                            .as_ref()
+                            .and_then(|work| work.operation.as_ref()),
                         &fault,
                         state.controller_revision,
                     );
@@ -326,7 +339,7 @@ impl SessionController {
                 ));
             }
             let candidate = work.candidate.clone();
-            self.spawn_record_save(&mut state, candidate, sender);
+            self.spawn_record_save(&mut state, candidate, sender, None);
             Ok(())
         })?;
         receiver.await.map_err(|_| {
@@ -353,7 +366,10 @@ impl SessionController {
     }
     /// Called only by the direct Agent after its saved default no longer points
     /// here. The Agent owns the wait; this Session owns its record and conclusion.
-    pub(crate) async fn finish_close_owned(self: &Arc<Self>) -> Result<(), Fault> {
+    pub(crate) async fn finish_close_owned(
+        self: &Arc<Self>,
+        operation: Option<&OperationId>,
+    ) -> Result<(), Fault> {
         self.wait_quiescent_owned().await;
         if self.store_owned().is_none() {
             return Ok(());
@@ -373,6 +389,7 @@ impl SessionController {
                 reason: state.end_reason.clone().expect("accepted close reason"),
             });
             state.record_work = Some(SessionRecordWork {
+                operation: operation.cloned(),
                 baseline: state.record_base.clone().expect("metadata baseline"),
                 candidate: candidate.clone(),
                 running: true,
@@ -394,6 +411,7 @@ impl SessionController {
         expected: u64,
         config: SessionConfig,
         title: Option<String>,
+        operation: Option<OperationId>,
         accepted: impl FnOnce(&mut SessionState) -> T,
     ) -> Result<(T, oneshot::Receiver<Result<SessionInfo, Fault>>), Fault> {
         if title
@@ -454,7 +472,7 @@ impl SessionController {
                 record.data.effective_config = config;
                 record.data.title = title;
                 record.data.config_revision = revision;
-                self.spawn_record_save(&mut state, record, sender);
+                self.spawn_record_save(&mut state, record, sender, operation);
             }
             Ok(accepted(&mut state))
         })?;
@@ -470,7 +488,7 @@ impl SessionController {
     ) -> Result<SessionInfo, Fault> {
         self.resources_owned()?.validate(&config)?;
         let (_, receiver) =
-            self.accept_prepared_update_candidate(caller, expected, config, title, |_| ())?;
+            self.accept_prepared_update_candidate(caller, expected, config, title, None, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::SessionInternalUnexpected,
@@ -521,6 +539,7 @@ impl SessionController {
             request.expected_config_revision,
             config,
             title,
+            Some(request.operation_id.clone()),
             |state| {
                 let result = if state.record_work.is_some() {
                     MetadataUpdateResult::Saving {

@@ -127,7 +127,7 @@ impl AgentOwner {
         } else {
             self.clear_default_if(&child.id);
         }
-        child.delete_data_owned().await
+        child.delete_data_owned(Some(operation)).await
     }
 
     /// This is the Agent admission boundary, shared with create/start/default

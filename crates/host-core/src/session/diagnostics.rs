@@ -406,7 +406,12 @@ pub(super) fn process_exit(
     )
 }
 
-pub(super) fn metadata_failed(source: &SessionIdentity, fault: &Fault, revision: u64) -> Record {
+pub(super) fn metadata_failed(
+    source: &SessionIdentity,
+    operation: Option<&OperationId>,
+    fault: &Fault,
+    revision: u64,
+) -> Record {
     Record::new(
         event(
             Level::ERROR,
@@ -417,7 +422,10 @@ pub(super) fn metadata_failed(source: &SessionIdentity, fault: &Fault, revision:
             &["phase", "controller_revision"],
         ),
         EventData::default()
-            .context(diagnostic::session_context(source))
+            .context(Context {
+                operation_id: operation.cloned(),
+                ..diagnostic::session_context(source)
+            })
             .fault(fault)
             .attribute("phase", "metadata_save")
             .attribute("controller_revision", revision),
