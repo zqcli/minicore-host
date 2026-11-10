@@ -151,6 +151,9 @@
     "release_tag": "v0.9.10",
     "release_record": "tasks/102-release-0.9.10/TASK.md",
     "previous_block": "The earlier automatic review required current-conversation publication authorization; that instruction has now been provided.",
-    "hosted_ci": "Check the published release commit separately; the validation above records the fixed local simplification checkpoint."
+    "hosted_ci": "Check the published release commit separately; the validation above records the fixed local simplification checkpoint.",
+    "published_code_checkpoint": "4ba0afa0ad1d2022195be1a11a08cbacb19976ff",
+    "publication_mapping": "tasks/102-release-0.9.10/publication.json",
+    "release_tag_status": "remote creation pending; source publication uses connected GitHub Git Data APIs"
   }
 }

@@ -76,42 +76,60 @@ The final release-record commit changes documentation only; Rust source,
 manifests, Cargo.lock and SPEC remain identical to the validated version
 checkpoint. Whitespace checks also cover that final documentation update.
 
-## Publication and verification
+## Publication through the connected GitHub API
 
-The current owner instruction supersedes the earlier automatic approval block.
-The local annotated tag points to
-`a8003501b8af23c6f5607571a3ca33cfcdd11f97`. A subsequent documentation-only
-checkpoint records this publication outcome without moving that release tag.
+The owner explicitly requested another submission through the already connected
+GitHub account. Repository metadata confirms write permission. The supported
+Git Data APIs successfully create trees and commits, independently of the CLI
+login problem recorded below.
 
-The normal atomic push was attempted but failed with
-`fatal: could not read Username for 'https://github.com': No such device or address`.
-The owner completed the requested GitHub device login. The CLI process then
-failed because network policy blocked `https://api.github.com:443`, before it
-could persist login credentials. `gh auth status` still reported no logged-in
-host. The environment's granular approval policy also rejected the supported
-network escalation request (`sandbox_approval: false`). This is an environment
-access limitation; the owner's publication authorization remains valid.
+All six local checkpoints are reproduced in order with identical trees and
+original commit messages. API-generated timestamps change commit SHAs; actual
+author and committer are both `zqcli <276883664+zqcli@users.noreply.github.com>`.
+There are no co-author trailers. The exact mappings, trees, parents and returned
+identities are recorded in [publication.json](publication.json).
 
-Remote `dev` remains `6ea03b85a318374f3dcb94c38dbe11ac1878f110`, and no remote
-`v0.9.10` tag or new release CI run exists. The connected GitHub tools have no
-tag-creation operation, so no partial alternate publication was attempted.
+- Simplification: local `0a40a5639069e39e3f304aac6fbff079adabd1d2` maps to
+  `4ba0afa0ad1d2022195be1a11a08cbacb19976ff`.
+- Version bump: local `4301deb87353d4246e8e43be881e3a61a4a1c7ad` maps to
+  `356c1c4c1c1c01bada0236041d22326551ce7431`.
+- Original release checkpoint: local `a8003501b8af23c6f5607571a3ca33cfcdd11f97`
+  maps to `ca8580653d0f069b60ba6bdb82460a35972b6ed8`.
+- Complete local source head `674ec56ca125eea7143ef5630e066f57372001ab` maps to
+  `58e1ee65e7b37f48acd0d57455aab7cd6fb9b2dc`, tree
+  `01ff0dcf283dd5072dbcfd3bba9966a579fbf054`.
 
-A complete Git bundle named `minicore-host-0.9.10.bundle` preserves local `dev`,
-its full ancestry and the annotated tag. In an environment with GitHub push
-credentials, the publication procedure is:
+The final publication-record commit updates only README, PROJECT, Task101 and
+Task102 records. Production code, tests, scripts, manifests, Cargo.lock and SPEC
+remain identical to the validated 0.9.10 checkpoint. The `dev` update uses the
+observed old head `6ea03b85a318374f3dcb94c38dbe11ac1878f110` as its expected SHA
+and `force: false`, retaining all existing remote history. Hosted CI must be
+checked for the actual final `dev` head; the local gate is a separate result.
 
-```sh
-git clone --branch dev minicore-host-0.9.10.bundle minicore-host-0.9.10
-cd minicore-host-0.9.10
-git remote set-url origin https://github.com/zqcli/minicore-host.git
-git push --atomic origin dev refs/tags/v0.9.10
-git ls-remote origin refs/heads/dev refs/tags/v0.9.10 'refs/tags/v0.9.10^{}'
-```
+### Tag status
 
-The branch update must preserve remote history, and the annotated tag's peeled
-commit must match the published release checkpoint. Existing CI runs on `dev`
-pushes; tag pushes alone do not trigger it. Hosted CI is a separate result from
-the local gate and must be checked for the published commit.
+Remote creation of `v0.9.10` remains pending. Its intended published target is
+`ca8580653d0f069b60ba6bdb82460a35972b6ed8`, the exact tree of the original local
+release checkpoint. The current connected tools expose branch/commit writes but
+no tag-object or tag-ref creation operation. Their `create_branch` documentation
+does not promise support for a `refs/tags/*` destination. A read-only check of
+the cloud browser found GitHub signed out, so it supplies no authenticated tag
+creation path either. These limits do not block the authorized source submission.
+
+The original local source history and tag are retained as an archive. They are
+not the current remote commit chain; the old bundle's direct `dev` push procedure
+is superseded by this API publication mapping. The local publication checkout
+and any refreshed bundle should track the actual published commits before a
+later tag push.
+
+### Earlier CLI attempt
+
+The ordinary atomic push failed because Git credentials were unavailable. The
+owner completed device login, but the CLI process was interrupted by the network
+policy blocking `https://api.github.com:443` before credentials were persisted.
+The environment also rejected the supported network escalation request. These
+were limitations of that CLI route; the connected GitHub write APIs remain
+available and are used for the source publication above.
 
 Actual external-provider and consuming TUI acceptance remain outside this
 version release. This task does not merge into `main` or publish crates.

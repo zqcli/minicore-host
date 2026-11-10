@@ -1,7 +1,7 @@
 # minicore-host
 
-Current Host workspace version: **0.9.10**, prepared as `v0.9.10` on local `dev`.
-Remote publication is awaiting Git authentication in a network-enabled environment.
+Current Host workspace version: **0.9.10**, available on `dev`.
+The release tag `v0.9.10` still awaits remote creation.
 See [the release record](tasks/102-release-0.9.10/TASK.md) for the source,
 version consistency review and validation.
 

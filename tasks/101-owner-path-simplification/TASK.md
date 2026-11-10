@@ -17,15 +17,20 @@ work into `dev`, preserving remote history and keeping `main` unchanged.
 
 ## Publication status
 
-This implementation and its review are included in the **0.9.10** release on
-`dev`, with annotated tag `v0.9.10`; [Task102](../102-release-0.9.10/TASK.md)
-records the version checkpoint and release validation.
+This implementation and its review are included in **0.9.10** on `dev`.
+The GitHub source commit is
+[`4ba0afa0ad1d2022195be1a11a08cbacb19976ff`](https://github.com/zqcli/minicore-host/commit/4ba0afa0ad1d2022195be1a11a08cbacb19976ff),
+whose tree is identical to the validated local checkpoint. The release tag
+`v0.9.10` still awaits remote creation. [Task102](../102-release-0.9.10/TASK.md)
+records the version checkpoint, publication mapping and release validation.
 
 The earlier automatic publication review rejected `git push origin dev` because
 it required explicit authorization in the active conversation and did not accept
-retrieved historical authorization. No alternate route was used. The owner then
+retrieved historical authorization. No alternate route was used after that
+rejection. The owner then
 explicitly requested the 0.9.10 version bump, tag and remote push in this
-conversation, superseding that block.
+conversation, superseding that block, and subsequently explicitly requested use
+of the connected GitHub write APIs after the local CLI login failed.
 
 ## Implementation
 
@@ -96,7 +101,8 @@ compile/module-check logs remain local; the corrected complete gate follows.
 
 ## Verified code and validation
 
-Code checkpoint: [`0a40a5639069e39e3f304aac6fbff079adabd1d2`](https://github.com/zqcli/minicore-host/commit/0a40a5639069e39e3f304aac6fbff079adabd1d2),
+Local code checkpoint: `0a40a5639069e39e3f304aac6fbff079adabd1d2`, published as
+[`4ba0afa0ad1d2022195be1a11a08cbacb19976ff`](https://github.com/zqcli/minicore-host/commit/4ba0afa0ad1d2022195be1a11a08cbacb19976ff),
 tree `dc881a0b356dc0402d40797488ca8685d4bb5e5c`. The implementation and crate-guide content is unchanged from the
 passing integrated gate. Subsequent project/report edits only record its results.
 The detailed counts, commands and local evidence hashes are in

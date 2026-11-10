@@ -3,30 +3,33 @@
 ## Current checkpoint: 0.9.10
 
 All 12 Host workspace packages and 34 internal dependency requirements are now
-**0.9.10**. The version checkpoint is
-[`4301deb87353d4246e8e43be881e3a61a4a1c7ad`](https://github.com/zqcli/minicore-host/commit/4301deb87353d4246e8e43be881e3a61a4a1c7ad).
-The local annotated release tag `v0.9.10` points to
-`a8003501b8af23c6f5607571a3ca33cfcdd11f97`; see
+**0.9.10**. The validated local version checkpoint `4301deb87353d4246e8e43be881e3a61a4a1c7ad`
+corresponds to published commit
+[`356c1c4c1c1c01bada0236041d22326551ce7431`](https://github.com/zqcli/minicore-host/commit/356c1c4c1c1c01bada0236041d22326551ce7431).
+The release tag `v0.9.10` still awaits remote creation; see
 [Task102](tasks/102-release-0.9.10/TASK.md) for release scope and verification.
 The full 0.9.10 local gate passes 955 unique Rust tests, 4 doctests, 28 Python
 checks, formatting, Clippy and rustdoc.
 The owner explicitly requested the version bump, tag and remote push in the
 active conversation, superseding the previous publication approval block.
 
-**Remote publication is blocked by the execution environment.** The normal
-atomic push failed because Git credentials were unavailable. The owner completed
-the device login step, but the CLI login process was interrupted by the network
-policy blocking `api.github.com`; the environment also rejected the request for
-network permission escalation. No remote ref was changed and no new hosted CI
-run is claimed. A complete Git bundle preserves the prepared commits and tag for
-the same ordinary push from an authenticated environment.
+The connected GitHub Git Data API publishes the six local source checkpoints as
+six commits with identical trees, messages and parent order. Source checkpoint
+`674ec56ca125eea7143ef5630e066f57372001ab` corresponds to
+[`58e1ee65e7b37f48acd0d57455aab7cd6fb9b2dc`](https://github.com/zqcli/minicore-host/commit/58e1ee65e7b37f48acd0d57455aab7cd6fb9b2dc).
+The [publication mapping](tasks/102-release-0.9.10/publication.json) records the
+actual GitHub identities, source trees and parent chain. This status update
+changes documentation only. The prior CLI login failure did not prevent use of
+the already connected GitHub write APIs. Tag creation remains a separate missing
+operation in that connection; hosted CI is checked for the resulting `dev` head.
 
 ## Included owner-path simplification
 
 [Task101](tasks/101-owner-path-simplification/TASK.md) implements the approved
 simplification review on top of `dev`
 [`6ea03b85a318374f3dcb94c38dbe11ac1878f110`](https://github.com/zqcli/minicore-host/commit/6ea03b85a318374f3dcb94c38dbe11ac1878f110).
-Code checkpoint [`0a40a563`](https://github.com/zqcli/minicore-host/commit/0a40a5639069e39e3f304aac6fbff079adabd1d2)
+Local code checkpoint `0a40a563`, published with the identical tree as
+[`4ba0afa0`](https://github.com/zqcli/minicore-host/commit/4ba0afa0ad1d2022195be1a11a08cbacb19976ff),
 passes the complete gate: **955 unique Rust cases, 4 doctests and 28 Python checks**,
 strict Clippy/rustdoc, rustfmt and whitespace. The fixed baseline contains 953
 cases. Rust source/test lines net **-1,265** (938 non-test-source, 327 explicit
