@@ -1,0 +1,13 @@
+Task098 artifact validation; no Host measurement is rerun.
+All four retained gzip files reproduce the exact raw byte counts and SHA-256 values.
+smoke-c22d8c8/run-01: 1414 JSONL records; 396 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+smoke-c22d8c8: environment/source/harness hashes and regenerated summary match
+measured-c22d8c8/run-01: 1414 JSONL records; 396 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-c22d8c8/run-02: 1414 JSONL records; 396 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-c22d8c8/run-03: 1502 JSONL records; 440 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-c22d8c8: environment/source/harness hashes and regenerated summary match
+No failed run was reclassified as successful. Smoke results remain separate from the 3-run reported sample.
+7 ordinary JSON evidence files parsed
+All report artifact links resolve
+Production/harness/source/SPEC/lock unchanged; existing process-group wait code matches earlier checkpoint.
+Formatting and full-history/staged/worktree whitespace passed.

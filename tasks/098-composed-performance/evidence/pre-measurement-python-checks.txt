@@ -1,0 +1,33 @@
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.001s
+
+OK
+...............
+----------------------------------------------------------------------
+Ran 15 tests in 0.001s
+
+OK
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.000s
+
+OK
+usage: task090_perf.py [-h] --binary BINARY --source-revision SOURCE_REVISION
+                       --out OUT [--runs RUNS]
+
+Fresh Task090 local Host measurements at a fixed production checkpoint. Build
+the actual minicore-host executable first, then run --help. This is a bounded
+first-version workload, not a load generator or product capacity test. This
+task-specific copy of task058_perf.py preserves its workload and public query
+assertions, qualifies current shutdown diagnostics, and measures the explicit
+model gate separately. The original scripts/evidence stay unchanged. Only the
+local HTTP model replies are scripted; Runtime and Host are real.
+
+options:
+  -h, --help            show this help message and exit
+  --binary BINARY       already-built actual Host executable
+  --source-revision SOURCE_REVISION
+                        exact production source commit used for binary
+  --out OUT             new directory for raw JSONL and results.json
+  --runs RUNS           small independent fresh-Host repetitions (default 3)

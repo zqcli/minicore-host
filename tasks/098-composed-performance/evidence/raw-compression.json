@@ -1,0 +1,37 @@
+{
+  "compression": "gzip, level 9, mtime 0; exact original bytes verified before moving uncompressed originals to local backup",
+  "files": [
+    {
+      "raw_file": "smoke-c22d8c8/run-01.jsonl",
+      "raw_bytes": 840133,
+      "raw_sha256": "7441eb58c34c6f2378f0121b9fbfc181c7c3f42bda8f5736ca81ce67082b8d5a",
+      "gzip_file": "smoke-c22d8c8/run-01.jsonl.gz",
+      "gzip_bytes": 62449,
+      "gzip_sha256": "d894a836aded8bfa6c603ad8836c85a47b96a854852f552a5c26afa0838e774b"
+    },
+    {
+      "raw_file": "measured-c22d8c8/run-01.jsonl",
+      "raw_bytes": 840130,
+      "raw_sha256": "c255c3393acb75b0804bd5715dde760aa895e0821bf2b5ca427db29737971292",
+      "gzip_file": "measured-c22d8c8/run-01.jsonl.gz",
+      "gzip_bytes": 62191,
+      "gzip_sha256": "1c9dfa8eb50eaa725694bf1d28c28addd5dbeec509e4be866e36f77b066b99af"
+    },
+    {
+      "raw_file": "measured-c22d8c8/run-02.jsonl",
+      "raw_bytes": 840121,
+      "raw_sha256": "febf98036d97bbceccc9ee7ffa7cc9d50d19e076b0a0730c2ef3a96dab63fec6",
+      "gzip_file": "measured-c22d8c8/run-02.jsonl.gz",
+      "gzip_bytes": 62394,
+      "gzip_sha256": "fcd83dc6be27cebd6bd4c4cf71ff3338f99627aaacac38ddaf3f8f827f4f68bc"
+    },
+    {
+      "raw_file": "measured-c22d8c8/run-03.jsonl",
+      "raw_bytes": 886871,
+      "raw_sha256": "0a9d09252171af2406631e833f3e1126715089e9b0f93b69e1fee208b07bf89c",
+      "gzip_file": "measured-c22d8c8/run-03.jsonl.gz",
+      "gzip_bytes": 63974,
+      "gzip_sha256": "c43e710c7339f46636db73a6de8f0ef8b2d85b5615aa694fa8483107eb05d1c6"
+    }
+  ]
+}
