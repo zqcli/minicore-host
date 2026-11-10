@@ -173,3 +173,113 @@ No production code, SPEC, lockfile, TUI, main branch or remote ref was changed b
 this reviewer. No push was performed. Resource-preparation/failure-scheduling
 and force-claim diagnostics were not yet assigned as a fixed composed revision
 at this checkpoint and require a separate explicit follow-up verdict.
+
+## Follow-up A: force, preparation and internal-message diagnostics
+
+### Separately fixed scope and verdict
+
+**APPROVE for these three additional slices** at
+`11e5bf5c05750bc4a39fd9e2c295ee8f39d0f246`, tree
+`3a8e011c327d6b3283fc6d69e85f1cd5e65794a0`:
+
+- `7bcc10e104b1226eb2561429dc2b538447d7f3da`: actual force claims, replayed
+  from source `1fef32ca5d7ae7a670018afa26a22142e1ff5003` onto the earlier
+  `8b129d4` checkpoint. These are two mappings of one change, not two patches.
+- `55bd353abcb5916a523821d609cd73cd2d0a9f16`: actual resource-preparation
+  refusal and its changed scheduling projection.
+- `11e5bf5c05750bc4a39fd9e2c295ee8f39d0f246`: failed internal delegated-send
+  and notification invocation correlation.
+
+The earlier eight-character checkpoint references and evidence above remain
+unchanged. This follow-up does not silently widen the original three-scope
+approval. SPEC and Cargo.lock hashes remain identical. No production file was
+edited by the reviewer. Requested/effective reviewer configuration and the
+unchanged TUI/Runtime distinction remain as stated above.
+
+### Findings and boundary checks
+
+- Both force paths add a record only when their original Starting/Running
+  state changes to Cancelling. Session traversal uses the revisions it really
+  publishes. `SessionInputs::take` does not publish at that boundary and omits
+  both revisions. Neither callee receives an operation, so neither borrows the
+  graceful or later force operation from an enclosing span. No cancellation
+  token, input disposal, activation lease or existing return path was changed.
+  Static inspection and distinct actual-path probes found no duplicate claim.
+- Preparation diagnostics occur only after an actual accepted candidate error
+  is retained as the owner's block. The stale-config `continue` remains before
+  all new record construction. Queued counts and the effective config/Controller
+  revision come from the same publication; the allocated but unbound Turn ID is
+  not logged. The five-scalar scheduling comparison emits only a changed
+  projection. Ordinary resource/config/lifecycle rejection is WARN; unexpected
+  and unrecognized failures are ERROR without remapping their Fault identity.
+- Internal message wrappers preserve the original permission checks, existing
+  one-attempt notification flag and exact `Result`. They emit only after the
+  failed invocation has returned and all nested admission/owner guards have
+  ended. Original input MessageId and `in_reply_to` are captured before moves or
+  notification canonicalization. Source and requested target remain distinct.
+  Notifications use the actual registered child chain and only origin metadata
+  for the ended parent Turn/tool. Failed calls are WARN/DEBUG, never a second
+  primary ERROR. The context holds no body, owner, request object or raw Fault.
+
+### Additional independent tests
+
+Four private cases passed against this exact source checkpoint:
+
+1. Real persistent force upgrade and repetition: callback reads all owner layers
+   without blocking, one original Turn is saved Cancelled, only the actual
+   published revisions appear, and no unavailable operation is guessed.
+2. **Deterministic real Runtime input-fence path:** a fixture PromptProvider
+   pauses the actual Runtime between input boundaries. Tracing gates hold the
+   accepted force call and its original shutdown worker *outside* owner locks.
+   Force admission has already happened; the prompt is released so the real
+   `SessionInputs::take` wins the first claim. This changes no owner fields and
+   synthesizes no owner event. That callback reenters Host/Agent/Session reads,
+   has neither operation nor unpublished revision, then releases the ordinary
+   traversal. Exactly one claim and one Cancelled finish result; zero HTTP
+   requests occur. This is not an uncontrolled repeated-race experiment.
+3. A gated first resource candidate becomes stale after a real Session config
+   update. Its returned Fault has no diagnostic record. A second actual failure
+   retains the original queued message and records revision 1 once. Both a known
+   missing-resource WARN and an unknown `FUTURE_PREPARATION_REFUSAL` / `62094`
+   ERROR preserve actual identity, body exclusions and the existing resume
+   policy. Refusal and scheduling callbacks reenter owner reads.
+4. Failed task send and duplicate/failed notification record exact original
+   MessageId, reply link, source and target. A retained original Turn capability
+   is also invoked after its parent Turn ends: it still returns
+   `HostAccessInvalid`, and the child never accepts that attempted message.
+   Logging does not reactivate the capability, widen permissions or emit another
+   primary ERROR. Actual callback reads complete without owner-lock retention.
+
+The preparation probe's first compile attempted to compare `BlockReason` directly
+with Fault. It was corrected to inspect `BlockReason.fault`; its compile-only log
+is retained and is not called a production failure. No production correction was
+required. The committed handoff fixture additionally executes its business path
+without any installed subscriber before enabling its real JSON pipeline.
+
+### Fresh validation and evidence
+
+The same exclusive environment/target settings described above were used.
+
+- `cargo test -p minicore-host-transport --test diagnostic_force --test diagnostic_preparation --test diagnostic_handoff --test diagnostic_agent_stop --test diagnostic_cleanup --locked --offline`: **5 passed**.
+- `cargo test -p minicore-host-core --all-targets --locked --offline -- --list`,
+  then the same command without `-- --list`: **337 listed unique core cases,
+  337 passed, 0 failed/ignored**. This remains a scoped core count, not workspace.
+- `cargo test --manifest-path ../evidence/followup-probes/Cargo.toml --locked --offline --no-fail-fast -- --nocapture`: **4 passed** in the final run.
+- `cargo fmt --all --check`, strict core/transport all-target Clippy, strict
+  core rustdoc and `./scripts/check-whitespace.sh`: **passed**, using the exact
+  same commands as the preceding scope.
+
+Raw follow-up logs are `source11-*.log`; exact private sources/manifest/lock are
+in `evidence/followup-probes/`. The separate `FOLLOWUP11_SHA256SUMS` manifest has
+SHA-256 `f6adc629e5a3e98f3e71535490e668d4d948c185596cf10703ea5e6a2174c885`.
+It does not replace the immutable earlier evidence manifest.
+
+- Focused log: `94e5f7aaf696b412bd909350635a03d003f62e42ed1e69c6a4322ad30a312d55`
+- Core log: `da6b84e5f8fc3f6fba9b7aafc47d46a716a3fcd70f2a41b823bf1bea15097024`
+- Final independent probes: `c4269be36230f041041f7efff45385a91881ef7694e89f34af179f228f81a591`
+- Strict Clippy: `e30789724e469e07ae23b438537bf20d3de3b0928231c61675d7aa588a164a67`
+- Strict rustdoc: `acaad188f3067848af4ba1ecdeb726d75c82bb089f560093c4558524ec2fdb1f`
+
+No full workspace gate, performance/live-provider/TUI acceptance or publication
+is claimed by this follow-up. The later composed compaction baseline and the
+subsequent thin failure/save-resume scheduling patch are separate review scopes.
