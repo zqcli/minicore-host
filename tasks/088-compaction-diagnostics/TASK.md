@@ -175,3 +175,18 @@ does not claim live-provider, performance or TUI acceptance, nor verification
 of the parent's subsequently updated saved-result query API or Runtime pin.
 The query fixture Option/async changes at integration are mechanical; preserve
 the exact original-Fault slot/claim logic while combining shared Session files.
+
+## Coordinator composition
+
+The four source commits are integrated as4445a69,9e2bdf4,1791455 and40bc1d5.
+The only production merge conflict was the diagnostics module import list;
+existing handoff/cleanup and the new compaction modules are all retained. Other
+owner/history changes merge without changing their claim or publication order.
+The new public query represents retained metadata as optional for saved-only
+results. Six assertions in the real compaction transport fixture now require
+the actual current-run info before making the same outcome/Fault/persistence
+checks. No expected result, original-failure comparison, retry count or barrier
+assertion is relaxed. The coordinator's combined tree also pins published
+Runtime3aa4762; its original source2f7aeb9 and exact-head CI were separately verified.
+The independent review of sourcea07fd1d remains scoped; the composed full-workspace
+gate is run and reported against the coordinator's separate fixed source.

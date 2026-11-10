@@ -83,6 +83,8 @@ async fn seed(
                 .await
                 .data
                 .info
+                .as_ref()
+                .unwrap()
                 .outcome,
             Some(TurnOutcome::Completed)
         );
@@ -508,7 +510,10 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     let message = input();
     session.send(message.clone(), options()).await.unwrap();
     let turn = result(&session, &message.message_id).await;
-    assert_eq!(turn.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        turn.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     let automatic = finished(&session).await.data.compaction.unwrap();
     assert!(
         matches!(&automatic.source, CompactionSource::Automatic { turn_id, load_id, .. }
@@ -529,11 +534,19 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     session.send(message.clone(), options()).await.unwrap();
     let automatic_failure = result(&session, &message.message_id).await;
     assert_eq!(
-        automatic_failure.data.info.outcome,
+        automatic_failure.data.info.as_ref().unwrap().outcome,
         Some(TurnOutcome::Failed)
     );
     assert_eq!(
-        automatic_failure.data.info.fault.as_ref().unwrap().kind(),
+        automatic_failure
+            .data
+            .info
+            .as_ref()
+            .unwrap()
+            .fault
+            .as_ref()
+            .unwrap()
+            .kind(),
         Some(FaultKind::SessionCompactionFailed)
     );
     let CompactionState::Finished {
@@ -545,13 +558,15 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         panic!("automatic utility must fail")
     };
     assert_eq!(
-        automatic_failure.data.info.fault.as_ref(),
+        automatic_failure.data.info.as_ref().unwrap().fault.as_ref(),
         Some(&original_fault)
     );
     assert_eq!(
         automatic_failure
             .data
             .info
+            .as_ref()
+            .unwrap()
             .fault
             .as_ref()
             .unwrap()
@@ -628,9 +643,12 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         .wait_turn(automatic_save_turn, options())
         .await
         .unwrap();
-    assert_eq!(automatic_saved.data.info.outcome, Some(TurnOutcome::Failed));
     assert_eq!(
-        automatic_saved.data.info.persistence,
+        automatic_saved.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Failed)
+    );
+    assert_eq!(
+        automatic_saved.data.info.as_ref().unwrap().persistence,
         PersistenceState::Persisted
     );
     assert!(matches!(
