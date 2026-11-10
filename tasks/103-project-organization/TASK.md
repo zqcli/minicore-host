@@ -144,3 +144,15 @@ The branch update preserves the original remote head
 expected SHA with `force: false`. Hosted CI is checked for the resulting `dev`
 head; the passing local gate above is a separate result. This release does not
 merge `main`, publish crates or claim live-provider/TUI acceptance.
+
+## Remote gate follow-up
+
+The first remote run on `ab7724832fe52da10bf3a11146e433158770ab90`,
+[42845638847](https://github.com/zqcli/minicore-host/actions/runs/42845638847),
+stopped at the whitespace gate: the newly added publication JSON had one extra
+blank line at EOF. That file was still untracked during the last local whitespace
+check, so the check did not include it. No remote Rust/Python pass is claimed
+from this run. A follow-up documentation-only commit removes that line and
+checks both the staged and committed diff before publication. Source, tests,
+version, dependencies and local gate results remain unchanged; the next remote
+run must pass the full gate on the resulting dev head.
