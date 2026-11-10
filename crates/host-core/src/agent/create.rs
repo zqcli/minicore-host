@@ -91,7 +91,7 @@ impl AgentOwner {
             .mode
             .session_mode(request.mode)
             .ok();
-        let span = context.span();
+        let mut span = Some(context.span());
         let options = SessionOptions {
             mode: request.mode,
             overrides: request.overrides,
@@ -103,7 +103,7 @@ impl AgentOwner {
                 request.initial_message,
                 false,
                 context.clone(),
-                span,
+                &mut span,
             )
         });
         if let Err(fault) = &accepted {
@@ -139,14 +139,14 @@ impl AgentOwner {
             .mode
             .session_mode(options.mode)
             .ok();
-        let span = context.span();
+        let mut span = Some(context.span());
         let accepted = self.accept_session_creation(
             operation,
             options,
             message,
             make_default,
             context.clone(),
-            span,
+            &mut span,
         );
         if let Err(fault) = &accepted {
             self.session_creation_record(context, mode, "admission", Some(fault))
@@ -167,7 +167,7 @@ impl AgentOwner {
         message: Option<MessageInput>,
         make_default: bool,
         context: Context,
-        span: tracing::Span,
+        span: &mut Option<tracing::Span>,
     ) -> Result<oneshot::Receiver<SessionCreateReceipt>, Fault> {
         self.access.ensure_execution_owned()?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
@@ -281,7 +281,7 @@ impl AgentOwner {
                 crate::diagnostics::emit(diagnostic);
                 let _ = sender.send(receipt);
             }
-            .instrument(span)
+            .instrument(span.take().expect("accepted operation span"))
             .with_current_subscriber(),
         );
         state.create_tasks.insert(id, task);

@@ -98,7 +98,7 @@ impl Host {
         };
         let (sender, receiver) = oneshot::channel();
         // Create the short operation span before entering the admission lock.
-        let span = context.span();
+        let mut span = Some(context.span());
         let subscriber = tracing::dispatcher::get_default(Clone::clone);
         self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
@@ -157,7 +157,7 @@ impl Host {
                     crate::diagnostics::emit(diagnostic);
                     let _ = sender.send(receipt);
                 }
-                .instrument(span)
+                .instrument(span.take().expect("accepted operation span"))
                 .with_subscriber(subscriber),
             );
             state.create_tasks.insert(id, task);

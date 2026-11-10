@@ -42,3 +42,15 @@ First reconstructed slice checks:
 - `cargo fmt --all --check` and `git diff --check`: passed.
 - The exact support fixture matches the independently restored 204-line source hash `179442c3a4e089e149355c464068a77cd5e8e4c1975ccfb01cda301c75ff8dc8`.
 - Known P1/P2 remain at this checkpoint. Clippy and broader regressions are still due on the corrected source.
+
+## P1 correction after new red reproduction
+
+On fixed reconstructed `69826db8cb3efb89648d1f38f5dcef2503c69d05`, the unchanged recovered TASK082 three-probe file (SHA-256 above) was copied to a separate worktree and executed with `cargo test -p minicore-host-core --test task082_owner_review --locked --offline -- --nocapture --test-threads=1`. All three failed as expected: both reentry cases observed try_close under admission and the repeated-force case observed false memory mode. Exit 101 and raw output are retained in `/workspace/shared/recovery-079-second/probes-red-69826db.log`. The test source hash remained unchanged.
+
+P1 now keeps `Option<Span>` in the outer Host/Agent caller. Acceptance only borrows it and takes it on successful transfer to an owned task. Rejected admission and repeated shutdown destroy the unused span after the outer guard returns. No Drop emitter, owner state, new acceptance, retry or business mutation was added.
+
+- `cargo test -p minicore-host-core --test task079_lock_boundary --test task079_diagnostics --locked --offline`: passed, 2 unchanged reentry probe bodies plus 4 diagnostics cases.
+- `cargo clippy -p minicore-host-core --lib --test task079_lock_boundary --test task079_diagnostics --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and `git diff --check`: passed.
+- Raw logs: `/workspace/shared/recovery-079-second/p1-tests.log`, `p1-clippy.log`.
+- P2 remains at this commit; independent post-fix review is pending.

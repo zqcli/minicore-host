@@ -29,7 +29,7 @@ impl Host {
             operation_id: Some(request.operation_id.clone()),
             ..self.diagnostic_context()
         };
-        let span = context.span();
+        let mut span = Some(context.span());
         let accept = || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle == HostLifecycle::Starting {
@@ -72,7 +72,7 @@ impl Host {
                         async move {
                             owner.run_shutdown(mode, operation).await;
                         }
-                        .instrument(span)
+                        .instrument(span.take().expect("accepted operation span"))
                         .with_current_subscriber(),
                     ),
                 );
