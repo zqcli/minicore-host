@@ -7,6 +7,7 @@ mod collaboration;
 mod controls;
 mod create;
 mod deletion;
+mod diagnostics;
 mod discovery;
 mod metadata;
 mod persistent;
@@ -18,6 +19,7 @@ use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use tracing::{Instrument, instrument::WithSubscriber};
 
 pub(crate) struct AgentOwner {
     pub(crate) id: AgentId,
@@ -403,7 +405,8 @@ impl AgentOwner {
         enabled: bool,
         operation: Option<OperationId>,
     ) -> Result<Option<Receipt>, Fault> {
-        let (children, receipt) = self.access.accept(caller, || {
+        let span = self.diagnostic_context().span();
+        let (children, receipt, diagnostic) = self.access.accept(caller, || {
             if enabled {
                 self.access.ensure_execution_owned()?;
             }
@@ -437,8 +440,8 @@ impl AgentOwner {
                 ))
                 || (enabled && state.info.lifecycle == AgentLifecycle::Active)
             {
-                let receipt = self.enabled_receipt(&mut state, operation, enabled);
-                return Ok((None, receipt));
+                let receipt = self.enabled_receipt(&mut state, operation.clone(), enabled);
+                return Ok((None, receipt, None));
             }
             self.enabled.store(enabled, Ordering::SeqCst);
             state.info.lifecycle = if enabled {
@@ -447,9 +450,20 @@ impl AgentOwner {
                 AgentLifecycle::Stopping
             };
             let children = state.sessions.values().cloned().collect::<Vec<_>>();
-            let receipt = self.enabled_receipt(&mut state, operation, enabled);
-            Ok((Some(children), receipt))
+            let diagnostic = self.lifecycle_record(
+                if enabled {
+                    "agent.started"
+                } else {
+                    "agent.stop_accepted"
+                },
+                if enabled { "active" } else { "stopping" },
+                state.info.mode,
+                operation.clone(),
+            );
+            let receipt = self.enabled_receipt(&mut state, operation.clone(), enabled);
+            Ok((Some(children), receipt, Some(diagnostic)))
         })?;
+        crate::diagnostics::emit(diagnostic);
         let Some(children) = children else {
             return Ok(receipt);
         };
@@ -466,41 +480,45 @@ impl AgentOwner {
             .executor
             .clone()
             .or_else(|| children.iter().find_map(|child| child.executor()));
-        if self.stop_settled() {
+        if self.stop_settled(operation.clone()) {
             return Ok(receipt);
         }
         let executor = executor.expect("accepted child work has an execution runtime");
         let owner = Arc::clone(self);
-        let task = executor.spawn(async move {
-            loop {
-                // Every child publishes to this narrow notification token too.
-                // A child checked earlier may acquire independent metadata/load
-                // work while we await a later sibling; its completion must wake
-                // the aggregate without giving it access to Agent state.
-                let notified = owner.changed.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                let children = owner
-                    .state
-                    .lock()
-                    .expect("Agent mutex poisoned")
-                    .sessions
-                    .values()
-                    .cloned()
-                    .collect::<Vec<_>>();
-                for child in children {
-                    child.wait_quiescent_owned().await;
+        let task = executor.spawn(
+            async move {
+                loop {
+                    // Every child publishes to this narrow notification token too.
+                    // A child checked earlier may acquire independent metadata/load
+                    // work while we await a later sibling; its completion must wake
+                    // the aggregate without giving it access to Agent state.
+                    let notified = owner.changed.notified();
+                    tokio::pin!(notified);
+                    notified.as_mut().enable();
+                    let children = owner
+                        .state
+                        .lock()
+                        .expect("Agent mutex poisoned")
+                        .sessions
+                        .values()
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    for child in children {
+                        child.wait_quiescent_owned().await;
+                    }
+                    if owner.stop_settled(operation.clone()) {
+                        return;
+                    }
+                    notified.await;
                 }
-                if owner.stop_settled() {
-                    return;
-                }
-                notified.await;
             }
-        });
+            .instrument(span)
+            .with_current_subscriber(),
+        );
         self.state.lock().expect("Agent mutex poisoned").stop_task = Some(task);
         Ok(receipt)
     }
-    fn stop_settled(&self) -> bool {
+    fn stop_settled(&self, operation: Option<OperationId>) -> bool {
         let children = {
             let state = self.state.lock().expect("Agent mutex poisoned");
             if state.creating != 0 || state.info.metadata_saving || !state.close_running.is_empty()
@@ -516,10 +534,15 @@ impl AgentOwner {
         if state.creating != 0 || state.info.metadata_saving || !state.close_running.is_empty() {
             return false;
         }
-        if state.info.lifecycle == AgentLifecycle::Stopping {
+        let diagnostic = if state.info.lifecycle == AgentLifecycle::Stopping {
             state.info.lifecycle = AgentLifecycle::Stopped;
-        }
+            Some(self.lifecycle_record("agent.stopped", "stopped", state.info.mode, operation))
+        } else {
+            None
+        };
         self.changed.notify_waiters();
+        drop(state);
+        crate::diagnostics::emit(diagnostic);
         true
     }
 }

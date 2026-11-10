@@ -3,6 +3,7 @@ use crate::configuration::{ConfigurationOwner, HostConfig, PreparedHostConfigura
 use crate::control::{CallerContext, ConnectionHandle, ConnectionRegistry};
 use crate::session::{ResourceResolver, SessionController, SessionSubscription};
 use crate::types::*;
+use minicore_host_diagnostics::Context;
 use minicore_host_protocol::*;
 use minicore_host_storage::{HostRecord, HostStore};
 use minicore_runtime::HistoryItem;
@@ -74,7 +75,11 @@ impl Host {
     pub fn memory_configured(candidate: PreparedHostConfiguration) -> Result<Arc<Self>, Fault> {
         let id = HostId::new()
             .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))?;
-        Self::construct(id, 0, candidate, None, HostLifecycle::Running)
+        let owner = Self::construct(id, 0, candidate, None, HostLifecycle::Running)?;
+        owner
+            .lifecycle_record("host.started", "running", StorageMode::Memory, None)
+            .emit();
+        Ok(owner)
     }
     fn construct(
         id: HostId,
@@ -203,6 +208,32 @@ impl Host {
         caller: &CallerContext,
         request: AgentCreate,
     ) -> Result<AgentCreateReceipt, Fault> {
+        let context = Context {
+            operation_id: Some(request.operation_id.clone()),
+            message_id: request
+                .initial_message
+                .as_ref()
+                .map(|input| input.message_id.clone()),
+            in_reply_to: request
+                .initial_message
+                .as_ref()
+                .and_then(|input| input.in_reply_to.clone()),
+            ..self.diagnostic_context()
+        };
+        let mode = request.mode;
+        let result = self.create_agent_memory(caller, request, context.clone());
+        if let Err(fault) = &result {
+            self.creation_failure_record(context, mode, "admission", fault, false)
+                .emit();
+        }
+        result
+    }
+    fn create_agent_memory(
+        &self,
+        caller: &CallerContext,
+        request: AgentCreate,
+        context: Context,
+    ) -> Result<AgentCreateReceipt, Fault> {
         request
             .validate()
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
@@ -255,11 +286,35 @@ impl Host {
             self.store()
                 .map(|store| Arc::new(store) as Arc<dyn Send + Sync>),
         );
+        self.agent_created_record(
+            Context {
+                agent_id: Some(id.clone()),
+                ..context.clone()
+            },
+            StorageMode::Memory,
+        )
+        .emit();
         let session_id = SessionId::new()
             .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()));
         let session = session_id.and_then(|id| {
             agent.create_session_owned(id, request.default_session.unwrap_or_default(), true)
         });
+        agent
+            .session_creation_record(
+                Context {
+                    agent_id: Some(id.clone()),
+                    session_id: session.as_ref().ok().map(|session| session.id.clone()),
+                    ..context
+                },
+                Some(StorageMode::Memory),
+                if session.is_ok() {
+                    "published"
+                } else {
+                    "session_creation"
+                },
+                session.as_ref().err(),
+            )
+            .emit();
         let message_id = request
             .initial_message
             .as_ref()
@@ -385,7 +440,30 @@ impl Host {
             .map(|message| message.message_id.clone());
         let key = SessionId::new()
             .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()))?;
-        let (session_id, result) = match agent.create_session(caller, key.clone(), options, false) {
+        let mode = agent.session_creation_mode(options.mode);
+        let created = agent.create_session(caller, key.clone(), options, false);
+        agent
+            .session_creation_record(
+                Context {
+                    operation_id: Some(request.operation_id.clone()),
+                    message_id: message_id.clone(),
+                    in_reply_to: request
+                        .initial_message
+                        .as_ref()
+                        .and_then(|input| input.in_reply_to.clone()),
+                    session_id: created.as_ref().ok().map(|session| session.id.clone()),
+                    ..agent.diagnostic_context()
+                },
+                mode,
+                if created.is_ok() {
+                    "published"
+                } else {
+                    "session_creation"
+                },
+                created.as_ref().err(),
+            )
+            .emit();
+        let (session_id, result) = match created {
             Err(error)
                 if matches!(
                     error.kind(),

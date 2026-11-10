@@ -1,9 +1,11 @@
 use super::*;
 use crate::persistence::disk;
 use futures_util::FutureExt;
+use minicore_host_diagnostics::Context;
 use minicore_host_storage::{AgentData, AgentRecord};
 use std::panic::AssertUnwindSafe;
 use tokio::sync::oneshot;
+use tracing::{Instrument, instrument::WithSubscriber};
 
 impl Host {
     /// Canonical asynchronous creation path for either storage mode. Once the
@@ -12,6 +14,34 @@ impl Host {
         self: &Arc<Self>,
         caller: &CallerContext,
         request: AgentCreate,
+    ) -> Result<AgentCreateReceipt, Fault> {
+        let context = Context {
+            operation_id: Some(request.operation_id.clone()),
+            message_id: request
+                .initial_message
+                .as_ref()
+                .map(|input| input.message_id.clone()),
+            in_reply_to: request
+                .initial_message
+                .as_ref()
+                .and_then(|input| input.in_reply_to.clone()),
+            ..self.diagnostic_context()
+        };
+        let mode = request.mode;
+        let result = self
+            .accept_agent_creation(caller, request, context.clone())
+            .await;
+        if let Err(fault) = &result {
+            self.creation_failure_record(context, mode, "admission", fault, false)
+                .emit();
+        }
+        result
+    }
+    async fn accept_agent_creation(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: AgentCreate,
+        context: Context,
     ) -> Result<AgentCreateReceipt, Fault> {
         request
             .validate()
@@ -67,6 +97,9 @@ impl Host {
             }),
         };
         let (sender, receiver) = oneshot::channel();
+        // Create the short operation span before entering the admission lock.
+        let span = context.span();
+        let subscriber = tracing::dispatcher::get_default(Clone::clone);
         self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle != HostLifecycle::Running {
@@ -79,39 +112,54 @@ impl Host {
             state.creating += 1;
             let owner = Arc::clone(self);
             let task_id = id.clone();
-            let task = runtime.spawn(async move {
-                let result = AssertUnwindSafe(owner.create_agent_work(task_id.clone(), request))
+            let mode = request.mode;
+            let task = runtime.spawn(
+                async move {
+                    let mut phase = "agent_creation";
+                    let result = AssertUnwindSafe(owner.create_agent_work(
+                        task_id.clone(),
+                        request,
+                        context.clone(),
+                        &mut phase,
+                    ))
                     .catch_unwind()
                     .await;
-                let receipt = match result {
-                    Ok(receipt) => receipt,
-                    Err(_) => owner.fail_agent_creation(
-                        &task_id,
-                        Fault::new(
-                            FaultKind::HostInternalUnexpected,
-                            "accepted Agent creation failed unexpectedly",
+                    let (receipt, diagnostic) = match result {
+                        Ok(receipt) => receipt,
+                        Err(_) => owner.fail_agent_creation(
+                            &task_id,
+                            mode,
+                            phase,
+                            context,
+                            Fault::new(
+                                FaultKind::HostInternalUnexpected,
+                                "accepted Agent creation failed unexpectedly",
+                            ),
                         ),
-                    ),
-                };
-                owner
-                    .state
-                    .lock()
-                    .expect("Host mutex poisoned")
-                    .creations
-                    .insert(task_id.clone(), receipt.clone());
-                {
-                    let mut state = owner.state.lock().expect("Host mutex poisoned");
-                    state.create_tasks.remove(&task_id);
-                    state.creating -= 1;
+                    };
+                    owner
+                        .state
+                        .lock()
+                        .expect("Host mutex poisoned")
+                        .creations
+                        .insert(task_id.clone(), receipt.clone());
+                    {
+                        let mut state = owner.state.lock().expect("Host mutex poisoned");
+                        state.create_tasks.remove(&task_id);
+                        state.creating -= 1;
+                    }
+                    owner.changed.notify_waiters();
+                    owner.remove_retired_agents_owned();
+                    // Returning the final receipt also retires this owned creation
+                    // task. Its temporary root lease must not race an immediate
+                    // drop/reopen by a caller that has awaited the result.
+                    drop(owner);
+                    crate::diagnostics::emit(diagnostic);
+                    let _ = sender.send(receipt);
                 }
-                owner.changed.notify_waiters();
-                owner.remove_retired_agents_owned();
-                // Returning the final receipt also retires this owned creation
-                // task. Its temporary root lease must not race an immediate
-                // drop/reopen by a caller that has awaited the result.
-                drop(owner);
-                let _ = sender.send(receipt);
-            });
+                .instrument(span)
+                .with_subscriber(subscriber),
+            );
             state.create_tasks.insert(id, task);
             Ok(())
         })?;
@@ -122,7 +170,14 @@ impl Host {
             )
         })
     }
-    fn fail_agent_creation(&self, id: &AgentId, error: Fault) -> AgentCreateReceipt {
+    fn fail_agent_creation(
+        &self,
+        id: &AgentId,
+        mode: StorageMode,
+        phase: &'static str,
+        context: Context,
+        error: Fault,
+    ) -> (AgentCreateReceipt, Option<crate::diagnostics::Record>) {
         let mut receipt = self
             .state
             .lock()
@@ -131,6 +186,17 @@ impl Host {
             .get(id)
             .expect("accepted creation registered")
             .clone();
+        let diagnostic = self.creation_failure_record(
+            Context {
+                agent_id: receipt.agent_id.clone(),
+                session_id: receipt.session_id.clone(),
+                ..context
+            },
+            mode,
+            phase,
+            &error,
+            phase == "default_session",
+        );
         let mut steps = receipt.result.steps.clone();
         if !steps.agent.succeeded() {
             steps.agent = CreateStep::Failed { error };
@@ -144,14 +210,17 @@ impl Host {
             steps.message = Some(CreateStep::NotAttempted);
         }
         receipt.result = AgentCreateResult::without_delivery(steps);
-        receipt
+        (receipt, Some(diagnostic))
     }
     async fn create_agent_work(
         self: &Arc<Self>,
         id: AgentId,
         request: AgentCreate,
-    ) -> AgentCreateReceipt {
+        context: Context,
+        phase: &mut &'static str,
+    ) -> (AgentCreateReceipt, Option<crate::diagnostics::Record>) {
         let operation = request.operation_id.clone();
+        let mode = request.mode;
         let created = async {
             self.access.ensure_execution_owned()?;
             let agent = if request.mode == StorageMode::Persistent {
@@ -173,6 +242,7 @@ impl Host {
                 );
                 let save_store = store.clone();
                 let save_record = record.clone();
+                *phase = "agent_metadata_save";
                 disk(FaultKind::HostStorageUnavailable, move || {
                     save_store.save(&save_record)
                 })
@@ -211,9 +281,18 @@ impl Host {
                 receipt.result.steps.agent = CreateStep::Succeeded;
                 receipt.result.steps.session = CreateStep::Running;
             }
+            self.agent_created_record(
+                Context {
+                    agent_id: Some(id.clone()),
+                    ..context.clone()
+                },
+                mode,
+            )
+            .emit();
             if !self.access.execution_allowed_owned() {
                 agent.begin_host_shutdown_owned(true);
             }
+            *phase = "default_session";
             let result = agent
                 .create_session_async_owned(
                     operation.clone(),
@@ -257,9 +336,9 @@ impl Host {
                 } else {
                     AgentCreateResult::without_delivery(steps)
                 };
-                receipt
+                (receipt, None)
             }
-            Err(error) => self.fail_agent_creation(&id, error),
+            Err(error) => self.fail_agent_creation(&id, mode, phase, context, error),
         }
     }
     pub async fn create_session_async(

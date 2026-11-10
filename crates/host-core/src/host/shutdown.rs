@@ -1,5 +1,7 @@
 use super::*;
 use crate::agent::shutdown::creation_save_fault;
+use minicore_host_diagnostics::Context;
+use tracing::{Instrument, instrument::WithSubscriber};
 
 impl Host {
     /// Accept a controlled shutdown without waiting for model/tool completion,
@@ -18,6 +20,16 @@ impl Host {
         request: HostShutdownRequest,
     ) -> Result<HostShutdownReceipt, Fault> {
         let executor = tokio::runtime::Handle::try_current().ok();
+        let mode = if self.store().is_some() {
+            StorageMode::Persistent
+        } else {
+            StorageMode::Memory
+        };
+        let context = Context {
+            operation_id: Some(request.operation_id.clone()),
+            ..self.diagnostic_context()
+        };
+        let span = context.span();
         let accept = || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             if state.lifecycle == HostLifecycle::Starting {
@@ -26,6 +38,7 @@ impl Host {
                     "Host initialization is still running",
                 ));
             }
+            let previous = (state.lifecycle, state.shutdown_strategy);
             let first = state.shutdown_strategy.is_none();
             if first && executor.is_none() {
                 return Err(Fault::new(
@@ -53,9 +66,16 @@ impl Host {
             }
             if first {
                 let owner = Arc::clone(self);
-                state.shutdown_task = Some(executor.expect("checked executor").spawn(async move {
-                    owner.run_shutdown().await;
-                }));
+                let operation = request.operation_id.clone();
+                state.shutdown_task = Some(
+                    executor.expect("checked executor").spawn(
+                        async move {
+                            owner.run_shutdown(mode, operation).await;
+                        }
+                        .instrument(span)
+                        .with_current_subscriber(),
+                    ),
+                );
             }
             let receipt = HostShutdownReceipt {
                 kind: HostShutdownKind::HostShutdown,
@@ -72,18 +92,33 @@ impl Host {
                 .entry(receipt.operation_id.clone())
                 .or_default()
                 .push(Receipt::HostShutdown(receipt.clone()));
+            let diagnostic = (previous != (state.lifecycle, state.shutdown_strategy)).then(|| {
+                self.lifecycle_record(
+                    "host.shutdown_accepted",
+                    match state.lifecycle {
+                        HostLifecycle::Draining => "draining",
+                        HostLifecycle::Stopping => "stopping",
+                        HostLifecycle::Stopped => "stopped",
+                        _ => unreachable!("accepted shutdown"),
+                    },
+                    mode,
+                    Some(receipt.operation_id.clone()),
+                )
+            });
             Ok((
                 (
                     state.lifecycle,
                     state.agents.values().cloned().collect::<Vec<_>>(),
                 ),
                 receipt,
+                diagnostic,
             ))
         };
-        let (children, receipt) = match caller {
+        let (children, receipt, diagnostic) = match caller {
             Some(caller) => self.access.accept(caller, accept)?,
             None => self.access.accept_internal_owned(accept)?,
         };
+        crate::diagnostics::emit(diagnostic);
         let stopping = matches!(children.0, HostLifecycle::Stopping | HostLifecycle::Stopped);
         if children.0 != HostLifecycle::Stopped {
             for child in children.1 {
@@ -96,7 +131,7 @@ impl Host {
         Ok(receipt)
     }
 
-    async fn run_shutdown(self: &Arc<Self>) {
+    async fn run_shutdown(self: &Arc<Self>, mode: StorageMode, operation: OperationId) {
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);
@@ -145,6 +180,13 @@ impl Host {
                     self.changed.notify_waiters();
                     self.process_changed.notify_waiters();
                     drop(state);
+                    self.lifecycle_record(
+                        "host.stopping",
+                        "stopping",
+                        mode,
+                        Some(operation.clone()),
+                    )
+                    .emit();
                     self.publish_host_state_owned();
                     continue;
                 }
@@ -205,6 +247,8 @@ impl Host {
                     self.changed.notify_waiters();
                     self.process_changed.notify_waiters();
                     drop(state);
+                    self.lifecycle_record("host.stopped", "stopped", mode, Some(operation.clone()))
+                        .emit();
                     self.publish_host_state_owned();
                     return;
                 }

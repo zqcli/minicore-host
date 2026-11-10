@@ -98,6 +98,9 @@ impl Host {
             }
         }
         owner.state.lock().expect("Host mutex poisoned").lifecycle = HostLifecycle::Running;
+        owner
+            .lifecycle_record("host.started", "running", StorageMode::Persistent, None)
+            .emit();
         Ok(owner)
     }
     /// Name-only embedding convenience, derived from the same committed config.

@@ -1,9 +1,11 @@
 use super::*;
 use crate::persistence::disk;
 use futures_util::FutureExt;
+use minicore_host_diagnostics::Context;
 use minicore_host_storage::{AgentData, SessionData, SessionRecord};
 use std::panic::AssertUnwindSafe;
 use tokio::sync::oneshot;
+use tracing::{Instrument, instrument::WithSubscriber};
 
 struct PreparedSession {
     id: SessionId,
@@ -69,18 +71,46 @@ impl AgentOwner {
         caller: &CallerContext,
         request: SessionCreate,
     ) -> Result<SessionCreateReceipt, Fault> {
+        let context = Context {
+            operation_id: Some(request.operation_id.clone()),
+            message_id: request
+                .initial_message
+                .as_ref()
+                .map(|input| input.message_id.clone()),
+            in_reply_to: request
+                .initial_message
+                .as_ref()
+                .and_then(|input| input.in_reply_to.clone()),
+            ..self.diagnostic_context()
+        };
+        let mode = self
+            .state
+            .lock()
+            .expect("Agent mutex poisoned")
+            .info
+            .mode
+            .session_mode(request.mode)
+            .ok();
+        let span = context.span();
         let options = SessionOptions {
             mode: request.mode,
             overrides: request.overrides,
         };
-        let receiver = self.access.accept_business(caller, || {
+        let accepted = self.access.accept_business(caller, || {
             self.accept_session_creation(
                 request.operation_id,
                 options,
                 request.initial_message,
                 false,
+                context.clone(),
+                span,
             )
-        })?;
+        });
+        if let Err(fault) = &accepted {
+            self.session_creation_record(context, mode, "admission", Some(fault))
+                .emit();
+        }
+        let receiver = accepted?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
@@ -95,7 +125,34 @@ impl AgentOwner {
         message: Option<MessageInput>,
         make_default: bool,
     ) -> Result<SessionCreateReceipt, Fault> {
-        let receiver = self.accept_session_creation(operation, options, message, make_default)?;
+        let context = Context {
+            operation_id: Some(operation.clone()),
+            message_id: message.as_ref().map(|input| input.message_id.clone()),
+            in_reply_to: message.as_ref().and_then(|input| input.in_reply_to.clone()),
+            ..self.diagnostic_context()
+        };
+        let mode = self
+            .state
+            .lock()
+            .expect("Agent mutex poisoned")
+            .info
+            .mode
+            .session_mode(options.mode)
+            .ok();
+        let span = context.span();
+        let accepted = self.accept_session_creation(
+            operation,
+            options,
+            message,
+            make_default,
+            context.clone(),
+            span,
+        );
+        if let Err(fault) = &accepted {
+            self.session_creation_record(context, mode, "admission", Some(fault))
+                .emit();
+        }
+        let receiver = accepted?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
@@ -109,6 +166,8 @@ impl AgentOwner {
         options: SessionOptions,
         message: Option<MessageInput>,
         make_default: bool,
+        context: Context,
+        span: tracing::Span,
     ) -> Result<oneshot::Receiver<SessionCreateReceipt>, Fault> {
         self.access.ensure_execution_owned()?;
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
@@ -164,47 +223,67 @@ impl AgentOwner {
         let (sender, receiver) = oneshot::channel();
         let owner = Arc::clone(self);
         let task_id = id.clone();
-        let task = runtime.spawn(async move {
-            let result = AssertUnwindSafe(owner.create_session_work(
-                &task_id,
-                prepared,
-                message,
-                make_default,
-            ))
-            .catch_unwind()
-            .await;
-            let result = result.unwrap_or_else(|_| {
-                Err(Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "accepted Session creation failed unexpectedly",
+        let mode = prepared.mode;
+        let task = runtime.spawn(
+            async move {
+                let mut phase = "resources";
+                let result = AssertUnwindSafe(owner.create_session_work(
+                    &task_id,
+                    prepared,
+                    message,
+                    make_default,
+                    &context,
+                    &mut phase,
                 ))
-            });
-            let mut state = owner.state.lock().expect("Agent mutex poisoned");
-            let receipt = state
-                .creations
-                .get_mut(&task_id)
-                .expect("accepted creation registered");
-            if let Err(error) = result {
-                let mut steps = receipt.result.steps.clone();
-                if !steps.session.succeeded() {
-                    steps.session = CreateStep::Failed { error };
-                    if steps.message.is_some() {
-                        steps.message = Some(CreateStep::NotAttempted);
+                .catch_unwind()
+                .await;
+                let result = result.unwrap_or_else(|_| {
+                    Err(Fault::new(
+                        FaultKind::AgentInternalUnexpected,
+                        "accepted Session creation failed unexpectedly",
+                    ))
+                });
+                let mut state = owner.state.lock().expect("Agent mutex poisoned");
+                let receipt = state
+                    .creations
+                    .get_mut(&task_id)
+                    .expect("accepted creation registered");
+                let diagnostic = result.as_ref().err().map(|fault| {
+                    owner.session_creation_record(
+                        Context {
+                            session_id: receipt.session_id.clone(),
+                            ..context
+                        },
+                        Some(mode),
+                        phase,
+                        Some(fault),
+                    )
+                });
+                if let Err(error) = result {
+                    let mut steps = receipt.result.steps.clone();
+                    if !steps.session.succeeded() {
+                        steps.session = CreateStep::Failed { error };
+                        if steps.message.is_some() {
+                            steps.message = Some(CreateStep::NotAttempted);
+                        }
+                    } else if steps.message.is_some() {
+                        steps.message = Some(CreateStep::Failed { error });
                     }
-                } else if steps.message.is_some() {
-                    steps.message = Some(CreateStep::Failed { error });
+                    receipt.result = SessionCreateResult::without_delivery(steps);
                 }
-                receipt.result = SessionCreateResult::without_delivery(steps);
+                let receipt = receipt.clone();
+                state.creating -= 1;
+                state.create_tasks.remove(&task_id);
+                owner.changed.notify_waiters();
+                drop(state);
+                owner.try_retire_empty_owned();
+                drop(owner);
+                crate::diagnostics::emit(diagnostic);
+                let _ = sender.send(receipt);
             }
-            let receipt = receipt.clone();
-            state.creating -= 1;
-            state.create_tasks.remove(&task_id);
-            owner.changed.notify_waiters();
-            drop(state);
-            owner.try_retire_empty_owned();
-            drop(owner);
-            let _ = sender.send(receipt);
-        });
+            .instrument(span)
+            .with_current_subscriber(),
+        );
         state.create_tasks.insert(id, task);
         Ok(receiver)
     }
@@ -214,6 +293,8 @@ impl AgentOwner {
         prepared: PreparedSession,
         message: Option<MessageInput>,
         make_default: bool,
+        context: &Context,
+        phase: &mut &'static str,
     ) -> Result<(), Fault> {
         self.access.ensure_execution_owned()?;
         let resources = self.resources_owned()?;
@@ -230,6 +311,7 @@ impl AgentOwner {
             })??;
         self.access.ensure_execution_owned()?;
         let session = if prepared.mode == StorageMode::Persistent {
+            *phase = "session_metadata_save";
             let store = self
                 .store()
                 .as_ref()
@@ -297,6 +379,7 @@ impl AgentOwner {
         // the default Session. A failed phase retains actual disk artifacts; it
         // does not publish a usable reference or invent a rollback.
         if make_default && let Some(store) = self.store() {
+            *phase = "default_metadata_save";
             let info = self
                 .state
                 .lock()
@@ -343,7 +426,18 @@ impl AgentOwner {
                 receipt.result.steps.message = Some(CreateStep::Running);
             }
         }
+        self.session_creation_record(
+            Context {
+                session_id: Some(session.id.clone()),
+                ..context.clone()
+            },
+            Some(prepared.mode),
+            "published",
+            None,
+        )
+        .emit();
         session.publish_initial();
+        *phase = "input_delivery";
         if let Some(message) = message {
             let delivered = session.send_owned(message);
             let mut state = self.state.lock().expect("Agent mutex poisoned");
