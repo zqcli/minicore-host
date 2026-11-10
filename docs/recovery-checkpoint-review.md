@@ -1,5 +1,46 @@
 # Fixed recovery checkpoint
 
+## Later verified checkpoint
+
+The next five-commit backup is published as
+[`2615fe00ff385a74c6ef6a302c169ccc2b6b4410`](https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410),
+identical to source `587318b69a2e1f72d0f82999d3f6f6badacfe0e4`, tree
+`03aad0d4af62a0b89fadcb3d3dc78d63d12425b9`. Compare with the preserved
+9f75 checkpoint below. All 358 published commits remain, and the cumulative
+[publication map](recovery-publication.json) has 75 entries. Main is unchanged.
+
+This adds Session history/metadata failure facts, Agent metadata/reconcile
+facts, the preceding checkpoint documentation and the deterministic real-WSS
+initialization test. The new [full-gate manifest](checkpoint-587318b-validation.json)
+records **908 unique Rust cases, 4 doctests and 20 Python checks**, with strict
+lint/docs, fmt and whitespace. Exact-head
+[CI 42741046081](https://github.com/zqcli/minicore-host/actions/runs/42741046081)
+passed. The previous 9f75 CI also completed successfully after its earlier
+in-progress observation below.
+
+Scoped independent review now approves the tool/process slice at source101abcb,
+the Agent metadata slice at19e7bbb, and the WSS test-only correction atf931bcc
+(integrated587318b). See [task080](../tasks/080-session-diagnostics-review/TASK.md)
+and [task082](../tasks/082-owner-diagnostics-review/TASK.md) for exact boundaries.
+This does not approve the newer model, reclamation or original Session metadata
+operation changes at local `d9ce4e9727204e0727943dc83d366dba9142604d`.
+
+The Runtime actual retry-wait measurement is separately implemented locally at
+`2f7aeb9a2112e69cf1918c375916656e54d1208e` and is under independent review and
+isolated Host integration. It is not in this checkpoint's published Runtime pin.
+Final contract audit, fresh performance evidence, live-provider/TUI acceptance
+and final external review remain uncompleted. The earlier evidence below is
+preserved as the state of that specific earlier checkpoint, not current status.
+
+The fresh contract audit has since reproduced a P1 at this fixed source:
+`turn.result` returns3201 after a controlled persistent restart despite a saved
+TurnId, terminal outcome and exact result records. Cold history still works and
+does not restore execution. SPEC section8 requires held or saved result reads;
+the existing query only examines the current in-process completed map. Its
+correction must not fabricate unavailable historical LoadId, configuration,
+revisions or counters. The actual restart probe is retained by task086 and is
+not one of the passing908 cases. The checkpoint is not ready for final approval.
+
 ## Source and publication
 
 - Review `dev` at [`9f75d0e770b39b99614530fa126fd90952f95fe7`](https://github.com/zqcli/minicore-host/commit/9f75d0e770b39b99614530fa126fd90952f95fe7), not an advancing branch head.

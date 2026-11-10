@@ -3,11 +3,11 @@
   "repository": "zqcli/minicore-host",
   "branch": "dev",
   "purpose": "Fixed five-commit progress backup; not completed-stage acceptance",
-  "source_base": "d28a9afa3772efc988325ba909fb8045425e58ed",
-  "initial_remote_head": "ee9e777bda45e6ee9990fe39970b8612a883c948",
-  "source_head": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
-  "remote_head": "9f75d0e770b39b99614530fa126fd90952f95fe7",
-  "tree": "16cb1a24ea981d1fb4bd43c341ffede2567634c8",
+  "source_base": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
+  "initial_remote_head": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+  "source_head": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+  "remote_head": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+  "tree": "03aad0d4af62a0b89fadcb3d3dc78d63d12425b9",
   "main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7",
   "source_chain_restart": {
     "base_is_actual_published_commit": true,
@@ -16,6 +16,29 @@
     "previous_local_source_objects_recreated": false,
     "historical_mapping_count": 57,
     "historical_mapping_recovery": "Semantic recovery from the published 37-entry prefix, retained verified mappings and actual remote objects; not byte-identical recovery of the lost JSON."
+  },
+  "historical_mapping_evidence": {
+    "repository_path": "docs/recovery-publication-8c5fe49.json",
+    "blob_sha": "e1e574ef27c28f5c676ce90457b5de601f4c6990",
+    "sha256": "d1db9c896fd9e28fee0bfe38d0c15ed0543d40d2a956fa4fa7be7595ed301f45",
+    "fixed_url": "https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/docs/recovery-publication-8c5fe49.json",
+    "mapping_count": 57,
+    "recovery_metadata_preserved_in_file": {
+      "original_artifact_sha256": "8cc723275d5eceeb6fb8aa08af60052b179f043277677c1baf5dd3ea9c36b50a",
+      "byte_identical_original_json_recovered": false,
+      "public_base_file_sha256": "da229f9c11290e49a8a7833bbf2ef36fb7ee51c7cd2deb30d245731173c2154a",
+      "published_suffix_commit_objects_verified": true,
+      "single_parent_sequence_verified": true,
+      "no_coauthors_verified": true,
+      "source_to_remote_links_from_previously_verified_publication_mappings": true,
+      "source_raw_commit_comparison_repeated": false,
+      "unrecovered_fields": [
+        "Original artifact creation and per-ref local verification timestamps.",
+        "Original local source commit objects and byte-identical original artifact JSON."
+      ],
+      "recovered_at": "2026-11-10T00:57:03.649276+00:00"
+    },
+    "note": "This fixed repository file retains the original recovered 57-mapping metadata; the earlier lost JSON was not claimed to be byte-identically restored."
   },
   "mapping": {
     "b138a8f366fc87883f84bef580bad0e4a73ca2da": "9063c7adc86c7bb984d6dcf6aed91926b92f56c5",
@@ -87,142 +110,147 @@
     "985ff19457e682f4d30f6c9bb309a3cbc2d118bf": "1b9c614ea33b9958e7a430ecfdf3737f1e492301",
     "7781a1d8f58967dfb76d52fbef6a224f813911d6": "ab88a491c7c7b8213f3af4221fd7c6b1653f9550",
     "0e7b8913fce27478a1f26e7c851d27214f816387": "263e2a2e3f2890a327f0f35cee2fc6f2056ed053",
-    "101abcb25a416a81f8350ca1acdbe6078b0de0bc": "9f75d0e770b39b99614530fa126fd90952f95fe7"
+    "101abcb25a416a81f8350ca1acdbe6078b0de0bc": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+    "ac181fcdf6b1a43775771d9b2468558d41e64578": "acc8090d01b011841ca9f194a474a7cbe7f99d53",
+    "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
+    "eb1065df9aa948478b907bd06407b56665eea955": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
+    "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93": "c793fa6a999208206447ddd5a4811bbab5471b1b",
+    "587318b69a2e1f72d0f82999d3f6f6badacfe0e4": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410"
   },
-  "inherited_mapping_count": 65,
+  "inherited_mapping_count": 70,
   "new_commits": [
     {
-      "source_sha": "87fa305fb77cae1e1c1c0b11e1f8481dc2e1455a",
-      "source_parent": "d28a9afa3772efc988325ba909fb8045425e58ed",
-      "source_author_raw": "Codex <codex@openai.com> 1794274892 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794274924 +0900",
-      "remote_sha": "015fdd540e919dc2ccfed2710e51c8e1e2d0c823",
-      "remote_parent": "ee9e777bda45e6ee9990fe39970b8612a883c948",
-      "tree": "bfaf67537e67900302bda5d3cedea66a3df06687",
-      "message": "feat(session): restore close diagnostic admission bridge\n",
+      "source_sha": "ac181fcdf6b1a43775771d9b2468558d41e64578",
+      "source_parent": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275730 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
+      "remote_sha": "acc8090d01b011841ca9f194a474a7cbe7f99d53",
+      "remote_parent": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+      "tree": "7eaee6f702604c8cd5b107c8f0b8cb041929afb8",
+      "message": "docs(app): record fixed-source fixture validation\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:57:54Z",
+        "date": "2026-11-10T02:09:44Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275874 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276584 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:57:54Z",
+        "date": "2026-11-10T02:09:44Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275874 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276584 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/015fdd540e919dc2ccfed2710e51c8e1e2d0c823",
+      "url": "https://github.com/zqcli/minicore-host/commit/acc8090d01b011841ca9f194a474a7cbe7f99d53",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "985ff19457e682f4d30f6c9bb309a3cbc2d118bf",
-      "source_parent": "87fa305fb77cae1e1c1c0b11e1f8481dc2e1455a",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794274894 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794274937 +0900",
-      "remote_sha": "1b9c614ea33b9958e7a430ecfdf3737f1e492301",
-      "remote_parent": "015fdd540e919dc2ccfed2710e51c8e1e2d0c823",
-      "tree": "57aec56b840234edaccdef3870d78f237713e4d5",
-      "message": "docs(core): record reconstructed diagnostic red and green gates\n",
+      "source_sha": "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf",
+      "source_parent": "ac181fcdf6b1a43775771d9b2468558d41e64578",
+      "source_author_raw": "Codex <codex@openai.com> 1794276012 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
+      "remote_sha": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
+      "remote_parent": "acc8090d01b011841ca9f194a474a7cbe7f99d53",
+      "tree": "ff57887924cacf85993ee084340d50b2aea36788",
+      "message": "feat(session): report actual history and metadata failures\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:58:22Z",
+        "date": "2026-11-10T02:10:03Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275902 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276603 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:58:22Z",
+        "date": "2026-11-10T02:10:03Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275902 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276603 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/1b9c614ea33b9958e7a430ecfdf3737f1e492301",
+      "url": "https://github.com/zqcli/minicore-host/commit/6430ff0f26587069fc85a0c43a14f862e1d1eb73",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "7781a1d8f58967dfb76d52fbef6a224f813911d6",
-      "source_parent": "985ff19457e682f4d30f6c9bb309a3cbc2d118bf",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275438 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275538 +0900",
-      "remote_sha": "ab88a491c7c7b8213f3af4221fd7c6b1653f9550",
-      "remote_parent": "1b9c614ea33b9958e7a430ecfdf3737f1e492301",
-      "tree": "3d4cd5d1d2ecfa58c9cb8f6803aec90f2b5917bc",
-      "message": "fix(core): retain host mode through resource retirement\n",
+      "source_sha": "eb1065df9aa948478b907bd06407b56665eea955",
+      "source_parent": "32a3820dc64358f6cbbf7f157e5c3ef6d1abf6bf",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276083 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276251 +0900",
+      "remote_sha": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
+      "remote_parent": "6430ff0f26587069fc85a0c43a14f862e1d1eb73",
+      "tree": "51bc2420f03bdefe084e0304f9d3ad2307ef41f8",
+      "message": "feat(agent): diagnose metadata saves and reconciliation\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:58:41Z",
+        "date": "2026-11-10T02:10:23Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275921 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276623 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:58:41Z",
+        "date": "2026-11-10T02:10:23Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275921 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276623 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/ab88a491c7c7b8213f3af4221fd7c6b1653f9550",
+      "url": "https://github.com/zqcli/minicore-host/commit/19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "0e7b8913fce27478a1f26e7c851d27214f816387",
-      "source_parent": "7781a1d8f58967dfb76d52fbef6a224f813911d6",
-      "source_author_raw": "Codex <codex@openai.com> 1794275508 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275596 +0900",
-      "remote_sha": "263e2a2e3f2890a327f0f35cee2fc6f2056ed053",
-      "remote_parent": "ab88a491c7c7b8213f3af4221fd7c6b1653f9550",
-      "tree": "3c881daf4abf137d007b449164670ad7447f0ed4",
-      "message": "feat(session): record actual tool completion and process facts\n",
+      "source_sha": "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93",
+      "source_parent": "eb1065df9aa948478b907bd06407b56665eea955",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
+      "remote_sha": "c793fa6a999208206447ddd5a4811bbab5471b1b",
+      "remote_parent": "19894637f974e0bb114aa89ab2ff57ee37fdb8d7",
+      "tree": "578137d0733fc8589e0612eb30654ed23ad04d6c",
+      "message": "docs(recovery): publish verified checkpoint and six-stage status\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:59:03Z",
+        "date": "2026-11-10T02:10:40Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275943 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276640 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:59:03Z",
+        "date": "2026-11-10T02:10:40Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275943 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276640 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/263e2a2e3f2890a327f0f35cee2fc6f2056ed053",
+      "url": "https://github.com/zqcli/minicore-host/commit/c793fa6a999208206447ddd5a4811bbab5471b1b",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     },
     {
-      "source_sha": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
-      "source_parent": "0e7b8913fce27478a1f26e7c851d27214f816387",
-      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275668 +0900",
-      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275771 +0900",
-      "remote_sha": "9f75d0e770b39b99614530fa126fd90952f95fe7",
-      "remote_parent": "263e2a2e3f2890a327f0f35cee2fc6f2056ed053",
-      "tree": "16cb1a24ea981d1fb4bd43c341ffede2567634c8",
-      "message": "test(app): qualify readiness diagnostics by component\n",
+      "source_sha": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+      "source_parent": "12db84c2cdb19a7c64abfc7b413fbe02fc69dc93",
+      "source_author_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276370 +0900",
+      "source_committer_raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276483 +0900",
+      "remote_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+      "remote_parent": "c793fa6a999208206447ddd5a4811bbab5471b1b",
+      "tree": "03aad0d4af62a0b89fadcb3d3dc78d63d12425b9",
+      "message": "test(transport): control WSS initialization deadline clock\n",
       "author": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:59:21Z",
+        "date": "2026-11-10T02:10:59Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275961 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276659 +0900"
       },
       "committer": {
         "name": "zqcli",
         "email": "276883664+zqcli@users.noreply.github.com",
-        "date": "2026-11-10T01:59:21Z",
+        "date": "2026-11-10T02:10:59Z",
         "timezone": "+0900",
-        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794275961 +0900"
+        "raw": "zqcli <276883664+zqcli@users.noreply.github.com> 1794276659 +0900"
       },
-      "url": "https://github.com/zqcli/minicore-host/commit/9f75d0e770b39b99614530fa126fd90952f95fe7",
+      "url": "https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
       "raw_message_and_tree_verified": true,
       "no_coauthor": true
     }
@@ -233,14 +261,14 @@
   "actual_remote_committers": [
     "zqcli <276883664+zqcli@users.noreply.github.com>"
   ],
-  "source_author_note": "Source 87fa305 and 0e7b891 retain Codex authors. Each local source author/committer and actual API/raw remote author/committer is recorded separately.",
+  "source_author_note": "Source 32a3820 retains a Codex author. Local source author/committer and actual API/raw remote author/committer are recorded separately for every new commit.",
   "verification": {
     "new_commits": 5,
-    "prior_commits_checked": 348,
+    "prior_commits_checked": 353,
     "prior_commit_objects_unchanged": true,
-    "known_blobs_checked": 1610,
-    "new_blobs_checked": 30,
-    "history_commit_count": 353,
+    "known_blobs_checked": 1640,
+    "new_blobs_checked": 25,
+    "history_commit_count": 358,
     "trees_modes_blob_bytes_identical": true,
     "raw_messages_identical": true,
     "single_parent_sequence_verified": true,
@@ -251,45 +279,45 @@
   },
   "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
   "remote_refs": {
-    "refs/heads/dev": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+    "refs/heads/dev": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
     "refs/heads/main": "b341b163e14543bfbe7f8d392ea243b4a123cdf7"
   },
-  "ref_verified_at": "2026-11-10T02:00:34.382Z",
+  "ref_verified_at": "2026-11-10T02:12:08.743Z",
   "branch_fetch_verified": true,
   "force": false,
   "branch_url": "https://github.com/zqcli/minicore-host/tree/dev",
-  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/9f75d0e770b39b99614530fa126fd90952f95fe7",
-  "compare_url": "https://github.com/zqcli/minicore-host/compare/ee9e777bda45e6ee9990fe39970b8612a883c948...9f75d0e770b39b99614530fa126fd90952f95fe7",
+  "checkpoint_url": "https://github.com/zqcli/minicore-host/commit/2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+  "compare_url": "https://github.com/zqcli/minicore-host/compare/9f75d0e770b39b99614530fa126fd90952f95fe7...2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
   "ci": {
-    "observed_at": "2026-11-10T02:01:19.643Z",
+    "observed_at": "2026-11-10T02:12:59.421Z",
     "waited_for_completion": false,
     "runs": [
       {
-        "id": 42739672016,
+        "id": 42741046081,
         "name": "Linux foundation CI",
-        "head_sha": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+        "head_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
         "status": "in_progress",
         "conclusion": null,
-        "url": "https://github.com/zqcli/minicore-host/actions/runs/42739672016",
-        "updated_at": "2026-11-10T02:00:13Z"
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081",
+        "updated_at": "2026-11-10T02:11:49Z"
       }
     ]
   },
   "previous_checkpoint_ci": {
-    "source_head": "d28a9afa3772efc988325ba909fb8045425e58ed",
-    "remote_head": "ee9e777bda45e6ee9990fe39970b8612a883c948",
-    "run_id": 42737965646,
+    "source_head": "101abcb25a416a81f8350ca1acdbe6078b0de0bc",
+    "remote_head": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+    "run_id": 42739672016,
     "status": "completed",
-    "conclusion": "failure",
-    "url": "https://github.com/zqcli/minicore-host/actions/runs/42737965646",
-    "updated_at": "2026-11-10T01:52:02Z",
+    "conclusion": "success",
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/42739672016",
+    "updated_at": "2026-11-10T02:07:47Z",
     "jobs": [
       {
-        "id": 129571749902,
+        "id": 129577353054,
         "name": "Quality gate (Linux, Rust 1.90.0)",
         "status": "completed",
-        "conclusion": "failure",
-        "run_id": 42737965646,
+        "conclusion": "success",
+        "run_id": 42739672016,
         "logs_url": null,
         "steps": [
           {
@@ -313,7 +341,7 @@
           {
             "name": "Run the full foundation quality gate",
             "status": "completed",
-            "conclusion": "failure",
+            "conclusion": "success",
             "number": 4
           },
           {
@@ -331,25 +359,41 @@
         ]
       }
     ],
-    "diagnosis": "credential_environment failed at tool_support/mod.rs:221 when an unqualified host.started event lacked listen_port. The published source 101abcb changes the readiness lookup to host.process plus host.started. The failed assertion did not establish credential disclosure.",
-    "observed_at": "2026-11-10T02:01:19.643Z"
+    "reported_source_gate": {
+      "command": "./scripts/check.sh",
+      "result": "passed",
+      "unique_rust_tests": 899,
+      "doctests": 4,
+      "python_tests": 20
+    },
+    "scope_note": "These successful results apply to source 101abcb and remote 9f75d0e only, not to the newer source checkpoint.",
+    "observed_at": "2026-11-10T02:12:59.421Z"
   },
   "validation_status": {
-    "combined_workspace_gate": "not passed for this fixed checkpoint before backup",
+    "combined_workspace_gate": "not yet run for this newer fixed source at backup time",
     "release_claimed": false,
     "stage_accepted": false,
     "source_validation_reported": [
-      "Session accept, terminal and close bridge scopes received independent approval.",
-      "The Host/Agent slice through 7781 passed independent original probes, 71 scoped cases, 8 additional checks and strict Clippy.",
-      "The new tool completion slice passed four focused cases, 361 core/tools cases and strict Clippy; independent review remains pending.",
-      "The app readiness fixture change passed 26 app tests, strict Clippy, documentation checks and static peer review; combined validation remains pending."
+      "Eleven focused metadata cases, strict all-target core/transport Clippy, formatting and committed whitespace checks passed.",
+      "Producer metadata scope: 317 cases passed; transport scope: 143 cases passed.",
+      "Deterministic WSS deadline fixture passed producer repetitions of 100 and 25; static review passed and root focused rerun was starting."
     ],
     "remaining": [
-      "Complete independent review of the new tool completion diagnostics and combined integration validation.",
-      "Resolve the short-budget TLS handshake EOF fixture observed on the earlier 138d081 CI.",
-      "Complete the full workspace quality gate, remaining owner diagnostics and performance work."
+      "Complete independent review of the new metadata diagnostics.",
+      "Complete root WSS focused validation and the newer combined full workspace gate.",
+      "Complete remaining stage work and performance validation."
     ]
   },
-  "recorded_at": "2026-11-10T02:01:19.922188+00:00",
-  "historical_recovery_evidence_file": "docs/recovery-publication-8c5fe49.json"
+  "recorded_at": "2026-11-10T02:12:59.715374+00:00",
+  "post_publication_validation": {
+    "local_fixed_source_gate": "docs/checkpoint-587318b-validation.json",
+    "hosted_ci": {
+      "run_id": 42741046081,
+      "head_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+      "status_at_last_check": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081"
+    },
+    "recorded_at": "2026-11-10T02:24:07.575949+00:00"
+  }
 }

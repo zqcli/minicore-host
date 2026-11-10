@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "purpose": "Fresh fixed-source gate after second workspace replacement, not final release acceptance",
+  "source_commit": "587318b69a2e1f72d0f82999d3f6f6badacfe0e4",
+  "published_commit": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+  "tree": "03aad0d4af62a0b89fadcb3d3dc78d63d12425b9",
+  "compare_base": "9f75d0e770b39b99614530fa126fd90952f95fe7",
+  "toolchain": "rustc 1.90.0 (1159e78c4 2025-09-14)",
+  "target": "x86_64-unknown-linux-gnu",
+  "runtime_git": "69faf9196991524b5549499d6208a1eaf567bf56",
+  "runtime_version": "0.10.0",
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "lock_sha256": "1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125",
+  "commands": [
+    {
+      "command": "CARGO_NET_OFFLINE=true ./scripts/check.sh",
+      "exit_code": 0,
+      "unique_rust_cases": 908,
+      "doctests": 4,
+      "python_tests": 20,
+      "includes": [
+        "committed/worktree whitespace",
+        "rustfmt",
+        "workspace all-target Clippy -D warnings",
+        "workspace all-target tests",
+        "workspace doctests",
+        "workspace rustdoc -D warnings"
+      ]
+    },
+    {
+      "command": "cargo test --workspace --all-targets --locked --offline -- --list",
+      "exit_code": 0,
+      "unique_cases": 908,
+      "count_method": "Count target/test-name listing, not repeated child-process test output"
+    },
+    {
+      "command": "cargo test -p minicore-host-transport --test wss_wait --locked --offline",
+      "exit_code": 0,
+      "unique_cases": 5
+    },
+    {
+      "command": "cargo test -p minicore-host-transport --test wss_wait initialization_budget_covers_tls_websocket_and_authenticated_response_once --locked --offline",
+      "exit_code": 0,
+      "unique_cases": 1,
+      "consecutive_repetitions": 20
+    }
+  ],
+  "environment": {
+    "cargo_build_jobs": 2,
+    "cargo_incremental": false,
+    "profile_dev_debug": 0,
+    "profile_test_debug": 0,
+    "target_reuse": "One exclusive target directory for the integration worktree; other worktrees use separate targets"
+  },
+  "logs": [
+    {
+      "name": "587318b-environment.txt",
+      "bytes": 228,
+      "sha256": "c3cb24fedd3b410cc4cc7084c377d3875f76c472bbef75747f487c6b43311777"
+    },
+    {
+      "name": "full-587318b.log",
+      "bytes": 108708,
+      "sha256": "f8a6aa3978861a62d273c603986998d5dd18ac0b249298beb64f9e870b16f3e1"
+    },
+    {
+      "name": "list-587318b.log",
+      "bytes": 88170,
+      "sha256": "8b1d78bc2b132b377c8c6f4050cdf3ebf5c6889a4a2edfdab5df58b44e121249"
+    },
+    {
+      "name": "wss-587318b.log",
+      "bytes": 837,
+      "sha256": "8cef17f88ea430c0e952f0ad2f9ec54e83ebb128f39f93498e924446a61e9ab2"
+    },
+    {
+      "name": "wss-587318b-repeat.log",
+      "bytes": 7560,
+      "sha256": "28425ace9cf5da61d2a3979d2e0e1159ab550aa41f0b8c1e28ed3aeb2d0b3d2a"
+    }
+  ],
+  "log_location": "Coordinator recovery-second/validation workspace; hashes identify retained local artifacts, not public download links",
+  "hosted_ci": {
+    "run_id": 42741046081,
+    "head_sha": "2615fe00ff385a74c6ef6a302c169ccc2b6b4410",
+    "status_at_last_check": "completed",
+    "conclusion": "success",
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/42741046081"
+  },
+  "exclusions": [
+    "The later model, owner-reclamation and original Session metadata-operation changes are not included in this full gate",
+    "Session metadata/history scope and later reclamation scope have separate review targets",
+    "Runtime actual retry-wait duration is implemented locally but not in this pinned dependency",
+    "Fresh performance measurements and final contract audit remain incomplete",
+    "No live external-model or TUI acceptance",
+    "No final external review or main merge"
+  ],
+  "recorded_at": "2026-11-10T02:24:07.575949+00:00"
+}
