@@ -933,12 +933,17 @@ impl SessionController {
             }
         }
     }
-    pub(crate) fn set_agent_enabled(self: &Arc<Self>, enabled: bool) {
-        let handle = {
+    pub(crate) fn set_agent_enabled(
+        self: &Arc<Self>,
+        enabled: bool,
+        operation: Option<&OperationId>,
+    ) {
+        let (handle, record) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if state.releasing || state.released || state.reclaimed {
                 return;
             }
+            let newly_claimed = !enabled && Self::cancellable(&state);
             if !enabled {
                 Self::cancel_compaction_locked(&mut state);
             }
@@ -956,8 +961,16 @@ impl SessionController {
                 None
             };
             self.publish(&mut state);
-            handle
+            let record = self.cancel_claim_record(
+                &state,
+                newly_claimed,
+                "agent_disabled",
+                operation.cloned(),
+                true,
+            );
+            (handle, record)
         };
+        diagnostic::emit(record);
         if let Some(handle) = handle {
             handle.cancel();
         }

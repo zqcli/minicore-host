@@ -478,7 +478,7 @@ impl AgentOwner {
             return Ok(receipt);
         };
         for child in &children {
-            child.set_agent_enabled(enabled);
+            child.set_agent_enabled(enabled, operation.as_ref());
         }
         if enabled {
             return Ok(receipt);

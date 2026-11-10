@@ -282,7 +282,7 @@ impl AgentOwner {
             if close {
                 child.begin_delete_close_owned();
             } else {
-                child.set_agent_enabled(false);
+                child.set_agent_enabled(false, Some(operation));
             }
         }
         let initial = children

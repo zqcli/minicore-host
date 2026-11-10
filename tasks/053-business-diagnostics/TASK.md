@@ -882,3 +882,27 @@ reports directory. This is a handoff slice, not full workspace or independent
 approval. SPEC, Runtime pin and Cargo.lock remain unchanged. Agent-stop claims,
 remaining cleanup/failure scheduling and the separately owned compaction work
 remain open.
+
+### Agent stop retains the actual child cancellation operation
+
+The coordinated thin patch (`688c927143f79a8c80c3f48f29aed72692901fa69ca8c95239fec071cebb6177`)
+passes the original Agent operation through its two existing child enable/disable
+callers. The Session extracts only its original first cancellable transition,
+then emits after releasing its state. Both caller traversals already run outside
+the Agent and admission guards. Repeated stop, already-ending Turns and the
+existing deletion fence do not manufacture another cancellation claim. Runtime
+cancel, queued inputs, receipt and Agent lifecycle behavior are unchanged.
+
+The permanent real Host/Runtime/gated HTTP test reached Cancelled with one model
+request before failing red on the absent claim. Green now proves one INFO with
+the original stop operation and real Turn/Session/Agent IDs, and no second claim
+for another stop request. Its two initial compile-only fixture mistakes (AgentRef
+versus AgentId and the actual HostId source) are retained separately, not called
+business failures.
+
+Four affected actual diagnostic cases and all 317 core all-target cases passed;
+core/transport strict all-target Clippy, core strict rustdoc, fmt and diff checks
+passed. Evidence is `agent-stop-{first-build,second-build,red,green,focused,core,clippy,doc}.log`
+in the second recovery reports directory. No full-workspace/independent claim is
+made. The saved-result worker confirmed this Session setter does not overlap its
+read-only HistoryBackend trait patch. SPEC and pinned dependencies are unchanged.
