@@ -1,5 +1,5 @@
 //! Pure owner/projection checks complement task055's real HTTP execution tests.
-#[path = "../../tests/support/input_context.rs"]
+#[path = "../../../../tests/support/input_context.rs"]
 mod input_context;
 use super::*;
 use minicore_runtime::{

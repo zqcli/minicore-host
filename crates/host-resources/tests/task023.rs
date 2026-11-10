@@ -1,7 +1,7 @@
 //! Real Host + Runtime + production HTTP/SSE on loopback, never a live provider.
 #[path = "support/http_server.rs"]
 mod http_server;
-#[path = "../../host-core/tests/support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 
 use minicore_host_core::*;

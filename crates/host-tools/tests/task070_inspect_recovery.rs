@@ -2,7 +2,7 @@
 //! The model stream is an explicit test fixture. No capability or owner is faked.
 #[path = "support/gated_host.rs"]
 mod gated_host;
-#[path = "../../host-core/tests/support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 use gated_host::{Fixture, Resources};
 use minicore_host_core::{Host, TurnSource};

@@ -1,6 +1,6 @@
 //! These tests use the real Host owners and AgentLoop. Only model responses are
 //! scripted fixtures; no external provider or TUI validation is implied.
-#[path = "support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;

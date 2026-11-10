@@ -4,6 +4,27 @@
 
 This crate implements the in-process business owners; transport servers and executable assembly live in `host-transport` and `host-app`. Runtime integration uses the published Git revision pinned by the workspace; no local dependency patch is needed. Implemented APIs do not by themselves establish live-provider or TUI acceptance.
 
+## Source organization
+
+`session.rs` keeps the Controller and its single authoritative state. Its
+`input`, `execution`, `history`, `loading`, and `close` modules implement the
+existing acceptance and handoff phases on that same owner. `query` reads actual
+retained/saved data; `observation` owns event and subscription adaptation.
+`session/compaction/prompt.rs` adapts Runtime prompt/history requests while the
+parent compaction module retains one manual/automatic commit path.
+
+`backend.rs` defines the history port and implementations; `resources.rs` defines
+the execution/compaction resource ports. `turn_binding.rs` contains active-Turn
+authority, while `collaboration.rs` retains permits for already accepted child
+delivery and cleanup that can outlive that Turn. Public crate-root exports remain
+available. Agent shutdown uses the existing strategy type, with monotonic
+graceful-to-force progression, instead of a numeric phase convention.
+
+Shared core test fixtures live in `session/tests/support.rs`. The
+`owner_diagnostics` integration suite groups the original five local-dispatch
+suites without merging their individual scenarios. Cross-crate provenance
+assertions use the workspace's `tests/support/input_context.rs`.
+
 ## Persistent initialization
 
 `Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. The name-only `HostSettings` is an embedding construction convenience, converted to the single complete `HostConfig` disk shape. Production composition uses `Host::open_configured` and the `minicore-host-resources` builder. Config queries, immutable resource catalogs, and accepted reload publication belong to Host; raw keys and execution handles are never stored in the record.

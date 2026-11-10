@@ -1,6 +1,6 @@
 //! Real public in-process Host routing through Runtime and production reqwest/SSE
 //! adapter to a local scripted HTTP fixture. This is not a live model/TUI test.
-#[path = "support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 #[path = "../../host-provider/tests/support/mod.rs"]
 #[allow(dead_code)]

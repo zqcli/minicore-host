@@ -1,7 +1,7 @@
 //! Production Host, Runtime, agent tool, owner ports and sink; gated model only.
 #[path = "support/gated_host.rs"]
 mod gated_host;
-#[path = "../../host-core/tests/support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 use gated_host::Fixture;
 use minicore_host_core::MessageBinding;

@@ -7,7 +7,7 @@ mod base;
 mod compaction;
 #[path = "input_provenance/input.rs"]
 mod input;
-#[path = "../../host-core/tests/support/input_context.rs"]
+#[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 #[path = "input_provenance/support.rs"]
 mod support;
