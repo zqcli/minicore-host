@@ -2,6 +2,21 @@
 
 `HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and one frozen framework/Role prompt per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
 
+The source follows those existing preparation boundaries:
+
+| Module | Responsibility |
+| --- | --- |
+| `builder.rs` | Private credential inputs, immutable Host candidates, provider construction, and builder-owned shared bindings across reloads |
+| `resolver.rs` | Session validation, frozen executable Turn bindings, output wrapping, and separate declaration-only compaction resources |
+| `prompt.rs` | Frozen framework/Role/workspace context combined with the existing core history and provenance preparation |
+| `workspaces.rs` | Weak sharing of actual canonical Workspace mutation bindings across overlapping Turns |
+| `approval.rs` | The selected execution policy and the actual built-in read/agent exemptions |
+
+Host candidate selection and compaction use the registry's exact ToolSpec lookup.
+Each caller keeps its own existing error contract: invalid Host configuration
+is distinct from missing Session resources. Shared prompt construction does not
+bind executable tools or create activation authority for compaction.
+
 Keep one builder (or its clones) across reloads, so the agent tool's independently owned delegation scopes and concurrent Turns' actual Workspace mutation binding remain shared. `prepare` reads only explicitly named environment variables. `prepare_with_credentials` supports explicit private embedding inputs, including isolated fixture credentials. Neither path sends model requests or executes tools to test availability.
 
 A production setup calls `prepare`, then `Host::memory_configured`; persistent setup calls `Host::open_configured` with the preparation closure. Saved HostConfig values are authoritative on reopen. Provider and network key bytes are never serialized. There is one `HostRecord<HostConfig>` disk shape; the name-only HostSettings convenience does not define another storage format.
@@ -35,6 +50,7 @@ that boundary; standalone local-tool callers choose their own environment policy
 - Executable/CLI/config-file and listener startup live in `host-app`; canonical `host.reload` receipts and publication live in `host-core` and route through `host-transport`. This crate prepares resources, not those entrypoints.
 - The Session owner supports automatic compaction at Runtime prompt boundaries using the original bound model/settings. Manual compaction prepares model, reasoning, selected ToolSpecs and the framework/Role/workspace prompt without creating a Turn or binding tools. Enabling compaction is supported; actual utility calls and their persistence can still fail and report their own facts.
 - Local tools bind the actual selected implementations to the original prepared Turn, Session output/edit owner, and canonical Workspace. Old and new resource publications share a builder-owned weak Workspace map, so overlapping Turns on the same root share the existing mutation guard without extending unused roots' lifetime. Arbitrary shell scripts and outside processes are not coordinated by that guard.
+- Normal Turn preparation uses that shared Workspace binding; manual compaction continues to bind its prompt's canonical workspace directly. It has no executable tool mutation work to register, and this source split does not change either binding path.
 - Public tool Finished state and completion wait for the actual per-call file/process cleanup, with final output positions. Native results enter history immediately; normal completed tools and argument rejection do not wait for Turn completion. The existing Turn collector still owns actual worker joins and blocks finalization on unconfirmed cleanup.
 - Actual edits enter the Session-owned EditJournal; process text enters the existing output store. Native ToolResults still use existing history save barriers. Edit snapshots and process observations survive unload but not source reclamation or restart. `host-core` and `host-transport` expose the existing `workspace.*`/`changes.*` queries; there is no permanent edit database.
 - Public output contains unchanged UTF-8 prefixes, including code points split across actual pipe chunks. Binary or incomplete EOF bytes are never replaced; text reads crossing that prefix explicitly fail. Successful native CommandResult preserves all raw bytes. Empty observed stdout/stderr is distinct from a missing source.
@@ -43,3 +59,11 @@ that boundary; standalone local-tool callers choose their own environment policy
 - A failed persistent configuration save remains an explicit blocker, with the original candidate retained. There is no new public repair command in this stage.
 
 Tests use real Host/Runtime, actual temporary files/processes, and loopback production HTTP/SSE with scripted replies, plus explicitly named scheduling gates and a harmless tool fixture for the earlier custom-registry tests. They are not live-provider or TUI validation.
+
+`tests/support/production.rs` supplies the shared production fixture for local
+tools, input provenance, approvals, credential environments, and builder
+concurrency tests. `tests/local_tools.rs` and its completion/process modules
+retain the actual worker cleanup and cancellation witnesses.
+`tests/input_provenance.rs` and its input/compaction modules retain the original
+input identity, queue, history, and compaction coverage. The private builder
+concurrency test still holds a real Workspace mutation guard as its gate.

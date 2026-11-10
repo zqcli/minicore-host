@@ -1,7 +1,7 @@
 //! Explicit local HTTP/SSE model fixture, real production resources + Host +
 //! Runtime. The registered external fixture records actual execute invocations.
 #[allow(dead_code)]
-#[path = "task042/support.rs"]
+#[path = "support/production.rs"]
 mod support;
 
 use minicore_host_core::*;

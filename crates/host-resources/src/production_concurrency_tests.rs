@@ -1,5 +1,5 @@
 //! Real production Turns, with a held actual mutation guard as the test gate.
-#[path = "../tests/task042/support.rs"]
+#[path = "../tests/support/production.rs"]
 mod support;
 use super::*;
 use minicore_host_core::*;

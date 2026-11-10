@@ -1,5 +1,5 @@
 //! Explicit HTTP/SSE fixture. Production Host, provider, Runtime and tools are real.
-#[path = "../support/http_server.rs"]
+#[path = "http_server.rs"]
 pub(crate) mod http_server;
 
 use minicore_host_core::*;

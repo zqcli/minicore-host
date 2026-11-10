@@ -1,5 +1,5 @@
 //! One builder's actual Workspace bindings, shared across its publications.
-use crate::session_invalid;
+use crate::resolver::session_invalid;
 use minicore_host_protocol::{Fault, WorkspaceRef};
 use minicore_host_workspace::Workspace;
 use std::{

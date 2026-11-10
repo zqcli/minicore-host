@@ -2,12 +2,12 @@
 //! Only the explicit loopback model replies are fixtures; filesystem, processes,
 //! owner records, tool declarations and result handoffs are production paths.
 #[cfg(target_os = "linux")]
-#[path = "task042/completion.rs"]
+#[path = "local_tools/completion.rs"]
 mod completion;
 #[cfg(unix)]
-#[path = "task042/process.rs"]
+#[path = "local_tools/process.rs"]
 mod process;
-#[path = "task042/support.rs"]
+#[path = "support/production.rs"]
 mod support;
 
 use minicore_host_core::*;
