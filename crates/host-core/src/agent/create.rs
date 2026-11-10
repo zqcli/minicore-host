@@ -406,7 +406,7 @@ impl AgentOwner {
             .await?;
             self.state.lock().expect("Agent mutex poisoned").record_base = Some(record);
         }
-        let shutdown_phase = {
+        let shutdown_strategy = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             // A stop accepted after creation does not erase the accepted object.
             // It is published disabled, and initial input is then truthfully refused.
@@ -425,14 +425,14 @@ impl AgentOwner {
             if receipt.result.steps.message.is_some() {
                 receipt.result.steps.message = Some(CreateStep::Running);
             }
-            state.host_shutdown_phase
+            state.host_shutdown_strategy
         };
         // Publication and the shutdown scan share the Agent boundary. If the
         // scan won, the new child must accept its phase before creation settles;
         // if publication won, the scan includes this child. Keep child calls
         // outside the Agent lock and retain the creation barrier through handoff.
-        if shutdown_phase > 0 {
-            session.begin_host_shutdown_owned(shutdown_phase == 2);
+        if let Some(strategy) = shutdown_strategy {
+            session.begin_host_shutdown_owned(strategy == HostShutdownStrategy::Force);
         }
         self.session_creation_record(
             Context {

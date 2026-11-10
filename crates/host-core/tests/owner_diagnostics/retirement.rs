@@ -1,11 +1,8 @@
 //! Real retirement, direct-owner removal and persistent deletion boundaries.
-#[allow(dead_code)]
-#[path = "task079/support.rs"]
-mod support;
+use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_storage::DataRoot;
-use support::*;
 use tracing::instrument::WithSubscriber;
 
 #[test]

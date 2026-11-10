@@ -27,11 +27,19 @@ impl AgentOwner {
     pub(crate) fn begin_host_shutdown_owned(&self, force: bool, operation: Option<&OperationId>) {
         let (children, diagnostic) = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
-            let phase = if force { 2 } else { 1 };
-            if state.host_shutdown_phase >= phase {
+            let strategy = if force {
+                HostShutdownStrategy::Force
+            } else {
+                HostShutdownStrategy::Graceful
+            };
+            if matches!(
+                state.host_shutdown_strategy,
+                Some(HostShutdownStrategy::Force)
+            ) || state.host_shutdown_strategy == Some(strategy)
+            {
                 return;
             }
-            state.host_shutdown_phase = phase;
+            state.host_shutdown_strategy = Some(strategy);
             if force {
                 self.enabled.store(false, Ordering::SeqCst);
                 if !state.deleting

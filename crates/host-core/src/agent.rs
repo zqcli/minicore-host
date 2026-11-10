@@ -1,8 +1,10 @@
 use crate::control::{CallerContext, ConnectionRegistry};
-use crate::session::{MemoryHistory, ResourceResolver, SessionController};
+use crate::session::SessionController;
 use crate::types::{AgentInfo, SessionLoadFailure};
+use crate::{MemoryHistory, ResourceResolver};
 use minicore_host_storage::{AgentRecord, AgentStore};
 
+mod close;
 mod collaboration;
 mod controls;
 mod create;
@@ -44,7 +46,7 @@ struct AgentState {
     creating: usize,
     creation_committed: bool,
     resources_released: bool,
-    host_shutdown_phase: u8,
+    host_shutdown_strategy: Option<HostShutdownStrategy>,
     retirement_joining: bool,
     executor: Option<tokio::runtime::Handle>,
     stop_task: Option<tokio::task::JoinHandle<()>>,
@@ -101,7 +103,7 @@ impl AgentOwner {
                 creating: 0,
                 creation_committed: false,
                 resources_released: false,
-                host_shutdown_phase: 0,
+                host_shutdown_strategy: None,
                 retirement_joining: false,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,

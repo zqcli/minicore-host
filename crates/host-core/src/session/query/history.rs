@@ -2,7 +2,7 @@ use super::*;
 use crate::{HistoryItemData, SessionHistorySnapshot};
 
 impl HistoryItemData {
-    pub(super) fn from_input(
+    pub(in crate::session) fn from_input(
         user: &minicore_runtime::UserHistory,
         message_id: &MessageId,
         source: &MessageSource,
@@ -17,7 +17,7 @@ impl HistoryItemData {
             in_reply_to: in_reply_to.cloned(),
         }
     }
-    pub(super) fn from_entry(entry: &HistoryEntry) -> Option<Self> {
+    pub(in crate::session) fn from_entry(entry: &HistoryEntry) -> Option<Self> {
         match entry {
             HistoryEntry::Input {
                 user,
@@ -44,51 +44,6 @@ impl HistoryItemData {
             }
             HistoryEntry::TurnFinished { .. } => None,
         }
-    }
-}
-impl SessionState {
-    pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) -> Result<(), Fault> {
-        let mut raw = Vec::new();
-        let mut input_provenance = input_provenance::InputProvenance::default();
-        let mut projection: Option<minicore_host_storage::CompactionProjection> = None;
-        for (position, entry) in entries.iter().enumerate() {
-            if let HistoryEntry::Compaction {
-                source_position,
-                covered_items,
-                summary,
-            } = entry
-            {
-                let candidate = minicore_host_storage::CompactionProjection::new(
-                    *source_position,
-                    *covered_items,
-                    summary.clone(),
-                );
-                candidate
-                    .validate(
-                        &raw,
-                        position as u64,
-                        projection.as_ref().map_or(0, |value| value.covered_items),
-                    )
-                    .map_err(|error| {
-                        Fault::new(FaultKind::SessionHistoryLoadFailed, error.to_string())
-                    })?;
-                projection = Some(candidate);
-            } else if let Some(item) = entry.runtime_item() {
-                input_provenance.record(raw.len(), entry);
-                raw.push(item);
-            }
-        }
-        self.history = raw;
-        self.input_provenance = input_provenance;
-        self.history_position = entries.len() as u64;
-        self.projection = projection;
-        self.readable_history = Some(
-            entries
-                .iter()
-                .filter_map(HistoryItemData::from_entry)
-                .collect(),
-        );
-        Ok(())
     }
 }
 
@@ -256,5 +211,5 @@ fn history_reader_revoked() -> Fault {
 }
 
 #[cfg(test)]
-#[path = "tests/task052_history_read.rs"]
-mod task052;
+#[path = "history_tests.rs"]
+mod tests;

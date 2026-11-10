@@ -7,6 +7,8 @@
 mod agent;
 mod backend;
 mod collaboration;
+mod turn_binding;
+pub use turn_binding::{PreparedTurnBinding, TurnCapability, TurnSource};
 mod configuration;
 mod context;
 mod control;
@@ -29,14 +31,19 @@ pub use discovery::*;
 mod session;
 mod types;
 
-pub use backend::JournalHistory;
+pub use backend::{
+    HistoryBackend, HistoryReadFuture, JournalHistory, LoadFuture, MemoryHistory, SaveFuture,
+};
+mod resources;
 pub use control::{CallerContext, ConnectionHandle};
 pub use host::{Host, HostProcessControl, HostProcessSnapshot, WorkspaceSnapshot};
+pub use resources::{
+    BoundCompactionResources, BoundResources, CompactionResourceFuture, ResourceFuture,
+    ResourceResolver,
+};
 pub use session::{
-    ApprovalAnswer, BoundCompactionResources, BoundResources, CompactionResourceFuture,
-    HistoryBackend, HistoryReadFuture, InteractionAnswerData, LoadFuture, MemoryHistory,
-    ResourceFuture, ResourceResolver, SaveFuture, SessionSubscription, ToolOutputBinding,
-    ToolOutputLease, ToolOutputSink, TurnToolCleanup,
+    ApprovalAnswer, InteractionAnswerData, SessionSubscription, ToolOutputBinding, ToolOutputLease,
+    ToolOutputSink, TurnToolCleanup,
 };
 pub use types::*;
 

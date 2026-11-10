@@ -1,12 +1,9 @@
 //! Actual Agent metadata writes, owned waits and explicit reconciliation.
-#[allow(dead_code)]
-#[path = "task079/support.rs"]
-mod support;
+use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_storage::AgentRecord;
 use std::{path::Path, sync::Arc, time::Duration};
-use support::*;
 use tracing::instrument::WithSubscriber;
 
 fn update(operation_id: OperationId) -> AgentUpdateRequest {

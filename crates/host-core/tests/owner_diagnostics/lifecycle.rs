@@ -1,12 +1,10 @@
 //! Production Host/Agent, storage and Runtime with named deterministic model fixtures.
 //! Reconstructed after workspace replacement; not live-provider, TUI or a complete stage gate.
-#[path = "task079/support.rs"]
-mod support;
+use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use serde_json::Value;
 use std::os::unix::fs::PermissionsExt;
-use support::*;
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]

@@ -1,7 +1,8 @@
+use crate::ResourceResolver;
 use crate::agent::AgentOwner;
 use crate::configuration::{ConfigurationOwner, HostConfig, PreparedHostConfiguration};
 use crate::control::{CallerContext, ConnectionHandle, ConnectionRegistry};
-use crate::session::{ResourceResolver, SessionController, SessionSubscription};
+use crate::session::{SessionController, SessionSubscription};
 use crate::types::*;
 use minicore_host_protocol::*;
 use minicore_host_storage::{HostRecord, HostStore};
@@ -9,7 +10,6 @@ use minicore_runtime::HistoryItem;
 
 mod collaboration;
 mod configuration;
-mod context;
 mod controls;
 mod create;
 mod deletion;
@@ -20,10 +20,10 @@ mod network;
 mod observation;
 mod persistent;
 mod process;
+mod query;
 pub use process::{HostProcessControl, HostProcessSnapshot};
 mod retirement;
 mod shutdown;
-mod tool_edits;
 mod workspace;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, Weak};
@@ -156,25 +156,6 @@ impl Host {
         self.publish_host_state_owned();
         Ok(connection)
     }
-    pub fn info(&self, caller: &CallerContext) -> Result<HostInfo, Fault> {
-        let control = self.access.snapshot(caller)?;
-        let (name, capabilities, resources, facilities) = self.discovery_info();
-        let state = self.state.lock().expect("Host mutex poisoned");
-        Ok(HostInfo {
-            name,
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            capabilities,
-            resources,
-            facilities,
-            host_id: self.id.clone(),
-            host_incarnation: self.incarnation.clone(),
-            lifecycle: state.lifecycle,
-            shutdown_strategy: state.shutdown_strategy,
-            shutdown_fault: state.shutdown_fault.clone(),
-            control,
-            logging: self.logging_status(),
-        })
-    }
     fn agent(&self, caller: &CallerContext, id: &AgentId) -> Result<Arc<AgentOwner>, Fault> {
         self.access.read(caller, || {
             let state = self.state.lock().expect("Host mutex poisoned");
@@ -209,53 +190,6 @@ impl Host {
             ))
         }
     }
-    pub fn receipt(
-        &self,
-        caller: &CallerContext,
-        operation_id: &OperationId,
-    ) -> Result<AgentCreateReceipt, Fault> {
-        let mut receipts = self.creation_receipts(caller, operation_id)?.into_iter();
-        let receipt = receipts.next().ok_or_else(|| {
-            Fault::new(
-                FaultKind::HostReceiptNotFound,
-                "no retained creation receipt for this operation",
-            )
-        })?;
-        if receipts.next().is_some() {
-            return Err(Fault::new(
-                FaultKind::HostReceiptAmbiguous,
-                "operation_id matches multiple invocations; use creation_receipts",
-            ));
-        }
-        Ok(receipt)
-    }
-    /// All accepted invocations with this correlation ID. Reusing an operation
-    /// ID neither deduplicates a request nor replaces another invocation's facts.
-    pub fn creation_receipts(
-        &self,
-        caller: &CallerContext,
-        operation_id: &OperationId,
-    ) -> Result<Vec<AgentCreateReceipt>, Fault> {
-        self.access.read(caller, || {
-            Ok(self
-                .state
-                .lock()
-                .expect("Host mutex poisoned")
-                .creations
-                .values()
-                .filter(|receipt| &receipt.operation_id == operation_id)
-                .cloned()
-                .collect())
-        })
-    }
-    pub fn agent_info(
-        &self,
-        caller: &CallerContext,
-        target: &AgentRef,
-    ) -> Result<AgentInfo, Fault> {
-        self.check_host(&target.host_id)?;
-        self.agent(caller, &target.agent_id)?.info(caller)
-    }
     pub fn send(
         &self,
         caller: &CallerContext,
@@ -272,42 +206,6 @@ impl Host {
             } => self.agent(caller, agent_id)?.session(session_id)?,
         };
         session.send(caller, request.input())
-    }
-    pub fn session_info(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<SessionInfo, Fault> {
-        self.session(caller, target)?.info(caller)
-    }
-    pub fn session_state(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<SessionSnapshot, Fault> {
-        self.session(caller, target)?.snapshot(caller)
-    }
-    pub fn session_states(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<SessionSubscription, Fault> {
-        self.session(caller, target)?.subscribe_state(caller)
-    }
-    pub fn message(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        message_id: &MessageId,
-    ) -> Result<MessageRecord, Fault> {
-        self.session(caller, target)?.message(caller, message_id)
-    }
-    pub fn history(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<Vec<HistoryItem>, Fault> {
-        self.session(caller, target)?.history(caller)
     }
     pub fn pause(&self, caller: &CallerContext, target: &SessionRef) -> Result<(), Fault> {
         self.session_pause(
@@ -428,46 +326,6 @@ impl Host {
             },
         )
         .map(|_| ())
-    }
-    pub fn turns(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<Vec<TurnInfo>, Fault> {
-        self.session(caller, target)?.turns(caller)
-    }
-    pub fn turn_info(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        id: &TurnId,
-    ) -> Result<TurnInfo, Fault> {
-        self.session(caller, target)?.turn_info(caller, id)
-    }
-    pub fn turn_result(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        id: &TurnId,
-    ) -> Result<TurnResult, Fault> {
-        self.session(caller, target)?.turn_result(caller, id)
-    }
-    pub async fn wait_turn(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        id: &TurnId,
-    ) -> Result<TurnResult, Fault> {
-        // The observation token contains only a Weak owner and a bounded state
-        // snapshot. An abandoned wait cannot retain Session bodies or runners.
-        let mut states = self.session_states(caller, target)?;
-        loop {
-            let turn = self.turn_info(caller, target, id)?;
-            if turn.state == TurnState::Finished {
-                return self.turn_result(caller, target, id);
-            }
-            states.changed().await?;
-        }
     }
 }
 

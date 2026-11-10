@@ -1,96 +1,7 @@
 use super::*;
 use crate::observation::*;
-use crate::{MessageSnapshot, TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot};
 
 impl Host {
-    pub fn answer_interaction(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        request: InteractionAnswerRequest<crate::InteractionAnswerData>,
-    ) -> Result<InteractionAnswerReceipt, Fault> {
-        self.session(caller, target)?
-            .answer_interaction(caller, request)
-    }
-
-    pub fn turn_snapshot(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        turn_id: &TurnId,
-    ) -> Result<TurnDetailsSnapshot, Fault> {
-        self.session(caller, target)?.turn_details(caller, turn_id)
-    }
-
-    pub fn message_snapshot(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        message_id: &MessageId,
-    ) -> Result<MessageSnapshot, Fault> {
-        self.session(caller, target)?
-            .message_snapshot(caller, message_id)
-    }
-
-    pub fn turn_list(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<TurnListSnapshot, Fault> {
-        self.session(caller, target)?.turn_list(caller)
-    }
-
-    pub async fn turn_result_snapshot(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        turn_id: &TurnId,
-    ) -> Result<TurnResultSnapshot, Fault> {
-        self.session(caller, target)?
-            .turn_result_snapshot(caller, turn_id)
-            .await
-    }
-
-    pub async fn wait_turn_snapshot(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        turn_id: &TurnId,
-    ) -> Result<TurnResultSnapshot, Fault> {
-        // A saved terminal result needs no execution subscription or waiter.
-        if self
-            .session(caller, target)?
-            .turn_query_finished(caller, turn_id)?
-            .unwrap_or(true)
-        {
-            return self.turn_result_snapshot(caller, target, turn_id).await;
-        }
-        // Subscribe before checking again, so completion cannot be missed.
-        // The existing subscription holds only a Weak owner and light state.
-        // Dropping this wait cannot retain content or cancel accepted work.
-        let mut states = self.session_states(caller, target)?;
-        loop {
-            if self
-                .session(caller, target)?
-                .turn_query_finished(caller, turn_id)?
-                .unwrap_or(true)
-            {
-                return self.turn_result_snapshot(caller, target, turn_id).await;
-            }
-            states.changed().await?;
-        }
-    }
-
-    pub async fn history_read(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        request: &HistoryReadRequest,
-    ) -> Result<SessionHistorySnapshot, Fault> {
-        self.session(caller, target)?
-            .history_read(caller, request)
-            .await
-    }
     pub(crate) fn publish_host_state_owned(&self) {
         let control = self.access.control_state_owned();
         let state = self.state.lock().expect("Host mutex poisoned");
@@ -227,62 +138,12 @@ impl Host {
                 .unsubscribe(caller.connection_number(), &request.subscription_id)
         })
     }
-    pub fn turn_output_read(
+    pub fn session_states(
         &self,
         caller: &CallerContext,
         target: &SessionRef,
-        turn_id: &TurnId,
-        response_index: u64,
-        request: &TextReadRequest,
-    ) -> Result<ModelTextSnapshot, Fault> {
-        let session = self.session(caller, target)?;
-        let info = session.turn_info(caller, turn_id)?;
-        let data = session.output_read(caller, turn_id, Some(response_index), None, request)?;
-        Ok(ModelTextSnapshot {
-            source: ModelOutputIdentity {
-                turn: TurnIdentity {
-                    session: SessionIdentity {
-                        host_id: self.id.clone(),
-                        host_incarnation: self.incarnation.clone(),
-                        agent_id: target.agent_id.clone(),
-                        session_id: target.session_id.clone(),
-                    },
-                    turn_id: turn_id.clone(),
-                    load_id: Some(info.load_id),
-                },
-                response_index,
-            },
-            data,
-        })
-    }
-    pub fn toolcall_output_read(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        tool: &ToolCallRef,
-        request: &TextReadRequest,
-    ) -> Result<ToolTextSnapshot, Fault> {
-        let session = self.session(caller, target)?;
-        let (source, _) = session.tool_get(caller, &tool.turn_id, &tool.tool_call_id)?;
-        let data = session.output_read(
-            caller,
-            &tool.turn_id,
-            None,
-            Some(&tool.tool_call_id),
-            request,
-        )?;
-        Ok(ToolTextSnapshot { source, data })
-    }
-    pub fn toolcall_get(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        tool: &ToolCallRef,
-    ) -> Result<ToolCallSnapshot, Fault> {
-        let (source, data) =
-            self.session(caller, target)?
-                .tool_get(caller, &tool.turn_id, &tool.tool_call_id)?;
-        Ok(ToolCallSnapshot { source, data })
+    ) -> Result<SessionSubscription, Fault> {
+        self.session(caller, target)?.subscribe_state(caller)
     }
 }
 

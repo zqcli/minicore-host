@@ -463,8 +463,8 @@ fn environment_name(name: &str) -> Result<(), Fault> {
 }
 
 #[cfg(test)]
-mod reload_tests;
+mod credential_environment_tests;
 #[cfg(test)]
-mod task066_credential_environment;
+mod reload_tests;
 #[cfg(test)]
 mod tests;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::MemoryHistory;
 
 pub(crate) struct SessionShutdownStatus {
     pub(crate) drained: bool,
@@ -6,40 +7,6 @@ pub(crate) struct SessionShutdownStatus {
     pub(crate) fault: Option<Fault>,
 }
 impl SessionController {
-    pub(super) async fn prepare_resources(
-        &self,
-        config: &SessionConfig,
-        binding: crate::PreparedTurnBinding,
-    ) -> Result<BoundResources, Fault> {
-        let resources = self.resources_owned()?;
-        let preparation = resources.resolve_for_turn(config, binding);
-        tokio::pin!(preparation);
-        loop {
-            let changed = self.changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-            {
-                let state = self.state.lock().expect("Session mutex poisoned");
-                if state.deleting {
-                    return Err(Fault::new(
-                        FaultKind::SessionLifecycleClosing,
-                        "Session deletion fenced unfinished Turn preparation",
-                    ));
-                }
-                if state.host_stopping || !self.access.execution_allowed_owned() {
-                    return Err(Fault::new(
-                        FaultKind::HostLifecycleUnavailable,
-                        "Host stopped before resource preparation completed",
-                    ));
-                }
-            }
-            tokio::select! {
-                result = &mut preparation => return result,
-                _ = changed => {}
-            }
-        }
-    }
-
     pub(super) fn resources_owned(&self) -> Result<Arc<dyn ResourceResolver>, Fault> {
         self.resources
             .lock()
@@ -411,5 +378,30 @@ impl SessionController {
         state.load_id = None;
         self.publish(&mut state);
         Ok(())
+    }
+}
+
+impl SessionController {
+    pub(crate) fn is_quiescent_owned(&self) -> bool {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        state.active.is_none()
+            && !state.preparing
+            && !state.driver_running
+            && state.compaction.is_none()
+            && state.history_work.is_none()
+            && state.record_work.is_none()
+            && !state.scope_cleanup_pending
+            && !state.handoff_pending
+    }
+    pub(crate) async fn wait_quiescent_owned(&self) {
+        let mut snapshots = self.snapshots.subscribe();
+        loop {
+            if self.is_quiescent_owned() {
+                return;
+            }
+            if snapshots.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }

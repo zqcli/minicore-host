@@ -1,11 +1,79 @@
-use crate::session::{HistoryBackend, HistoryReadFuture, LoadFuture, SaveFuture};
-use minicore_host_protocol::{Fault, FaultDetails, FaultKind, HistoryLoadDetails, StorageMode};
+use minicore_host_protocol::{
+    Fault, FaultDetails, FaultKind, HistoryLoadDetails, PersistenceState, StorageMode, TurnId,
+};
 use minicore_host_storage::{HistoryEntry, SaveRange, SessionJournal, SessionStore};
 use std::{
     future::Future,
     pin::Pin,
     sync::{Arc, Mutex},
 };
+
+pub type SaveFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<PersistenceState, Fault>> + Send + 'a>>;
+/// Narrow save ownership boundary. The implementation must keep accepted
+/// batches through cancellation and perform disk work outside owner state locks.
+pub type LoadFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Vec<HistoryEntry>, Fault>> + Send + 'a>>;
+/// A validated cold snapshot, or None when the existing execution owner has
+/// acquired the journal and must publish its accepted history instead.
+pub type HistoryReadFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<Vec<HistoryEntry>>, Fault>> + Send + 'a>>;
+pub trait HistoryBackend: Send + Sync + std::any::Any {
+    fn mode(&self) -> StorageMode;
+    /// Original entries in save order. The Session separately projects readable
+    /// content and complete Runtime context; partials never enter the latter.
+    fn load(&self) -> LoadFuture<'_>;
+    /// Observe cold content without loading execution or reconciling a save.
+    /// Custom backends opt in explicitly; reading never falls back to load.
+    fn read_cold(&self) -> HistoryReadFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryLoadFailed,
+                "this history backend does not support cold content reads",
+            ))
+        })
+    }
+    /// Read validated records of one saved Turn without loading execution,
+    /// reconciling a save, or requiring a cold journal. Loaded backends may use
+    /// their existing opening baseline; the Session's current execution wins.
+    fn read_saved_turn(&self, _id: &TurnId) -> LoadFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryLoadFailed,
+                "this history backend does not support saved Turn reads",
+            ))
+        })
+    }
+    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
+    /// Explicitly continue only the original retained append. Never reload,
+    /// accept another batch, or infer confirmation from readable bytes.
+    fn reconcile(&self) -> SaveFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryWriteFailed,
+                "this history backend cannot reconcile the original save",
+            ))
+        })
+    }
+    /// Called by a fenced owner after actual workers have returned. Implementors
+    /// retaining external storage handles must release them here, not merely
+    /// publish a persisted acknowledgement.
+    fn release(&self) -> Pin<Box<dyn Future<Output = Result<(), Fault>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+pub struct MemoryHistory;
+impl HistoryBackend for MemoryHistory {
+    fn mode(&self) -> StorageMode {
+        StorageMode::Memory
+    }
+    fn load(&self) -> LoadFuture<'_> {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+    fn append<'a>(&'a self, _entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+        Box::pin(async { Ok(PersistenceState::NotApplicable) })
+    }
+}
 
 /// A save task retains the journal and its exclusive root guard even if the
 /// caller abandons its future. This disk-only mutex is never an owner/access lock.
@@ -384,7 +452,6 @@ impl JournalState {
 }
 
 #[cfg(test)]
-#[path = "tests/task052_backend_gate.rs"]
-mod task052;
+mod tests;
 #[cfg(test)]
-pub(crate) use task052::TestReadGate;
+pub(crate) use tests::TestReadGate;

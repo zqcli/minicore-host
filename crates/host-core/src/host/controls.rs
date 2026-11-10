@@ -1,13 +1,6 @@
 use super::*;
 
 impl Host {
-    pub fn input_list(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-    ) -> Result<InputList, Fault> {
-        self.session(caller, target)?.input_list(caller)
-    }
     pub fn input_remove(
         &self,
         caller: &CallerContext,
@@ -150,53 +143,16 @@ impl Host {
         self.remove_retired_agents_owned();
         Ok(receipt)
     }
-    /// Lookup traverses the current direct-owner indexes, without retaining
-    /// owners or copying Session facts into a Host result cache.
-    pub fn receipts(
+}
+
+impl Host {
+    pub fn answer_interaction(
         &self,
         caller: &CallerContext,
-        operation: &OperationId,
-    ) -> Result<Vec<Receipt>, Fault> {
-        self.access.read(caller, || {
-            let (mut receipts, children) = {
-                let state = self.state.lock().expect("Host mutex poisoned");
-                let mut receipts = state
-                    .creations
-                    .values()
-                    .filter(|receipt| &receipt.operation_id == operation)
-                    .cloned()
-                    .map(Receipt::AgentCreate)
-                    .collect::<Vec<_>>();
-                receipts.extend(state.controls.get(operation).into_iter().flatten().cloned());
-                (receipts, state.agents.values().cloned().collect::<Vec<_>>())
-            };
-            receipts.extend(self.configuration.receipts_owned(operation));
-            for child in children {
-                receipts.extend(child.receipts_owned(operation));
-            }
-            Ok(receipts)
-        })
-    }
-    /// An operation ID is correlation only. Ambiguous independent invocations
-    /// are never merged, deduplicated, overwritten, or replayed.
-    pub fn receipt_get(
-        &self,
-        caller: &CallerContext,
-        operation: &OperationId,
-    ) -> Result<Receipt, Fault> {
-        let mut receipts = self.receipts(caller, operation)?.into_iter();
-        let receipt = receipts.next().ok_or_else(|| {
-            Fault::new(
-                FaultKind::HostReceiptNotFound,
-                "no owner retains facts for this operation",
-            )
-        })?;
-        if receipts.next().is_some() {
-            return Err(Fault::new(
-                FaultKind::HostReceiptAmbiguous,
-                "operation_id matches multiple invocations; use receipts to inspect their separate facts",
-            ));
-        }
-        Ok(receipt)
+        target: &SessionRef,
+        request: InteractionAnswerRequest<crate::InteractionAnswerData>,
+    ) -> Result<InteractionAnswerReceipt, Fault> {
+        self.session(caller, target)?
+            .answer_interaction(caller, request)
     }
 }

@@ -1,10 +1,7 @@
 //! An already stopped Host does not start a second lifecycle transition.
-#[allow(dead_code)]
-#[path = "task079/support.rs"]
-mod support;
+use super::support::*;
 use minicore_host_core::Host;
 use minicore_host_protocol::*;
-use support::*;
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]

@@ -1,5 +1,3 @@
-mod query;
-
 use super::*;
 use crate::diagnostics::{self as diagnostic, Record};
 use crate::observation::*;
@@ -43,10 +41,10 @@ pub(super) struct Body {
     // A binary channel has only a real contiguous UTF-8 prefix. Never imply
     // that a request crossing its end returned the complete process stream.
     pub(super) non_utf8: bool,
-    complete: Option<String>,
+    pub(super) complete: Option<String>,
 }
 impl Body {
-    fn text(&self) -> &str {
+    pub(super) fn text(&self) -> &str {
         self.complete.as_deref().unwrap_or(&self.live)
     }
 }
@@ -779,89 +777,6 @@ impl SessionController {
         }
         Ok((initial, watermarks))
     }
-    pub(crate) fn output_read(
-        &self,
-        caller: &CallerContext,
-        turn: &TurnId,
-        response: Option<u64>,
-        tool: Option<&ToolCallId>,
-        request: &TextReadRequest,
-    ) -> Result<TextRangeData, Fault> {
-        self.access.read(caller, || {
-            self.ensure_visible()?;
-            request
-                .validate()
-                .map_err(|e| Fault::new(FaultKind::SessionOutputRangeInvalid, e.to_string()))?;
-            let state = self.state.lock().expect("Session mutex poisoned");
-            let output = state.output.get(turn).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionTurnNotFound,
-                    "Turn output is not retained",
-                )
-            })?;
-            let channels = match (response, tool) {
-                (Some(index), None) => output.models.get(&index),
-                (None, Some(id)) => output.tools.get(id).map(|record| &record.output),
-                _ => None,
-            }
-            .ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionOutputNotFound,
-                    "output source is not retained",
-                )
-            })?;
-            let body = channels.get(&request.channel).ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionOutputNotFound,
-                    "output channel is not retained",
-                )
-            })?;
-            if body.non_utf8 && request.end > body.text().len() as u64 {
-                return Err(Fault::new(
-                    FaultKind::SessionOutputRangeInvalid,
-                    "tool channel contains non-UTF-8 bytes; only its observed UTF-8 prefix is text-readable",
-                ));
-            }
-            read_range(body.text(), request)
-        })
-    }
-    pub(crate) fn tool_get(
-        &self,
-        caller: &CallerContext,
-        turn: &TurnId,
-        tool: &ToolCallId,
-    ) -> Result<(ToolCallIdentity, ToolCallData), Fault> {
-        self.access.read(caller, || {
-            self.ensure_visible()?;
-            let state = self.state.lock().expect("Session mutex poisoned");
-            let info = state
-                .active
-                .as_ref()
-                .filter(|a| &a.info.id == turn)
-                .map(|a| &a.info)
-                .or_else(|| state.completed.get(turn).map(|r| &r.info))
-                .ok_or_else(|| {
-                    Fault::new(FaultKind::SessionTurnNotFound, "Turn is not retained")
-                })?;
-            let record = state
-                .output
-                .get(turn)
-                .and_then(|o| o.tools.get(tool))
-                .ok_or_else(|| {
-                    Fault::new(
-                        FaultKind::SessionToolCallNotFound,
-                        "ToolCall is not retained by this Turn",
-                    )
-                })?;
-            Ok((
-                ToolCallIdentity {
-                    turn: self.turn_identity(info),
-                    tool_call_id: tool.clone(),
-                },
-                record.data.clone(),
-            ))
-        })
-    }
 }
 fn positions(channels: &BTreeMap<String, Body>) -> Vec<ChannelPosition> {
     channels
@@ -872,39 +787,133 @@ fn positions(channels: &BTreeMap<String, Body>) -> Vec<ChannelPosition> {
         })
         .collect()
 }
-fn read_range(text: &str, request: &TextReadRequest) -> Result<TextRangeData, Fault> {
-    let invalid = || {
-        Fault::new(
-            FaultKind::SessionOutputRangeInvalid,
-            "read positions must be available UTF-8 boundaries",
-        )
-    };
-    let start = usize::try_from(request.start).map_err(|_| invalid())?;
-    let requested_end = usize::try_from(request.end).map_err(|_| invalid())?;
-    if start > text.len()
-        || !text.is_char_boundary(start)
-        || (requested_end <= text.len() && !text.is_char_boundary(requested_end))
-    {
-        return Err(invalid());
+
+/// A connection-scoped state subscription. It never exposes a raw watch handle
+/// that could keep receiving private state after that connection is revoked.
+pub struct SessionSubscription {
+    owner: Weak<SessionController>,
+    snapshots: watch::Receiver<SessionSnapshot>,
+    revocation: watch::Receiver<bool>,
+    access: Arc<ConnectionRegistry>,
+    caller: CallerContext,
+}
+impl SessionSubscription {
+    pub fn snapshot(&self) -> Result<SessionSnapshot, Fault> {
+        self.access.read(&self.caller, || {
+            self.owner
+                .upgrade()
+                .ok_or_else(|| {
+                    Fault::new(FaultKind::AgentSessionNotFound, "Session was reclaimed")
+                })?
+                .ensure_visible()?;
+            Ok(self.snapshots.borrow().clone())
+        })
     }
-    let fixed_end = requested_end.min(text.len());
-    let budget = usize::try_from(request.max_bytes).unwrap_or(usize::MAX);
-    let mut end = start.saturating_add(budget).min(fixed_end);
-    while end > start && !text.is_char_boundary(end) {
-        end -= 1;
+    pub async fn changed(&mut self) -> Result<(), Fault> {
+        self.snapshot()?;
+        tokio::select! {
+            _ = self.revocation.changed() => Err(Fault::new(FaultKind::HostAccessInvalid, "subscription connection is no longer valid")),
+            changed = self.snapshots.changed() => {
+                changed.map_err(|_| Fault::new(FaultKind::SessionLifecycleClosed, "state subscription owner has ended"))?;
+                self.snapshot().map(|_| ())
+            }
+        }
     }
-    if end == start && start < fixed_end {
-        end += text[start..fixed_end]
-            .chars()
-            .next()
-            .expect("nonempty range")
-            .len_utf8();
+}
+
+impl SessionController {
+    pub(super) fn make_snapshot(
+        state: &SessionState,
+        host_id: &HostId,
+        incarnation: &HostIncarnation,
+        agent_id: &AgentId,
+        id: &SessionId,
+    ) -> SessionSnapshot {
+        let control = Self::control_facts(state);
+        SessionSnapshot {
+            host_id: host_id.clone(),
+            host_incarnation: incarnation.clone(),
+            agent_id: agent_id.clone(),
+            session_id: id.clone(),
+            data: SessionStateData {
+                owned_work: Self::owned_work(state),
+                end_reason: state.end_reason.clone(),
+                mode: state.info.mode,
+                controller_revision: state.controller_revision,
+                lifecycle: state.lifecycle,
+                scheduling: control.scheduling,
+                pause_reasons: control.pause_reasons,
+                residency: state.residency,
+                load_id: state.load_id.clone(),
+                runner_revision: state.runner_revision,
+                active_turn_id: state.active.as_ref().map(|active| active.info.id.clone()),
+                pending_interactions: state
+                    .active
+                    .as_ref()
+                    .and_then(|active| active.pending_interaction.clone())
+                    .into_iter()
+                    .collect(),
+                next_step: state.next_step.iter().map(QueuedInput::summary).collect(),
+                next_turn: state.next_turn.iter().map(QueuedInput::summary).collect(),
+                preparing: state.preparing,
+                compaction: state
+                    .compaction
+                    .as_ref()
+                    .map(|work| work.activity.clone())
+                    .or_else(|| state.last_compaction.clone())
+                    .map(Box::new),
+                saving: state.history_work.as_ref().is_some_and(|work| work.running),
+                deletion: state.deletion.clone(),
+                metadata_saving: state.record_work.as_ref().is_some_and(|work| work.running),
+                metadata_fault: state
+                    .record_work
+                    .as_ref()
+                    .and_then(|work| work.fault.clone())
+                    .or_else(|| state.close_fault.clone()),
+                block_reason: control.block_reason,
+                last_result: state.completion_order.last().map(|id| TurnRef {
+                    session_id: state.info.id.clone(),
+                    turn_id: id.clone(),
+                }),
+            },
+        }
     }
-    Ok(TextRangeData {
-        channel: request.channel.clone(),
-        start: start as u64,
-        end: end as u64,
-        text: text[start..end].to_owned(),
-        has_more: end < fixed_end,
-    })
+    pub(super) fn publish(&self, state: &mut SessionState) {
+        state.controller_revision = state
+            .controller_revision
+            .checked_add(1)
+            .expect("controller revision exhausted");
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
+        let snapshot = Self::make_snapshot(
+            state,
+            &self.host_id,
+            &self.incarnation,
+            &self.agent_id,
+            &self.id,
+        );
+        self.publish_observation(state, &snapshot);
+        self.snapshots.send_replace(snapshot);
+        self.changed.notify_waiters();
+        if let Some(parent_changed) = &self.parent_changed {
+            parent_changed.notify_waiters();
+        }
+    }
+    pub(crate) fn subscribe_state(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+    ) -> Result<SessionSubscription, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            Ok(SessionSubscription {
+                owner: Arc::downgrade(self),
+                snapshots: self.snapshots.subscribe(),
+                revocation: caller.revocation(),
+                access: Arc::clone(&self.access),
+                caller: caller.clone(),
+            })
+        })
+    }
 }

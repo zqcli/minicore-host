@@ -4,7 +4,7 @@ mod input_context;
 use super::*;
 use minicore_runtime::{
     SummaryHistory, UserHistory, UserMessageKind,
-    model::{ModelDescriptor, ModelMessage},
+    model::{ModelDescriptor, ModelMessage, ReasoningPreference},
     prompt::DefaultPromptProvider,
 };
 use std::collections::BTreeSet;

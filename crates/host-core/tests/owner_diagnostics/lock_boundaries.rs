@@ -1,10 +1,8 @@
 //! Recovered TASK082 failing probes from the reviewer's retained conversation.
 //! The two reentry test functions and subscriber checks preserve the original probes.
 //! Old file hashes and raw logs were lost; this is not a byte-identity claim.
-#[allow(dead_code)]
-#[path = "task079/support.rs"]
-mod support;
 
+use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use std::{
@@ -15,7 +13,6 @@ use std::{
     },
     time::Duration,
 };
-use support::*;
 use tracing::{
     Dispatch, Event, Metadata, Subscriber,
     instrument::WithSubscriber,

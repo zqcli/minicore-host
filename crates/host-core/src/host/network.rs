@@ -5,14 +5,18 @@ use minicore_host_protocol::Fault;
 
 impl Host {
     /// Trusted embedding setup, separate from any business JSON interface.
-    /// Network access starts disabled. `Some` requires a nonblank secret;
+    /// Prefer configured Host construction and `reload` for application setup
+    /// so network credentials publish with the complete Host configuration.
+    /// Unconfigured network access is disabled. `Some` requires a nonblank secret;
     /// `None` disables it. Actual changes invalidate only network connections.
     /// The process must finish configuration before starting a WSS listener.
     pub fn configure_network_access(&self, access_key: Option<String>) -> Result<(), Fault> {
         self.access.publish_network(None, access_key, || Ok(()))
     }
 
-    /// Trusted publication hook for the future Host configuration owner.
+    /// Trusted compatibility hook for embedding-owned publication.
+    /// Prefer `reload`, whose configuration owner validates and publishes the
+    /// complete prepared configuration at this same authentication boundary.
     ///
     /// Prepare and fully validate the candidate first. Do not invoke for a
     /// candidate containing a restart-required change. `publish` runs under the

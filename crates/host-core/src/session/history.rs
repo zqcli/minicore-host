@@ -426,163 +426,6 @@ impl SessionController {
         diagnostic::emit(scheduling);
         result.map(|_| ())
     }
-    pub(super) async fn finalize(
-        &self,
-        turn_id: &TurnId,
-        outcome: TurnOutcome,
-        fault: Option<Fault>,
-    ) {
-        let (record, scheduling) = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let previous = diagnostics::Schedule::capture(&state);
-            let Some(active) = state
-                .active
-                .as_mut()
-                .filter(|active| &active.info.id == turn_id)
-            else {
-                return;
-            };
-            let newly_claimed = active.claim_terminal(outcome, fault);
-            if active.info.outcome == Some(TurnOutcome::Failed) {
-                state.failure_paused = true;
-            }
-            self.publish(&mut state);
-            (
-                self.terminal_claim_record(&state, newly_claimed),
-                self.scheduling_record(&state, previous, "finalizing", None),
-            )
-        };
-        diagnostic::emit(record);
-        diagnostic::emit(scheduling);
-        // Runtime may have dropped a tool future on cancellation. Actual tool
-        // workers must still be joined, even if an original history save failed.
-        if !self.finish_tool_cleanup(turn_id).await {
-            return;
-        }
-        let save = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            if state.history_work.is_some() {
-                return;
-            }
-            let stopping = state.host_stopping;
-            let Some(active) = state
-                .active
-                .as_ref()
-                .filter(|active| &active.info.id == turn_id)
-            else {
-                return;
-            };
-            let outcome = active.info.outcome.expect("terminal claim");
-            let save = if active.terminal_accepted {
-                None
-            } else {
-                let entry = HistoryEntry::TurnFinished {
-                    turn_id: turn_id.clone(),
-                    outcome,
-                    reason: active
-                        .info
-                        .fault
-                        .as_ref()
-                        .map(|fault| fault.message().to_owned())
-                        .or_else(|| {
-                            active
-                                .report
-                                .as_ref()
-                                .and_then(|report| match &report.outcome {
-                                    LoopOutcome::Cancelled(reason) => {
-                                        Some(format!("Runtime cancellation: {reason:?}"))
-                                    }
-                                    LoopOutcome::Failed(failure)
-                                        if outcome == TurnOutcome::Failed =>
-                                    {
-                                        Some(failure.diagnostic.message().as_str().to_owned())
-                                    }
-                                    _ => None,
-                                })
-                        })
-                        .or_else(|| {
-                            (outcome == TurnOutcome::Cancelled).then(|| {
-                                if stopping {
-                                    "Host shutdown".to_owned()
-                                } else {
-                                    "user cancellation".to_owned()
-                                }
-                            })
-                        }),
-                };
-                let Ok(binding) =
-                    Self::register_turn_save(&mut state, turn_id, Boundary::Terminal, 1)
-                else {
-                    return;
-                };
-                state
-                    .active
-                    .as_mut()
-                    .expect("checked original Turn")
-                    .terminal_accepted = true;
-                Some((binding, vec![entry]))
-            };
-            self.publish(&mut state);
-            save
-        };
-        if let Some((binding, entries)) = save
-            && self.persist_registered(binding, entries).await.is_err()
-        {
-            return;
-        }
-        self.finish_pending_answers(turn_id).await;
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        if state.history_work.is_some()
-            || state.active.as_ref().is_none_or(|active| {
-                &active.info.id != turn_id
-                    || !active.tool_cleanup.complete
-                    || !active.terminal_accepted
-                    || !matches!(
-                        active.info.persistence,
-                        PersistenceState::Persisted | PersistenceState::NotApplicable
-                    )
-            })
-        {
-            return;
-        }
-        let mut active = state.active.take().expect("checked original Turn");
-        active.info.state = TurnState::Finished;
-        let result = TurnResult {
-            info: active.info,
-            history: state.history[active.start_history..].to_vec(),
-            partials: active.partials,
-        };
-        self.observe_finished(&mut state, &result.info, active.report.as_deref());
-        let record = diagnostics::turn_finished(
-            &self.turn_identity(&result.info),
-            &result.info,
-            active.started_at,
-        );
-        state.completion_order.push(turn_id.clone());
-        let mut inputs = active.consumed_inputs;
-        for id in active.bound_inputs {
-            if !inputs.contains(&id) {
-                inputs.push(id);
-            }
-        }
-        Self::record_delegated_result(&mut state, &result, inputs);
-        state.completed.insert(
-            turn_id.clone(),
-            RetainedTurnResult {
-                result,
-                start_history: active.start_history,
-            },
-        );
-        let previous = state.lifecycle;
-        Self::finish_memory_close(&mut state);
-        self.publish(&mut state);
-        let record = record.published(state.controller_revision, state.runner_revision);
-        let closed = self.closed_record(&state, previous);
-        drop(state);
-        record.emit();
-        diagnostic::emit(closed);
-        self.handoff_delegation_owned();
-    }
     pub(super) fn start_save_continuations(
         self: &Arc<Self>,
         state: &mut SessionState,
@@ -750,6 +593,82 @@ impl SessionController {
         self.publish(state);
         Ok(())
     }
+    /// Accept and confirm the original terminal record before result publication.
+    /// False keeps finalization with its current owner and outstanding save.
+    pub(super) async fn save_terminal(&self, turn_id: &TurnId) -> bool {
+        let save = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.history_work.is_some() {
+                return false;
+            }
+            let stopping = state.host_stopping;
+            let Some(active) = state
+                .active
+                .as_ref()
+                .filter(|active| &active.info.id == turn_id)
+            else {
+                return false;
+            };
+            let outcome = active.info.outcome.expect("terminal claim");
+            let save = if active.terminal_accepted {
+                None
+            } else {
+                let entry = HistoryEntry::TurnFinished {
+                    turn_id: turn_id.clone(),
+                    outcome,
+                    reason: active
+                        .info
+                        .fault
+                        .as_ref()
+                        .map(|fault| fault.message().to_owned())
+                        .or_else(|| {
+                            active
+                                .report
+                                .as_ref()
+                                .and_then(|report| match &report.outcome {
+                                    LoopOutcome::Cancelled(reason) => {
+                                        Some(format!("Runtime cancellation: {reason:?}"))
+                                    }
+                                    LoopOutcome::Failed(failure)
+                                        if outcome == TurnOutcome::Failed =>
+                                    {
+                                        Some(failure.diagnostic.message().as_str().to_owned())
+                                    }
+                                    _ => None,
+                                })
+                        })
+                        .or_else(|| {
+                            (outcome == TurnOutcome::Cancelled).then(|| {
+                                if stopping {
+                                    "Host shutdown".to_owned()
+                                } else {
+                                    "user cancellation".to_owned()
+                                }
+                            })
+                        }),
+                };
+                let Ok(binding) =
+                    Self::register_turn_save(&mut state, turn_id, Boundary::Terminal, 1)
+                else {
+                    return false;
+                };
+                state
+                    .active
+                    .as_mut()
+                    .expect("checked original Turn")
+                    .terminal_accepted = true;
+                Some((binding, vec![entry]))
+            };
+            self.publish(&mut state);
+            save
+        };
+        if let Some((binding, entries)) = save
+            && self.persist_registered(binding, entries).await.is_err()
+        {
+            return false;
+        }
+        true
+    }
 }
 pub(super) async fn checked_save(
     future: impl Future<Output = Result<PersistenceState, Fault>>,
@@ -776,6 +695,53 @@ fn stale_history() -> Fault {
         FaultKind::SessionInternalUnexpected,
         "history work does not match its original Turn, Load, and execution range",
     )
+}
+
+pub(super) struct SessionHistory {
+    pub(super) session: Arc<SessionController>,
+    pub(super) turn_id: TurnId,
+}
+impl LoopHistory for SessionHistory {
+    fn append<'a>(
+        &'a self,
+        loop_id: LoopId,
+        offset: usize,
+        items: &'a [HistoryItem],
+    ) -> HistoryFuture<'a> {
+        Box::pin(async move {
+            let result = self
+                .session
+                .accept_history(&self.turn_id, loop_id, offset, items)
+                .await;
+            // Observe the Host's accepted force fence at the Runtime boundary,
+            // even if direct-owner traversal has not reached this Session yet.
+            // Save completion is never cancelled, but subsequent business is.
+            if !self.session.access.execution_allowed_owned() {
+                let handle = {
+                    let state = self.session.state.lock().expect("Session mutex poisoned");
+                    state
+                        .active
+                        .as_ref()
+                        .filter(|active| {
+                            active.info.id == self.turn_id && active.loop_id == Some(loop_id)
+                        })
+                        .and_then(|active| active.handle.clone())
+                };
+                if let Some(handle) = handle {
+                    handle.shutdown();
+                }
+            }
+            result.map_err(|_| {
+                DiagnosticSummary::new(
+                    DiagnosticCode::ContextFailed,
+                    DiagnosticCategory::Context,
+                    Text::new("Session could not confirm its history save boundary"),
+                    false,
+                )
+                .expect("static diagnostic")
+            })
+        })
+    }
 }
 
 #[cfg(test)]

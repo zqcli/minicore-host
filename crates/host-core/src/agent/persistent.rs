@@ -103,7 +103,7 @@ impl AgentOwner {
                 creating: 0,
                 creation_committed: true,
                 resources_released: false,
-                host_shutdown_phase: 0,
+                host_shutdown_strategy: None,
                 retirement_joining: false,
                 executor: tokio::runtime::Handle::try_current().ok(),
                 stop_task: None,

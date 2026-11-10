@@ -1,4 +1,5 @@
 use super::*;
+use crate::TurnCapability;
 use crate::collaboration::*;
 
 impl Host {

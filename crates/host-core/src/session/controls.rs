@@ -18,27 +18,6 @@ impl SessionController {
         )
         .map(|_| ())
     }
-    pub(crate) fn input_list(&self, caller: &CallerContext) -> Result<InputList, Fault> {
-        self.access.read(caller, || {
-            self.ensure_visible()?;
-            let state = self.state.lock().expect("Session mutex poisoned");
-            let entry = |queued: &QueuedInput| QueuedInputRecord {
-                input: queued.message.clone(),
-                source: queued.source.clone(),
-                queue: queued.queue,
-                order: queued.order,
-            };
-            Ok(InputList {
-                host_id: self.host_id.clone(),
-                host_incarnation: self.incarnation.clone(),
-                agent_id: self.agent_id.clone(),
-                session_id: self.id.clone(),
-                controller_revision: state.controller_revision,
-                next_step: state.next_step.iter().map(entry).collect(),
-                next_turn: state.next_turn.iter().map(entry).collect(),
-            })
-        })
-    }
     pub(crate) fn remove_control(
         &self,
         caller: &CallerContext,
@@ -157,18 +136,6 @@ impl SessionController {
             controller_revision: state.controller_revision,
         }
     }
-    pub(super) fn finish_load_resume(&self, state: &mut SessionState) {
-        if state.resume_after_load.take() == Some(state.pause_generation)
-            && state.lifecycle == SessionLifecycle::Open
-            && !state.host_stopping
-            && self.access.execution_allowed_owned()
-            && state.block_reason.is_none()
-        {
-            state.paused = false;
-            state.failure_paused = false;
-            state.unloaded_with_input = false;
-        }
-    }
     pub(super) fn retain_control(state: &mut SessionState, receipt: Receipt) {
         state
             .controls
@@ -182,158 +149,6 @@ impl SessionController {
             return Vec::new();
         }
         state.controls.get(operation).cloned().unwrap_or_default()
-    }
-    pub(crate) fn control(
-        self: &Arc<Self>,
-        caller: &CallerContext,
-        request: SessionControlRequest,
-        kind: SessionControlKind,
-    ) -> Result<SessionControlReceipt, Fault> {
-        if matches!(kind, SessionControlKind::Load | SessionControlKind::Resume) {
-            self.ensure_executor()?;
-        }
-        let (receipt, record) = self.access.accept(caller, || {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let previous = diagnostics::Schedule::capture(&state);
-            match kind {
-                SessionControlKind::Pause => {
-                    Self::open(&state)?;
-                    state.pause_generation =
-                        state.pause_generation.checked_add(1).ok_or_else(|| {
-                            Fault::new(
-                                FaultKind::SessionInternalUnexpected,
-                                "pause generation exhausted",
-                            )
-                        })?;
-                    state.paused = true;
-                    self.publish(&mut state);
-                }
-                SessionControlKind::Resume => {
-                    if state.history_work.is_some() || state.record_work.is_some() {
-                        let resume_scheduling =
-                            self.access.execution_allowed_owned() && !state.host_stopping;
-                        self.start_save_continuations(&mut state, resume_scheduling)?;
-                    } else if self.resume_scope_cleanup(&mut state) {
-                        // Explicitly continue the registered cleanup only, even
-                        // during force shutdown. This never restarts business work.
-                    } else {
-                        self.access.ensure_execution_owned()?;
-                        Self::open(&state)?;
-                        if state.block_reason.as_ref().is_some_and(|fault| {
-                            matches!(
-                                fault.kind(),
-                                Some(
-                                    FaultKind::SessionResourceMissing
-                                        | FaultKind::SessionConfigInvalid
-                                        | FaultKind::SessionConfigConflict
-                                )
-                            )
-                        }) {
-                            // Explicit resume permits one fresh preparation of
-                            // queued input; the driver rechecks dependencies
-                            // before binding it and retains any new fault.
-                            state.block_reason = None;
-                        }
-                        if state.residency == Residency::Loading {
-                            state.resume_after_load = Some(state.pause_generation);
-                            self.publish(&mut state);
-                        } else if state.info.mode == StorageMode::Persistent
-                            && (!state.history_loaded
-                                || state.block_reason.as_ref().is_some_and(|fault| {
-                                    fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
-                                }))
-                        {
-                            self.start_load_owned(&mut state, true, request.operation_id.clone())?;
-                        } else {
-                            if let Some(fault) = &state.block_reason {
-                                return Err(fault.clone());
-                            }
-                            state.paused = false;
-                            state.failure_paused = false;
-                            state.unloaded_with_input = false;
-                            self.publish(&mut state);
-                        }
-                    }
-                }
-                SessionControlKind::Load => {
-                    self.access.ensure_execution_owned()?;
-                    self.start_load_owned(&mut state, false, request.operation_id.clone())?;
-                }
-                SessionControlKind::Unload => {
-                    Self::open(&state)?;
-                    if state.active.is_some()
-                        || state.compaction.is_some()
-                        || state.history_work.is_some()
-                        || state.preparing
-                        || state.record_work.as_ref().is_some_and(|work| work.running)
-                    {
-                        return Err(Fault::new(
-                            FaultKind::SessionBusy,
-                            "Session still owns execution or save work",
-                        ));
-                    }
-                    if !state.next_step.is_empty() || !state.next_turn.is_empty() {
-                        state.unloaded_with_input = true;
-                    }
-                    state.residency = Residency::Unloaded;
-                    state.load_id = None;
-                    if state.info.mode == StorageMode::Persistent {
-                        state.history_loaded = false;
-                    }
-                    self.publish(&mut state);
-                }
-            }
-            let record = self.scheduling_record(
-                &state,
-                previous,
-                match kind {
-                    SessionControlKind::Pause => "pause",
-                    SessionControlKind::Resume => "resume",
-                    SessionControlKind::Load => "load",
-                    SessionControlKind::Unload => "unload",
-                },
-                Some(&request.operation_id),
-            );
-            let receipt = SessionControlReceipt {
-                kind,
-                host_id: self.host_id.clone(),
-                host_incarnation: self.incarnation.clone(),
-                operation_id: request.operation_id,
-                agent_id: self.agent_id.clone(),
-                session_id: self.id.clone(),
-                result: Self::control_facts(&state),
-            };
-            Self::retain_control(&mut state, Receipt::SessionControl(receipt.clone()));
-            Ok((receipt, record))
-        })?;
-        diagnostic::emit(record);
-        if kind == SessionControlKind::Resume {
-            self.wake();
-        }
-        Ok(receipt)
-    }
-    // Legacy test convenience calls use the same acceptance and state mutation.
-    #[cfg(test)]
-    pub(crate) fn pause(self: &Arc<Self>, caller: &CallerContext) -> Result<(), Fault> {
-        self.control(
-            caller,
-            SessionControlRequest {
-                operation_id: OperationId::new().unwrap(),
-            },
-            SessionControlKind::Pause,
-        )
-        .map(|_| ())
-    }
-    #[cfg(test)]
-    pub(crate) fn resume(self: &Arc<Self>, caller: &CallerContext) -> Result<(), Fault> {
-        self.control(
-            caller,
-            SessionControlRequest {
-                operation_id: OperationId::new().unwrap(),
-            },
-            SessionControlKind::Resume,
-        )
-        .map(|_| ())
     }
     pub(crate) fn cancel(
         &self,
@@ -444,61 +259,52 @@ impl SessionController {
         self.handoff_delegation_owned();
         Ok((result, receipt))
     }
-    pub(super) fn apply_close_locked(&self, state: &mut SessionState) -> Option<LoopHandle> {
-        if state.lifecycle == SessionLifecycle::Closed {
-            None
-        } else {
-            if state.lifecycle == SessionLifecycle::Open {
-                state.end_reason = Some("explicit close".into());
+}
+
+impl SessionController {
+    pub(crate) fn set_agent_enabled(
+        self: &Arc<Self>,
+        enabled: bool,
+        operation: Option<&OperationId>,
+    ) {
+        let (handle, record) = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            if state.releasing || state.released || state.reclaimed {
+                return;
             }
-            state.lifecycle = SessionLifecycle::Closing;
-            Self::cancel_compaction_locked(state);
-            clear_inbox(state);
-            let handle = state.active.as_mut().and_then(|active| {
-                if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
-                    active._activation.expire();
-                    active.info.state = TurnState::Cancelling;
-                }
-                active.handle.clone()
-            });
-            Self::finish_memory_close(state);
-            self.publish(state);
-            handle
-        }
-    }
-    pub(super) fn close_owned(
-        &self,
-        operation: OperationId,
-    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>, Vec<Record>), Fault> {
-        self.start_scope_cleanup_owned();
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        Self::available(&state)?;
-        let previous = state.lifecycle;
-        let cancellable = Self::cancellable(&state);
-        let handle = self.apply_close_locked(&mut state);
-        let records = self.close_records(
-            &state,
-            previous,
-            cancellable,
-            "close",
-            Some(operation.clone()),
-        );
-        let receipt = SessionCloseReceipt {
-            kind: SessionCloseKind::SessionClose,
-            host_id: self.host_id.clone(),
-            host_incarnation: self.incarnation.clone(),
-            operation_id: operation,
-            agent_id: self.agent_id.clone(),
-            session_id: self.id.clone(),
-            result: SessionCloseResult {
-                lifecycle: match state.lifecycle {
-                    SessionLifecycle::Closed => SessionCloseLifecycle::Closed,
-                    _ => SessionCloseLifecycle::Closing,
-                },
-                controller_revision: state.controller_revision,
-            },
+            let newly_claimed = !enabled && Self::cancellable(&state);
+            if !enabled {
+                Self::cancel_compaction_locked(&mut state);
+            }
+            let handle = if !enabled {
+                state.active.as_mut().and_then(|active| {
+                    if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        active._activation.expire();
+                        active.info.state = TurnState::Cancelling;
+                        active.handle.clone()
+                    } else {
+                        None
+                    }
+                })
+            } else {
+                None
+            };
+            self.publish(&mut state);
+            let record = self.cancel_claim_record(
+                &state,
+                newly_claimed,
+                "agent_disabled",
+                operation.cloned(),
+                true,
+            );
+            (handle, record)
         };
-        Self::retain_control(&mut state, Receipt::SessionClose(receipt.clone()));
-        Ok((receipt, handle, records))
+        diagnostic::emit(record);
+        if let Some(handle) = handle {
+            handle.cancel();
+        }
+        if enabled {
+            self.wake();
+        }
     }
 }

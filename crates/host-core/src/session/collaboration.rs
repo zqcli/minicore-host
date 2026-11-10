@@ -13,9 +13,6 @@ pub(super) struct DelegationSlot {
     discarded: Vec<MessageId>,
 }
 impl SessionController {
-    pub(crate) fn wake_owned(self: &Arc<Self>) {
-        self.wake();
-    }
     pub(crate) fn register_scope_owned(
         self: &Arc<Self>,
         hooks: Arc<dyn ScopeHooks>,
@@ -504,39 +501,6 @@ impl SessionController {
             scope.root_closed();
         }
     }
-    pub(crate) async fn join_close_owned(&self) -> Result<(), Fault> {
-        loop {
-            let changed = self.changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-            {
-                let state = self.state.lock().expect("Session mutex poisoned");
-                if let Some(fault) = &state.close_fault {
-                    return Err(fault.clone());
-                }
-                if state.released || state.reclaimed {
-                    return Ok(());
-                }
-                if state.lifecycle == SessionLifecycle::Closed
-                    && !state.driver_running
-                    && !state.handoff_pending
-                    && !state.scope_cleanup_pending
-                    && state.history_work.is_none()
-                    && state.record_work.is_none()
-                {
-                    return Ok(());
-                }
-                if let Some(fault) = state
-                    .history_work
-                    .as_ref()
-                    .and_then(|work| work.fault.clone())
-                {
-                    return Err(fault);
-                }
-            }
-            changed.await;
-        }
-    }
 }
 
 impl SessionController {
@@ -564,34 +528,6 @@ impl SessionController {
         let closed = self.closed_record(&state, previous);
         drop(state);
         diagnostic::emit(closed);
-    }
-}
-
-impl SessionController {
-    pub(super) fn finish_memory_close(state: &mut SessionState) {
-        if state.lifecycle == SessionLifecycle::Closing
-            && state.info.mode == StorageMode::Memory
-            && state.active.is_none()
-            && state.compaction.is_none()
-            && !state.preparing
-            && state.history_work.is_none()
-            && state.record_work.is_none()
-            && !state.handoff_pending
-            && !state.scope_cleanup_pending
-            && state.close_fault.is_none()
-            && !state
-                .delegation
-                .as_ref()
-                .is_some_and(DelegationSlot::needs_handoff)
-            && state
-                .root_scope
-                .as_ref()
-                .is_none_or(|scope| scope.pending.load(Ordering::SeqCst) == 0)
-        {
-            state.lifecycle = SessionLifecycle::Closed;
-            state.residency = Residency::Unloaded;
-            state.load_id = None;
-        }
     }
 }
 

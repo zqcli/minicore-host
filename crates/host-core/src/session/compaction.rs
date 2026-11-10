@@ -1,26 +1,16 @@
 //! One Session owner for utility work, its commit claim and its original save.
 //! Runtime prompt waiters may disappear; the registered task and save may not.
 use super::*;
+use crate::CompactionResourceFuture;
+mod prompt;
 use minicore_host_compaction::{self as engine, CompactionCandidate, HistorySnapshot};
 use minicore_host_storage::CompactionProjection;
-use minicore_runtime::{
-    HistoryView,
-    model::{Model, ModelCallContext, ModelLimits, ModelRequest, ReasoningPreference},
-    prompt::{PreparedPrompt, PromptError, PromptFuture, PromptProvider, PromptRequest},
-    tools::ToolSpec,
-};
+use minicore_runtime::model::{Model, ModelCallContext};
+use minicore_runtime::prompt::PromptError;
+use prompt::RequestHistory;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-pub type CompactionResourceFuture =
-    Pin<Box<dyn Future<Output = Result<BoundCompactionResources, Fault>> + Send>>;
-#[derive(Clone)]
-pub struct BoundCompactionResources {
-    pub model: Arc<dyn Model>,
-    pub reasoning: ReasoningPreference,
-    pub tools: Vec<ToolSpec>,
-    pub prompt: Arc<dyn PromptProvider>,
-}
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum CompactionBinding {
     Manual {
@@ -114,96 +104,6 @@ impl CompactionWork {
 pub(super) struct FinishedManualCompaction {
     outcome: CompactionOutcome,
     cancellation_requested: bool,
-}
-
-/// Base/appended retain the actual internal Loop distinction. Only the
-/// unhanded suffix is protected; earlier batches of this same Turn are eligible.
-struct RequestHistory {
-    input_provenance: input_provenance::InputProvenance,
-    source: HistorySnapshot,
-    base_len: usize,
-    preserve_from: usize,
-    previous_coverage: u64,
-}
-impl RequestHistory {
-    fn new(state: &SessionState, raw_base: usize, unhanded: &[HistoryItem]) -> Result<Self, Fault> {
-        let covered = state
-            .projection
-            .as_ref()
-            .map_or(0, |value| value.covered_items);
-        let covered_index = usize::try_from(covered).map_err(|_| stale())?;
-        if raw_base > state.history.len() || covered_index > state.history.len() {
-            return Err(stale());
-        }
-        let mut items = state
-            .projection
-            .as_ref()
-            .map(|value| vec![HistoryItem::Summary(value.summary.clone())])
-            .unwrap_or_default();
-        let mut input_provenance = input_provenance::InputProvenance::default();
-        if covered_index < raw_base {
-            input_provenance.append_range(
-                &state.input_provenance,
-                covered_index..raw_base,
-                items.len(),
-            );
-            items.extend_from_slice(&state.history[covered_index..raw_base]);
-        }
-        let base_len = items.len();
-        input_provenance.append_range(
-            &state.input_provenance,
-            raw_base.max(covered_index)..state.history.len(),
-            items.len(),
-        );
-        items.extend_from_slice(&state.history[raw_base.max(covered_index)..]);
-        let mut preserve_from = items.len();
-        // A genuinely incomplete *accepted* tail is not a closed exchange for
-        // the durable marker. Fresh, still-unhanded input cannot close it in
-        // the journal. Keep that one group intact until a later accepted item
-        // establishes its end, just as the storage coverage validator requires.
-        if let Some(start) = incomplete_tail(&state.history) {
-            preserve_from = usize::from(state.projection.is_some()) + start - covered_index;
-        }
-        input_provenance.append_unhanded(items.len(), unhanded, state.active.as_ref())?;
-        items.extend_from_slice(unhanded);
-        Ok(Self {
-            input_provenance,
-            source: HistorySnapshot {
-                revision: state.history_position,
-                items: items.into(),
-            },
-            base_len,
-            preserve_from,
-            previous_coverage: covered,
-        })
-    }
-    fn view(&self) -> HistoryView<'_> {
-        HistoryView::new(
-            &self.source.items[..self.base_len],
-            &self.source.items[self.base_len..],
-        )
-    }
-}
-
-fn incomplete_tail(raw: &[HistoryItem]) -> Option<usize> {
-    let start = raw
-        .iter()
-        .rposition(|item| !matches!(item, HistoryItem::ToolResult(_)))?;
-    let HistoryItem::Assistant(assistant) = &raw[start] else {
-        return None;
-    };
-    assistant
-        .content
-        .iter()
-        .filter_map(minicore_runtime::model::AssistantPart::as_tool_call)
-        .any(|call| {
-            !raw[start + 1..].iter().any(|item| matches!(item,
-            HistoryItem::ToolResult(result) if result.loop_id == assistant.loop_id
-                && result.request_index == assistant.request_index
-                && &result.call_id == call.tool_call_id() && &result.tool_name == call.name()
-        ))
-        })
-        .then_some(start)
 }
 
 impl SessionController {
@@ -483,40 +383,15 @@ impl SessionController {
         };
         let deadline =
             tokio::time::Instant::now() + Duration::from_millis(config.execution.model_timeout_ms);
-        let prompt = resources.prompt.prepare(PromptRequest {
-            loop_id,
-            request_index: 0,
-            history: HistoryView::new(&source.items, &[]),
-            model: resources.model.descriptor(),
-            reasoning: resources.reasoning,
-            tools: &resources.tools,
-            cancellation: cancellation.clone(),
-            deadline,
-        });
-        let prompt = tokio::select! {
-            _ = cancellation.cancelled() => Err(PromptError::Cancelled),
-            result = tokio::time::timeout_at(deadline, prompt) => result.unwrap_or(Err(PromptError::Cancelled)),
-        };
-        let plan = prompt
-            .and_then(|prompt| history.input_provenance.project(&source.items, prompt))
-            .map_err(|error| failure(error.to_string()))
-            .and_then(|prompt| {
-                let request = ModelRequest::new(
-                    prompt.messages,
-                    resources.tools.clone(),
-                    ModelLimits::default(),
-                    resources.reasoning,
-                )
-                .map_err(|error| failure(error.to_string()))?;
-                engine::prepare(
-                    source.clone(),
-                    source.items.len(),
-                    resources.model.descriptor(),
-                    &config.execution.compaction,
-                    request,
-                )
-                .map_err(|error| failure(error.to_string()))
-            });
+        let plan = history
+            .prepare_manual(
+                &resources,
+                loop_id,
+                &config.execution.compaction,
+                &cancellation,
+                deadline,
+            )
+            .await;
         match plan {
             Ok(Some(plan)) if self.plan_advances(binding, &plan) => {
                 self.generate_and_commit(
@@ -892,53 +767,6 @@ impl SessionController {
             changed.await;
         }
     }
-    pub(super) fn bind_compaction_prompt(
-        self: &Arc<Self>,
-        turn_id: &TurnId,
-        config: &SessionConfig,
-        execution: &ExecutionConfig,
-    ) -> Result<ExecutionConfig, Fault> {
-        ExecutionConfig::new(
-            execution.model().clone(),
-            execution.reasoning(),
-            execution.tools().clone(),
-            execution.policy().cloned(),
-            Arc::new(SessionPrompt {
-                session: Arc::downgrade(self),
-                turn_id: turn_id.clone(),
-                inner: execution.prompt().clone(),
-                model: execution.model().clone(),
-                settings: config.execution.compaction.clone(),
-            }),
-        )
-        .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))
-    }
-    fn request_history(
-        &self,
-        turn_id: &TurnId,
-        request: &PromptRequest<'_>,
-    ) -> Result<(RequestHistory, LoadId), Fault> {
-        let state = self.state.lock().expect("Session mutex poisoned");
-        let active = state
-            .active
-            .as_ref()
-            .filter(|active| &active.info.id == turn_id && active.loop_id == Some(request.loop_id))
-            .ok_or_else(stale)?;
-        if active.accepted > request.history.appended().len()
-            || state.history.len() != active.raw_base_len + active.accepted
-            || request.history.base().len() != active.raw_base_len
-        {
-            return Err(stale());
-        }
-        Ok((
-            RequestHistory::new(
-                &state,
-                active.raw_base_len,
-                &request.history.appended()[active.accepted..],
-            )?,
-            active.info.load_id.clone(),
-        ))
-    }
     fn start_automatic(
         self: &Arc<Self>,
         binding: CompactionBinding,
@@ -1040,117 +868,9 @@ impl SessionController {
         Ok(completion)
     }
 }
-struct SessionPrompt {
-    session: Weak<SessionController>,
-    turn_id: TurnId,
-    inner: Arc<dyn PromptProvider>,
-    model: Arc<dyn Model>,
-    settings: CompactionSettings,
-}
-impl PromptProvider for SessionPrompt {
-    fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
-        Box::pin(async move {
-            let owner = self.session.upgrade().ok_or(PromptError::Cancelled)?;
-            let (history, load_id) = owner
-                .request_history(&self.turn_id, &request)
-                .map_err(|_| PromptError::InvalidHistory)?;
-            let prompt = self.project(&history, &request).await?;
-            if !self.settings.enabled {
-                return Ok(prompt);
-            }
-            let normal = ModelRequest::new(
-                prompt.messages.clone(),
-                request.tools.to_vec(),
-                ModelLimits::default(),
-                request.reasoning,
-            )
-            .map_err(|_| PromptError::InvalidHistory)?;
-            if !engine::estimate_context(request.model, &self.settings, &normal)
-                .map_err(|_| PromptError::InvalidHistory)?
-                .automatic_due
-            {
-                return Ok(prompt);
-            }
-            let Some(plan) = engine::prepare(
-                history.source.clone(),
-                history.preserve_from,
-                request.model,
-                &self.settings,
-                normal,
-            )
-            .map_err(|_| PromptError::InvalidHistory)?
-            else {
-                return Ok(prompt);
-            };
-            // A/F may rebuild the same request after input arrives. Merely
-            // resummarizing the previous summary is not progress or new work.
-            if plan.covered().end <= usize::from(history.previous_coverage > 0) {
-                return Ok(prompt);
-            }
-            let binding = CompactionBinding::Automatic {
-                turn_id: self.turn_id.clone(),
-                load_id,
-                loop_id: request.loop_id,
-                request_index: request.request_index,
-            };
-            let mut completion = owner
-                .start_automatic(
-                    binding,
-                    &history,
-                    plan,
-                    self.model.clone(),
-                    request.cancellation.child_token(),
-                    request.deadline,
-                )
-                .map_err(|_| PromptError::Cancelled)?;
-            loop {
-                if let Some(result) = completion.borrow_and_update().clone() {
-                    result.map_err(|_| PromptError::InvalidHistory)?;
-                    break;
-                }
-                completion
-                    .changed()
-                    .await
-                    .map_err(|_| PromptError::Cancelled)?;
-            }
-            let (history, _) = owner
-                .request_history(&self.turn_id, &request)
-                .map_err(|_| PromptError::InvalidHistory)?;
-            self.project(&history, &request).await
-        })
-    }
-}
-impl SessionPrompt {
-    async fn project(
-        &self,
-        history: &RequestHistory,
-        request: &PromptRequest<'_>,
-    ) -> Result<PreparedPrompt, PromptError> {
-        let prompt = self
-            .inner
-            .prepare(PromptRequest {
-                loop_id: request.loop_id,
-                request_index: request.request_index,
-                history: history.view(),
-                model: request.model,
-                reasoning: request.reasoning,
-                tools: request.tools,
-                cancellation: request.cancellation.clone(),
-                deadline: request.deadline,
-            })
-            .await?;
-        history
-            .input_provenance
-            .project(&history.source.items, prompt)
-    }
-}
 fn failure(message: impl Into<String>) -> Fault {
     Fault::new(FaultKind::SessionCompactionFailed, message)
 }
 fn stale() -> Fault {
     failure("compaction no longer matches its original Session history and execution")
 }
-
-#[cfg(test)]
-#[path = "input_provenance_tests.rs"]
-mod input_provenance_tests;

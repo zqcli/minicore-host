@@ -1,5 +1,8 @@
+mod history;
+mod output;
 mod saved;
 
+use super::observation::TurnObservation;
 use super::*;
 use crate::{
     MessageData, MessageSnapshot, TurnDetailsData, TurnDetailsSnapshot, TurnHistoryItemData,
@@ -128,6 +131,152 @@ impl SessionController {
                         .collect(),
                 },
             }))
+        })
+    }
+    pub(crate) fn info(&self, caller: &CallerContext) -> Result<SessionInfo, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            Ok(self
+                .state
+                .lock()
+                .expect("Session mutex poisoned")
+                .info
+                .clone())
+        })
+    }
+    pub(crate) fn snapshot(&self, caller: &CallerContext) -> Result<SessionSnapshot, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            Ok(self.snapshots.borrow().clone())
+        })
+    }
+    pub(crate) fn message(
+        &self,
+        caller: &CallerContext,
+        id: &MessageId,
+    ) -> Result<MessageRecord, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            self.state
+                .lock()
+                .expect("Session mutex poisoned")
+                .messages
+                .iter()
+                .rev()
+                .find(|message| &message.input.message_id == id)
+                .cloned()
+                .ok_or_else(|| {
+                    Fault::new(
+                        FaultKind::SessionInputNotFound,
+                        "message is not held by this Session",
+                    )
+                })
+        })
+    }
+    pub(crate) fn history(&self, caller: &CallerContext) -> Result<Vec<HistoryItem>, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            if !state.history_loaded {
+                return Err(Fault::new(
+                    FaultKind::SessionHistoryLoadFailed,
+                    "history has not yet been loaded and validated",
+                ));
+            }
+            Ok(state.history.clone())
+        })
+    }
+
+    pub(crate) fn turn_info(&self, caller: &CallerContext, id: &TurnId) -> Result<TurnInfo, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            state
+                .active
+                .as_ref()
+                .filter(|active| &active.info.id == id)
+                .map(|active| active.info.clone())
+                .or_else(|| state.completed.get(id).map(|result| result.info.clone()))
+                .ok_or_else(|| {
+                    Fault::new(
+                        FaultKind::SessionTurnNotFound,
+                        "Turn is not held by this Session",
+                    )
+                })
+        })
+    }
+    pub(crate) fn turns(&self, caller: &CallerContext) -> Result<Vec<TurnInfo>, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let mut turns = state
+                .completion_order
+                .iter()
+                .filter_map(|id| state.completed.get(id).map(|result| result.info.clone()))
+                .collect::<Vec<_>>();
+            if let Some(active) = &state.active {
+                turns.push(active.info.clone());
+            }
+            Ok(turns)
+        })
+    }
+    pub(crate) fn turn_result(
+        &self,
+        caller: &CallerContext,
+        id: &TurnId,
+    ) -> Result<TurnResult, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            self.state
+                .lock()
+                .expect("Session mutex poisoned")
+                .completed
+                .get(id)
+                .map(|held| held.result.clone())
+                .ok_or_else(|| {
+                    Fault::new(
+                        FaultKind::SessionTurnNotFound,
+                        "completed Turn result is not held by this Session",
+                    )
+                })
+        })
+    }
+    #[cfg(test)]
+    pub(crate) async fn wait_turn(
+        &self,
+        caller: &CallerContext,
+        id: &TurnId,
+    ) -> Result<TurnResult, Fault> {
+        loop {
+            let notified = self.changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let info = self.turn_info(caller, id)?;
+            if info.state == TurnState::Finished {
+                return self.turn_result(caller, id);
+            }
+            notified.await;
+        }
+    }
+    pub(crate) fn input_list(&self, caller: &CallerContext) -> Result<InputList, Fault> {
+        self.access.read(caller, || {
+            self.ensure_visible()?;
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let entry = |queued: &QueuedInput| QueuedInputRecord {
+                input: queued.message.clone(),
+                source: queued.source.clone(),
+                queue: queued.queue,
+                order: queued.order,
+            };
+            Ok(InputList {
+                host_id: self.host_id.clone(),
+                host_incarnation: self.incarnation.clone(),
+                agent_id: self.agent_id.clone(),
+                session_id: self.id.clone(),
+                controller_revision: state.controller_revision,
+                next_step: state.next_step.iter().map(entry).collect(),
+                next_turn: state.next_turn.iter().map(entry).collect(),
+            })
         })
     }
 }
