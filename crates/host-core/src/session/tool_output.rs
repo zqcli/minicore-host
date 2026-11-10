@@ -77,6 +77,28 @@ impl ToolOutputLease {
     pub fn source(&self) -> &ToolCallIdentity {
         &self.source
     }
+    /// Observe the trusted command owner's actual wait/cleanup facts. This is
+    /// diagnostic-only: it grants no admission, confirms no cleanup and cannot
+    /// alter the original command result. Call outside the adapter's lock.
+    pub fn record_process_exit(
+        &self,
+        pid: u32,
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+        process_waited: bool,
+        cleanup_confirmed: bool,
+    ) {
+        diagnostics::process_exit(
+            &self.source,
+            self.sink.invocation.tool_name.as_str(),
+            pid,
+            exit_code,
+            signal,
+            process_waited,
+            cleanup_confirmed,
+        )
+        .emit();
+    }
     /// Record an actual mutation observation under this original invocation.
     /// This retained Session journal is not a new durable history database.
     pub fn record_edit(
@@ -122,7 +144,9 @@ impl ToolOutputLease {
             .tools
             .get_mut(&self.source.tool_call_id)
             .unwrap();
-        session.publish_tool_finished(self.source.clone(), record, revision);
+        let diagnostic = session.publish_tool_finished(self.source.clone(), record, revision);
+        drop(state);
+        diagnostic::emit(diagnostic);
         Ok(())
     }
 

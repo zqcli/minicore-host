@@ -324,3 +324,82 @@ impl SessionController {
         records
     }
 }
+
+fn tool_context(source: &ToolCallIdentity) -> Context {
+    Context {
+        tool_call_id: Some(source.tool_call_id.clone()),
+        ..turn_context(&source.turn)
+    }
+}
+pub(super) fn tool_finished(
+    source: &ToolCallIdentity,
+    state: &crate::observation::ToolCallStateData,
+    outcome: minicore_runtime::tools::ToolResultOutcome,
+) -> Record {
+    use minicore_runtime::tools::ToolResultOutcome;
+    Record::new(
+        event(
+            Level::DEBUG,
+            Scope::Runtime,
+            "session.tools",
+            "tool.finished",
+            "Original tool result and its actual owned cleanup are complete",
+            &["tool_name", "response_index", "runner_revision", "outcome"],
+        ),
+        EventData::default()
+            .context(tool_context(source))
+            .attribute("tool_name", state.name.as_str())
+            .attribute("response_index", state.response_index)
+            .attribute("runner_revision", state.runner_revision)
+            .attribute(
+                "outcome",
+                match outcome {
+                    ToolResultOutcome::Success => "success",
+                    ToolResultOutcome::Failed => "failed",
+                    ToolResultOutcome::Denied => "denied",
+                    ToolResultOutcome::Cancelled => "cancelled",
+                    ToolResultOutcome::InputProvided => "input_provided",
+                },
+            ),
+    )
+}
+pub(super) fn process_exit(
+    source: &ToolCallIdentity,
+    name: &str,
+    pid: u32,
+    exit_code: Option<i32>,
+    signal: Option<i32>,
+    process_waited: bool,
+    cleanup_confirmed: bool,
+) -> Record {
+    let mut data = EventData::default()
+        .context(tool_context(source))
+        .attribute("tool_name", name)
+        .attribute("pid", u64::from(pid))
+        .attribute("process_waited", process_waited)
+        .attribute("cleanup_confirmed", cleanup_confirmed);
+    if let Some(code) = exit_code {
+        data = data.attribute("exit_code", i64::from(code));
+    }
+    if let Some(signal) = signal {
+        data = data.attribute("signal", i64::from(signal));
+    }
+    Record::new(
+        event(
+            Level::DEBUG,
+            Scope::Runtime,
+            "session.tools",
+            "tool.process_observed",
+            "Command owner observed original process wait and cleanup facts",
+            &[
+                "tool_name",
+                "pid",
+                "exit_code",
+                "signal",
+                "process_waited",
+                "cleanup_confirmed",
+            ],
+        ),
+        data,
+    )
+}

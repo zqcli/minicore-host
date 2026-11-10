@@ -195,7 +195,12 @@ impl SessionController {
         }
         records
     }
-    pub(super) fn observe_history(&self, state: &mut SessionState, items: &[HistoryItem]) {
+    pub(super) fn observe_history(
+        &self,
+        state: &mut SessionState,
+        items: &[HistoryItem],
+    ) -> Vec<Record> {
+        let mut diagnostics = Vec::new();
         let active = state.active.as_ref().expect("accepted active Turn");
         let source = self.turn_identity(&active.info);
         let base = active.response_base;
@@ -270,40 +275,40 @@ impl SessionController {
                         // history/save handoff never waits for observer timing
                         // or for a cancelled tool's actual cleanup tail.
                         record.data.result = Some(result.into());
-                        self.publish_tool_finished(
+                        diagnostics.extend(self.publish_tool_finished(
                             ToolCallIdentity {
                                 turn: source.clone(),
                                 tool_call_id: id,
                             },
                             record,
                             revision,
-                        );
+                        ));
                     }
                 }
                 _ => {}
             }
         }
+        diagnostics
     }
     pub(super) fn publish_tool_finished(
         &self,
         source: ToolCallIdentity,
         record: &mut ToolRecord,
         revision: u64,
-    ) {
+    ) -> Option<Record> {
         if record.data.state.state == ToolCallState::Finished
             || record
                 .owned_output
                 .as_ref()
                 .is_some_and(|live| live.load(Ordering::SeqCst))
         {
-            return;
+            return None;
         }
-        let Some(result) = record.data.result.clone() else {
-            return;
-        };
+        let result = record.data.result.clone()?;
         record.data.state.state = ToolCallState::Finished;
         record.data.state.outcome = Some(result.outcome);
         record.data.state.runner_revision = revision;
+        let diagnostic = diagnostics::tool_finished(&source, &record.data.state, result.outcome);
         self.access
             .observation
             .publish(ObservationEvent::State(StateEvent::Toolcall {
@@ -319,9 +324,15 @@ impl SessionController {
                     output_positions: positions(&record.output),
                 },
             }));
+        Some(diagnostic)
     }
 
-    pub(super) fn publish_cleaned_tool_results(&self, state: &mut SessionState, turn_id: &TurnId) {
+    pub(super) fn publish_cleaned_tool_results(
+        &self,
+        state: &mut SessionState,
+        turn_id: &TurnId,
+    ) -> Vec<Record> {
+        let mut diagnostics = Vec::new();
         let source = self.turn_identity(&state.active.as_ref().expect("owned active Turn").info);
         state.runner_revision = state
             .runner_revision
@@ -330,16 +341,17 @@ impl SessionController {
         let revision = state.runner_revision;
         if let Some(turn) = state.output.get_mut(turn_id) {
             for (tool_call_id, record) in &mut turn.tools {
-                self.publish_tool_finished(
+                diagnostics.extend(self.publish_tool_finished(
                     ToolCallIdentity {
                         turn: source.clone(),
                         tool_call_id: tool_call_id.clone(),
                     },
                     record,
                     revision,
-                );
+                ));
             }
         }
+        diagnostics
     }
 
     pub(super) fn observe_runtime_state(

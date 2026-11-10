@@ -515,3 +515,56 @@ other cancellation claims, actual tool/process completion and cleanup faults,
 history loader/cold-read failures, compaction and result handoff. Pinned Runtime
 still supplies no source retry-wait elapsed duration, so that SPEC requirement
 remains explicitly unavailable rather than estimated or filled with zero.
+
+### Actual tool completion and process facts
+
+The existing native ToolResult/owned-output barrier now produces a scalar
+`tool.finished` Record exactly when its original ToolCall first becomes Finished.
+`observe_history` and `publish_cleaned_tool_results` return the records to their
+existing callers. History acceptance, actual Turn tool cleanup, and the retained
+output lease emit only after their Session lock ends. The production local
+adapter already releases its map lock before calling the lease. No Runtime
+ToolFinished observation is used to manufacture a result, no additional cleanup
+or logging-state flag is added, and business history/save boundaries stay intact.
+
+`ToolOutputLease::record_process_exit` is diagnostic-only and uses its original
+Session-minted ToolCallIdentity. The one authorized `local_records::command`
+call reads only CommandResult pid, optional exit code/signal and the distinct
+actual process_waited/cleanup_confirmed facts, outside the adapter lock. It never
+reads output or cleanup error strings, grants admission, confirms cleanup or
+changes the command return. Unknown exit/signal values remain absent.
+
+The new real Host/production resources/Runtime/loopback HTTP regression executes
+bash with exit code 7, followed by a missing-file read. It compares the diagnostic
+process fields to the actual native CommandResult delivered back through Runtime,
+checks original Turn/tool IDs, exactly one completion per native result, unknown
+signal omission, and no script/path/stdout/stderr/Role/body/key leakage. An ordinary
+failed read remains a DEBUG tool result, not an infrastructure ERROR; the final
+Turn completes normally. Approval is explicitly Auto because this is not an
+approval test. No public observation listener or model/tool-result double is used.
+
+Validation is new, not recovery of lost raw logs. The first fixture compile used
+an obsolete Turn ID projection and was corrected to `done.source.turn_id`.
+The corrected test on fixed e02f741 production failed with zero process records
+rather than the required one, after all actual business/process assertions passed.
+Both red outputs are retained. A subsequent run reused that red worktree's target
+and mistakenly linked its old core artifact; it is excluded from validation.
+The old rlib lacks the new diagnostic literal while the fresh one contains it.
+Every different worktree now has a separate target; all green results below use
+a completely new target dedicated solely to this source tree.
+
+- Actual transport diagnostic focused tests: 4 passed (calls, close bridge,
+  terminal/save dual failure, and tool/process completion).
+- Core and tools all-target suites: 361 unique cases passed, 302 core plus 59
+  tools, confirmed by the combined `-- --list` output. Existing fixtures retain
+  their own explicit doubles and are not called live-provider validation.
+- Core/tools/transport all-target strict Clippy and core/tools strict rustdoc:
+  passed. Formatting and diff checks passed; dependencies and SPEC unchanged.
+
+Current raw files are `tools-red-new-environment.log`,
+`tools-red-fixed-fixture-new-environment.log`, the excluded
+`tools-green-new-environment.log`, and successful
+`tools-{green-isolated,core,module,core-module-list,clippy,doc}-new-environment.log`
+in the recovery reports directory. No full workspace or independent approval is
+claimed. Cleanup-fault, model retry/recovery, history-load, scheduling, remaining
+close/handoff and compaction diagnostics are still separate work.

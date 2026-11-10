@@ -157,6 +157,13 @@ impl LocalToolSink for SessionLocalToolSink {
             }
             (invocation.output.clone(), channels)
         };
+        output.record_process_exit(
+            result.pid,
+            result.exit_code,
+            result.signal,
+            result.process_waited,
+            result.cleanup_confirmed,
+        );
         for (channel, incomplete, empty) in channels {
             if incomplete && !output.mark_non_utf8(channel) {
                 return Err(RecordError);

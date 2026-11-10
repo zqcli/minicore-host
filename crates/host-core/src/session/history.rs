@@ -110,7 +110,7 @@ impl SessionController {
         items: &[HistoryItem],
     ) -> Result<(), Fault> {
         self.wait_compaction_boundary().await?;
-        let (binding, entries) = {
+        let (binding, entries, diagnostics) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let active = state.active.as_ref().ok_or_else(|| {
                 Fault::new(
@@ -206,10 +206,11 @@ impl SessionController {
                 .as_mut()
                 .expect("history loaded before execution")
                 .extend(items.iter().map(HistoryItemData::from));
-            self.observe_history(&mut state, items);
+            let diagnostics = self.observe_history(&mut state, items);
             self.publish(&mut state);
-            (binding, entries)
+            (binding, entries, diagnostics)
         };
+        diagnostic::emit(diagnostics);
         self.persist_registered(binding, entries).await
     }
     /// Called in the same short owner boundary that accepts these entries. The
