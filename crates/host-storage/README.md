@@ -3,6 +3,11 @@
 Object schema **1** and history schema **2**, implementing the persistence boundaries of SPEC v4.93.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
+`journal.rs` owns accepted writes and original-range save confirmation.
+`journal/read.rs` reads and decodes saved history; `journal/validation.rs` provides
+the same validator to both accepted batches and decoded records. Moving these
+implementations does not create a second history authority or a recovery service.
+
 ## Supported platform and root ownership
 
 The first implementation explicitly supports Linux. It needs a filesystem that

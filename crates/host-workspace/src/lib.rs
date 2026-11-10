@@ -23,5 +23,8 @@ pub use git::{StatusEntry, StatusEntryKind, StatusResult};
 mod changes;
 pub use changes::*;
 
+mod edits;
+pub use edits::*;
+
 mod diff;
 pub use diff::*;

@@ -1,4 +1,7 @@
 use super::*;
+use crate::CompactionProjection;
+use minicore_host_protocol::TurnId;
+use minicore_runtime::LoopId;
 use minicore_runtime::{
     UserInput,
     history::{UserHistory, UserMessageKind},

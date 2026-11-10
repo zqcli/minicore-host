@@ -43,6 +43,10 @@ Diffs compare file content, including link text for a Git symlink without follow
 
 ## Required tool-edit handoff
 
+`changes.rs` implements current Git/workspace observations and shared change
+values. `edits.rs` holds caller-owned tool evidence; `diff.rs` shares the content
+comparison implementation. Public crate exports are unchanged.
+
 `EditJournal` is a plain append-only value owned by one Session, with no I/O, locks, tasks or implicit saving. `EditRecord` retains the actual `ToolCallRef`, path, before/after snapshots and observed `Applied` / `NotApplied` / `Unknown` outcome. Each stored position plus the bound Session/ToolCall identifies a record; repeated edits of one file remain separate observations.
 
 The integrated write/edit tool owner in `host-local-tools` and its Session sink
