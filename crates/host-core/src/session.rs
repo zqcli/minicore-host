@@ -19,6 +19,7 @@ mod input_provenance;
 mod interaction;
 pub use interaction::{ApprovalAnswer, InteractionAnswerData};
 mod metadata;
+mod model;
 mod observation;
 mod tool_edits;
 mod tool_output;
@@ -1413,6 +1414,14 @@ impl SessionController {
             &resources.execution,
             ToolOutputBinding::new(self, turn_id.clone()),
         );
+        let execution = match self.bind_turn_model(&turn_id, &execution) {
+            Ok(execution) => execution,
+            Err(fault) => {
+                self.finalize(&turn_id, TurnOutcome::Failed, Some(fault))
+                    .await;
+                return;
+            }
+        };
         loop {
             let started = {
                 let mut state = self.state.lock().expect("Session mutex poisoned");
