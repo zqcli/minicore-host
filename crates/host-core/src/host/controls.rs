@@ -146,7 +146,7 @@ impl Host {
         let agent = self.agent(caller, &target.agent_id)?;
         let receipt = agent.close_session(caller, &target.session_id, request)?;
         self.ensure_retirement_watch();
-        agent.try_retire_empty_owned();
+        agent.try_retire_empty_owned(Some(&receipt.operation_id));
         self.remove_retired_agents_owned();
         Ok(receipt)
     }

@@ -276,7 +276,7 @@ impl AgentOwner {
                 state.create_tasks.remove(&task_id);
                 owner.changed.notify_waiters();
                 drop(state);
-                owner.try_retire_empty_owned();
+                owner.try_retire_empty_owned(Some(&receipt.operation_id));
                 drop(owner);
                 crate::diagnostics::emit(diagnostic);
                 let _ = sender.send(receipt);

@@ -94,7 +94,7 @@ impl AgentOwner {
                     .unwrap_or_else(|error| DataDeletion::Failed { error });
                     child.deletion_result_owned(data.clone());
                     if data.removed() {
-                        owner.remove_retired_session_owned(&child);
+                        owner.remove_retired_session_owned(&child, Some(&operation));
                     }
                     {
                         let mut state = owner.state.lock().expect("Agent mutex poisoned");
@@ -102,7 +102,7 @@ impl AgentOwner {
                         state.delete_tasks.remove(&task_id);
                     }
                     owner.changed.notify_waiters();
-                    owner.try_retire_empty_owned();
+                    owner.try_retire_empty_owned(Some(&operation));
                 }
                 .with_current_subscriber(),
             );
@@ -194,6 +194,14 @@ impl AgentOwner {
                 }
             }
         }
+        let diagnostic = (state.info.lifecycle != AgentLifecycle::Retiring).then(|| {
+            self.lifecycle_record(
+                "agent.retiring",
+                "retiring",
+                state.info.mode,
+                Some(operation.clone()),
+            )
+        });
         state.deleting = true;
         state.info.lifecycle = AgentLifecycle::Retiring;
         self.enabled.store(false, Ordering::SeqCst);
@@ -207,7 +215,7 @@ impl AgentOwner {
         // The shared admission boundary is still held, but no Agent state lock
         // crosses a child call. A Retiring receipt must not leave old Turn
         // capabilities or descendant scope admission live until a worker runs.
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = diagnostic.into_iter().collect::<Vec<_>>();
         if matches!(scope, AgentDeleteScope::Sessions { close: true, .. }) {
             for child in &children {
                 diagnostics.extend(child.fence_delete_close_owned(operation));
@@ -222,17 +230,34 @@ impl AgentOwner {
         children: Vec<Arc<SessionController>>,
         operation: OperationId,
     ) {
-        let result = AssertUnwindSafe(self.delete_agent_work(&scope, &children, &operation))
+        let mode = self.state.lock().expect("Agent mutex poisoned").info.mode;
+        let result = AssertUnwindSafe(self.delete_agent_work(&scope, &children, &operation, mode))
             .catch_unwind()
             .await
             .unwrap_or_else(|_| {
-                Err(Fault::new(
+                let fault = Fault::new(
                     FaultKind::AgentDeleteFailed,
                     "Agent deletion worker panicked",
-                ))
+                );
+                self.resource_release_failure_record(
+                    "delete_worker",
+                    mode,
+                    Some(&operation),
+                    &fault,
+                )
+                .emit();
+                Err(fault)
             });
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         state.deleting = false;
+        let diagnostic = result.as_ref().ok().map(|_| {
+            self.lifecycle_record(
+                "agent.retired",
+                "retired",
+                state.info.mode,
+                Some(operation.clone()),
+            )
+        });
         if let Err(error) = result {
             state
                 .info
@@ -242,12 +267,15 @@ impl AgentOwner {
                 .data = DataDeletion::Failed { error };
         }
         self.changed.notify_waiters();
+        drop(state);
+        crate::diagnostics::emit(diagnostic);
     }
     async fn delete_agent_work(
         self: &Arc<Self>,
         scope: &AgentDeleteScope,
         children: &[Arc<SessionController>],
         operation: &OperationId,
+        mode: StorageMode,
     ) -> Result<(), Fault> {
         let close = matches!(scope, AgentDeleteScope::Sessions { close: true, .. });
         for child in children {
@@ -327,7 +355,7 @@ impl AgentOwner {
                     }),
                 };
             if result.data.removed() {
-                self.remove_retired_session_owned(child);
+                self.remove_retired_session_owned(child, Some(operation));
             }
             let failed = match &result.data {
                 DataDeletion::Failed { error } => Some(error.clone()),
@@ -371,16 +399,36 @@ impl AgentOwner {
             tasks
         };
         for task in tasks {
-            task.await.map_err(|_| {
-                Fault::new(
-                    FaultKind::AgentDeleteFailed,
-                    "Agent worker did not join cleanly",
-                )
-            })?;
+            task.await
+                .map_err(|_| {
+                    Fault::new(
+                        FaultKind::AgentDeleteFailed,
+                        "Agent worker did not join cleanly",
+                    )
+                })
+                .inspect_err(|fault| {
+                    self.resource_release_failure_record(
+                        "delete_join",
+                        mode,
+                        Some(operation),
+                        fault,
+                    )
+                    .emit()
+                })?;
         }
         let store = self.store();
         let data = if let Some(store) = store {
-            disk(FaultKind::AgentDeleteFailed, move || store.delete_empty()).await?;
+            disk(FaultKind::AgentDeleteFailed, move || store.delete_empty())
+                .await
+                .inspect_err(|fault| {
+                    self.resource_release_failure_record(
+                        "agent_directory_delete",
+                        mode,
+                        Some(operation),
+                        fault,
+                    )
+                    .emit()
+                })?;
             DataDeletion::Deleted {}
         } else {
             DataDeletion::Reclaimed {}

@@ -25,11 +25,11 @@ impl AgentOwner {
                 continue;
             }
             if child.retire_closed_owned().await.is_ok() {
-                self.remove_retired_session_owned(&child);
+                self.remove_retired_session_owned(&child, None);
             }
         }
         self.join_empty_owner_tasks().await;
-        self.try_retire_empty_owned();
+        self.try_retire_empty_owned(None);
     }
     async fn join_empty_owner_tasks(&self) {
         let tasks = {
@@ -69,12 +69,21 @@ impl AgentOwner {
         }
         let mut state = self.state.lock().expect("Agent mutex poisoned");
         state.retirement_joining = false;
+        let diagnostic = fault.as_ref().map(|fault| {
+            self.resource_release_failure_record("retirement_join", state.info.mode, None, fault)
+        });
         if fault.is_some() {
             state.info.metadata_fault = fault;
         }
         self.changed.notify_waiters();
+        drop(state);
+        crate::diagnostics::emit(diagnostic);
     }
-    pub(super) fn remove_retired_session_owned(&self, child: &Arc<SessionController>) {
+    pub(super) fn remove_retired_session_owned(
+        &self,
+        child: &Arc<SessionController>,
+        operation: Option<&OperationId>,
+    ) {
         let removed = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             if !state
@@ -92,10 +101,12 @@ impl AgentOwner {
         };
         drop(removed);
         self.changed.notify_waiters();
+        self.session_removed_record(&child.id, child.storage_mode(), operation)
+            .emit();
     }
     /// Creation admission and this final retiring claim share AgentState. No
     /// request routed before the claim can publish into a retired owner later.
-    pub(crate) fn try_retire_empty_owned(&self) {
+    pub(crate) fn try_retire_empty_owned(&self, operation: Option<&OperationId>) {
         let tasks = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             if state.deleting
@@ -136,17 +147,32 @@ impl AgentOwner {
                 tasks
             }
         };
+        self.lifecycle_record(
+            "agent.retiring",
+            "retiring",
+            StorageMode::Memory,
+            operation.cloned(),
+        )
+        .emit();
         for task in tasks {
             if !matches!(task.now_or_never(), Some(Ok(()))) {
+                let fault = Fault::new(
+                    FaultKind::AgentInternalUnexpected,
+                    "Agent retirement task did not join cleanly",
+                );
                 self.state
                     .lock()
                     .expect("Agent mutex poisoned")
                     .info
-                    .metadata_fault = Some(Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "Agent retirement task did not join cleanly",
-                ));
+                    .metadata_fault = Some(fault.clone());
                 self.changed.notify_waiters();
+                self.resource_release_failure_record(
+                    "retirement_join",
+                    StorageMode::Memory,
+                    operation,
+                    &fault,
+                )
+                .emit();
                 return;
             }
         }
@@ -178,6 +204,13 @@ impl AgentOwner {
             state.info.lifecycle = AgentLifecycle::Retired;
         }
         self.changed.notify_waiters();
+        self.lifecycle_record(
+            "agent.retired",
+            "retired",
+            StorageMode::Memory,
+            operation.cloned(),
+        )
+        .emit();
     }
     pub(crate) fn memory_retirement_pending_owned(&self) -> bool {
         let (children, empty_pending) = {
@@ -202,12 +235,8 @@ impl AgentOwner {
                 .iter()
                 .any(|child| child.storage_mode() == StorageMode::Memory)
     }
-    pub(crate) fn is_retired_owned(&self) -> bool {
-        self.state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .info
-            .lifecycle
-            == AgentLifecycle::Retired
+    pub(crate) fn retired_mode_owned(&self) -> Option<StorageMode> {
+        let state = self.state.lock().expect("Agent mutex poisoned");
+        (state.info.lifecycle == AgentLifecycle::Retired).then_some(state.info.mode)
     }
 }

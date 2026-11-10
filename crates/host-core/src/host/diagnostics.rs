@@ -78,6 +78,51 @@ impl Host {
                 .attribute("phase", "published"),
         )
     }
+    pub(super) fn agent_removed_record(&self, id: &AgentId, mode: StorageMode) -> Record {
+        Record::new(
+            event(
+                Level::INFO,
+                Scope::Host,
+                "host.owner",
+                "host.agent_removed",
+                "Host removed its retired Agent from the direct owner index",
+                &["mode", "phase"],
+            ),
+            EventData::default()
+                .context(Context {
+                    agent_id: Some(id.clone()),
+                    ..self.diagnostic_context()
+                })
+                .attribute("mode", mode_name(mode))
+                .attribute("phase", "removed"),
+        )
+    }
+    pub(super) fn shutdown_failure_record(
+        &self,
+        phase: &'static str,
+        mode: StorageMode,
+        operation: &OperationId,
+        fault: &Fault,
+    ) -> Record {
+        Record::new(
+            event(
+                Level::ERROR,
+                Scope::Host,
+                "host.owner",
+                "host.shutdown_failed",
+                "Host could not join its owned shutdown work",
+                &["mode", "phase"],
+            ),
+            EventData::default()
+                .context(Context {
+                    operation_id: Some(operation.clone()),
+                    ..self.diagnostic_context()
+                })
+                .fault(fault)
+                .attribute("mode", mode_name(mode))
+                .attribute("phase", phase),
+        )
+    }
     pub(super) fn creation_failure_record(
         &self,
         context: Context,

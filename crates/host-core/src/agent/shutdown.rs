@@ -24,8 +24,8 @@ pub(crate) fn creation_save_fault(step: &CreateStep) -> Option<Fault> {
 }
 
 impl AgentOwner {
-    pub(crate) fn begin_host_shutdown_owned(&self, force: bool) {
-        let children = {
+    pub(crate) fn begin_host_shutdown_owned(&self, force: bool, operation: Option<&OperationId>) {
+        let (children, diagnostic) = {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             let phase = if force { 2 } else { 1 };
             if state.host_shutdown_phase >= phase {
@@ -43,12 +43,21 @@ impl AgentOwner {
                     state.info.lifecycle = AgentLifecycle::Stopping;
                 }
             }
-            state.sessions.values().cloned().collect::<Vec<_>>()
+            (
+                state.sessions.values().cloned().collect::<Vec<_>>(),
+                self.lifecycle_record(
+                    "agent.host_shutdown_started",
+                    if force { "stopping" } else { "draining" },
+                    state.info.mode,
+                    operation.cloned(),
+                ),
+            )
         };
         for child in children {
             child.begin_host_shutdown_owned(force);
         }
         self.changed.notify_waiters();
+        diagnostic.emit();
     }
 
     pub(crate) fn shutdown_status_owned(&self) -> AgentShutdownStatus {
@@ -92,7 +101,10 @@ impl AgentOwner {
 
     /// Host owns the shutdown decision; Agent retires only its direct children
     /// and its own storage handles. Persistent business lifecycle is preserved.
-    pub(crate) async fn release_host_resources_owned(self: &Arc<Self>) -> Result<(), Fault> {
+    pub(crate) async fn release_host_resources_owned(
+        self: &Arc<Self>,
+        operation: &OperationId,
+    ) -> Result<(), Fault> {
         let status = self.shutdown_status_owned();
         if !status.quiescent {
             return Err(status.fault.unwrap_or_else(|| {
@@ -102,18 +114,21 @@ impl AgentOwner {
                 )
             }));
         }
-        let children = {
+        let (children, mode) = {
             let state = self.state.lock().expect("Agent mutex poisoned");
             if state.resources_released {
                 return Ok(());
             }
-            state.sessions.values().cloned().collect::<Vec<_>>()
+            (
+                state.sessions.values().cloned().collect::<Vec<_>>(),
+                state.info.mode,
+            )
         };
         for child in children {
             child.release_host_resources_owned().await?;
             if child.storage_mode() == StorageMode::Memory {
                 child.reclaim_shutdown_memory_owned()?;
-                self.remove_retired_session_owned(&child);
+                self.remove_retired_session_owned(&child, Some(operation));
             }
         }
         // No new business may enter after the Host fence. Reconciliation only
@@ -129,12 +144,22 @@ impl AgentOwner {
             tasks
         };
         for task in tasks {
-            task.await.map_err(|_| {
-                Fault::new(
-                    FaultKind::AgentInternalUnexpected,
-                    "Agent shutdown task did not join cleanly",
-                )
-            })?;
+            task.await
+                .map_err(|_| {
+                    Fault::new(
+                        FaultKind::AgentInternalUnexpected,
+                        "Agent shutdown task did not join cleanly",
+                    )
+                })
+                .inspect_err(|fault| {
+                    self.resource_release_failure_record(
+                        "shutdown_join",
+                        mode,
+                        Some(operation),
+                        fault,
+                    )
+                    .emit()
+                })?;
         }
         drop(
             self.store
@@ -169,6 +194,25 @@ impl AgentOwner {
             state.info.lifecycle = AgentLifecycle::Stopped;
         }
         self.changed.notify_waiters();
+        let diagnostic = self.lifecycle_record(
+            if state.info.mode == StorageMode::Memory {
+                "agent.retired"
+            } else {
+                "agent.resources_released"
+            },
+            match state.info.lifecycle {
+                AgentLifecycle::Creating => "creating",
+                AgentLifecycle::Active => "active",
+                AgentLifecycle::Stopping => "stopping",
+                AgentLifecycle::Stopped => "stopped",
+                AgentLifecycle::Retiring => "retiring",
+                AgentLifecycle::Retired => "retired",
+            },
+            state.info.mode,
+            Some(operation.clone()),
+        );
+        drop(state);
+        diagnostic.emit();
         Ok(())
     }
 }

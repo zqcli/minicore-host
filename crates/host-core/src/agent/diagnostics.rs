@@ -66,6 +66,57 @@ impl AgentOwner {
                 .attribute("config_revision", info.config_revision),
         )
     }
+    pub(super) fn session_removed_record(
+        &self,
+        id: &SessionId,
+        mode: StorageMode,
+        operation_id: Option<&OperationId>,
+    ) -> Record {
+        Record::new(
+            event(
+                Level::INFO,
+                Scope::Agent,
+                "agent.owner",
+                "agent.session_removed",
+                "Agent removed its retired Session from the direct owner index",
+                &["mode", "phase"],
+            ),
+            EventData::default()
+                .context(Context {
+                    session_id: Some(id.clone()),
+                    operation_id: operation_id.cloned(),
+                    ..self.diagnostic_context()
+                })
+                .attribute("mode", mode_name(mode))
+                .attribute("phase", "removed"),
+        )
+    }
+    pub(super) fn resource_release_failure_record(
+        &self,
+        phase: &'static str,
+        mode: StorageMode,
+        operation_id: Option<&OperationId>,
+        fault: &Fault,
+    ) -> Record {
+        Record::new(
+            event(
+                Level::ERROR,
+                Scope::Agent,
+                "agent.owner",
+                "agent.resource_release_failed",
+                "Agent could not finish its owned resource release",
+                &["mode", "phase"],
+            ),
+            EventData::default()
+                .context(Context {
+                    operation_id: operation_id.cloned(),
+                    ..self.diagnostic_context()
+                })
+                .fault(fault)
+                .attribute("mode", mode_name(mode))
+                .attribute("phase", phase),
+        )
+    }
     pub(super) fn metadata_refusal_record(
         &self,
         operation_id: Option<OperationId>,

@@ -379,7 +379,7 @@ impl Host {
         state.creating -= 1;
         self.changed.notify_waiters();
         drop(state);
-        agent.try_retire_empty_owned();
+        agent.try_retire_empty_owned(Some(&receipt.operation_id));
         self.remove_retired_agents_owned();
         Ok(receipt)
     }

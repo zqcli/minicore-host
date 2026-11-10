@@ -295,3 +295,48 @@ async fn persistent_metadata_failure_and_reconcile_callbacks_leave_owner_guards(
     probe.assert_unlocked();
     shutdown(&host, &caller).await;
 }
+
+#[tokio::test]
+async fn memory_retirement_and_persistent_shutdown_callbacks_leave_all_owner_guards() {
+    for mode in [StorageMode::Memory, StorageMode::Persistent] {
+        let directory = tempfile::tempdir().unwrap();
+        let host = if mode == StorageMode::Memory {
+            Host::memory(resources()).unwrap()
+        } else {
+            Host::open_persistent(directory.path(), settings(), resources())
+                .await
+                .unwrap()
+        };
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let created = host
+            .create_agent_async(&caller, request(mode))
+            .await
+            .unwrap();
+        let agent = AgentRef {
+            host_id: created.host_id,
+            agent_id: created.agent_id.unwrap(),
+        };
+        let (probe, dispatch) = reentry();
+        probe.arm(&host, &caller, Some(agent.clone()));
+        async {
+            if mode == StorageMode::Memory {
+                host.session_close(
+                    &caller,
+                    &SessionRef {
+                        agent_id: agent.agent_id,
+                        session_id: created.session_id.unwrap(),
+                    },
+                    SessionCloseRequest {
+                        operation_id: OperationId::new().unwrap(),
+                    },
+                )
+                .unwrap();
+            }
+            shutdown(&host, &caller).await;
+        }
+        .with_subscriber(dispatch)
+        .await;
+        probe.assert_unlocked();
+    }
+}

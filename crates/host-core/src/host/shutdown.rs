@@ -123,7 +123,7 @@ impl Host {
         let stopping = matches!(children.0, HostLifecycle::Stopping | HostLifecycle::Stopped);
         if children.0 != HostLifecycle::Stopped {
             for child in children.1 {
-                child.begin_host_shutdown_owned(stopping);
+                child.begin_host_shutdown_owned(stopping, Some(&receipt.operation_id));
             }
         }
         self.publish_host_state_owned();
@@ -155,7 +155,7 @@ impl Host {
             let mut quiescent = creating == 0 && !configuration_saving;
             let mut fault = creation_fault.or(configuration_fault);
             for child in &children {
-                child.begin_host_shutdown_owned(stopping);
+                child.begin_host_shutdown_owned(stopping, Some(&operation));
                 let status = child.shutdown_status_owned();
                 drained &= status.drained;
                 quiescent &= status.quiescent;
@@ -204,20 +204,23 @@ impl Host {
                 if let Some(watcher) = watcher
                     && watcher.await.is_err()
                 {
+                    let fault = Fault::new(
+                        FaultKind::HostInternalUnexpected,
+                        "memory retirement owner did not join cleanly",
+                    );
                     self.state
                         .lock()
                         .expect("Host mutex poisoned")
-                        .shutdown_fault = Some(Fault::new(
-                        FaultKind::HostInternalUnexpected,
-                        "memory retirement owner did not join cleanly",
-                    ));
+                        .shutdown_fault = Some(fault.clone());
+                    self.shutdown_failure_record("retirement_join", mode, &operation, &fault)
+                        .emit();
                     self.publish_host_state_owned();
                     self.process_changed.notify_waiters();
                     return;
                 }
                 let mut failure = None;
                 for child in children {
-                    if let Err(error) = child.release_host_resources_owned().await {
+                    if let Err(error) = child.release_host_resources_owned(&operation).await {
                         failure = Some(error);
                         break;
                     }

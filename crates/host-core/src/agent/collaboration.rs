@@ -60,7 +60,7 @@ impl AgentOwner {
                             target.join_close_owned().await?;
                             if target.storage_mode() == StorageMode::Memory {
                                 target.retire_closed_owned().await?;
-                                owner.remove_retired_session_owned(&target);
+                                owner.remove_retired_session_owned(&target, Some(&operation));
                             }
                             Ok::<_, Fault>(())
                         }
@@ -74,7 +74,7 @@ impl AgentOwner {
                             state.close_tasks.remove(&id);
                         }
                         owner.changed.notify_waiters();
-                        owner.try_retire_empty_owned();
+                        owner.try_retire_empty_owned(Some(&operation));
                     }
                     .with_current_subscriber(),
                 );

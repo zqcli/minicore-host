@@ -290,7 +290,7 @@ impl Host {
             )
             .emit();
             if !self.access.execution_allowed_owned() {
-                agent.begin_host_shutdown_owned(true);
+                agent.begin_host_shutdown_owned(true, None);
             }
             *phase = "default_session";
             let result = agent
@@ -302,7 +302,7 @@ impl Host {
                 )
                 .await;
             agent.finish_initial_creation();
-            agent.try_retire_empty_owned();
+            agent.try_retire_empty_owned(Some(&operation));
             result
         }
         .await;

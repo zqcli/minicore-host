@@ -405,7 +405,7 @@ impl AgentOwner {
         if !persistent {
             self.clear_default_if(id);
             if child.retire_closed_immediately_owned() == Ok(true) {
-                self.remove_retired_session_owned(&child);
+                self.remove_retired_session_owned(&child, Some(&operation));
             }
             self.state
                 .lock()
@@ -413,7 +413,7 @@ impl AgentOwner {
                 .close_running
                 .remove(id);
             self.changed.notify_waiters();
-            self.try_retire_empty_owned();
+            self.try_retire_empty_owned(Some(&operation));
             return Ok(receipt);
         }
         let owner = Arc::clone(self);
@@ -428,7 +428,7 @@ impl AgentOwner {
                     child.join_close_owned().await?;
                     if child.storage_mode() == StorageMode::Memory {
                         child.retire_closed_owned().await?;
-                        owner.remove_retired_session_owned(&child);
+                        owner.remove_retired_session_owned(&child, Some(&operation));
                     }
                     Ok::<_, Fault>(())
                 }

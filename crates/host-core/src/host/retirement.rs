@@ -1,4 +1,5 @@
 use super::*;
+use tracing::{Instrument, instrument::WithSubscriber};
 
 impl Host {
     pub(super) fn ensure_retirement_watch(&self) {
@@ -28,52 +29,60 @@ impl Host {
         }
         let owner = self.self_weak.clone();
         let changed = Arc::clone(&self.changed);
-        state.retirement_watch = Some(runtime.spawn(async move {
-            loop {
-                let notified = changed.notified();
-                tokio::pin!(notified);
-                notified.as_mut().enable();
-                let Some(host) = owner.upgrade() else {
-                    return;
-                };
-                let (agents, epoch) = {
-                    let state = host.state.lock().expect("Host mutex poisoned");
-                    if matches!(
-                        state.lifecycle,
-                        HostLifecycle::Stopping | HostLifecycle::Stopped
-                    ) {
-                        return;
-                    } else {
-                        (
-                            state.agents.values().cloned().collect::<Vec<_>>(),
-                            state.retirement_epoch,
-                        )
-                    }
-                };
-                for agent in &agents {
-                    agent.reap_closed_sessions_owned().await;
-                }
-                host.remove_retired_agents_owned();
-                if !agents
-                    .iter()
-                    .any(|agent| agent.memory_retirement_pending_owned())
-                {
-                    let task = {
-                        let mut state = host.state.lock().expect("Host mutex poisoned");
-                        if state.retirement_epoch != epoch {
-                            continue;
+        state.retirement_watch = Some(
+            runtime.spawn(
+                async move {
+                    loop {
+                        let notified = changed.notified();
+                        tokio::pin!(notified);
+                        notified.as_mut().enable();
+                        let Some(host) = owner.upgrade() else {
+                            return;
+                        };
+                        let (agents, epoch) = {
+                            let state = host.state.lock().expect("Host mutex poisoned");
+                            if matches!(
+                                state.lifecycle,
+                                HostLifecycle::Stopping | HostLifecycle::Stopped
+                            ) {
+                                return;
+                            } else {
+                                (
+                                    state.agents.values().cloned().collect::<Vec<_>>(),
+                                    state.retirement_epoch,
+                                )
+                            }
+                        };
+                        for agent in &agents {
+                            agent
+                                .reap_closed_sessions_owned()
+                                .instrument(agent.diagnostic_context().span())
+                                .await;
                         }
-                        state.retirement_watch.take()
-                    };
-                    drop(task);
-                    return;
+                        host.remove_retired_agents_owned();
+                        if !agents
+                            .iter()
+                            .any(|agent| agent.memory_retirement_pending_owned())
+                        {
+                            let task = {
+                                let mut state = host.state.lock().expect("Host mutex poisoned");
+                                if state.retirement_epoch != epoch {
+                                    continue;
+                                }
+                                state.retirement_watch.take()
+                            };
+                            drop(task);
+                            return;
+                        }
+                        drop(agents);
+                        // Idle observation never keeps Host or directory ownership alive.
+                        drop(host);
+                        notified.await;
+                    }
                 }
-                drop(agents);
-                // Idle observation never keeps Host or directory ownership alive.
-                drop(host);
-                notified.await;
-            }
-        }));
+                .with_current_subscriber(),
+            ),
+        );
     }
     pub(super) fn remove_retired_agents_owned(&self) {
         let agents = self
@@ -86,25 +95,31 @@ impl Host {
             .collect::<Vec<_>>();
         let retired = agents
             .into_iter()
-            .filter(|agent| agent.is_retired_owned())
+            .filter_map(|agent| agent.retired_mode_owned().map(|mode| (agent, mode)))
             .collect::<Vec<_>>();
         let removed = {
             let mut state = self.state.lock().expect("Host mutex poisoned");
             retired
                 .iter()
-                .filter_map(|agent| {
+                .filter_map(|(agent, mode)| {
                     if state
                         .agents
                         .get(&agent.id)
                         .is_some_and(|current| Arc::ptr_eq(current, agent))
                     {
-                        state.agents.remove(&agent.id)
+                        state.agents.remove(&agent.id).map(|agent| (agent, *mode))
                     } else {
                         None
                     }
                 })
                 .collect::<Vec<_>>()
         };
+        let diagnostics = removed
+            .iter()
+            .map(|(agent, mode)| self.agent_removed_record(&agent.id, *mode))
+            .collect::<Vec<_>>();
         drop(removed);
+        drop(retired);
+        crate::diagnostics::emit(diagnostics);
     }
 }
