@@ -43,6 +43,29 @@ impl CompactionBinding {
         }
     }
 }
+
+/// Original owner failure handed to this Turn's next terminal report. Runtime
+/// intentionally reports only a prompt failure, so the Host retains its own
+/// Fault and exact request binding rather than replacing it with a generic one.
+/// The ActiveTurn consumes this once; it is not a result cache or logging flag.
+pub(super) struct CompactionFailure {
+    pub(super) binding: CompactionBinding,
+    pub(super) fault: Fault,
+    pub(super) history: bool,
+}
+impl CompactionFailure {
+    pub(super) fn matches(&self, active: &ActiveTurn, report: &LoopReport) -> bool {
+        matches!(&self.binding, CompactionBinding::Automatic {
+            turn_id, load_id, loop_id, request_index,
+        } if turn_id == &active.info.id
+            && load_id == &active.info.load_id
+            && Some(*loop_id) == active.loop_id
+            && *loop_id == report.loop_id
+            // Runtime counts an issued request only after prompt preparation.
+            // A failed prompt is the next unissued index, not the last response.
+            && *request_index == report.requests)
+    }
+}
 pub(super) struct CompactionWork {
     pub(super) binding: CompactionBinding,
     pub(super) activity: CompactionActivity,
@@ -723,6 +746,7 @@ impl SessionController {
                 *persistence = PersistenceState::Failed;
                 *fault = Some(error.clone());
                 let _ = work.completion.send_replace(Some(Err(error.clone())));
+                Self::handoff_compaction_failure(state, binding, error, true);
                 self.publish_compaction(state);
                 Vec::new()
             }
@@ -773,6 +797,9 @@ impl SessionController {
         let mut work = state.compaction.take().expect("checked work");
         work.activity.cancellation_requested |=
             work.cancellation.is_cancelled() && !work.committing();
+        if let CompactionOutcome::Failed { fault } = &result {
+            Self::handoff_compaction_failure(state, binding, fault, false);
+        }
         if let CompactionBinding::Manual {
             operation_id,
             receipt_index,
@@ -802,6 +829,42 @@ impl SessionController {
         let mut records = vec![record.published(state.controller_revision, state.runner_revision)];
         records.extend(self.closed_record(state, previous));
         records
+    }
+    fn handoff_compaction_failure(
+        state: &mut SessionState,
+        binding: &CompactionBinding,
+        fault: &Fault,
+        history: bool,
+    ) {
+        let CompactionBinding::Automatic {
+            turn_id,
+            load_id,
+            loop_id,
+            ..
+        } = binding
+        else {
+            return;
+        };
+        let Some(active) = state.active.as_mut().filter(|active| {
+            &active.info.id == turn_id
+                && &active.info.load_id == load_id
+                && active.loop_id == Some(*loop_id)
+        }) else {
+            return;
+        };
+        if active.info.outcome.is_some() {
+            // A previously claimed terminal outcome stays authoritative. Save
+            // faults already belong to persistence_fault, never to cleanup.
+            if !history {
+                active.info.cleanup_faults.push(fault.clone());
+            }
+        } else {
+            active.compaction_failure = Some(CompactionFailure {
+                binding: binding.clone(),
+                fault: fault.clone(),
+                history,
+            });
+        }
     }
     /// Runtime's terminal callback runs before join, even when its prompt
     /// future was dropped. Fence it before touching the accepted raw cursor.

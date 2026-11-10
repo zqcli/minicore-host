@@ -403,9 +403,10 @@ impl SessionController {
                         Boundary::Terminal => "terminal",
                     },
                 ),
-                SaveBinding::Compaction(binding) => {
-                    (diagnostics::compaction_context(&self.identity(), binding), "compaction")
-                }
+                SaveBinding::Compaction(binding) => (
+                    diagnostics::compaction_context(&self.identity(), binding),
+                    "compaction",
+                ),
             };
             diagnostics::history_failed(context, fault, phase, state.controller_revision)
         });

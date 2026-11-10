@@ -694,6 +694,202 @@ async fn compaction_save_reconcile_keeps_original_candidate_and_never_calls_util
     }
 }
 
+// Reuse the existing real append gate, adding only its original-save reconcile
+// delegation. There is no simulated success or owner-result injection here.
+struct CompactionEndJournal(Arc<GatedJournal>);
+impl HistoryBackend for CompactionEndJournal {
+    fn mode(&self) -> StorageMode {
+        self.0.mode()
+    }
+    fn load(&self) -> LoadFuture<'_> {
+        self.0.load()
+    }
+    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+        self.0.append(entries)
+    }
+    fn reconcile(&self) -> SaveFuture<'_> {
+        self.0.inner.reconcile()
+    }
+}
+
+#[tokio::test]
+async fn compaction_original_failure_survives_cancel_and_independent_save_failure_once() {
+    for (cancel_first, fail_save) in [(false, true), (true, false), (true, true)] {
+        // Explicit scripted model fixture returns an empty utility stream.
+        // The production utility engine rejects that actual response.
+        let model = Arc::new(FixtureModel {
+            descriptor: ModelDescriptor::new(
+                "test/model".parse().unwrap(),
+                4096,
+                BTreeSet::from([ReasoningPreference::Auto]),
+                true,
+            )
+            .unwrap(),
+            calls: AtomicUsize::new(0),
+            scripts: Mutex::new(VecDeque::from([Vec::new()])),
+        });
+        let (entered, mut received) = mpsc::unbounded_channel();
+        let mut backend = None;
+        let fixture = setup(
+            UtilityResources::new(model.clone(), ToolSet::default()),
+            |inner| {
+                let journal = Arc::new(GatedJournal {
+                    inner,
+                    gates: Mutex::new(VecDeque::new()),
+                    entered,
+                    count: AtomicUsize::new(0),
+                });
+                backend = Some(journal.clone());
+                Arc::new(CompactionEndJournal(journal))
+            },
+        );
+        seed(&fixture, true).await;
+        assert_eq!(received.recv().await, Some(0));
+        let gate = Arc::new(Semaphore::new(0));
+        backend
+            .as_ref()
+            .unwrap()
+            .gates
+            .lock()
+            .unwrap()
+            .push_back(gate.clone());
+        send(&fixture, "original utility failure before cancellation");
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), received.recv())
+                .await
+                .unwrap(),
+            Some(1)
+        );
+        let (turn, original_fault, binding) = {
+            let state = fixture.session.state.lock().unwrap();
+            let active = state.active.as_ref().unwrap();
+            assert_eq!(active.info.state, TurnState::Running);
+            let CompactionState::Finished {
+                result: CompactionOutcome::Failed { fault },
+            } = &state.last_compaction.as_ref().unwrap().state
+            else {
+                panic!("actual utility must have failed")
+            };
+            assert_eq!(fault.kind(), Some(FaultKind::SessionCompactionFailed));
+            let handoff = active
+                .compaction_failure
+                .as_ref()
+                .expect("original bound failure");
+            assert_eq!(&handoff.fault, fault);
+            assert!(!handoff.history);
+            (
+                active.info.id.clone(),
+                fault.clone(),
+                handoff.binding.clone(),
+            )
+        };
+        let path = fixture.store.canonical_path().join("history.jsonl");
+        let original = path.with_extension("original");
+        if fail_save {
+            // Real production Journal identity refusal, not injected errno.
+            std::fs::rename(&path, &original).unwrap();
+            std::fs::write(&path, b"").unwrap();
+        }
+        let outcome = if cancel_first {
+            let (cancel, _) = fixture
+                .session
+                .cancel(&fixture.connection.caller(), Some(&turn), true, None)
+                .unwrap();
+            assert_eq!(cancel.status, CancelStatus::Claimed);
+            TurnOutcome::Cancelled
+        } else {
+            TurnOutcome::Failed
+        };
+        let primary = (!cancel_first).then(|| original_fault.clone());
+        let cleanup = if cancel_first {
+            vec![original_fault.clone()]
+        } else {
+            Vec::new()
+        };
+        gate.add_permits(1);
+        if fail_save {
+            let pending = blocked(&fixture).await;
+            assert_eq!(pending.outcome, Some(outcome));
+            assert_eq!(pending.fault, primary);
+            assert_eq!(pending.cleanup_faults, cleanup);
+            assert_eq!(
+                pending.persistence_fault.as_ref().unwrap().kind(),
+                Some(FaultKind::SessionHistoryWriteFailed)
+            );
+            {
+                // Pure identity probes use the actual held owner/report, with
+                // only one deliberately mismatched binding scalar per probe.
+                let state = fixture.session.state.lock().unwrap();
+                let active = state.active.as_ref().unwrap();
+                let report = active.report.as_ref().unwrap();
+                assert!(active.compaction_failure.is_none(), "handoff consumed once");
+                let exact = crate::session::compaction::CompactionFailure {
+                    binding: binding.clone(),
+                    fault: original_fault.clone(),
+                    history: false,
+                };
+                assert!(exact.matches(active, report));
+                let mut mismatches = Vec::new();
+                for index in 0..4 {
+                    let mut wrong = binding.clone();
+                    let crate::session::compaction::CompactionBinding::Automatic {
+                        turn_id,
+                        load_id,
+                        loop_id,
+                        request_index,
+                    } = &mut wrong
+                    else {
+                        unreachable!()
+                    };
+                    match index {
+                        0 => *turn_id = TurnId::new().unwrap(),
+                        1 => *load_id = LoadId::new().unwrap(),
+                        2 => *loop_id = LoopId::new().unwrap(),
+                        _ => *request_index += 1,
+                    }
+                    mismatches.push(wrong);
+                }
+                mismatches.push(crate::session::compaction::CompactionBinding::Manual {
+                    operation_id: OperationId::new().unwrap(),
+                    receipt_index: 0,
+                    config_revision: 0,
+                });
+                for binding in mismatches {
+                    assert!(
+                        !crate::session::compaction::CompactionFailure {
+                            binding,
+                            fault: original_fault.clone(),
+                            history: false,
+                        }
+                        .matches(active, report)
+                    );
+                }
+                let mut other_loop = (**report).clone();
+                other_loop.loop_id = LoopId::new().unwrap();
+                assert!(!exact.matches(active, &other_loop));
+            }
+            std::fs::remove_file(&path).unwrap();
+            std::fs::rename(&original, &path).unwrap();
+            fixture
+                .session
+                .resume(&fixture.connection.caller())
+                .unwrap();
+        }
+        let result = fixture
+            .session
+            .wait_turn(&fixture.connection.caller(), &turn)
+            .await
+            .unwrap();
+        assert_eq!(result.info.outcome, Some(outcome));
+        assert_eq!(result.info.fault, primary);
+        assert_eq!(result.info.cleanup_faults, cleanup);
+        assert_eq!(result.info.persistence, PersistenceState::Persisted);
+        assert!(result.info.persistence_fault.is_none());
+        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(markers(&fixture), 0);
+    }
+}
+
 #[tokio::test]
 async fn compaction_prompt_cancellation_fences_terminal_handoff_then_resumes_original_range() {
     let model = UtilityModel::new(Vec::new(), false);

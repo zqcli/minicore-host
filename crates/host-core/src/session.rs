@@ -239,6 +239,7 @@ struct ActiveTurn {
     raw_base_len: usize,
     partials: Vec<PartialResult>,
     report: Option<Arc<LoopReport>>,
+    compaction_failure: Option<compaction::CompactionFailure>,
     partial_accepted: bool,
     terminal_accepted: bool,
     pending_interaction: Option<crate::PendingInteractionData>,
@@ -260,8 +261,17 @@ impl ActiveTurn {
         self.handle = None;
         newly_claimed
     }
-    fn claim_report(&mut self, report: &LoopReport) -> bool {
-        let (outcome, fault) = match &report.outcome {
+    fn claim_report(&mut self, report: &LoopReport) -> (bool, bool) {
+        let original = self
+            .compaction_failure
+            .take()
+            .filter(|failure| failure.matches(self, report));
+        let prompt_failed = matches!(
+            &report.outcome,
+            LoopOutcome::Failed(failure)
+                if failure.kind == minicore_runtime::LoopFailureKind::Prompt
+        );
+        let (outcome, mut fault) = match &report.outcome {
             LoopOutcome::Completed => (TurnOutcome::Completed, None),
             LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
             LoopOutcome::Failed(failure) => (
@@ -277,7 +287,27 @@ impl ActiveTurn {
                 )),
             ),
         };
-        self.claim_terminal(outcome, fault)
+        let forwarded_primary = original.is_some() && prompt_failed;
+        if let Some(original) = original {
+            // A wrapped Prompt error is not a second business failure. The
+            // actual automatic owner retains the original typed Fault; its
+            // history save fault already lives in persistence_fault.
+            if prompt_failed {
+                fault = None;
+            }
+            if !original.history {
+                if self.info.outcome.is_some()
+                    || self.info.state == TurnState::Cancelling
+                    || outcome == TurnOutcome::Cancelled
+                    || !prompt_failed
+                {
+                    self.info.cleanup_faults.push(original.fault);
+                } else {
+                    fault = Some(original.fault);
+                }
+            }
+        }
+        (self.claim_terminal(outcome, fault), forwarded_primary)
     }
 }
 struct SessionState {
@@ -1293,6 +1323,7 @@ impl SessionController {
                     raw_base_len: start_history,
                     partials: Vec::new(),
                     report: None,
+                    compaction_failure: None,
                     partial_accepted: false,
                     terminal_accepted: false,
                     pending_interaction: None,
@@ -1504,12 +1535,12 @@ impl SessionController {
                 // Failed/cancelled execution cannot become cancellable again
                 // while this owner saves its returned report or partial.
                 let record = if report.outcome != LoopOutcome::Completed {
-                    let newly_claimed = active.claim_report(&report);
+                    let (newly_claimed, forwarded) = active.claim_report(&report);
                     if active.info.outcome == Some(TurnOutcome::Failed) {
                         state.failure_paused = true;
                     }
                     self.publish(&mut state);
-                    self.terminal_claim_record(&state, newly_claimed)
+                    self.terminal_claim_record(&state, newly_claimed && !forwarded)
                 } else {
                     None
                 };
@@ -1527,17 +1558,17 @@ impl SessionController {
                 let record = {
                     let mut state = self.state.lock().expect("Session mutex poisoned");
                     state.block_reason = Some(fault.clone());
-                    let mut newly_claimed = false;
+                    let mut claim = (false, false);
                     if let Some(active) = state.active.as_mut() {
                         active.info.persistence = PersistenceState::Failed;
                         active.info.persistence_fault = Some(fault);
-                        newly_claimed = active.claim_report(&report);
+                        claim = active.claim_report(&report);
                         if active.info.outcome == Some(TurnOutcome::Failed) {
                             state.failure_paused = true;
                         }
                     }
                     self.publish(&mut state);
-                    self.terminal_claim_record(&state, newly_claimed)
+                    self.terminal_claim_record(&state, claim.0 && !claim.1)
                 };
                 diagnostic::emit(record);
                 self.finish_tool_cleanup(&turn_id).await;
@@ -1566,11 +1597,11 @@ impl SessionController {
                     (Some(next), records)
                 } else {
                     let active = state.active.as_mut().expect("owned active Turn");
-                    let newly_claimed = active.claim_report(&report);
+                    let (newly_claimed, forwarded) = active.claim_report(&report);
                     self.publish(&mut state);
                     (
                         None,
-                        self.terminal_claim_record(&state, newly_claimed)
+                        self.terminal_claim_record(&state, newly_claimed && !forwarded)
                             .into_iter()
                             .collect(),
                     )

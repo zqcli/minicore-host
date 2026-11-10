@@ -10,14 +10,17 @@ gates. No push, remote or main action.
 
 Implement only SPEC v4.93 §12 diagnostics at actual compaction boundaries.
 No compaction workflow, acceptance, retry, recovery, save confirmation,
-projection, dependency, TUI or lifecycle behavior change. SPEC SHA-256 remains
+projection, dependency, TUI or lifecycle behavior change. The parent subsequently
+authorized a separate original-Fault handoff correction after the real red below.
+SPEC SHA-256 remains
 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
 Runtime remains `69faf9196991524b5549499d6208a1eaf567bf56` (0.10.0).
 
 Own `session/compaction.rs`, `session/diagnostics/compaction.rs`, new integration
 test `diagnostic_compaction.rs`, and this record. TASK053 owns applying the
 exact shared `session/diagnostics.rs` export and `history.rs::settle_save` seam.
-Do not edit Session.rs or query/backend paths.
+TASK053 also owns the later narrowly authorized Session.rs handoff patch.
+Query/backend paths remain outside this task.
 
 ## Design
 
@@ -30,7 +33,7 @@ original Fault identity, never its raw message. History failure remains solely
 owned by history.rs. Original-save continuation does not repeat utility work or
 completion diagnostics. Logging stores no Span in work and no bodies/resources.
 
-## Validation in progress
+## Evidence and environment
 
 Use `/workspace/shared/recovery-second/task088/env.sh`: Rust 1.90, two jobs,
 no incremental compilation, and a fresh exclusive task088 target directory.
@@ -71,3 +74,83 @@ will be a separate fix commit, with the original diagnostic change kept reviewab
 
 Validation paused for the parent's shared-machine performance quiet window.
 No Cargo/dependency or compiler process is left running by TASK088 during it.
+
+
+## Separate original-Fault handoff fix
+
+Ordinary diagnostic checkpoint:
+`9887e24745ac2e9ba90c64a106f64a5b1bdc2d6d`.
+Before changing the business handoff, `original-fault-red.log` reruns the real
+HTTP automatic utility case against exactly that production source and asserts
+public `turn.result` should retain SESSION_COMPACTION_FAILED. It fails with
+actual TURN_INTERNAL_UNEXPECTED. This stronger red is separate from the prior
+duplicate-ERROR observation; the fix does not merely hide that observation.
+
+The parent authorized a narrow ActiveTurn-owned `CompactionFailure` slot with
+its original Automatic binding, original Fault and explicit history origin.
+Only a settled Failed utility outcome after existing cancellation precedence,
+or an actual original-save failure, registers it. No manual operation enters
+that slot. An already claimed outcome is not replaced; a later utility failure
+is cleanup only, while save faults remain independently owned by persistence.
+`claim_report` consumes the slot once, matching Turn, Load, active Loop, returned
+Loop and request index. Pinned Runtime increments `requests` only after prompt
+preparation, so a failed prompt's original request_index equals report.requests.
+A matching Prompt wrapper now yields the original utility Fault, not 4999;
+a save-caused wrapper yields no synthetic primary execution Fault. A matching
+cancelled report keeps cancellation and the utility Fault only as cleanup.
+Other reports retain their existing mapping. Full Fault values are moved,
+including any existing diagnostic_id, with no replacement correlation created.
+The real HTTP provider case has no invented diagnostic_id and asserts equality
+to the original compaction Fault, including its optional association.
+
+TASK053 implemented only the shared Session.rs field, initializer, claim_report
+and three callsites. Its exact patch is `original-fault-shared.patch`, SHA-256
+`0a91479fc904f6711b927b18216f711b68d269a6822c4d8f96cb38e0dfbeecae`.
+The transient returned forwarding fact prevents a second primary ERROR only
+after the original business Fault has been restored. No dedup state is kept.
+
+The parent also assigned narrow additions in session/tests/compaction.rs.
+Its existing real append gate holds Runtime's terminal history handoff after
+an actual invalid utility response. Tests cover retained primary versus
+cancellation-first, each with a separate original-inode save refusal where
+applicable, explicit original-save resume, exact one-shot cleanup, unchanged
+utility call count and no compaction marker for failed utility. Identity-only
+probes mutate one binding scalar at a time against the real held owner/report,
+including manual, wrong Turn/Load/Loop/request and a different returned Loop.
+They are identified as unit probes, not another live integration result.
+
+The public HTTP/file test additionally verifies manual and automatic starts,
+manual cancellation, utility failure, confirmed completion, no completion while
+an original save is unconfirmed, same-candidate resume, original manual receipt,
+automatic Turn/Load/Loop/request/response association, one direct owner ERROR,
+failed execution versus persisted save, no and closed subscriber behavior,
+reentrant event/new_span/enter/exit/try_close callbacks and TRACE-level payload
+exclusion. The script provider is a loopback fixture, not a live external model.
+The persistent config fixture initially waited for !preparing instead of the
+actual committed enabled config, causing a test-only timeout. It now waits for
+that real config fact. See fixture-persistent-config-wait.log; this is not a
+production failure, changed timeout or acceptance change.
+
+## Validation
+
+All commands run with the recorded exclusive task088 environment and
+`--locked --offline` for dependency operations.
+
+- New real-provider diagnostic_compaction: pass (green.log).
+- New gated original-Fault/cancel/save test: pass (green-original-cancel.log).
+- `cargo test -p minicore-host-core --lib session::tests::compaction`: all
+  16 cases pass (core-compaction-regressions.log).
+- Transport compaction, compaction_wait, compaction_wire and
+  diagnostic_terminal_failures: all 10 cases pass (transport-regressions.log).
+- `cargo clippy -p minicore-host-core -p minicore-host-transport --all-targets
+  -- -D warnings`: pass (clippy.log).
+- `cargo fmt --all -- --check`: pass (fmt.log); the initial shared seam's import
+  order and tuple layout were mechanically formatted, with no semantic edit.
+- `cargo test -p minicore-host-core -p minicore-host-transport --doc`: pass,
+  zero core examples and one transport compile example (doctest.log).
+- `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core
+  -p minicore-host-transport --no-deps`: pass (doc.log).
+- Workspace unique-case inventory and final whitespace/protected-file checks
+  are being completed. Parent owns the final composed all-tests gate and
+  independent review. This task does not claim live-provider, performance or
+  TUI acceptance, nor the parent's subsequently updated query API/Runtime pin.

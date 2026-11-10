@@ -136,6 +136,66 @@ async fn utility_started(http: &Http) {
         .forget();
 }
 
+async fn logged(path: &std::path::Path, event: &str, session: &SessionId) -> Vec<Value> {
+    tokio::time::timeout(WAIT, async {
+        loop {
+            // The asynchronous writer may be between writes. Only complete
+            // JSON lines are observation evidence, never business confirmation.
+            let rows: Vec<Value> = std::fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .filter_map(|line| serde_json::from_str(line).ok())
+                .collect();
+            if rows
+                .iter()
+                .any(|row| row["event"] == event && row["session_id"] == session.as_str())
+            {
+                return rows;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+async fn enable_automatic(session: &SessionClient) {
+    let mut execution = session.info(options()).await.unwrap().config.execution;
+    execution.compaction.enabled = true;
+    session
+        .update(
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        execution: Some(execution),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            },
+            options(),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(WAIT, async {
+        while !session
+            .info(options())
+            .await
+            .unwrap()
+            .config
+            .execution
+            .compaction
+            .enabled
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
 #[derive(Clone)]
 struct QueryTarget {
     host: Weak<Host>,
@@ -333,6 +393,20 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         Some(FaultKind::SessionHistoryWriteFailed)
     );
     assert!(failed.data.active_turn_id.is_none());
+    let pending_logs = logged(
+        &log,
+        "session.history_write_failed",
+        &session.target().session_id,
+    )
+    .await;
+    assert!(
+        operation_rows(
+            &pending_logs,
+            &accepted.operation_id,
+            "session.compaction_finished"
+        )
+        .is_empty()
+    );
     std::fs::remove_file(&history).unwrap();
     std::fs::rename(&original, &history).unwrap();
     session.resume(control(), options()).await.unwrap();
@@ -428,26 +502,9 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     // operation or an extra public Turn for the utility.
     let http = Http::start(replies([response(SUMMARY, None), Reply::success()])).await;
     let (host, _client, session) = seed(&http, None).await;
-    let mut execution = session.info(options()).await.unwrap().config.execution;
-    execution.compaction.enabled = true;
-    session
-        .update(
-            SessionUpdateRequest {
-                operation_id: OperationId::new().unwrap(),
-                expected_config_revision: 0,
-                changes: SessionUpdateChanges {
-                    config: SessionConfigPatch {
-                        execution: Some(execution),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            },
-            options(),
-        )
-        .await
-        .unwrap();
-    state_where(&session, |state| !state.data.preparing).await;
+    enable_automatic(&session).await;
+    let connection = host.connect().unwrap();
+    probe.arm(&host, connection.caller(), session.target().clone());
     let message = input();
     session.send(message.clone(), options()).await.unwrap();
     let turn = result(&session, &message.message_id).await;
@@ -458,6 +515,134 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         if turn_id == &turn.source.turn_id && load_id == turn.source.load_id.as_ref().unwrap())
     );
     assert_eq!(http.count(), 4);
+    probe.disarm();
+    stop(&host).await;
+    http.finish().await;
+
+    // A failed automatic utility must not become a second primary ERROR at
+    // the forwarding prompt/Turn boundary. The original business Fault and
+    // Runtime result remain unchanged by diagnostics.
+    let http = Http::start(replies([Reply::auth_failure()])).await;
+    let (host, _client, session) = seed(&http, None).await;
+    enable_automatic(&session).await;
+    let message = input();
+    session.send(message.clone(), options()).await.unwrap();
+    let automatic_failure = result(&session, &message.message_id).await;
+    assert_eq!(
+        automatic_failure.data.info.outcome,
+        Some(TurnOutcome::Failed)
+    );
+    assert_eq!(
+        automatic_failure.data.info.fault.as_ref().unwrap().kind(),
+        Some(FaultKind::SessionCompactionFailed)
+    );
+    let CompactionState::Finished {
+        result: CompactionOutcome::Failed {
+            fault: original_fault,
+        },
+    } = finished(&session).await.data.compaction.unwrap().state
+    else {
+        panic!("automatic utility must fail")
+    };
+    assert_eq!(
+        automatic_failure.data.info.fault.as_ref(),
+        Some(&original_fault)
+    );
+    assert_eq!(
+        automatic_failure
+            .data
+            .info
+            .fault
+            .as_ref()
+            .unwrap()
+            .diagnostic_id(),
+        original_fault.diagnostic_id()
+    );
+    assert_eq!(http.count(), 3);
+    stop(&host).await;
+    http.finish().await;
+
+    // Automatic utility's save failure is a separate original-save fact. Its
+    // Turn remains failed even after the same candidate is durably confirmed.
+    let gate = Arc::new(Semaphore::new(0));
+    let http = Http::start(replies([response(SUMMARY, Some(gate.clone()))])).await;
+    let root = directory.path().join("automatic-save");
+    let (host, _client, session) = seed(&http, Some(&root)).await;
+    enable_automatic(&session).await;
+    let message = input();
+    session.send(message.clone(), options()).await.unwrap();
+    utility_started(&http).await;
+    let automatic_save_turn = bound(&session, &message.message_id).await;
+    let automatic_history = root
+        .join("agents")
+        .join(session.target().agent_id.as_str())
+        .join("sessions")
+        .join(session.target().session_id.as_str())
+        .join("history.jsonl");
+    let original = automatic_history.with_extension("original");
+    std::fs::rename(&automatic_history, &original).unwrap();
+    std::fs::write(&automatic_history, b"").unwrap();
+    gate.add_permits(1);
+    state_where(&session, |state| {
+        matches!(
+            state.data.compaction.as_ref().map(|a| &a.state),
+            Some(CompactionState::Committing {
+                persistence: PersistenceState::Failed,
+                ..
+            })
+        )
+    })
+    .await;
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let turn = session
+                .turn(automatic_save_turn.clone(), options())
+                .await
+                .unwrap();
+            if turn.data.state.state == TurnState::Finalizing {
+                assert_eq!(turn.data.state.outcome, Some(TurnOutcome::Failed));
+                assert_eq!(turn.data.state.persistence, PersistenceState::Failed);
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let pending_logs = logged(
+        &log,
+        "session.history_write_failed",
+        &session.target().session_id,
+    )
+    .await;
+    assert!(
+        !pending_logs
+            .iter()
+            .any(|row| row["event"] == "session.compaction_finished"
+                && row["turn_id"] == automatic_save_turn.as_str())
+    );
+    std::fs::remove_file(&automatic_history).unwrap();
+    std::fs::rename(&original, &automatic_history).unwrap();
+    session.resume(control(), options()).await.unwrap();
+    let automatic_saved = session
+        .wait_turn(automatic_save_turn, options())
+        .await
+        .unwrap();
+    assert_eq!(automatic_saved.data.info.outcome, Some(TurnOutcome::Failed));
+    assert_eq!(
+        automatic_saved.data.info.persistence,
+        PersistenceState::Persisted
+    );
+    assert!(matches!(
+        finished(&session).await.data.compaction.unwrap().state,
+        CompactionState::Finished {
+            result: CompactionOutcome::Compacted {
+                persistence: PersistenceState::Persisted,
+                ..
+            }
+        }
+    ));
+    assert_eq!(http.count(), 3);
     stop(&host).await;
     http.finish().await;
 
@@ -481,6 +666,49 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    let automatic_errors: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row["level"] == "ERROR" && row["turn_id"] == automatic_failure.source.turn_id.as_str()
+        })
+        .collect();
+    assert_eq!(
+        automatic_errors.len(),
+        1,
+        "forwarded automatic utility failure was logged twice: {automatic_errors:?}"
+    );
+    assert_eq!(automatic_errors[0]["event"], "session.compaction_finished");
+    let save_errors: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            row["level"] == "ERROR" && row["turn_id"] == automatic_saved.source.turn_id.as_str()
+        })
+        .collect();
+    assert_eq!(
+        save_errors.len(),
+        1,
+        "forwarded original-save failure was logged twice: {save_errors:?}"
+    );
+    assert_eq!(save_errors[0]["event"], "session.history_write_failed");
+    assert_eq!(save_errors[0]["fault_code"], save_fault.code());
+    let saved_compaction = rows
+        .iter()
+        .find(|row| {
+            row["event"] == "session.compaction_finished"
+                && row["turn_id"] == automatic_saved.source.turn_id.as_str()
+        })
+        .unwrap();
+    assert_eq!(saved_compaction["attributes"]["outcome"], "compacted");
+    assert_eq!(saved_compaction["attributes"]["persistence"], "persisted");
+    let saved_turn = rows
+        .iter()
+        .find(|row| {
+            row["event"] == "turn.finished"
+                && row["turn_id"] == automatic_saved.source.turn_id.as_str()
+        })
+        .unwrap();
+    assert_eq!(saved_turn["attributes"]["outcome"], "failed");
+    assert_eq!(saved_turn["attributes"]["persistence"], "persisted");
     let start = one(&rows, &accepted.operation_id, "session.compaction_started");
     assert_eq!(start["attributes"]["receipt_index"], 0);
     assert_eq!(
@@ -594,6 +822,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         PROVIDER_MODEL,
         SUMMARY,
         history.to_str().unwrap(),
+        automatic_history.to_str().unwrap(),
     ] {
         assert!(!text.contains(private), "private payload leaked: {private}");
     }
