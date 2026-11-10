@@ -5,12 +5,21 @@
 All 12 Host workspace packages and 34 internal dependency requirements are now
 **0.9.10**. The version checkpoint is
 [`4301deb87353d4246e8e43be881e3a61a4a1c7ad`](https://github.com/zqcli/minicore-host/commit/4301deb87353d4246e8e43be881e3a61a4a1c7ad).
-The annotated release tag is `v0.9.10` on `dev`; see
+The local annotated release tag `v0.9.10` points to
+`a8003501b8af23c6f5607571a3ca33cfcdd11f97`; see
 [Task102](tasks/102-release-0.9.10/TASK.md) for release scope and verification.
 The full 0.9.10 local gate passes 955 unique Rust tests, 4 doctests, 28 Python
 checks, formatting, Clippy and rustdoc.
 The owner explicitly requested the version bump, tag and remote push in the
 active conversation, superseding the previous publication approval block.
+
+**Remote publication is blocked by the execution environment.** The normal
+atomic push failed because Git credentials were unavailable. The owner completed
+the device login step, but the CLI login process was interrupted by the network
+policy blocking `api.github.com`; the environment also rejected the request for
+network permission escalation. No remote ref was changed and no new hosted CI
+run is claimed. A complete Git bundle preserves the prepared commits and tag for
+the same ordinary push from an authenticated environment.
 
 ## Included owner-path simplification
 

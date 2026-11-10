@@ -79,9 +79,31 @@ checkpoint. Whitespace checks also cover that final documentation update.
 ## Publication and verification
 
 The current owner instruction supersedes the earlier automatic approval block.
-Publish the reviewed commits and tag using one ordinary atomic push:
+The local annotated tag points to
+`a8003501b8af23c6f5607571a3ca33cfcdd11f97`. A subsequent documentation-only
+checkpoint records this publication outcome without moving that release tag.
+
+The normal atomic push was attempted but failed with
+`fatal: could not read Username for 'https://github.com': No such device or address`.
+The owner completed the requested GitHub device login. The CLI process then
+failed because network policy blocked `https://api.github.com:443`, before it
+could persist login credentials. `gh auth status` still reported no logged-in
+host. The environment's granular approval policy also rejected the supported
+network escalation request (`sandbox_approval: false`). This is an environment
+access limitation; the owner's publication authorization remains valid.
+
+Remote `dev` remains `6ea03b85a318374f3dcb94c38dbe11ac1878f110`, and no remote
+`v0.9.10` tag or new release CI run exists. The connected GitHub tools have no
+tag-creation operation, so no partial alternate publication was attempted.
+
+A complete Git bundle named `minicore-host-0.9.10.bundle` preserves local `dev`,
+its full ancestry and the annotated tag. In an environment with GitHub push
+credentials, the publication procedure is:
 
 ```sh
+git clone --branch dev minicore-host-0.9.10.bundle minicore-host-0.9.10
+cd minicore-host-0.9.10
+git remote set-url origin https://github.com/zqcli/minicore-host.git
 git push --atomic origin dev refs/tags/v0.9.10
 git ls-remote origin refs/heads/dev refs/tags/v0.9.10 'refs/tags/v0.9.10^{}'
 ```
