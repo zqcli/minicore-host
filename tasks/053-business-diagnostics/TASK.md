@@ -1001,3 +1001,42 @@ Clippy, strict core rustdoc, fmt and diff checks passed. The inventory is
 `preparation-{red,green,focused,core,core-list,clippy,doc}.log` in the second
 recovery reports directory. Full workspace/independent review is not claimed.
 SPEC is unchanged; this slice itself changes no dependency, pin or lock bytes.
+
+### Internal delegated message rejection without a client observer
+
+Existing tool.finished identifies a ToolCall/outcome, while handoff identifies
+the original task message. Neither represented the distinct MessageId or original
+in_reply_to of a rejected internal send/notification. The two actual outer
+TurnCapability::send_delegated and DelegationPermit::notify returns now record
+those request leaves with the unchanged Fault. No Host method signature,
+protocol, input mutation, notification-once marker or business acceptance is
+changed. Host/scope/admission/Session guards have all returned before emission.
+
+The send uses its real bound source Turn; the target is a requested-target
+attribute. A notification uses the actually registered child Session as source,
+the parent as target attributes, and the old origin Turn/tool only as origin
+attributes. It does not pretend the completed parent is a current Turn. No
+missing Load/operation/owner is reconstructed. Ordinary rejection is WARN and
+other call failures DEBUG; an underlying owner's primary ERROR is never repeated.
+Original request in_reply_to is captured before the receiver's existing
+notification normalization, so rejected calls are not described as accepted
+rewritten input. Only scalar identities are retained for this invocation.
+
+The real parent/child Runtime/local HTTP fixture now first runs without any
+subscriber, then with the process pipeline. It rejects a nonmatching delegated
+task ID before accepting the correct original task, and checks both failed
+handoff notification and duplicate notification rejection after the parent ends.
+Each rejected original message has one exact error correlation and no body/key,
+while the original handoff and independent-fault assertions remain intact.
+The additive test was red on absent message.send_error; its first compile-only
+attempt incorrectly assumed Options was Clone and was corrected to move the
+single pending installation. An earlier failed edit assertion left source
+unchanged and only reran the baseline; that green run is not labeled a red test.
+
+Six affected diagnostic cases and all 337 core cases passed; strict core and
+transport all-target Clippy, strict core rustdoc, fmt and diff checks passed.
+Evidence is `message-error-{unmodified-baseline,first-build,red,green,focused,core,clippy,doc}.log`
+in the second recovery reports directory. No full-workspace or independent
+review is claimed. SPEC, Runtime pin and Cargo.lock remain exactly the adopted
+coordinator baseline. Remaining actual failure/save-resume scheduling summaries
+will be composed separately with task088's reviewed original-Fault handoff.

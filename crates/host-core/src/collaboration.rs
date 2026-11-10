@@ -377,44 +377,69 @@ pub struct DelegationPermit {
 }
 impl DelegationPermit {
     pub async fn notify(&self, input: MessageInput) -> Result<MessageAccepted, Fault> {
-        if let Some(child) = self.state.child.upgrade() {
-            child.wait_handoff_owned().await;
+        let registration = &self.state.registration;
+        let context = minicore_host_diagnostics::Context {
+            host_id: Some(registration.host_id.clone()),
+            host_incarnation: Some(registration.host_incarnation.clone()),
+            agent_id: Some(registration.child.agent_id.clone()),
+            session_id: Some(registration.child.session_id.clone()),
+            message_id: Some(input.message_id.clone()),
+            in_reply_to: input.in_reply_to.clone(),
+            ..Default::default()
+        };
+        let result = async {
+            if let Some(child) = self.state.child.upgrade() {
+                child.wait_handoff_owned().await;
+            }
+            if !self.state.handed_off.load(Ordering::SeqCst) {
+                return Err(Fault::new(
+                    FaultKind::SessionBusy,
+                    "the actual delegated result has not been handed off",
+                ));
+            }
+            let access = self.state.access.upgrade().ok_or_else(scope_closed)?;
+            let parent = self.state.parent.upgrade().ok_or_else(|| {
+                Fault::new(
+                    FaultKind::AgentSessionNotFound,
+                    "original direct parent is no longer available",
+                )
+            })?;
+            let (receipt, record) = access.accept_internal_owned(|| {
+                access.ensure_execution_owned()?;
+                self.state.scope.check_open()?;
+                if self.state.released.load(Ordering::SeqCst)
+                    || self.state.notified.swap(true, Ordering::SeqCst)
+                {
+                    return Err(Fault::new(
+                        FaultKind::SessionInputInvalid,
+                        "this delegation notification was already attempted or released",
+                    ));
+                }
+                if input.message_id == self.state.registration.task_message_id {
+                    return Err(Fault::new(
+                        FaultKind::SessionInputInvalid,
+                        "a final notification requires a new MessageId",
+                    ));
+                }
+                parent.receive_notification_owned(&self.state, input)
+            })?;
+            record.emit();
+            parent.wake_owned();
+            Ok(receipt)
         }
-        if !self.state.handed_off.load(Ordering::SeqCst) {
-            return Err(Fault::new(
-                FaultKind::SessionBusy,
-                "the actual delegated result has not been handed off",
-            ));
-        }
-        let access = self.state.access.upgrade().ok_or_else(scope_closed)?;
-        let parent = self.state.parent.upgrade().ok_or_else(|| {
-            Fault::new(
-                FaultKind::AgentSessionNotFound,
-                "original direct parent is no longer available",
+        .await;
+        if let Err(fault) = &result {
+            crate::diagnostics::message_error(
+                context,
+                &registration.parent,
+                &registration.task_message_id,
+                Some(&registration.origin),
+                "delegation_notify",
+                fault,
             )
-        })?;
-        let (receipt, record) = access.accept_internal_owned(|| {
-            access.ensure_execution_owned()?;
-            self.state.scope.check_open()?;
-            if self.state.released.load(Ordering::SeqCst)
-                || self.state.notified.swap(true, Ordering::SeqCst)
-            {
-                return Err(Fault::new(
-                    FaultKind::SessionInputInvalid,
-                    "this delegation notification was already attempted or released",
-                ));
-            }
-            if input.message_id == self.state.registration.task_message_id {
-                return Err(Fault::new(
-                    FaultKind::SessionInputInvalid,
-                    "a final notification requires a new MessageId",
-                ));
-            }
-            parent.receive_notification_owned(&self.state, input)
-        })?;
-        record.emit();
-        parent.wake_owned();
-        Ok(receipt)
+            .emit();
+        }
+        result
     }
     pub async fn release(&self, disposition: DelegationDisposition) -> Result<(), Fault> {
         if let Some(child) = self.state.child.upgrade() {
@@ -472,7 +497,32 @@ impl TurnCapability {
         registration: &DelegationRegistration,
         input: MessageInput,
     ) -> Result<MessageAccepted, Fault> {
-        self.host()?.send_delegated_owned(self, registration, input)
+        let source = self.source();
+        let context = minicore_host_diagnostics::Context {
+            host_id: Some(source.host_id.clone()),
+            host_incarnation: Some(source.host_incarnation.clone()),
+            agent_id: Some(source.session.agent_id.clone()),
+            session_id: Some(source.session.session_id.clone()),
+            turn_id: Some(source.turn.turn_id.clone()),
+            message_id: Some(input.message_id.clone()),
+            in_reply_to: input.in_reply_to.clone(),
+            ..Default::default()
+        };
+        let result = self
+            .host()
+            .and_then(|host| host.send_delegated_owned(self, registration, input));
+        if let Err(fault) = &result {
+            crate::diagnostics::message_error(
+                context,
+                &registration.child,
+                &registration.task_message_id,
+                None,
+                "delegated_send",
+                fault,
+            )
+            .emit();
+        }
+        result
     }
     pub fn record_delegation(&self, origin: &ToolCallRef, registration: &DelegationRegistration) {
         if let Some(owner) = self.authority.owner.upgrade() {

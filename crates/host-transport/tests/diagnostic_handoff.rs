@@ -66,7 +66,7 @@ impl DelegationSink for Sink {
 struct Plan {
     child: Mutex<Option<SessionRef>>,
     sink: Arc<Sink>,
-    accepted: mpsc::UnboundedSender<(DelegationPermit, DelegationRegistration)>,
+    accepted: mpsc::UnboundedSender<(DelegationPermit, DelegationRegistration, MessageInput)>,
 }
 struct Delegate {
     spec: ToolSpec,
@@ -99,10 +99,19 @@ impl Tool for Delegate {
                 .cap
                 .prepare_delegation(registration.clone(), self.plan.sink.clone())
                 .unwrap();
+            let rejected = input();
+            let fault = self
+                .cap
+                .send_delegated(&registration, rejected.clone())
+                .unwrap_err();
+            assert_eq!(fault.kind(), Some(FaultKind::SessionInputInvalid));
             self.cap.send_delegated(&registration, task).unwrap();
             self.cap
                 .record_delegation(&registration.origin, &registration);
-            self.plan.accepted.send((permit, registration)).unwrap();
+            self.plan
+                .accepted
+                .send((permit, registration, rejected))
+                .unwrap();
             Ok(ToolExecutionOutcome::Completed(
                 ToolOutput::new("PRIVATE_DELEGATION_TOOL_RESULT").unwrap(),
             ))
@@ -201,9 +210,14 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
     let mut logging = Options::new("diagnostic-handoff");
     logging.level = tracing::Level::TRACE;
     logging.output = Output::File(log.clone());
-    let guard = minicore_host_diagnostics::install(logging).unwrap();
+    let mut logging = Some(logging);
+    let mut guard = None;
     let mut expected = Vec::new();
-    for fail in [false, true] {
+    // The same real business path first runs without any installed subscriber.
+    for (fail, enabled) in [(false, false), (false, true), (true, true)] {
+        if enabled && guard.is_none() {
+            guard = Some(minicore_host_diagnostics::install(logging.take().unwrap()).unwrap());
+        }
         let parent_http = Http::start(vec![
             delegate_reply(),
             Reply::gated(Arc::new(Semaphore::new(0))),
@@ -243,10 +257,11 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
         let parent = target(&client.create_agent(creation, options()).await.unwrap());
         let parent_client = client.session(parent.clone());
         parent_client.send(input(), options()).await.unwrap();
-        let (permit, registration) = tokio::time::timeout(WAIT, registrations.recv())
-            .await
-            .unwrap()
-            .unwrap();
+        let (permit, registration, rejected_send) =
+            tokio::time::timeout(WAIT, registrations.recv())
+                .await
+                .unwrap()
+                .unwrap();
         tokio::time::timeout(WAIT, parent_http.started.acquire_many(2))
             .await
             .unwrap()
@@ -316,8 +331,11 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
             completion.results[0].info.outcome,
             Some(TurnOutcome::Completed)
         );
-        let notice = permit.notify(input()).await;
+        let notice_input = input();
+        let notice = permit.notify(notice_input.clone()).await;
+        let rejected_notice;
         if fail {
+            rejected_notice = notice_input;
             let fault = notice.unwrap_err();
             assert_eq!(fault.kind(), Some(FaultKind::SessionBusy));
             assert_eq!(
@@ -338,6 +356,9 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
             // The original close fault stays owned. No clean Host shutdown or
             // successful handoff is claimed for this deliberately rejected sink.
         } else {
+            rejected_notice = input();
+            let duplicate = permit.notify(rejected_notice.clone()).await.unwrap_err();
+            assert_eq!(duplicate.kind(), Some(FaultKind::SessionInputInvalid));
             permit
                 .release(DelegationDisposition::Notified(notice.unwrap()))
                 .await
@@ -356,10 +377,18 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
         assert_eq!(child_http.finish().await.len(), 1);
         assert_eq!(parent_http.count(), 2);
         parent_http.abort().await;
-        expected.push((registration, fail, completion.results[0].info.id.clone()));
+        if enabled {
+            expected.push((
+                registration,
+                fail,
+                completion.results[0].info.id.clone(),
+                rejected_send,
+                rejected_notice,
+            ));
+        }
     }
     assert_eq!(
-        guard.shutdown(Duration::from_secs(2)),
+        guard.unwrap().shutdown(Duration::from_secs(2)),
         ShutdownOutcome::Flushed
     );
     let text = std::fs::read_to_string(&log).unwrap();
@@ -367,7 +396,50 @@ async fn handoff_records_actual_child_completion_and_error_after_ended_parent_wi
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    for (source, fail, turn) in expected {
+    for (source, fail, turn, rejected_send, rejected_notice) in expected {
+        for (message, phase, target) in [
+            (&rejected_send, "delegated_send", &source.child),
+            (&rejected_notice, "delegation_notify", &source.parent),
+        ] {
+            let errors: Vec<_> = rows
+                .iter()
+                .filter(|row| {
+                    row["event"] == "message.send_error"
+                        && row["message_id"] == message.message_id.as_str()
+                })
+                .collect();
+            assert_eq!(errors.len(), 1);
+            assert_eq!(
+                errors[0]["in_reply_to"],
+                message.in_reply_to.as_ref().unwrap().as_str()
+            );
+            assert_eq!(errors[0]["attributes"]["phase"], phase);
+            assert_eq!(
+                errors[0]["attributes"]["task_message_id"],
+                source.task_message_id.as_str()
+            );
+            assert_eq!(
+                errors[0]["attributes"]["target_session_id"],
+                target.session_id.as_str()
+            );
+            assert_eq!(
+                errors[0]["attributes"]["target_agent_id"],
+                target.agent_id.as_str()
+            );
+            assert_ne!(errors[0]["level"], "ERROR");
+            if phase == "delegation_notify" {
+                assert_eq!(errors[0]["session_id"], source.child.session_id.as_str());
+                assert!(errors[0].get("turn_id").is_none());
+                assert!(errors[0].get("tool_call_id").is_none());
+                assert_eq!(
+                    errors[0]["attributes"]["origin_turn_id"],
+                    source.origin.turn_id.as_str()
+                );
+            } else {
+                assert_eq!(errors[0]["session_id"], source.parent.session_id.as_str());
+                assert_eq!(errors[0]["turn_id"], source.origin.turn_id.as_str());
+            }
+        }
         let events: Vec<_> = rows
             .iter()
             .filter(|row| {
