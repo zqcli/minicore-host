@@ -85,11 +85,32 @@ impl CoreTurnPort {
                     agent_id,
                     session_id,
                 };
-                let info = self.capability.turn_info(&target, &turn_id)?;
-                let mut data = encoded(&info)?;
-                // Turn inspect is lightweight; explicit bound config belongs to turn.get.
-                remove(&mut data, &["id", "session_id", "config"]);
-                if request.include_output {
+                let data = if request.include_output && request.output_range.is_none() {
+                    // Full result reads share the public held/saved owner path.
+                    // Saved-only results have no current execution metadata.
+                    let result = self
+                        .capability
+                        .turn_result_snapshot(&target, &turn_id)
+                        .await?;
+                    let mut data = match result.data.info {
+                        Some(info) => encoded(info)?,
+                        None => json!({}),
+                    };
+                    if let Some(load_id) = result.source.load_id {
+                        data["load_id"] = encoded(load_id)?;
+                    }
+                    if let Some(terminal) = result.data.saved_terminal {
+                        data["saved_terminal"] = encoded(terminal)?;
+                    }
+                    data["history"] = encoded(result.data.history)?;
+                    // Keep the tool's flat partial shape and public response index.
+                    data["partials"]=json!(result.data.partials.into_iter().map(|value| json!({"response_index":value.response_index,"content":value.partial.content,"incomplete_tool_calls":value.partial.incomplete_tool_calls,"usage":value.partial.usage})).collect::<Vec<_>>());
+                    data
+                } else {
+                    let info = self.capability.turn_info(&target, &turn_id)?;
+                    let mut data = encoded(&info)?;
+                    // Lightweight/current-range reads retain current execution facts.
+                    remove(&mut data, &["id", "session_id", "config"]);
                     if let Some(range) = request.output_range {
                         let output = self.capability.turn_output_read(
                             &target,
@@ -99,20 +120,9 @@ impl CoreTurnPort {
                         )?;
                         data["output"] = encoded(output.data)?;
                         data["response_index"] = encoded(output.source.response_index)?;
-                    } else {
-                        let result = self.capability.turn_result(&target, &turn_id)?;
-                        data["history"] = encoded(
-                            result
-                                .history
-                                .iter()
-                                .map(core::HistoryItemData::from)
-                                .collect::<Vec<_>>(),
-                        )?;
-                        // Actual partial text remains marked and associated with
-                        // its public response index, without leaking Loop IDs.
-                        data["partials"]=json!(result.partials.into_iter().map(|value| json!({"response_index":value.response_index,"content":value.partial.content,"incomplete_tool_calls":value.partial.incomplete_tool_calls,"usage":value.partial.usage})).collect::<Vec<_>>());
                     }
-                }
+                    data
+                };
                 Ok(
                     json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":target.agent_id,"session_id":target.session_id,"turn_id":turn_id,"data":data}),
                 )

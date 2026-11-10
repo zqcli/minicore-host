@@ -194,6 +194,15 @@ impl TurnCapability {
     pub fn turn_result(&self, target: &SessionRef, id: &TurnId) -> Result<TurnResult, Fault> {
         self.host()?.turn_result(&self.caller()?, target, id)
     }
+    pub async fn turn_result_snapshot(
+        &self,
+        target: &SessionRef,
+        id: &TurnId,
+    ) -> Result<TurnResultSnapshot, Fault> {
+        self.host()?
+            .turn_result_snapshot(&self.caller()?, target, id)
+            .await
+    }
     pub fn turns(&self, target: &SessionRef) -> Result<Vec<TurnInfo>, Fault> {
         self.host()?.turns(&self.caller()?, target)
     }

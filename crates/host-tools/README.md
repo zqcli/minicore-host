@@ -27,7 +27,11 @@ from one owner snapshot with its original revision. Inspect uses authoritative
 Agent/Session state, paged history, model/tool text ranges, messages and
 receipts. Output projections exclude Runtime loop and provider replay metadata.
 `history_page`, `output_range`, and model `response_index` use the shared read
-contracts; an omitted range/page requests the currently retained body.
+contracts. A Turn output read without a range shares the public asynchronous
+result reader, including saved terminal facts and actual history after restart.
+Saved-only results contain no fabricated Load ID, config or revision. Default
+Turn inspection and explicit output ranges retain current execution semantics;
+Turn inspect never exposes the full bound configuration.
 
 The strict actions, snapshot configuration mapping, standard Runtime Tool,
 selected ToolSet factory, ephemeral root scopes, pre-delivery registration,

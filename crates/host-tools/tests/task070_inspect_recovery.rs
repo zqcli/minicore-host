@@ -171,6 +171,76 @@ impl Fixture {
             calls: called,
         }
     }
+    async fn open(path: &std::path::Path) -> Self {
+        let (calls, called) = mpsc::unbounded_channel();
+        let mut tools = ToolRegistry::new();
+        tools
+            .register(Arc::new(AgentToolFactory::new(ScopeManager::new())))
+            .unwrap();
+        let host = Host::open_persistent(
+            path,
+            minicore_host_core::HostSettings {
+                name: "persistent inspect fixture".into(),
+            },
+            Arc::new(Resources { calls, tools }),
+        )
+        .await
+        .unwrap();
+        let connection = host.connect().unwrap();
+        Self {
+            host,
+            connection,
+            calls: called,
+        }
+    }
+    async fn persistent_agent(&self) -> SessionRef {
+        let mut config = AgentConfig::default();
+        config.role.instructions = "original bound instructions".into();
+        config.session_defaults.tools = vec![ToolBinding {
+            name: "agent".into(),
+        }];
+        config.session_defaults.execution.compaction.enabled = false;
+        let receipt = self
+            .host
+            .create_agent_async(
+                &self.connection.caller(),
+                AgentCreate {
+                    operation_id: OperationId::new().unwrap(),
+                    name: "persistent inspect fixture".into(),
+                    mode: StorageMode::Persistent,
+                    config,
+                    default_session: None,
+                    initial_message: None,
+                },
+            )
+            .await
+            .unwrap();
+        SessionRef {
+            agent_id: receipt.agent_id.unwrap(),
+            session_id: receipt.session_id.unwrap(),
+        }
+    }
+    async fn stop(&self) {
+        self.host
+            .shutdown(
+                &self.connection.caller(),
+                HostShutdownRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    strategy: HostShutdownStrategy::Graceful,
+                },
+            )
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while self.host.info(&self.connection.caller()).unwrap().lifecycle
+                != HostLifecycle::Stopped
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        self.connection.close();
+    }
     fn agent(&self) -> SessionRef {
         let mut config = AgentConfig::default();
         config.role.instructions = "original bound instructions".into();
@@ -292,6 +362,19 @@ async fn active_turn_inspect_is_lightweight_while_public_get_keeps_bound_configu
     let next = f.next(&session).await;
     assert_tool_summary(&next.last_tool_result(), &first.source, "running");
     assert_public_binding(&f, &first.source);
+    next.events
+        .send(ModelEvent::text_delta("visible while running"))
+        .unwrap();
+    let mut range = inspect(&first.source, true);
+    range["response_index"] = json!(1);
+    range["output_range"] = json!({"channel":"text","start":0,"end":21,"max_bytes":21});
+    next.tool("inspect-current-range", range);
+    let next = f.next(&session).await;
+    let ranged = next.last_tool_result();
+    assert_tool_summary(&ranged, &first.source, "running");
+    assert_eq!(ranged["data"]["output"]["text"], "visible while running");
+    assert_eq!(ranged["data"]["response_index"], 1);
+    assert!(ranged["data"].get("history").is_none());
     next.complete("actual first result");
     f.finished(&first.source).await;
     assert_public_binding(&f, &first.source);
@@ -326,4 +409,89 @@ async fn completed_turn_inspect_omits_config_with_and_without_actual_output() {
     assert_public_binding(&f, &first.source);
     next.complete("inspections complete");
     f.finished(&next.source).await;
+}
+
+#[tokio::test]
+async fn agent_inspect_reads_saved_turn_after_restart_without_inventing_execution_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "minicore-inspect-saved-{}",
+        OperationId::new().unwrap()
+    ));
+    let mut f = Fixture::open(&path).await;
+    let target = f.persistent_agent().await;
+    f.send(&target, "save the original answer");
+    let first = f.next(&target).await;
+    first.complete("actual saved answer — 原文完整保留");
+    f.finished(&first.source).await;
+    let old_source = first.source.clone();
+    f.stop().await;
+    drop(f);
+
+    let mut f = Fixture::open(&path).await;
+    let public = f
+        .host
+        .turn_result_snapshot(&f.connection.caller(), &target, &old_source.turn.turn_id)
+        .await
+        .unwrap();
+    assert_ne!(
+        public.source.session.host_incarnation,
+        old_source.host_incarnation
+    );
+    assert!(public.source.load_id.is_none());
+    assert!(public.data.info.is_none());
+    assert!(public.data.config.is_none());
+    assert_eq!(
+        public.data.saved_terminal.as_ref().unwrap().outcome,
+        TurnOutcome::Completed
+    );
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &target)
+            .unwrap()
+            .is_empty()
+    );
+
+    f.send(&target, "inspect the original saved turn");
+    let current = f.next(&target).await;
+    current.tool("inspect-saved-turn", inspect(&old_source, true));
+    let after_tool = f.next(&target).await;
+    let actual = after_tool.last_tool_result();
+    assert_eq!(actual["turn_id"], json!(old_source.turn.turn_id));
+    assert_eq!(
+        actual["host_incarnation"],
+        json!(public.source.session.host_incarnation)
+    );
+    assert_eq!(
+        actual["data"]["history"],
+        serde_json::to_value(public.data.history).unwrap()
+    );
+    assert!(
+        actual["data"]["history"]
+            .to_string()
+            .contains("actual saved answer — 原文完整保留")
+    );
+    assert_eq!(
+        actual["data"]["saved_terminal"],
+        serde_json::to_value(public.data.saved_terminal.unwrap()).unwrap()
+    );
+    assert_eq!(actual["data"]["partials"], json!([]));
+    for field in [
+        "info",
+        "state",
+        "config",
+        "load_id",
+        "config_revision",
+        "runner_revision",
+    ] {
+        assert!(
+            actual["data"].get(field).is_none(),
+            "invented saved execution metadata: {actual}"
+        );
+    }
+    assert!(!actual.to_string().contains("original bound instructions"));
+    after_tool.complete("inspection complete");
+    f.finished(&after_tool.source).await;
+    f.stop().await;
+    drop(f);
+    std::fs::remove_dir_all(path).unwrap();
 }
