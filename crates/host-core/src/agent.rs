@@ -322,7 +322,7 @@ impl AgentOwner {
                 "default Session must be open",
             ));
         }
-        self.access.accept_business(caller, || {
+        let diagnostic = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if session
@@ -344,8 +344,10 @@ impl AgentOwner {
                 ));
             }
             state.info.default_session_id = session;
-            Ok(())
-        })
+            Ok(self.metadata_result_record(self.diagnostic_context(), &state.info, None))
+        })?;
+        diagnostic.emit();
+        Ok(())
     }
     pub(crate) fn clear_default_if(&self, id: &SessionId) {
         let mut state = self.state.lock().expect("Agent mutex poisoned");
@@ -376,11 +378,14 @@ impl AgentOwner {
             .config
             .apply_patch(patch)
             .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
-        self.resources_owned()?.validate(
-            &SessionConfig::from_agent(&config, &SessionOverrides::default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-        )?;
-        self.access.accept_business(caller, || {
+        self.resources_owned()?
+            .validate(
+                &SessionConfig::from_agent(&config, &SessionOverrides::default()).map_err(
+                    |error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()),
+                )?,
+            )
+            .inspect_err(|fault| self.metadata_refusal_record(None, fault).emit())?;
+        let (info, diagnostic) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if state.info.config_revision != expected_revision {
@@ -396,8 +401,13 @@ impl AgentOwner {
                 )
             })?;
             state.info.config = config;
-            Ok(state.info.clone())
-        })
+            Ok((
+                state.info.clone(),
+                self.metadata_result_record(self.diagnostic_context(), &state.info, None),
+            ))
+        })?;
+        diagnostic.emit();
+        Ok(info)
     }
     pub(crate) fn set_enabled(
         self: &Arc<Self>,

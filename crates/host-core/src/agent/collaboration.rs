@@ -26,7 +26,7 @@ impl AgentOwner {
                 }
                 state.close_running.insert(id.clone())
             };
-            let records = match child.begin_close_owned(operation) {
+            let records = match child.begin_close_owned(operation.clone()) {
                 Ok((_, records)) => records,
                 Err(error) => {
                     if first {
@@ -47,34 +47,37 @@ impl AgentOwner {
                 let target = Arc::clone(&child);
                 let id = id.clone();
                 let key = id.clone();
-                let task = runtime.spawn(async move {
-                    let result = async {
-                        target.handoff_delegation_owned();
-                        if owner.store().is_some() {
-                            owner.clear_default_before_close(&id).await?;
-                        } else {
-                            owner.clear_default_if(&id);
+                let task = runtime.spawn(
+                    async move {
+                        let result = async {
+                            target.handoff_delegation_owned();
+                            if owner.store().is_some() {
+                                owner.clear_default_before_close(&id, &operation).await?;
+                            } else {
+                                owner.clear_default_if(&id);
+                            }
+                            target.finish_close_owned().await?;
+                            target.join_close_owned().await?;
+                            if target.storage_mode() == StorageMode::Memory {
+                                target.retire_closed_owned().await?;
+                                owner.remove_retired_session_owned(&target);
+                            }
+                            Ok::<_, Fault>(())
                         }
-                        target.finish_close_owned().await?;
-                        target.join_close_owned().await?;
-                        if target.storage_mode() == StorageMode::Memory {
-                            target.retire_closed_owned().await?;
-                            owner.remove_retired_session_owned(&target);
+                        .await;
+                        if let Err(fault) = result {
+                            target.set_close_fault(fault);
                         }
-                        Ok::<_, Fault>(())
+                        {
+                            let mut state = owner.state.lock().expect("Agent mutex poisoned");
+                            state.close_running.remove(&id);
+                            state.close_tasks.remove(&id);
+                        }
+                        owner.changed.notify_waiters();
+                        owner.try_retire_empty_owned();
                     }
-                    .await;
-                    if let Err(fault) = result {
-                        target.set_close_fault(fault);
-                    }
-                    {
-                        let mut state = owner.state.lock().expect("Agent mutex poisoned");
-                        state.close_running.remove(&id);
-                        state.close_tasks.remove(&id);
-                    }
-                    owner.changed.notify_waiters();
-                    owner.try_retire_empty_owned();
-                });
+                    .with_current_subscriber(),
+                );
                 state.close_tasks.insert(key, task);
             }
             Ok(())

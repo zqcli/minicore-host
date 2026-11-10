@@ -193,3 +193,105 @@ async fn repeated_host_shutdown_drops_unused_span_outside_registry() {
     });
     probe.assert_unlocked();
 }
+
+#[tokio::test]
+async fn memory_metadata_commits_emit_after_registry_and_agent_unlock() {
+    let host = Host::memory(resources()).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = memory_agent(&host, &caller).await;
+    let (probe, dispatch) = reentry();
+    probe.arm(&host, &caller, Some(agent.clone()));
+    async {
+        host.agent_update(
+            &caller,
+            &agent,
+            AgentUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: AgentUpdateChanges {
+                    name: Some("private memory metadata name".into()),
+                    ..Default::default()
+                },
+            },
+        )
+        .await
+        .unwrap();
+        host.agent_set_default_session(
+            &caller,
+            &agent,
+            AgentSetDefaultSessionRequest {
+                operation_id: OperationId::new().unwrap(),
+                session_id: None,
+            },
+        )
+        .unwrap();
+        host.update_agent(
+            &caller,
+            &agent,
+            1,
+            &AgentConfigPatch {
+                role: Some(Role {
+                    name: "private role metadata".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        host.set_default_session(&caller, &agent, None).unwrap();
+    }
+    .with_subscriber(dispatch)
+    .await;
+    probe.assert_unlocked();
+}
+
+#[tokio::test]
+async fn persistent_metadata_failure_and_reconcile_callbacks_leave_owner_guards() {
+    let directory = tempfile::tempdir().unwrap();
+    let host = Host::open_persistent(directory.path(), settings(), resources())
+        .await
+        .unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let created = host
+        .create_agent_async(&caller, request(StorageMode::Persistent))
+        .await
+        .unwrap();
+    let agent = AgentRef {
+        host_id: created.host_id,
+        agent_id: created.agent_id.unwrap(),
+    };
+    let path = directory
+        .path()
+        .join("agents")
+        .join(agent.agent_id.as_str());
+    std::fs::rename(path.join("agent.json"), path.join("original-agent.json")).unwrap();
+    std::fs::create_dir(path.join("agent.json")).unwrap();
+    let (probe, dispatch) = reentry();
+    probe.arm(&host, &caller, Some(agent.clone()));
+    async {
+        host.agent_update(
+            &caller,
+            &agent,
+            AgentUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: AgentUpdateChanges {
+                    name: Some("private persistent metadata name".into()),
+                    ..Default::default()
+                },
+            },
+        )
+        .await
+        .unwrap();
+        until(|| host.agent_info(&caller, &agent).unwrap().metadata_fault).await;
+        std::fs::remove_dir(path.join("agent.json")).unwrap();
+        std::fs::rename(path.join("original-agent.json"), path.join("agent.json")).unwrap();
+        host.reconcile_agent_record(&caller, &agent).await.unwrap();
+    }
+    .with_subscriber(dispatch)
+    .await;
+    probe.assert_unlocked();
+    shutdown(&host, &caller).await;
+}

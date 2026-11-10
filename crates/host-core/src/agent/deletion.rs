@@ -17,6 +17,7 @@ impl AgentOwner {
                 "deletion requires a live Tokio runtime",
             )
         })?;
+        let operation = request.operation_id.clone();
         let (receipt, diagnostics) = self.access.accept_execution(caller, || {
             let child = {
                 let mut state = self.state.lock().expect("Agent mutex poisoned");
@@ -75,8 +76,13 @@ impl AgentOwner {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             state.closing.insert(id.clone());
             Self::retain_control(&mut state, Receipt::SessionDelete(receipt.clone()));
-            let task = runtime.spawn(async move {
-                let data = AssertUnwindSafe(owner.delete_session_work(&child, request.close))
+            let task = runtime.spawn(
+                async move {
+                    let data = AssertUnwindSafe(owner.delete_session_work(
+                        &child,
+                        request.close,
+                        &operation,
+                    ))
                     .catch_unwind()
                     .await
                     .unwrap_or_else(|_| {
@@ -86,18 +92,20 @@ impl AgentOwner {
                         ))
                     })
                     .unwrap_or_else(|error| DataDeletion::Failed { error });
-                child.deletion_result_owned(data.clone());
-                if data.removed() {
-                    owner.remove_retired_session_owned(&child);
+                    child.deletion_result_owned(data.clone());
+                    if data.removed() {
+                        owner.remove_retired_session_owned(&child);
+                    }
+                    {
+                        let mut state = owner.state.lock().expect("Agent mutex poisoned");
+                        state.deleting_sessions.remove(&task_id);
+                        state.delete_tasks.remove(&task_id);
+                    }
+                    owner.changed.notify_waiters();
+                    owner.try_retire_empty_owned();
                 }
-                {
-                    let mut state = owner.state.lock().expect("Agent mutex poisoned");
-                    state.deleting_sessions.remove(&task_id);
-                    state.delete_tasks.remove(&task_id);
-                }
-                owner.changed.notify_waiters();
-                owner.try_retire_empty_owned();
-            });
+                .with_current_subscriber(),
+            );
             state.delete_tasks.insert(id.clone(), task);
             Ok((receipt, diagnostics))
         })?;
@@ -108,12 +116,14 @@ impl AgentOwner {
         self: &Arc<Self>,
         child: &Arc<SessionController>,
         close: bool,
+        operation: &OperationId,
     ) -> Result<DataDeletion, Fault> {
         if close {
             child.begin_delete_close_owned();
         }
         if self.store().is_some() {
-            self.clear_default_before_close(&child.id).await?;
+            self.clear_default_before_close(&child.id, operation)
+                .await?;
         } else {
             self.clear_default_if(&child.id);
         }
@@ -210,8 +220,9 @@ impl AgentOwner {
         self: &Arc<Self>,
         scope: AgentDeleteScope,
         children: Vec<Arc<SessionController>>,
+        operation: OperationId,
     ) {
-        let result = AssertUnwindSafe(self.delete_agent_work(&scope, &children))
+        let result = AssertUnwindSafe(self.delete_agent_work(&scope, &children, &operation))
             .catch_unwind()
             .await
             .unwrap_or_else(|_| {
@@ -236,6 +247,7 @@ impl AgentOwner {
         self: &Arc<Self>,
         scope: &AgentDeleteScope,
         children: &[Arc<SessionController>],
+        operation: &OperationId,
     ) -> Result<(), Fault> {
         let close = matches!(scope, AgentDeleteScope::Sessions { close: true, .. });
         for child in children {
@@ -302,7 +314,7 @@ impl AgentOwner {
                         }
                         self.changed.notify_waiters();
                         let data = self
-                            .delete_session_work(child, close)
+                            .delete_session_work(child, close, operation)
                             .await
                             .unwrap_or_else(|error| DataDeletion::Failed { error });
                         child.deletion_result_owned(data)

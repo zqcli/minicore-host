@@ -1,5 +1,6 @@
 use super::*;
 use crate::persistence::disk;
+use minicore_host_diagnostics::Context;
 use minicore_host_storage::AgentData;
 use tokio::sync::oneshot;
 
@@ -10,6 +11,7 @@ pub(super) struct AgentRecordWork {
     runtime_default: Option<SessionId>,
     running: bool,
     fault: Option<Fault>,
+    context: Context,
 }
 impl AgentOwner {
     fn record(&self, info: &AgentInfo, persistent_default: Option<SessionId>) -> AgentRecord {
@@ -87,7 +89,7 @@ impl AgentOwner {
         caller: &CallerContext,
         target: Option<SessionId>,
     ) -> Result<(), Fault> {
-        let (_, receiver) = self.accept_default(caller, target, |_| ())?;
+        let (_, receiver) = self.accept_default(caller, target, None, |_| ())?;
         receiver
             .await
             .map_err(|_| {
@@ -102,6 +104,7 @@ impl AgentOwner {
         self: &Arc<Self>,
         caller: &CallerContext,
         target: Option<SessionId>,
+        operation_id: Option<OperationId>,
         accepted: impl FnOnce(&mut AgentState) -> T,
     ) -> Result<(T, oneshot::Receiver<Result<AgentInfo, Fault>>), Fault> {
         let child = target.as_ref().map(|id| self.session(id)).transpose()?;
@@ -115,7 +118,11 @@ impl AgentOwner {
             .filter(|child| child.storage_mode() == StorageMode::Persistent)
             .map(|child| child.id.clone());
         let (sender, receiver) = oneshot::channel();
-        let result = self.access.accept_business(caller, || {
+        let context = Context {
+            operation_id,
+            ..self.diagnostic_context()
+        };
+        let (result, diagnostic) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if target
@@ -133,16 +140,19 @@ impl AgentOwner {
                     "default Session is closing",
                 ));
             }
-            if state.info.mode == StorageMode::Memory {
+            let diagnostic = if state.info.mode == StorageMode::Memory {
                 state.info.default_session_id = target;
                 let _ = sender.send(Ok(state.info.clone()));
                 self.changed.notify_waiters();
+                self.metadata_result_record(context, &state.info, None)
             } else {
                 let record = self.record(&state.info, persistent_default);
-                self.spawn_record_save(&mut state, record, target, sender)?;
-            }
-            Ok(accepted(&mut state))
+                self.spawn_record_save(&mut state, record, target, sender, context.clone())?;
+                self.metadata_accepted_record(context, &state.info)
+            };
+            Ok((accepted(&mut state), diagnostic))
         })?;
+        diagnostic.emit();
         Ok((result, receiver))
     }
     pub(crate) fn set_default_control(
@@ -151,28 +161,33 @@ impl AgentOwner {
         request: AgentSetDefaultSessionRequest,
     ) -> Result<AgentSetDefaultSessionReceipt, Fault> {
         let requested = request.session_id.clone();
-        let (receipt, _) = self.accept_default(caller, request.session_id, |state| {
-            let result = if state.info.metadata_saving {
-                AgentSetDefaultSessionResult::Saving {
-                    default_session_id: state.info.default_session_id.clone(),
-                    requested_session_id: requested,
-                }
-            } else {
-                AgentSetDefaultSessionResult::Committed {
-                    default_session_id: state.info.default_session_id.clone(),
-                }
-            };
-            let receipt = AgentSetDefaultSessionReceipt {
-                kind: AgentSetDefaultSessionKind::AgentSetDefaultSession,
-                host_id: self.host_id.clone(),
-                host_incarnation: self.incarnation.clone(),
-                agent_id: self.id.clone(),
-                operation_id: request.operation_id,
-                result,
-            };
-            Self::retain_control(state, Receipt::AgentSetDefaultSession(receipt.clone()));
-            receipt
-        })?;
+        let (receipt, _) = self.accept_default(
+            caller,
+            request.session_id,
+            Some(request.operation_id.clone()),
+            |state| {
+                let result = if state.info.metadata_saving {
+                    AgentSetDefaultSessionResult::Saving {
+                        default_session_id: state.info.default_session_id.clone(),
+                        requested_session_id: requested,
+                    }
+                } else {
+                    AgentSetDefaultSessionResult::Committed {
+                        default_session_id: state.info.default_session_id.clone(),
+                    }
+                };
+                let receipt = AgentSetDefaultSessionReceipt {
+                    kind: AgentSetDefaultSessionKind::AgentSetDefaultSession,
+                    host_id: self.host_id.clone(),
+                    host_incarnation: self.incarnation.clone(),
+                    agent_id: self.id.clone(),
+                    operation_id: request.operation_id,
+                    result,
+                };
+                Self::retain_control(state, Receipt::AgentSetDefaultSession(receipt.clone()));
+                receipt
+            },
+        )?;
         Ok(receipt)
     }
     fn spawn_record_save(
@@ -181,6 +196,7 @@ impl AgentOwner {
         candidate: AgentRecord,
         runtime_default: Option<SessionId>,
         sender: oneshot::Sender<Result<AgentInfo, Fault>>,
+        context: Context,
     ) -> Result<(), Fault> {
         let runtime = state
             .executor
@@ -206,13 +222,19 @@ impl AgentOwner {
             runtime_default: runtime_default.clone(),
             running: true,
             fault: None,
+            context,
         });
         let owner = Arc::clone(self);
-        state.record_task = Some(runtime.spawn(async move {
-            let result = owner.save_record(candidate, runtime_default).await;
-            drop(owner);
-            let _ = sender.send(result);
-        }));
+        state.record_task = Some(
+            runtime.spawn(
+                async move {
+                    let result = owner.save_record(candidate, runtime_default).await;
+                    drop(owner);
+                    let _ = sender.send(result);
+                }
+                .with_current_subscriber(),
+            ),
+        );
         Ok(())
     }
     async fn save_record(
@@ -222,54 +244,61 @@ impl AgentOwner {
     ) -> Result<AgentInfo, Fault> {
         let store = self.store().expect("persistent Agent");
         let saved = candidate.clone();
-        let baseline = self
-            .state
-            .lock()
-            .expect("Agent mutex poisoned")
-            .record_work
-            .as_ref()
-            .expect("owned save")
-            .baseline
-            .clone();
-        let result = disk(FaultKind::HostStorageUnavailable, move || {
-            let current = store.load_record()?;
-            if current != baseline && current != saved {
-                return Err(minicore_host_storage::StorageError::UncertainWrite);
-            }
-            store.save(&saved)
-        })
-        .await;
-        let mut state = self.state.lock().expect("Agent mutex poisoned");
-        state.record_task.take();
-        state.info.metadata_saving = false;
-        let result = match result {
-            Ok(_) => {
-                state.record_base = Some(candidate.clone());
-                state.info.name = candidate.data.name;
-                state.info.config = candidate.data.config;
-                state.info.config_revision = candidate.data.config_revision;
-                state.info.default_session_id = runtime_default;
-                state.info.metadata_fault = None;
-                state.record_work = None;
-                Ok(state.info.clone())
-            }
-            Err(fault) => {
-                let work = state.record_work.as_mut().expect("original save retained");
-                work.running = false;
-                work.fault = Some(fault.clone());
-                state.info.metadata_fault = Some(fault.clone());
-                Err(fault)
-            }
+        let (baseline, context) = {
+            let state = self.state.lock().expect("Agent mutex poisoned");
+            let work = state.record_work.as_ref().expect("owned save");
+            (work.baseline.clone(), work.context.clone())
         };
-        self.changed.notify_waiters();
-        result
+        // This owned worker creates and destroys its short span outside every
+        // admission and owner guard, including a failed caller or reconciliation.
+        let span = context.span();
+        async move {
+            let result = disk(FaultKind::HostStorageUnavailable, move || {
+                let current = store.load_record()?;
+                if current != baseline && current != saved {
+                    return Err(minicore_host_storage::StorageError::UncertainWrite);
+                }
+                store.save(&saved)
+            })
+            .await;
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
+            state.record_task.take();
+            state.info.metadata_saving = false;
+            let result = match result {
+                Ok(_) => {
+                    state.record_base = Some(candidate.clone());
+                    state.info.name = candidate.data.name;
+                    state.info.config = candidate.data.config;
+                    state.info.config_revision = candidate.data.config_revision;
+                    state.info.default_session_id = runtime_default;
+                    state.info.metadata_fault = None;
+                    state.record_work = None;
+                    Ok(state.info.clone())
+                }
+                Err(fault) => {
+                    let work = state.record_work.as_mut().expect("original save retained");
+                    work.running = false;
+                    work.fault = Some(fault.clone());
+                    state.info.metadata_fault = Some(fault.clone());
+                    Err(fault)
+                }
+            };
+            let diagnostic =
+                self.metadata_result_record(context, &state.info, result.as_ref().err());
+            self.changed.notify_waiters();
+            drop(state);
+            diagnostic.emit();
+            result
+        }
+        .instrument(span)
+        .await
     }
     pub(crate) async fn reconcile_record(
         self: &Arc<Self>,
         caller: &CallerContext,
     ) -> Result<AgentInfo, Fault> {
         let (sender, receiver) = oneshot::channel();
-        self.access.accept(caller, || {
+        let diagnostic = self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             let work = state.record_work.as_ref().ok_or_else(|| {
                 Fault::new(
@@ -285,8 +314,11 @@ impl AgentOwner {
             }
             let candidate = work.candidate.clone();
             let target = work.runtime_default.clone();
-            self.spawn_record_save(&mut state, candidate, target, sender)
+            let context = work.context.clone();
+            self.spawn_record_save(&mut state, candidate, target, sender, context.clone())?;
+            Ok(self.metadata_accepted_record(context, &state.info))
         })?;
+        diagnostic.emit();
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
@@ -300,6 +332,7 @@ impl AgentOwner {
         id: &SessionId,
         request: SessionCloseRequest,
     ) -> Result<SessionCloseReceipt, Fault> {
+        let operation = request.operation_id.clone();
         let persistent = self.store().is_some();
         let runtime = if persistent {
             Some(tokio::runtime::Handle::try_current().map_err(|_| {
@@ -387,11 +420,10 @@ impl AgentOwner {
         let id = id.clone();
         let task_id = id.clone();
         let mut state = self.state.lock().expect("Agent mutex poisoned");
-        let task = runtime
-            .expect("persistent close runtime")
-            .spawn(async move {
+        let task = runtime.expect("persistent close runtime").spawn(
+            async move {
                 let result = async {
-                    owner.clear_default_before_close(&id).await?;
+                    owner.clear_default_before_close(&id, &operation).await?;
                     child.finish_close_owned().await?;
                     child.join_close_owned().await?;
                     if child.storage_mode() == StorageMode::Memory {
@@ -410,14 +442,22 @@ impl AgentOwner {
                     child.set_close_fault(fault);
                 }
                 owner.changed.notify_waiters();
-            });
+            }
+            .with_current_subscriber(),
+        );
         state.close_tasks.insert(task_id, task);
         Ok(receipt)
     }
     pub(super) async fn clear_default_before_close(
         self: &Arc<Self>,
         id: &SessionId,
+        operation: &OperationId,
     ) -> Result<(), Fault> {
+        let context = Context {
+            operation_id: Some(operation.clone()),
+            session_id: Some(id.clone()),
+            ..self.diagnostic_context()
+        };
         loop {
             let notified = self.changed.notified();
             tokio::pin!(notified);
@@ -451,11 +491,16 @@ impl AgentOwner {
                         runtime_default: None,
                         running: true,
                         fault: None,
+                        context: context.clone(),
                     });
-                    Some(record)
+                    Some((
+                        record,
+                        self.metadata_accepted_record(context.clone(), &state.info),
+                    ))
                 }
             };
-            if let Some(candidate) = candidate {
+            if let Some((candidate, diagnostic)) = candidate {
+                diagnostic.emit();
                 self.save_record(candidate, None).await?;
                 return Ok(());
             }
@@ -469,10 +514,11 @@ impl AgentOwner {
         self: &Arc<Self>,
         caller: &CallerContext,
         expected: u64,
-        config: AgentConfig,
-        name: String,
+        candidate: (AgentConfig, String),
+        operation_id: Option<OperationId>,
         accepted: impl FnOnce(&mut AgentState) -> T,
     ) -> Result<(T, oneshot::Receiver<Result<AgentInfo, Fault>>), Fault> {
+        let (config, name) = candidate;
         if name.trim().is_empty() || name.contains('\0') {
             return Err(Fault::new(
                 FaultKind::AgentConfigInvalid,
@@ -492,7 +538,11 @@ impl AgentOwner {
             None
         };
         let (sender, receiver) = oneshot::channel();
-        let result = self.access.accept_business(caller, || {
+        let context = Context {
+            operation_id,
+            ..self.diagnostic_context()
+        };
+        let (result, diagnostic) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
             if state.info.config_revision != expected
@@ -512,16 +562,25 @@ impl AgentOwner {
                     "configuration revision exhausted",
                 )
             })?;
-            if state.info.mode == StorageMode::Memory {
+            let diagnostic = if state.info.mode == StorageMode::Memory {
                 state.info = candidate;
                 self.changed.notify_waiters();
                 let _ = sender.send(Ok(state.info.clone()));
+                self.metadata_result_record(context, &state.info, None)
             } else {
                 let record = self.record(&candidate, persistent_default);
-                self.spawn_record_save(&mut state, record, candidate.default_session_id, sender)?;
-            }
-            Ok(accepted(&mut state))
+                self.spawn_record_save(
+                    &mut state,
+                    record,
+                    candidate.default_session_id,
+                    sender,
+                    context.clone(),
+                )?;
+                self.metadata_accepted_record(context, &state.info)
+            };
+            Ok((accepted(&mut state), diagnostic))
         })?;
+        diagnostic.emit();
         Ok((result, receiver))
     }
     pub(crate) async fn update_candidate_async(
@@ -531,12 +590,15 @@ impl AgentOwner {
         config: AgentConfig,
         name: String,
     ) -> Result<AgentInfo, Fault> {
-        self.resources_owned()?.validate(
-            &SessionConfig::from_agent(&config, &SessionOverrides::default())
-                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?,
-        )?;
+        self.resources_owned()?
+            .validate(
+                &SessionConfig::from_agent(&config, &SessionOverrides::default()).map_err(
+                    |error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()),
+                )?,
+            )
+            .inspect_err(|fault| self.metadata_refusal_record(None, fault).emit())?;
         let (_, receiver) =
-            self.accept_prepared_update_candidate(caller, expected, config, name, |_| ())?;
+            self.accept_prepared_update_candidate(caller, expected, (config, name), None, |_| ())?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::AgentInternalUnexpected,
@@ -585,12 +647,17 @@ impl AgentOwner {
                     FaultKind::AgentInternalUnexpected,
                     "configuration validation task ended unexpectedly",
                 )
-            })??;
+            })
+            .and_then(|result| result)
+            .inspect_err(|fault| {
+                self.metadata_refusal_record(Some(request.operation_id.clone()), fault)
+                    .emit();
+            })?;
         let (receipt, _) = self.accept_prepared_update_candidate(
             caller,
             request.expected_config_revision,
-            config,
-            name,
+            (config, name),
+            Some(request.operation_id.clone()),
             |state| {
                 let result = if state.info.metadata_saving {
                     MetadataUpdateResult::Saving {

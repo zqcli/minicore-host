@@ -49,6 +49,91 @@ impl AgentOwner {
                 .attribute("phase", phase),
         )
     }
+    pub(super) fn metadata_accepted_record(&self, context: Context, info: &AgentInfo) -> Record {
+        Record::new(
+            event(
+                Level::INFO,
+                Scope::Agent,
+                "agent.owner",
+                "agent.metadata_save_accepted",
+                "Agent accepted metadata save work",
+                &["mode", "phase", "config_revision"],
+            ),
+            EventData::default()
+                .context(context)
+                .attribute("mode", mode_name(info.mode))
+                .attribute("phase", "saving")
+                .attribute("config_revision", info.config_revision),
+        )
+    }
+    pub(super) fn metadata_refusal_record(
+        &self,
+        operation_id: Option<OperationId>,
+        fault: &Fault,
+    ) -> Record {
+        let mode = self.state.lock().expect("Agent mutex poisoned").info.mode;
+        Record::new(
+            event(
+                if fault.kind() == Some(FaultKind::AgentInternalUnexpected) {
+                    Level::ERROR
+                } else {
+                    Level::WARN
+                },
+                Scope::Agent,
+                "agent.owner",
+                if fault.kind() == Some(FaultKind::SessionResourceMissing) {
+                    "agent.resources_refused"
+                } else {
+                    "agent.metadata_update_failed"
+                },
+                "Agent could not prepare metadata resources",
+                &["mode", "phase"],
+            ),
+            EventData::default()
+                .context(Context {
+                    operation_id,
+                    ..self.diagnostic_context()
+                })
+                .fault(fault)
+                .attribute("mode", mode_name(mode))
+                .attribute("phase", "resources"),
+        )
+    }
+    pub(super) fn metadata_result_record(
+        &self,
+        context: Context,
+        info: &AgentInfo,
+        fault: Option<&Fault>,
+    ) -> Record {
+        let mut data = EventData::default()
+            .context(context)
+            .attribute("mode", mode_name(info.mode))
+            .attribute("config_revision", info.config_revision);
+        let (level, name) = if let Some(fault) = fault {
+            data = data.fault(fault).attribute("phase", "failed");
+            (Level::ERROR, "agent.metadata_save_failed")
+        } else {
+            data = data.attribute("phase", "committed").attribute(
+                "persistence",
+                match info.mode {
+                    StorageMode::Memory => "not_applicable",
+                    StorageMode::Persistent => "persisted",
+                },
+            );
+            (Level::INFO, "agent.metadata_committed")
+        };
+        Record::new(
+            event(
+                level,
+                Scope::Agent,
+                "agent.owner",
+                name,
+                "Agent settled its metadata write",
+                &["mode", "phase", "config_revision", "persistence"],
+            ),
+            data,
+        )
+    }
     pub(crate) fn session_creation_record(
         &self,
         context: Context,

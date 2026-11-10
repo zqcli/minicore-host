@@ -85,3 +85,23 @@ Fresh checks in `fix/079-host-mode-diagnostics` / `/workspace/shared/minicore-ho
 - `cargo clippy -p minicore-host-core --lib --test task079_shutdown_repetition --test task079_lock_boundary --test task079_diagnostics --locked --offline -- -D warnings`: passed.
 - `cargo fmt --all --check` and `git diff --check`: passed.
 - Logs: `/workspace/shared/task079-mode-evidence/regression.log`, `clippy.log`. Independent TASK082 follow-up and a complete workspace gate remain separate.
+
+## Agent metadata save and reconciliation slice
+
+- Branch `task/079-agent-metadata-diagnostics`, worktree `/workspace/shared/minicore-host-task079-metadata`. Began from `985ff19457e682f4d30f6c9bb309a3cbc2d118bf` and fast-forwarded to independently reviewed mode fix `7781a1d8f58967dfb76d52fbef6a224f813911d6` before final checks.
+- This is newly written/tested work, not byte-for-byte recovery of the lost metadata edits. The existing `AgentRecordWork` retains only an additional scalar Context, so explicit reconcile continues the original operation without inventing another identity or retry owner.
+- Record actual save acceptance, confirmed commit, and failed save separately. Saving retains the old committed revision and does not claim persistence. Memory commits use `not_applicable`; only a confirmed persistent save uses `persisted`. The immutable Saving receipt remains unchanged after commit or failure.
+- The direct Agent reports one main ERROR for its actual metadata/default-reference save failure. Close, Session deletion and Agent cascade retain the original operation and target Session through that same owner; forwarding does not duplicate the ERROR. Resource refusal 3403 remains WARN and a rejected update does not create a save or receipt.
+- Synchronous records leave the outer admission before emit. Owned save workers create/end their short span after releasing owner guards and explicitly inherit the subscriber. No Span enters pending owner state. No body/config/Role/name/path/raw error is logged; optional IDs absent from the caller are not fabricated.
+- No Session source/signature, shared helper, configuration/resource/schema, Runtime, TUI or lockfile change. No new recovery API, implicit close/shutdown retry or lifecycle state. The Host deletion change only carries its already-known operation into the existing Agent worker and propagates the subscriber.
+
+Fresh validation with the Rust environment/isolated target above:
+
+- `cargo test -p minicore-host-core --locked --offline`: all **317** core cases passed, zero ignored; doc-tests contain zero cases. `cargo test -p minicore-host-core --all-targets --locked --offline -- --list` independently lists 317 distinct test names. This is not a workspace-wide gate.
+- Six new metadata integration cases cover real filesystem save refusal/reconcile, unchanged original receipt/revision, default-close forwarding, Session/Agent deletion forwarding, an accepted gated save after waiter cancellation and connection revocation, memory commit vs persistent commit, real resource refusal, and uninstalled/closed logging. Two new callback-reentry cases cover memory metadata commits and persistent failure/reconcile, alongside the unchanged two P1 probes.
+- `cargo clippy -p minicore-host-core --lib --tests --locked --offline -- -D warnings`: passed.
+- `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core --no-deps --locked --offline`: passed. `cargo fmt --all --check` and `git diff --check`: passed.
+- The first all-core run exposed a fixture race: it closed the writer immediately after observing business publication while another Runtime poll could still emit its diagnostic tail. The fixture now shuts down its test-owned Runtime before flushing the independent writer. It does not make production business publication wait for logging. The corrected gated-save test passed 12 consecutive runs, then the complete core suite passed. No old environment result is counted.
+- Logs are in `/workspace/shared/task079-metadata-evidence/`: `core-tests-final.log`, `core-list.log`, `clippy-final.log`, `rustdoc-final.log`, `owned-poll-repeat.log`. Earlier diagnostic/harness failures remain in `core-tests.log` and the initial focused logs rather than being reported as green.
+
+Independent review of this new metadata scope is pending. Reclamation and later deletion/shutdown summaries remain a separate next slice.

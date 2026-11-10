@@ -1,4 +1,5 @@
 use super::*;
+use tracing::instrument::WithSubscriber;
 
 impl Host {
     pub fn session_delete(
@@ -31,6 +32,7 @@ impl Host {
                 "deletion requires a live Tokio runtime",
             )
         })?;
+        let operation = request.operation_id.clone();
         let (receipt, diagnostics) = self.access.accept_execution(caller, || {
             let agent = {
                 let state = self.state.lock().expect("Host mutex poisoned");
@@ -76,17 +78,22 @@ impl Host {
                 .entry(receipt.operation_id.clone())
                 .or_default()
                 .push(Receipt::AgentDelete(receipt.clone()));
-            let task = runtime.spawn(async move {
-                agent.delete_agent_owned(request.scope, children).await;
-                owner.remove_retired_agents_owned();
-                {
-                    let mut state = owner.state.lock().expect("Host mutex poisoned");
-                    state.deleting -= 1;
-                    state.delete_tasks.remove(&task_id);
+            let task = runtime.spawn(
+                async move {
+                    agent
+                        .delete_agent_owned(request.scope, children, operation)
+                        .await;
+                    owner.remove_retired_agents_owned();
+                    {
+                        let mut state = owner.state.lock().expect("Host mutex poisoned");
+                        state.deleting -= 1;
+                        state.delete_tasks.remove(&task_id);
+                    }
+                    owner.changed.notify_waiters();
+                    owner.publish_host_state_owned();
                 }
-                owner.changed.notify_waiters();
-                owner.publish_host_state_owned();
-            });
+                .with_current_subscriber(),
+            );
             state.delete_tasks.insert(target.agent_id.clone(), task);
             Ok((receipt, diagnostics))
         })?;
