@@ -1,0 +1,30 @@
+COMMAND: PYTHONDONTWRITEBYTECODE=1 python3 scripts/task090_perf_test.py
+........
+----------------------------------------------------------------------
+Ran 8 tests in 0.001s
+
+OK
+COMMAND: PYTHONDONTWRITEBYTECODE=1 python3 scripts/task059_projection_test.py
+...............
+----------------------------------------------------------------------
+Ran 15 tests in 0.001s
+
+OK
+COMMAND: PYTHONDONTWRITEBYTECODE=1 python3 scripts/task058_rss_test.py
+.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.000s
+
+OK
+COMMAND: PYTHONDONTWRITEBYTECODE=1 python3 tasks/090-fresh-performance/verify_evidence.py
+smoke-aa64dc7/run-01: 1596 JSONL records; 484 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+smoke-aa64dc7: environment/source/harness hashes and regenerated summary match
+measured-aa64dc7/run-01: 1551 JSONL records; 462 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-aa64dc7/run-02: 1571 JSONL records; 473 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-aa64dc7/run-03: 1570 JSONL records; 473 RPCs matched without errors; 46 sends; 14 real HTTP requests; 104 emitted chunks; 104 matching observer/chunk timings; cleanup witness and both stopped components; resource union verified
+measured-aa64dc7: environment/source/harness hashes and regenerated summary match
+No failed run was reclassified as successful. Smoke results remain separate from the 3-run reported sample.
+COMMAND: git diff --check
+COMMAND: ./scripts/check-whitespace.sh
+COMMAND: git diff --exit-code f36761a -- crates Cargo.toml Cargo.lock SPEC.md original scripts
+All listed checks exited 0. Rust full gate not run in this evidence-only task.

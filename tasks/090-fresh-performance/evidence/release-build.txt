@@ -1,0 +1,194 @@
+2026-11-10T02:45:07Z
+COMMAND: time cargo build --release -p minicore-host --locked --offline
+CARGO_TARGET_DIR=/workspace/shared/minicore-host-task090-target
+CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+f36761a164c6f3ae092c5e0bbf7ab08bbcd58891
+rustc 1.90.0 (1159e78c4 2025-09-14)
+binary: rustc
+commit-hash: 1159e78c4747b02ef996e55082b704c09b970588
+commit-date: 2025-09-14
+host: x86_64-unknown-linux-gnu
+release: 1.90.0
+LLVM version: 20.1.8
+cargo 1.90.0 (840b83a10 2025-07-30)
+Linux a983ced6af0b 6.18.57 #1 SMP Tue Oct 20 21:56:04 UTC 2026 x86_64 GNU/Linux
+1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125  Cargo.lock
+f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3  SPEC.md
+f332e227d6c6094d5f2856c6ee75d3685e6937a782490f00ade844c089080373  scripts/task058_perf.py
+19ba3e056059a8308bfc0bf0986402de85d288b99769cb74285e488023ac85d2  scripts/task058_summarize.py
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.191
+   Compiling syn v3.0.9
+   Compiling cfg-if v1.0.5
+   Compiling memchr v2.8.3
+   Compiling pin-project-lite v0.2.17
+   Compiling bytes v1.12.1
+   Compiling futures-core v0.3.34
+   Compiling itoa v1.0.18
+   Compiling errno v0.3.14
+   Compiling futures-sink v0.3.34
+   Compiling futures-channel v0.3.34
+   Compiling signal-hook-registry v1.4.8
+   Compiling socket2 v0.6.5
+   Compiling futures-macro v0.3.34
+   Compiling tokio-macros v2.7.2
+   Compiling mio v1.2.4
+   Compiling slab v0.4.12
+   Compiling futures-io v0.3.34
+   Compiling futures-task v0.3.34
+   Compiling tokio v1.54.0
+   Compiling futures-util v0.3.34
+   Compiling synstructure v0.14.0
+   Compiling serde_core v1.0.229
+   Compiling typenum v1.20.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling zerofrom v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling stable_deref_trait v1.2.1
+   Compiling yoke v0.8.3
+   Compiling zmij v1.0.23
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.229
+   Compiling serde_derive v1.0.229
+   Compiling zerovec-derive v0.11.6
+   Compiling serde_json v1.0.154
+   Compiling zerovec v0.11.8
+   Compiling displaydoc v0.2.7
+   Compiling thiserror v2.0.21
+   Compiling version_check v0.9.5
+   Compiling generic-array v0.14.7
+   Compiling thiserror-impl v2.0.21
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling bitflags v2.13.2
+   Compiling cc v1.9.0
+   Compiling deranged v0.5.9
+   Compiling http v1.5.0
+   Compiling powerfmt v0.2.1
+   Compiling num-conv v0.2.2
+   Compiling log v0.4.34
+   Compiling time-core v0.1.9
+   Compiling time v0.3.55
+   Compiling ring v0.17.14
+   Compiling tinystr v0.8.4
+   Compiling tracing-core v0.1.36
+   Compiling tokio-util v0.7.20
+   Compiling smallvec v1.16.3
+   Compiling writeable v0.6.4
+   Compiling crossbeam-utils v0.8.23
+   Compiling litemap v0.8.3
+   Compiling httparse v1.10.1
+   Compiling icu_locale_core v2.3.0
+   Compiling minicore-host-protocol v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-protocol)
+   Compiling zerotrie v0.2.5
+   Compiling potential_utf v0.1.6
+   Compiling aho-corasick v1.1.5
+   Compiling icu_normalizer_data v2.3.0
+   Compiling regex-syntax v0.8.11
+   Compiling icu_properties_data v2.3.0
+   Compiling zeroize v1.9.1
+   Compiling utf8_iter v1.0.4
+   Compiling crossbeam-epoch v0.9.21
+   Compiling icu_collections v2.3.0
+   Compiling rustls-pki-types v1.15.1
+   Compiling regex-automata v0.4.18
+   Compiling icu_provider v2.3.1
+   Compiling tracing v0.1.44
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling getrandom v0.2.17
+   Compiling percent-encoding v2.3.2
+   Compiling untrusted v0.9.0
+   Compiling crossbeam-deque v0.8.8
+   Compiling rustix v1.1.6
+   Compiling subtle v2.6.1
+   Compiling digest v0.10.7
+   Compiling minicore-runtime v0.10.0 (https://github.com/zqcli/minicore-runtime?rev=69faf9196991524b5549499d6208a1eaf567bf56#69faf919)
+   Compiling http-body v1.1.0
+   Compiling bstr v1.13.1
+   Compiling linux-raw-sys v0.12.1
+   Compiling same-file v1.0.6
+   Compiling rustls v0.23.46
+   Compiling cpufeatures v0.2.17
+   Compiling lazy_static v1.5.1
+   Compiling sharded-slab v0.1.7
+   Compiling sha2 v0.10.9
+   Compiling walkdir v2.5.0
+   Compiling globset v0.4.21
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling rustls-webpki v0.103.16
+   Compiling hybrid-array v0.4.15
+   Compiling thread_local v1.1.10
+   Compiling try-lock v0.2.5
+   Compiling cfg_aliases v0.2.2
+   Compiling tower-service v0.3.3
+   Compiling nix v0.30.1
+   Compiling want v0.3.2
+   Compiling tracing-subscriber v0.3.23
+   Compiling ignore v0.4.33
+   Compiling idna_adapter v1.2.2
+   Compiling form_urlencoded v1.2.2
+   Compiling regex v1.13.1
+   Compiling atomic-waker v1.1.2
+   Compiling similar v3.2.0
+   Compiling cpufeatures v0.3.1
+   Compiling minicore-host-workspace v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-workspace)
+   Compiling hyper v1.12.0
+   Compiling idna v1.1.0
+   Compiling tokio-rustls v0.26.6
+   Compiling minicore-host-diagnostics v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-diagnostics)
+   Compiling block-buffer v0.12.1
+   Compiling crypto-common v0.2.2
+   Compiling futures-executor v0.3.34
+   Compiling sync_wrapper v1.0.2
+   Compiling const-oid v0.10.2
+   Compiling ipnet v2.12.2
+   Compiling base64 v0.23.1
+   Compiling tower-layer v0.3.3
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling tower v0.5.3
+   Compiling indexmap v2.14.2
+   Compiling hyper-util v0.1.21
+   Compiling digest v0.11.3
+   Compiling futures v0.3.34
+   Compiling url v2.5.8
+   Compiling chacha20 v0.10.2
+   Compiling minicore-host-storage v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-storage)
+   Compiling minicore-host-compaction v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-compaction)
+   Compiling webpki-roots v1.0.10
+   Compiling fastrand v2.5.0
+   Compiling ryu v1.0.23
+   Compiling serde_urlencoded v0.7.1
+   Compiling tempfile v3.27.0
+   Compiling hyper-rustls v0.27.10
+   Compiling minicore-host-core v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-core)
+   Compiling rand v0.10.3
+   Compiling tower-http v0.6.11
+   Compiling process-wrap v8.2.2
+   Compiling sha1 v0.11.0
+   Compiling http-body-util v0.1.5
+   Compiling base64 v0.22.1
+   Compiling data-encoding v2.11.1
+   Compiling tungstenite v0.30.0
+   Compiling reqwest v0.12.28
+   Compiling minicore-host-local-tools v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-local-tools)
+   Compiling httpdate v1.0.3
+   Compiling minicore-host-provider v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-provider)
+   Compiling minicore-host-tools v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-tools)
+   Compiling tokio-tungstenite v0.30.0
+   Compiling minicore-host-transport v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-transport)
+   Compiling minicore-host-resources v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-resources)
+   Compiling minicore-host v0.1.0 (/workspace/shared/minicore-host-task090/crates/host-app)
+    Finished `release` profile [optimized] target(s) in 2m 59s
+
+real	2m59.348s
+user	5m31.488s
+sys	0m15.730s
+build_exit=0
+2026-11-10T02:48:06Z

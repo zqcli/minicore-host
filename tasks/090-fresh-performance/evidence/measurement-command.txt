@@ -1,0 +1,11 @@
+Coordinator confirmed project workers 053/088/089/091 have no Cargo/heavy load; 087 exited; root does static work only. This does not certify whole-machine isolation.
+2026-11-10T02:55:42Z
+COMMAND: python3 scripts/task090_perf.py --binary /workspace/shared/minicore-host-task090-target/release/minicore-host --source-revision f36761a164c6f3ae092c5e0bbf7ab08bbcd58891 --out tasks/090-fresh-performance/evidence/smoke-aa64dc7 --runs 1
+running 1/1
+Raw evidence: tasks/090-fresh-performance/evidence/smoke-aa64dc7
+COMMAND: python3 scripts/task090_perf.py --binary /workspace/shared/minicore-host-task090-target/release/minicore-host --source-revision f36761a164c6f3ae092c5e0bbf7ab08bbcd58891 --out tasks/090-fresh-performance/evidence/measured-aa64dc7 --runs 3
+running 1/3
+running 2/3
+running 3/3
+Raw evidence: tasks/090-fresh-performance/evidence/measured-aa64dc7
+2026-11-10T02:55:56Z

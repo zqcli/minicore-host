@@ -1,0 +1,19 @@
+2026-11-10T02:44:56Z
+COMMAND: cargo build --release -p minicore-host --locked --offline
+f36761a164c6f3ae092c5e0bbf7ab08bbcd58891
+rustc 1.90.0 (1159e78c4 2025-09-14)
+binary: rustc
+commit-hash: 1159e78c4747b02ef996e55082b704c09b970588
+commit-date: 2025-09-14
+host: x86_64-unknown-linux-gnu
+release: 1.90.0
+LLVM version: 20.1.8
+cargo 1.90.0 (840b83a10 2025-07-30)
+Linux a983ced6af0b 6.18.57 #1 SMP Tue Oct 20 21:56:04 UTC 2026 x86_64 GNU/Linux
+1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125  Cargo.lock
+f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3  SPEC.md
+f332e227d6c6094d5f2856c6ee75d3685e6937a782490f00ade844c089080373  scripts/task058_perf.py
+19ba3e056059a8308bfc0bf0986402de85d288b99769cb74285e488023ac85d2  scripts/task058_summarize.py
+/bin/bash: line 1: /usr/bin/time: No such file or directory
+build_exit=127
+2026-11-10T02:44:57Z

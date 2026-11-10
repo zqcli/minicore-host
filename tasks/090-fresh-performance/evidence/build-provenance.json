@@ -1,0 +1,36 @@
+{
+  "build_source": "f36761a164c6f3ae092c5e0bbf7ab08bbcd58891",
+  "harness_source": "aa64dc732b52dd63f2813cb67103311973a67714",
+  "runtime_revision": "69faf9196991524b5549499d6208a1eaf567bf56",
+  "build_profile": "release (optimized); no custom release profile",
+  "environment": {
+    "RUSTUP_HOME": "/workspace/shared/rustup",
+    "CARGO_HOME": "/workspace/shared/cargo",
+    "PATH_prefix": "/workspace/shared/cargo/bin",
+    "TMPDIR": "/workspace/shared/minicore-host-tmp",
+    "CARGO_TARGET_DIR": "/workspace/shared/minicore-host-task090-target",
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "CARGO_INCREMENTAL": "0"
+  },
+  "source_note": "Production paths compared unchanged after harness-only commit; binary built once in exclusive target.",
+  "original_harness_sha256": "f332e227d6c6094d5f2856c6ee75d3685e6937a782490f00ade844c089080373",
+  "requested_worker_model": "gpt-6-astra",
+  "requested_reasoning_effort": "max",
+  "effective_worker_configuration": "not independently verified",
+  "selected_additional_build_environment": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CARGO_PROFILE_RELEASE_OPT_LEVEL": null,
+    "CARGO_PROFILE_RELEASE_LTO": null,
+    "CARGO_PROFILE_RELEASE_DEBUG": null,
+    "CARGO_PROFILE_RELEASE_CODEGEN_UNITS": null,
+    "CARGO_BUILD_TARGET": null
+  },
+  "binary_cargo_fingerprint": {
+    "rustflags": [],
+    "compile_kind": 0,
+    "profile": 4744567270671568404
+  }
+}
