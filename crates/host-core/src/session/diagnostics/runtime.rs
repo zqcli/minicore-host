@@ -63,6 +63,7 @@ const MODEL_ATTRIBUTES: &[&str] = &[
     "cache_read_tokens",
     "cache_write_tokens",
     "provider_total_tokens",
+    "wait_duration_ms",
 ];
 fn usage(mut data: EventData, usage: Option<Usage>) -> EventData {
     if let Some(usage) = usage {
@@ -156,8 +157,14 @@ pub(in crate::session) fn models_reported(
             data(),
         ));
         if response.is_some() && attempts > 1 {
-            // Pinned Runtime exposes no source wait-start/elapsed measurement.
-            // Neither its planned deadline nor Host dequeue time fills that gap.
+            // Source-measured retry waits share the report's original request
+            // index. Planned deadlines and Host observation times are not used.
+            let mut recovered = data();
+            if let Some(elapsed) = report.model_retry_wait_elapsed.get(index)
+                && let Ok(milliseconds) = u64::try_from(elapsed.as_millis())
+            {
+                recovered = recovered.attribute("wait_duration_ms", milliseconds);
+            }
             records.push(Record::new(
                 event(
                     Level::INFO,
@@ -167,7 +174,7 @@ pub(in crate::session) fn models_reported(
                     "Runtime produced a complete response after actual retries",
                     MODEL_ATTRIBUTES,
                 ),
-                data(),
+                recovered,
             ));
         }
     }

@@ -27,7 +27,7 @@ fn usage_reply() -> Reply {
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn actual_model_attempts_usage_and_recovery_are_turn_bound_without_invented_wait_time() {
+async fn actual_model_attempts_usage_and_source_measured_wait_are_turn_bound() {
     let directory = tempfile::tempdir().unwrap();
     let log = directory.path().join("diagnostic.jsonl");
     let mut logging = Options::new("diagnostic-model");
@@ -139,6 +139,12 @@ async fn actual_model_attempts_usage_and_recovery_are_turn_bound_without_invente
         if mode == 0 {
             assert_eq!(recovery[0]["level"], "INFO");
             assert_eq!(recovery[0]["attributes"]["attempt"], 3);
+            let waited = recovery[0]["attributes"]["wait_duration_ms"]
+                .as_u64()
+                .unwrap();
+            assert!(waited > 0);
+            eprintln!("actual recovery: attempts=3, source wait_duration_ms={waited}");
+            assert!(recovery[0]["attributes"].get("retry_after_ms").is_none());
             for (key, value) in [
                 ("input_tokens", 10),
                 ("output_tokens", 6),
@@ -153,8 +159,8 @@ async fn actual_model_attempts_usage_and_recovery_are_turn_bound_without_invente
                 assert!(call["attributes"].get(key).is_none());
             }
         }
-        for row in retries.iter().chain(recovery.iter()) {
-            // Pinned Runtime exposes a deadline, not elapsed source wait time.
+        for row in &retries {
+            // Scheduled retry facts are not the later measured wait outcome.
             for unknown in ["wait_duration_ms", "wait_ms", "retry_after_ms"] {
                 assert!(row["attributes"].get(unknown).is_none());
             }

@@ -17,7 +17,7 @@ sandbox, and configured credential exclusion does not isolate same-user processe
 
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed. Whitespace checks include committed changes and require full Git history; CI uses `fetch-depth: 0`.
 
-The Runtime dependency is exactly `0.10.0`, pinned to published commit `69faf9196991524b5549499d6208a1eaf567bf56` on `zqcli/minicore-runtime:feat/host-history-handoff`. It includes authoritative history/partial handoff, application-quota removal and retry-progress observation. No local Runtime patch, copied source or bootstrap bundle is required. Runtime's exact-head CI passed all seven checks; see [PROJECT.md](PROJECT.md) for verification boundaries and the source-tree mapping.
+The Runtime dependency is exactly `0.10.0`, pinned to published commit `3aa47629929906832dcb309afb7d242c1ae3e53f` on `zqcli/minicore-runtime:feat/host-history-handoff`. It includes authoritative history/partial handoff, application-quota removal, retry-progress observation and source-measured retry waits in the joined report. No local Runtime patch, copied source or bootstrap bundle is required. Runtime producer and independent local gates pass 324 tests and 2 doctests; its new [exact-head CI](https://github.com/zqcli/minicore-runtime/actions/runs/42746444546) passed. The previous pinned head's CI also passed all seven checks. See [PROJECT.md](PROJECT.md) and [the publication evidence](docs/runtime-retry-wait-publication.json) for fixed boundaries.
 
 ## Components
 

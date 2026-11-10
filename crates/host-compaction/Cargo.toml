@@ -8,7 +8,7 @@ description = "Model-backed historical compaction primitives for MiniCore Host"
 
 [dependencies]
 minicore-host-protocol = { path = "../host-protocol", version = "0.1.0" }
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 serde_json = "=1.0.154"
 thiserror = "=2.0.21"
 tokio = { version = "=1.54.0", features = ["macros", "time"] }

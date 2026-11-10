@@ -782,3 +782,73 @@ result handoff/cleanup failures still need their separate scalar summaries.
 Session.rs is frozen after this slice while the saved-result query P1 worker
 coordinates its independent read-only trait/module change. No query/history-read
 projection, SPEC, Runtime or lockfile changes belong to this slice.
+### Isolated integration with Runtime source-measured retry waits
+
+This is a **local integration candidate**, not a standard published-pin build.
+The Host code in this slice requires Runtime fixed source
+`2f7aeb9a2112e69cf1918c375916656e54d1208e` and its
+`LoopReport.model_retry_wait_elapsed: Arc<[Duration]>` API. The coordinator
+separately owns approval/publication and the eventual exact dependency pin.
+Do not merge this code alone with the still-committed 69faf919 Runtime pin.
+
+The only production change reads the same original request index already used
+for model_attempts and complete response facts. Recovery includes that source
+Duration as checked integer wait_duration_ms. Missing entries or unrepresentable
+milliseconds remain absent. No Host clock, planned retry delay, Retry-After,
+model wrapper, observer, additional state or wait is substituted. A normal
+request still has no recovered event; retries scheduled do not prematurely log
+elapsed waits. The prior SPEC acceptance difference is resolved by this candidate
+only when paired with the new Runtime source, not in the published old-pin tree.
+
+The real three-Host/Runtime/local HTTP regression was first red using the new
+Runtime with old Host summary code: attempts/outcomes were correct but recovery
+had no elapsed field. It is now green with measured elapsed, actual attempts and
+usage, unknown usage absent, and bounded exhaustion retaining its primary Fault.
+The retained measured run reports attempts=3 and actual wait_duration_ms=4;
+this observed value is not asserted as a timing threshold or planned duration.
+
+An external temporary Cargo config patched only minicore-runtime to the fixed
+local Runtime checkout. Cargo's temporary lock differed by exactly the Runtime
+source line; all registry versions/checksums remained fixed. After validation,
+the original tracked lock was restored byte-for-byte (SHA-256
+`1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125`).
+No path override, manifest/pin change, or temporary lock is included in this
+commit, and the main Session topic was never modified for this experiment.
+
+Local-config validation in its own exclusive worktree/target:
+
+- Actual HTTP regression red then green, including the retained measured run.
+- Eight actual diagnostic focused cases passed.
+- Core all-target suite and new list: 317 unique cases passed.
+- Core/transport all-target strict Clippy (rechecked after the scalar-only test
+  output addition), core strict rustdoc, fmt and diff checks passed.
+
+Evidence, exact external config, original/local-only locks and command outputs
+are under the task053-local-retry-timing artifact directory. These checks do not
+claim a standard published dependency gate, a full Host workspace pass, or
+independent Host integration approval. No Runtime or Host push was performed.
+
+### Published Runtime timing composition
+
+The separately approved Runtime source 2f7aeb9 is published as
+3aa47629929906832dcb309afb7d242c1ae3e53f on the existing
+feat/host-history-handoff branch, parent 69faf919, exact tree
+bb4cad715f52c96edaa95e9403416eb6ee619272. All 15 changed blobs/modes, raw commit
+message, parent, actual author/committer zqcli and unchanged other refs were
+verified through API and actual fetch. No Co-authored-by, force, public event
+field or retry-policy change. Exact-head CI 42746444546 passed before this composition.
+
+The Host consumer from e4be354 is composed with the published Git pin in all 8
+existing manifest entries and the single lock source. No path patch or copied
+Runtime is part of the normal build. Registry versions/checksums are unchanged.
+Task089 independently approved the exact consumer against source 2f7aeb9, including
+multi-Loop attempts/usage/indexes and dual execution/save failure. The following
+normal published-pin tests belong to the coordinator's new integration checkpoint,
+not retroactively to the earlier isolated experiment.
+
+The normal `--locked --offline` production Git dependency build now passes the
+three actual transport/model/terminal diagnostic regressions. The lock diff is
+exactly the old/new Runtime Git source substitution, with every registry package
+unchanged. Evidence: published-runtime-timing-focused.log in the coordinator
+validation directory. The previous isolated candidate lock/config remains only
+historical local evidence. A fixed composed full gate follows later.

@@ -8,7 +8,7 @@ description = "Owner-scoped durable storage for MiniCore Host"
 
 [dependencies]
 minicore-host-protocol = { path = "../host-protocol", version = "=0.1.0" }
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "69faf9196991524b5549499d6208a1eaf567bf56", version = "=0.10.0" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
 rustix = { version = "=1.1.6", features = ["fs", "process"] }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.154", features = ["arbitrary_precision", "raw_value"] }
