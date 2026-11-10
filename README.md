@@ -1,22 +1,13 @@
 # minicore-host
 
-Current Host workspace version: **0.9.10**, available on `dev`.
-The release tag `v0.9.10` still awaits remote creation.
-See [the release record](tasks/102-release-0.9.10/TASK.md) for the source,
-version consistency review and validation.
-
-The current simplification unifies owner creation/metadata paths and shares
-facts, protocol/SDK templates and test fixtures. See [current status](PROJECT.md)
-and [Task101](tasks/101-owner-path-simplification/TASK.md) for its fixed baseline,
-intentional Rust API changes and validation. The full local gate passes **955
-unique Rust tests, 4 doctests and 28 Python checks**, with strict lint/docs. The
-preceding R1-R4 fixes remain in
-[Task100](tasks/100-review-r1-r4/TASK.md). The backend is under development against
-v4.93; actual external-provider and consuming TUI acceptance remain separate work.
-
 Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.93.
 
-The implementation contains strict contracts, Linux durable storage, real Runtime scheduling, production HTTP/SSE resources, scoped observation/interaction adapters and the owner-bound agent tool. It is not yet the complete first version. See [PROJECT.md](PROJECT.md) for exact baselines, implemented boundaries and remaining work.
+The implementation contains strict contracts, Linux durable storage, real Runtime
+scheduling, production HTTP/SSE resources, scoped observation/interaction adapters
+and the owner-bound agent tool. Start with the [executable guide](crates/host-app/README.md).
+See [current project status](PROJECT.md) for the release version, exact source,
+validation, publication and remaining acceptance work. Historical reports below
+describe their fixed checkpoints, not the current open-work list.
 
 ## Tool approval
 
@@ -29,11 +20,17 @@ sandbox, and configured credential exclusion does not isolate same-user processe
 
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed. Whitespace checks include committed changes and require full Git history; CI uses `fetch-depth: 0`.
 
-The Runtime dependency is exactly `0.10.0`, pinned to published commit `3aa47629929906832dcb309afb7d242c1ae3e53f` on `zqcli/minicore-runtime:feat/host-history-handoff`. It includes authoritative history/partial handoff, application-quota removal, retry-progress observation and source-measured retry waits in the joined report. No local Runtime patch, copied source or bootstrap bundle is required. Runtime producer and independent local gates pass 324 tests and 2 doctests; its new [exact-head CI](https://github.com/zqcli/minicore-runtime/actions/runs/42746444546) passed. The previous pinned head's CI also passed all seven checks. See [PROJECT.md](PROJECT.md) and [the publication evidence](docs/runtime-retry-wait-publication.json) for fixed boundaries.
+Shared package metadata and dependency pins are declared in the root
+[Cargo.toml](Cargo.toml); members retain their own feature selections. The
+committed lockfile fixes the resolved graph. The exact Runtime source and its
+validation are recorded in [PROJECT.md](PROJECT.md). No local Runtime patch,
+copied source or bootstrap bundle is required.
 
 ## Components
 
 - [Executable startup/configuration](crates/host-app/README.md)
+- [Production resource composition](crates/host-resources/README.md)
+- [Agent tools and owner binding](crates/host-tools/README.md)
 - [Production local tools](crates/host-local-tools/README.md)
 - [Client transports](crates/host-transport/README.md)
 - [In-process owners](crates/host-core/README.md)
@@ -41,15 +38,12 @@ The Runtime dependency is exactly `0.10.0`, pinned to published commit `3aa47629
 - [Provider adapter](crates/host-provider/README.md)
 - [Storage schema](crates/host-storage/README.md)
 - [Workspace and change-reading backend](crates/host-workspace/README.md)
-- [Current fixed-source method audit](docs/current-contract-audit.md)
-- [Historical method implementation map](docs/method-coverage.md)
-- [Current local executable review handoff](docs/executable-review-handoff.md)
-- [Earlier local execution review handoff](docs/execution-review-handoff.md)
-- [Published owner/resource review handoff](docs/integration-review-handoff.md)
-- [Earlier foundation review handoff](docs/review-handoff.md)
-- [Implementation/checkpoint log](tasks/001-foundation/TASK.md)
-- [Controller and integration evidence](tasks/005-controllers/TASK.md)
+- [Compaction engine](crates/host-compaction/README.md)
+- [Structured diagnostics](crates/host-diagnostics/README.md)
+
+## Project records
 
 Historical checkpoints, source mappings, review findings and performance evidence
-are indexed in [PROJECT.md](PROJECT.md); detailed evidence remains in its original
-task and handoff files.
+are indexed in [PROJECT.md](PROJECT.md#historical-review-index). Detailed evidence
+remains in its original task and handoff files. The organization implementation
+and release work is recorded in [Task103](tasks/103-project-organization/TASK.md).

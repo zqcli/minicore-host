@@ -1,0 +1,51 @@
+{
+  "baseline": "c4451653ea5f3110041bef85a5b86a55b1b203a4",
+  "requested_worker_configuration": {
+    "model": "gpt-6-astra",
+    "reasoning_effort": "max",
+    "effective_runtime_independently_attested": false
+  },
+  "reviews": [
+    {
+      "reviewer": "organization_transport",
+      "scope": "workspace inheritance and storage/workspace organization",
+      "commits": [
+        "1d99f6073093b02de55ec5f47241334b6de57739",
+        "759b9791f6d82fe2a3aa71ca9c23c924c2ef658f"
+      ],
+      "result": "approved; no blocking findings",
+      "evidence": "221-package metadata and complete dependency graph unchanged before release bump; one shared history validator; save/read order and edit evidence preserved."
+    },
+    {
+      "reviewer": "organization_tools",
+      "scope": "protocol and transport",
+      "commits": [
+        "d0c05dc1a7f2a52b6ba8c8fa14a3503cf0bec6e2"
+      ],
+      "result": "approved; no blocking findings",
+      "evidence": "52 routes and 51 ordinary handlers unchanged;82 affected protocol definitions,49 client bodies and51 RPC bodies equivalent under relocation normalization;16 diagnostic roots byte-identical."
+    },
+    {
+      "reviewer": "organization_transport",
+      "scope": "core owner organization",
+      "commits": [
+        "5bbd090210879f913ce4935d3f1e7511fc7fd432"
+      ],
+      "worker_source": "dd54c3aae642df478b713db3b3a4482777259c6a",
+      "result": "approved; no blocking findings",
+      "evidence": "1617 of 1623 existing function bodies unchanged under relocation normalization; remaining changes are typed shutdown and two explicit extractions. All 344 test bodies and attributes retained; same owner state and mutex boundaries."
+    },
+    {
+      "reviewer": "organization_core",
+      "scope": "tools/resources and shared provenance fixture",
+      "commits": [
+        "8c79081264b250cb6696c463646074f724cd049a",
+        "c41e93bf465b610d8e09ea4725f256ed8b056e9d",
+        "5502e6b437bc4155ba2e7969c6132c81c650e215"
+      ],
+      "result": "approved; no blocking findings",
+      "evidence": "Inspect omission/null/body/config/result shapes preserved; capability and lease boundaries unchanged; compaction remains declarations-only; shared helper byte-identical with 8 correct consumers."
+    }
+  ],
+  "limits": "Independent reviews were read-only source/comparison reviews with scoped test-evidence inspection; they do not replace the integrated release gate. No live external-provider, consuming TUI or new performance acceptance is claimed."
+}

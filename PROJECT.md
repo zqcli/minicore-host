@@ -1,27 +1,34 @@
 # MiniCore Host
 
-## Current checkpoint: 0.9.10
+## Current checkpoint: 0.9.20
 
-All 12 Host workspace packages and 34 internal dependency requirements are now
-**0.9.10**. The validated local version checkpoint `4301deb87353d4246e8e43be881e3a61a4a1c7ad`
-corresponds to published commit
-[`356c1c4c1c1c01bada0236041d22326551ce7431`](https://github.com/zqcli/minicore-host/commit/356c1c4c1c1c01bada0236041d22326551ce7431).
-The release tag `v0.9.10` still awaits remote creation; see
-[Task102](tasks/102-release-0.9.10/TASK.md) for release scope and verification.
-The full 0.9.10 local gate passes 955 unique Rust tests, 4 doctests, 28 Python
-checks, formatting, Clippy and rustdoc.
-The owner explicitly requested the version bump, tag and remote push in the
-active conversation, superseding the previous publication approval block.
+[Task103](tasks/103-project-organization/TASK.md) implements the approved project
+organization review. Direct owners and public crate-root APIs are preserved;
+Session execution/loading/closing/query modules, transport adapters, resource
+composition, tool projections and storage validation now follow their existing
+responsibilities. Shared test support is no longer owned by an old task directory.
 
-The connected GitHub Git Data API publishes the six local source checkpoints as
-six commits with identical trees, messages and parent order. Source checkpoint
-`674ec56ca125eea7143ef5630e066f57372001ab` corresponds to
-[`58e1ee65e7b37f48acd0d57455aab7cd6fb9b2dc`](https://github.com/zqcli/minicore-host/commit/58e1ee65e7b37f48acd0d57455aab7cd6fb9b2dc).
-The [publication mapping](tasks/102-release-0.9.10/publication.json) records the
-actual GitHub identities, source trees and parent chain. This status update
-changes documentation only. The prior CLI login failure did not prevent use of
-the already connected GitHub write APIs. Tag creation remains a separate missing
-operation in that connection; hosted CI is checked for the resulting `dev` head.
+All 12 Host packages inherit **0.9.20** from the workspace. The 34 internal
+requirements retain their original constraint semantics; external dependency
+revisions and features are unchanged. The exact local release source checkpoint
+is `fa2c40043695f493cfbfbf057ec8145ec8f5f9c7`. Publication mapping is maintained in
+Task103; the owner explicitly authorized the final `dev` push.
+
+Three independently assigned Astra/max workers implemented disjoint scopes and
+cross-reviewed the other scopes, with no blocking findings. These are requested
+model settings, not an independent runtime attestation. The integrated release
+gate passes **956 unique Rust cases, 4 doctests and 28 Python checks**, formatting,
+strict Clippy/rustdoc and whitespace. The authoritative listing has 126 targets,
+including 114 integration test binaries (four fewer after owner diagnostic grouping).
+The sole added case checks real-owner message/ToolCall inspect projections.
+
+[Validation](tasks/103-project-organization/validation.json) records the exact
+commands, source/tree, counting method, log hashes, dependency comparison and
+unchanged historical performance verification. Rust physical lines change by
++448 in non-test-source files and +287 in explicit tests/support. This release
+improves responsibility boundaries and type projections; it claims no measured
+performance increase. The 12-crate layout, trusted embedding hooks and frozen
+performance harnesses remain deliberately intact.
 
 ## Included owner-path simplification
 
@@ -68,6 +75,12 @@ stdout; builtins are agent/read/edit/write/bash. `apply_patch` is not implemente
 or required by name in SPEC. The README configuration smoke and its limits remain
 recorded in [Task097](tasks/097-usage-docs/TASK.md).
 
+The retained measurement entry is `scripts/task090_perf.py`; `task058_perf.py`
+is its frozen predecessor. Their shared-looking code is intentionally retained
+byte-for-byte: Task090 and Task098 validate the original harness hashes. New
+measurements need their own source/evidence record. Organization changes do not
+rewrite those hashes or turn old measurements into current performance claims.
+
 The existing [c22d8c8 measurements](docs/performance-c22d8c8.md) and
 [older f36761a report](docs/performance-f36761a.md) describe their fixed historical
 sources. Their raw evidence and recomputation scripts remain available. They are
@@ -101,7 +114,7 @@ checkpoints, not the current open-work list.
 | R1-R4 fixes; code `564a4865`, documentation `6ea03b85`; 953 Rust cases | [Task100](tasks/100-review-r1-r4/TASK.md), [validation manifest](tasks/100-review-r1-r4/validation.json) |
 | Backend review `be0e9955`; 939 Rust cases; publication/source mapping | [Task099](tasks/099-backend-review-handoff/TASK.md), [fixed handoff](docs/recovery-checkpoint-review.md), [publication map](docs/recovery-publication.json), [validation](docs/backend-review-validation.json) |
 | Final diagnostic integration and contract audit | [Task053](tasks/053-business-diagnostics/TASK.md), [Task091](tasks/091-saved-result-review/TASK.md), [Task092](tasks/092-compaction-review/TASK.md), [Task093](tasks/093-session-handoff-cleanup-review/TASK.md), [Task094](tasks/094-convergence-audit/TASK.md), [Task095](tasks/095-saved-history-diagnostics/TASK.md), [Task096](tasks/096-convergence-checkpoint/TASK.md) |
-| Executable, query, saved-history and input-provenance checkpoints | [Executable handoff](docs/executable-review-handoff.md), [current method audit](docs/current-contract-audit.md) |
+| Executable, query, saved-history and input-provenance checkpoints | [Executable handoff](docs/executable-review-handoff.md), [historical method audit](docs/current-contract-audit.md) |
 | Execution integration; original 650-case checkpoint and lease correction | [Task041](tasks/041-execution-integration/TASK.md), [execution handoff](docs/execution-review-handoff.md), [linear source map](docs/execution-linear-map.json) |
 | Owner/resource integration `c6d8a5e1`; 506 Rust cases | [Task029](tasks/029-owner-resource-integration/TASK.md), [integration handoff](docs/integration-review-handoff.md), [publication map](docs/owner-integration-publication.json) |
 | Tool cleanup, terminal claim and root-lease findings | [Task033](tasks/033-turn-tool-cleanup/TASK.md), [Task034](tasks/034-history-lock-reopen/TASK.md) |

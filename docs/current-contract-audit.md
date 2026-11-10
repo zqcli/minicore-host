@@ -1,4 +1,10 @@
-# Current first-version contract audit
+# Historical first-version contract audit
+
+This report applies to the fixed source listed below. Its open findings describe
+that checkpoint; see [current project status](../PROJECT.md) for subsequent fixes,
+validation and remaining work. Source-file links use published checkpoint
+`2615fe00`, whose tree matches the audited tree recorded below; later file moves
+do not redirect this historical evidence to current code.
 
 ## Decision and fixed source
 
@@ -45,11 +51,11 @@ Later diagnostics, Runtime changes or fixes are outside this fixed-source verdic
 
 ## Route and source key
 
-[The catalog](../crates/host-protocol/src/catalog.rs) defines 52 names.
-[operations.rs](../crates/host-transport/src/operations.rs) supplies 51 ordinary
+[The catalog](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-protocol/src/catalog.rs) defines 52 names.
+[operations.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-transport/src/operations.rs) supplies 51 ordinary
 `Operation::execute` routes; `events.subscribe` is the explicit stream route in
-[client.rs](../crates/host-transport/src/client.rs) and
-[rpc.rs](../crates/host-transport/src/rpc.rs). Local calls invoke the same typed
+[client.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-transport/src/client.rs) and
+[rpc.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-transport/src/rpc.rs). Local calls invoke the same typed
 operation directly; stdio/WSS decode, execute and encode that operation. A
 catalog entry or `Implemented` capability is route availability, not acceptance.
 
@@ -59,17 +65,17 @@ there is no global Session lookup or selected-page fallback. Owner source keys:
 
 | Key | Actual production source |
 | --- | --- |
-| H | [host.rs](../crates/host-core/src/host.rs) |
-| HC / HO | [host/controls.rs](../crates/host-core/src/host/controls.rs) / [host/observation.rs](../crates/host-core/src/host/observation.rs) |
-| HD / HM | [host/discovery.rs](../crates/host-core/src/host/discovery.rs) / [host/metadata.rs](../crates/host-core/src/host/metadata.rs) |
-| HR / HW | [host/configuration.rs](../crates/host-core/src/host/configuration.rs), [configuration.rs](../crates/host-core/src/configuration.rs) / [host/workspace.rs](../crates/host-core/src/host/workspace.rs) |
-| HCreate / HStop / HDelete | [host/create.rs](../crates/host-core/src/host/create.rs) / [host/shutdown.rs](../crates/host-core/src/host/shutdown.rs) / [host/deletion.rs](../crates/host-core/src/host/deletion.rs) |
-| A / AD / AM | [agent.rs](../crates/host-core/src/agent.rs) / [agent/discovery.rs](../crates/host-core/src/agent/discovery.rs) / [agent/metadata.rs](../crates/host-core/src/agent/metadata.rs) |
-| ACreate / ADelete | [agent/create.rs](../crates/host-core/src/agent/create.rs) / [agent/deletion.rs](../crates/host-core/src/agent/deletion.rs) |
-| S / SC / SM | [session.rs](../crates/host-core/src/session.rs) / [session/controls.rs](../crates/host-core/src/session/controls.rs) / [session/metadata.rs](../crates/host-core/src/session/metadata.rs) |
-| SQ / SO | [session/observation/query.rs](../crates/host-core/src/session/observation/query.rs) / [session/observation.rs](../crates/host-core/src/session/observation.rs) |
-| SH / SX / SP | [session/history_read.rs](../crates/host-core/src/session/history_read.rs) / [session/context.rs](../crates/host-core/src/session/context.rs) / [session/compaction.rs](../crates/host-core/src/session/compaction.rs) |
-| SI / SE / SD | [session/interaction.rs](../crates/host-core/src/session/interaction.rs) / [session/tool_edits.rs](../crates/host-core/src/session/tool_edits.rs) / [session/deletion.rs](../crates/host-core/src/session/deletion.rs) |
+| H | [host.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host.rs) |
+| HC / HO | [host/controls.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/controls.rs) / [host/observation.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/observation.rs) |
+| HD / HM | [host/discovery.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/discovery.rs) / [host/metadata.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/metadata.rs) |
+| HR / HW | [host/configuration.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/configuration.rs), [configuration.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/configuration.rs) / [host/workspace.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/workspace.rs) |
+| HCreate / HStop / HDelete | [host/create.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/create.rs) / [host/shutdown.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/shutdown.rs) / [host/deletion.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/deletion.rs) |
+| A / AD / AM | [agent.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/agent.rs) / [agent/discovery.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/agent/discovery.rs) / [agent/metadata.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/agent/metadata.rs) |
+| ACreate / ADelete | [agent/create.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/agent/create.rs) / [agent/deletion.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/agent/deletion.rs) |
+| S / SC / SM | [session.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session.rs) / [session/controls.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/controls.rs) / [session/metadata.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/metadata.rs) |
+| SQ / SO | [session/observation/query.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/observation/query.rs) / [session/observation.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/observation.rs) |
+| SH / SX / SP | [session/history_read.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/history_read.rs) / [session/context.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/context.rs) / [session/compaction.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/compaction.rs) |
+| SI / SE / SD | [session/interaction.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/interaction.rs) / [session/tool_edits.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/tool_edits.rs) / [session/deletion.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/deletion.rs) |
 
 Test references below are exact `file::test_function` names. `CT:` expands to
 `crates/host-core/tests/`; `TT:` expands to `crates/host-transport/tests/`.
@@ -198,20 +204,20 @@ added to production or the committed suite by this documentation-only audit.
 
 ### Source path that loses the queryable result
 
-- [host-storage records.rs](../crates/host-storage/src/records.rs), lines 136-159:
+- [host-storage records.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-storage/src/records.rs), lines 136-159:
   `Input`, `Runtime` and `Partial` retain TurnId; runtime/partial records retain
   response index. `TurnFinished` retains TurnId, actual outcome and reason.
-- [session/history.rs](../crates/host-core/src/session/history.rs), around lines
+- [session/history.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/history.rs), around lines
   460 and 531-550, persists the terminal fact and places the live result in
   `state.completed` during actual finalization.
-- [SQ](../crates/host-core/src/session/observation/query.rs), lines 80-105,
+- [SQ](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/observation/query.rs), lines 80-105,
   `turn_result_snapshot` reads only `state.completed` (line 88). There is no
   validated saved-record read path. `retained_turn` likewise checks only active
   and completed maps; `turn_list` uses the retained completion sequence.
-- [SH](../crates/host-core/src/session/history_read.rs), lines 5-20,
+- [SH](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/history_read.rs), lines 5-20,
   `HistoryItemData::from_entry` does not expose `TurnFinished`. Its `replace_history`
   (lines 24-65) loads model context/provenance/readable history, not a result
-  projection. [persistent.rs](../crates/host-core/src/session/persistent.rs)
+  projection. [persistent.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/session/persistent.rs)
   constructs a new Session without the old execution maps. That absence of old
   execution is correct; the absent saved-result reader is not.
 
@@ -225,7 +231,7 @@ output sources, queues, ToolCalls or delegation scopes. Use the existing
 history-read coordination and Fault paths; do not introduce a recovery service,
 new public RPC, availability state or retention cache.
 
-The current [query DTO](../crates/host-core/src/query.rs) hard-requires
+The current [query DTO](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/query.rs) hard-requires
 `TurnResultData.info: TurnStateData` and original `config`. Existing
 `TurnFinished` does **not** save LoadId, original config/revisions, attempt
 counts or complete Fault/cleanup metadata. `TurnIdentity.load_id` is already
@@ -271,8 +277,8 @@ claims do not mint `CallerContext`; ordinary pre-init requests and RPC
 notifications do not dispatch business mutations. First initialized eligible
 connection gets operation rights, observers do not auto-promote, clones share
 one connection, and a new connection competes afresh after release. See
-[control.rs](../crates/host-core/src/control.rs),
-[host/network.rs](../crates/host-core/src/host/network.rs), RPC and WSS code;
+[control.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/control.rs),
+[host/network.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-core/src/host/network.rs), RPC and WSS code;
 focused evidence includes:
 
 - `TT:adapters.rs::malformed_initialization_and_json_claims_never_acquire_authority`
@@ -280,7 +286,7 @@ focused evidence includes:
 - `TT:wss.rs::first_initialized_connection_operates_and_observers_do_not_promote`
 - `TT:wss.rs::old_network_request_blocked_before_acceptance_cannot_borrow_new_key_authority`
 
-[deadline.rs](../crates/host-transport/src/deadline.rs) starts one monotonic call
+[deadline.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-transport/src/deadline.rs) starts one monotonic call
 budget, default **30,000 ms**, covering local/RPC work through the complete
 response; a positive override replaces that one budget. TCP/TLS/WebSocket/auth
 initialization cannot restart it. Timeout ends the caller's wait, not accepted
@@ -324,7 +330,7 @@ Task073 independently reviewed this boundary. Host facilities and summaries
 come from direct owners and omit large Role/body content; this is not an
 allocation/performance measurement.
 
-SO and [transport output.rs](../crates/host-transport/src/output.rs) preserve
+SO and [transport output.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-transport/src/output.rs) preserve
 original Turn/response/ToolCall/channel sources and UTF-8 byte intervals. A
 fixed read endpoint and real watermark bound gap filling; completion is not
 proof that late tail data has arrived. The buffer merges matching overlaps
@@ -388,8 +394,8 @@ with two real local HTTP providers and TLS clients, not live-provider validation
 ### Independent delegation, ordinary tools and approval
 
 SPEC §13's owner-bound `agent` tool is an internal capability adapter, not an
-external connection or authority shortcut. [scope.rs](../crates/host-tools/src/scope.rs),
-[core_adapter.rs](../crates/host-tools/src/core_adapter.rs) and owner collaboration
+external connection or authority shortcut. [scope.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-tools/src/scope.rs),
+[core_adapter.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-tools/src/core_adapter.rs) and owner collaboration
 code register actual delegation before send, preserve the original receiver,
 keep child work independent of the parent's Turn/wait, and deliver one actual
 completion input through the ordinary two-queue rules. Launch ToolResult,
@@ -405,7 +411,7 @@ owner. Exact evidence includes:
 The production registry contains `agent`, `read`, `write`, `edit`, `bash`.
 `apply_patch` is absent and not a SPEC requirement. Local tools use their actual
 bound workspace/resources and source identity, not a global current-directory
-switch; this is not an OS sandbox. [approval.rs](../crates/host-resources/src/approval.rs)
+switch; this is not an OS sandbox. [approval.rs](https://github.com/zqcli/minicore-host/blob/2615fe00ff385a74c6ef6a302c169ccc2b6b4410/crates/host-resources/src/approval.rs)
 freezes Ask (default), Auto or ReadOnly per Turn, with exemptions only for known
 builtin read/inspection/wait origins. Registered external tools named `read` or
 `agent` do not acquire those exemptions. Original interaction/cancel/deadline

@@ -1,0 +1,94 @@
+{
+  "source_checkpoint": "fa2c40043695f493cfbfbf057ec8145ec8f5f9c7",
+  "source_tree": "4fcf93c4fd62347754ef976fc4f07dec5e2817fb",
+  "version": "0.9.20",
+  "spec_sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+  "runtime": {
+    "version": "0.10.0",
+    "revision": "3aa47629929906832dcb309afb7d242c1ae3e53f"
+  },
+  "dependency_check": "Before bump: 221-package metadata, resolved graph and Cargo.lock unchanged. At bump: 12 local lock versions and 34 internal requirements move 0.9.10 -> 0.9.20; external packages, feature selections and exact-vs-compatible constraints unchanged.",
+  "full_gate": {
+    "command": "PATH=/home/agent/.cargo/bin:$PATH CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 ./scripts/check.sh",
+    "exit_code": 0,
+    "python_checks": 28,
+    "unique_rust_cases": 956,
+    "doctests": 4,
+    "formatting": "passed",
+    "clippy": "passed, warnings denied",
+    "rustdoc": "passed, warnings denied",
+    "whitespace": "passed"
+  },
+  "test_inventory": {
+    "unique_cases": 956,
+    "targets": 126,
+    "nonempty_targets": 123
+  },
+  "inventory_command": "cargo test --workspace --all-targets --locked -- --list",
+  "historical_evidence_checks": [
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 tasks/090-fresh-performance/verify_evidence.py",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 tasks/098-composed-performance/verify_evidence.py",
+      "exit_code": 0
+    }
+  ],
+  "documentation_checks": "Changed local Markdown links resolve; 44 historical source links pinned to 2615fe00, whose tree matches the audit source tree.",
+  "accounting": {
+    "baseline": "c4451653ea5f3110041bef85a5b86a55b1b203a4",
+    "source_checkpoint": "fa2c40043695f493cfbfbf057ec8145ec8f5f9c7",
+    "baseline_rust": {
+      "non_test_source_files": 155,
+      "non_test_source_lines": 40663,
+      "explicit_test_support_files": 175,
+      "explicit_test_support_lines": 71592
+    },
+    "current_rust": {
+      "non_test_source_files": 181,
+      "non_test_source_lines": 41111,
+      "explicit_test_support_files": 183,
+      "explicit_test_support_lines": 71879
+    },
+    "net": {
+      "explicit_test_support_lines": 287,
+      "explicit_test_support_files": 8,
+      "non_test_source_files": 26,
+      "non_test_source_lines": 448
+    },
+    "targets": {
+      "bin": 1,
+      "test": 114,
+      "lib": 11
+    },
+    "counting": "Physical Rust lines including blanks/comments; explicit tests/support identified by tests path component, tests.rs/_tests.rs, and baseline cfg(test)-only credential file. Non-test-source may include inline test code."
+  },
+  "first_gate_attempt": {
+    "exit_code": 101,
+    "reason": "Linking ran out of workspace disk; no complete Rust-test execution was claimed. Reproducible incremental caches were cleared after compilers exited; the unchanged source passed the full rerun."
+  },
+  "local_evidence": {
+    "full-gate.log": {
+      "sha256": "c5d3270531d4c9c49d5801a48782ac6eb8f03d5dad55a65e062d483ddcd8f4ac",
+      "bytes": 113099
+    },
+    "test-list.log": {
+      "sha256": "a20c7fd9a3fc3d219fac1386b1c8ac1c14957560dabcf07bad471199de4bb306",
+      "bytes": 89401
+    },
+    "historical-090.log": {
+      "sha256": "5eae113bf21553b6200da862267457499b9f348f3c3f16c4a07896231c9526d3",
+      "bytes": 1214
+    },
+    "historical-098.log": {
+      "sha256": "eecc6bab61e7030d2d37b1b49dd7d188d35ef86fc29d4a4e87a26ec8deb469a7",
+      "bytes": 1299
+    },
+    "full-gate-attempt1-space.log": {
+      "sha256": "d98539d35f343eb3ee811b65cb1e83b7f91785b38d5c3d24b02e8546e4461bb6",
+      "bytes": 133652
+    }
+  },
+  "limits": "Local logs are identified by hashes. Historical verifiers only recompute retained evidence; no new performance measurement or live-provider/TUI acceptance. Hosted CI is checked for the actual published dev head separately."
+}

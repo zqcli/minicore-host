@@ -1,5 +1,9 @@
 # Executable checkpoint review handoff
 
+This is a historical sequence of fixed-source handoffs. "Latest" below refers
+to the latest checkpoint in this document, not the current repository. See
+[current project status](../PROJECT.md) for the active release and open work.
+
 ## Latest input-provenance composition
 
 Fixed local code `7cf8e104bf84ee599331a3d96e181bba53fdf54c` adds the eight reviewed task055 commits without source conflicts. The normal full gate passes **822 unique tests and 4 doctests**, with 89 nonempty targets, strict Clippy/rustdoc, formatting and committed whitespace. [The manifest](executable-provenance-verification.json) preserves exact logs and the unchanged published Runtime/SPEC. The source map now has 71 topic entries. Publication remains separately frozen at the preceding `9598f8f47716be6fbf6041b62929eeb62936e12d`; this newer code is not silently included in that pending handoff.
