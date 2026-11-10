@@ -70,11 +70,12 @@ impl SessionController {
         }
     }
     pub(crate) fn begin_host_shutdown_owned(&self, force: bool) {
-        let handle = {
+        let (handle, record) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if state.host_draining && (!force || state.host_stopping) {
                 return;
             }
+            let claimed = force && Self::cancellable(&state);
             state.host_draining = true;
             state.host_stopping |= force;
             if force {
@@ -94,8 +95,10 @@ impl SessionController {
                 None
             };
             self.publish(&mut state);
-            handle
+            let record = self.cancel_claim_record(&state, claimed, "host_force", None, true);
+            (handle, record)
         };
+        diagnostic::emit(record);
         // Runtime shutdown cancels business work and still joins through the
         // original owner. It never aborts the history callback or driver future.
         if let Some(handle) = handle {

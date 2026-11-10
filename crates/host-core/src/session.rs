@@ -1692,18 +1692,24 @@ impl LoopInputs for SessionInputs {
     fn take(&self) -> Vec<UserInput> {
         let mut state = self.session.state.lock().expect("Session mutex poisoned");
         if state.host_stopping || !self.session.access.execution_allowed_owned() {
+            let mut claimed = false;
             let handle = state
                 .active
                 .as_mut()
                 .filter(|active| active.info.id == self.turn_id)
                 .and_then(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
+                        claimed = true;
                         active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                     }
                     active.handle.clone()
                 });
+            let record =
+                self.session
+                    .cancel_claim_record(&state, claimed, "host_force", None, false);
             drop(state);
+            diagnostic::emit(record);
             if let Some(handle) = handle {
                 handle.shutdown();
             }

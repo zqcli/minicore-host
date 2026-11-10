@@ -936,3 +936,32 @@ passed, plus strict core/transport all-target Clippy, core strict rustdoc, fmt a
 diff checks. Evidence is `cleanup-{fixture-failure,red,green,focused,core,clippy,doc}.log`
 in the second recovery reports directory. Full workspace/independent validation
 is not claimed. SPEC and pinned dependencies are unchanged.
+
+### First force cancellation without invented operation identity
+
+The existing Session shutdown traversal and Runtime input-fence boundary each
+extract a Record only when they actually change Starting/Running to Cancelling.
+Both emit outside Session state. The traversal uses its actual published
+revisions; the input boundary did not publish, so it does not claim a new
+revision. Neither fence, cancellation token, input disposal nor history behavior
+changes. No Host or Agent caller signature/state is added.
+
+These two callees do not receive an operation. It remains absent rather than
+reusing an earlier graceful-shutdown operation during later force escalation.
+This source limitation is explicitly approved and visible: the original
+Turn/Load/Session and host_force reason remain available, but this event alone
+does not identify which concurrent force request supplied the fence.
+
+The permanent regression uses actual persistent Host/resources/Runtime, a gated
+HTTP request and real history.jsonl. Graceful is upgraded to force, the original
+Turn is saved Cancelled exactly once, and one cancellation INFO precedes the
+actual finished summary. Repetition cannot claim again; no operation is guessed.
+The missing-claim red was retained after correcting two test-only issues (an
+unavailable storage dev-dependency import and the exact on-disk enum envelope).
+No dependency was added. Five affected diagnostic cases plus all 317 core cases,
+strict core/transport all-target Clippy, core rustdoc, fmt and diff checks passed.
+Evidence is `force-{first-build,fixture-failure,red,green,focused,core,clippy,doc}.log`
+in the second recovery reports directory. This is not full workspace or
+independent review. SPEC and the original pinned dependencies are unchanged in
+this source slice; the next worktree adopts the coordinator's separately
+published Runtime and saved-result query baseline.
