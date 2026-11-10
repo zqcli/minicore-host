@@ -754,3 +754,31 @@ core strict rustdoc, fmt and diff checks passed. Logs are
 recovery reports directory. SPEC and locked Runtime remain unchanged. Agent
 stop/force claim propagation, failure/save-driven scheduling, remaining actual
 Closed/finalizing/handoff and compaction boundaries are separate pending slices.
+
+### Actual asynchronous memory Closed completion
+
+Six existing completion seams now compare the prior and published lifecycle:
+driver return/resource-preparation return, joined Turn finalization, delegation
+handoff return, scope cleanup completion, and the final scope-member release
+signal. A transition Record is formed under the existing state boundary and
+emitted after unlock. No close barrier, inbox disposition, callback order or
+publication is moved; the logger still cannot close or release a Session.
+Already Closed and unpublished owners do not generate another completion.
+
+The permanent close/delete regression now also requires exactly one real
+session.closed for each active memory Session after its original Turn finishes,
+with a revision no earlier than the actual Turn completion. This addition was
+red on 6a801fc (accepted close and cancelled Turn were present, Closed was absent)
+and green with these hooks, for Session close, Session deletion and Agent cascade.
+The existing idle-close assertion remains unchanged. The full core suite also
+rechecks existing gated tool/scope/cleanup and deletion barriers.
+
+Eight actual diagnostic focused cases and all 317 core cases passed, as did
+core/transport strict all-target Clippy, core strict rustdoc, fmt and diff checks.
+Raw evidence is `close-completion-{red,green,focused,core,clippy,doc}.log` in the
+recovery reports directory. This does not claim all close/failure coverage:
+compaction's locked completion requires its own later Record-return seam, and
+result handoff/cleanup failures still need their separate scalar summaries.
+Session.rs is frozen after this slice while the saved-result query P1 worker
+coordinates its independent read-only trait/module change. No query/history-read
+projection, SPEC, Runtime or lockfile changes belong to this slice.

@@ -319,6 +319,7 @@ impl SessionController {
                 ))
             });
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = state.lifecycle;
         state.handoff_pending = false;
         match result {
             Ok(()) => {
@@ -330,6 +331,9 @@ impl SessionController {
         }
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+        let closed = self.closed_record(&state, previous);
+        drop(state);
+        diagnostic::emit(closed);
     }
     pub(crate) fn record_delegation_owned(
         &self,
@@ -459,13 +463,16 @@ impl SessionController {
                         "scope cleanup owner panicked",
                     ))
                 });
-            {
+            let closed = {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
+                let previous = state.lifecycle;
                 state.scope_cleanup_pending = false;
                 state.close_fault = result.err();
                 Self::finish_memory_close(&mut state);
                 owner.publish(&mut state);
-            }
+                owner.closed_record(&state, previous)
+            };
+            diagnostic::emit(closed);
             owner.scope_root_closed_owned();
         }));
         self.publish(state);
@@ -535,8 +542,12 @@ impl SessionController {
     }
     pub(crate) fn signal_collaboration_owned(&self) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = state.lifecycle;
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+        let closed = self.closed_record(&state, previous);
+        drop(state);
+        diagnostic::emit(closed);
     }
 }
 

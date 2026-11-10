@@ -1081,10 +1081,13 @@ impl SessionController {
                     || state.active.is_some()
                     || (state.next_step.is_empty() && state.next_turn.is_empty())
                 {
+                    let previous = state.lifecycle;
                     Self::finish_memory_close(&mut state);
                     state.driver_running = false;
                     self.publish(&mut state);
+                    let closed = self.closed_record(&state, previous);
                     drop(state);
+                    diagnostic::emit(closed);
                     self.handoff_delegation_owned();
                     return;
                 }
@@ -1186,9 +1189,12 @@ impl SessionController {
                     }
                     state.block_reason = Some(fault);
                     state.driver_running = false;
+                    let previous = state.lifecycle;
                     Self::finish_memory_close(&mut state);
                     self.publish(&mut state);
+                    let closed = self.closed_record(&state, previous);
                     drop(state);
+                    diagnostic::emit(closed);
                     self.handoff_delegation_owned();
                     return;
                 }

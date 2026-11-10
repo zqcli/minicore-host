@@ -548,11 +548,14 @@ impl SessionController {
         }
         Self::record_delegated_result(&mut state, &result, inputs);
         state.completed.insert(turn_id.clone(), result);
+        let previous = state.lifecycle;
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
         let record = record.published(state.controller_revision, state.runner_revision);
+        let closed = self.closed_record(&state, previous);
         drop(state);
         record.emit();
+        diagnostic::emit(closed);
         self.handoff_delegation_owned();
     }
     pub(super) fn start_save_continuations(

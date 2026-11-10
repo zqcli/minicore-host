@@ -138,6 +138,21 @@ async fn close_and_delete_records_cross_all_admission_layers_once_with_the_origi
             .collect();
         assert_eq!(finished.len(), 1);
         assert_eq!(finished[0]["attributes"]["outcome"], "cancelled");
+        let completed: Vec<_> = rows
+            .iter()
+            .filter(|row| {
+                row["event"] == "session.closed" && row["session_id"] == target.session_id.as_str()
+            })
+            .collect();
+        assert_eq!(completed.len(), 1, "active close completion");
+        assert!(
+            completed[0]["attributes"]["controller_revision"]
+                .as_u64()
+                .unwrap()
+                >= finished[0]["attributes"]["controller_revision"]
+                    .as_u64()
+                    .unwrap()
+        );
     }
     let events: Vec<_> = rows
         .iter()
