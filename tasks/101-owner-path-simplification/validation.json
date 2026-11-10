@@ -146,9 +146,11 @@
     }
   },
   "publication": {
-    "status": "blocked_before_remote_update",
-    "remote_dev": "6ea03b85a318374f3dcb94c38dbe11ac1878f110",
-    "reason": "Automatic approval review requires explicit current-conversation authorization for publishing these commits; historical personal-context evidence was not accepted.",
-    "hosted_ci": "not triggered by these unpublished commits"
+    "authorization": "The owner explicitly requested version 0.9.10, a tag and a remote push in the active conversation.",
+    "destination": "zqcli/minicore-host:dev",
+    "release_tag": "v0.9.10",
+    "release_record": "tasks/102-release-0.9.10/TASK.md",
+    "previous_block": "The earlier automatic review required current-conversation publication authorization; that instruction has now been provided.",
+    "hosted_ci": "Check the published release commit separately; the validation above records the fixed local simplification checkpoint."
   }
 }

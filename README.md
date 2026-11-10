@@ -1,5 +1,9 @@
 # minicore-host
 
+Current Host workspace version: **0.9.10**, released as `v0.9.10` on `dev`.
+See [the release record](tasks/102-release-0.9.10/TASK.md) for the source,
+version consistency review and validation.
+
 The current simplification unifies owner creation/metadata paths and shares
 facts, protocol/SDK templates and test fixtures. See [current status](PROJECT.md)
 and [Task101](tasks/101-owner-path-simplification/TASK.md) for its fixed baseline,

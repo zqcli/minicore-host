@@ -1,11 +1,18 @@
 # MiniCore Host
 
-## Current checkpoint: owner-path simplification
+## Current checkpoint: 0.9.10
 
-**Publication pending.** The validated implementation is committed on local
-`dev`; remote `dev` remains `6ea03b85a318374f3dcb94c38dbe11ac1878f110`.
-The automatic publication review rejected the push and requires explicit approval
-in the active conversation. No remote update or hosted CI run is claimed here.
+All 12 Host workspace packages and 34 internal dependency requirements are now
+**0.9.10**. The version checkpoint is
+[`4301deb87353d4246e8e43be881e3a61a4a1c7ad`](https://github.com/zqcli/minicore-host/commit/4301deb87353d4246e8e43be881e3a61a4a1c7ad).
+The annotated release tag is `v0.9.10` on `dev`; see
+[Task102](tasks/102-release-0.9.10/TASK.md) for release scope and verification.
+The full 0.9.10 local gate passes 955 unique Rust tests, 4 doctests, 28 Python
+checks, formatting, Clippy and rustdoc.
+The owner explicitly requested the version bump, tag and remote push in the
+active conversation, superseding the previous publication approval block.
+
+## Included owner-path simplification
 
 [Task101](tasks/101-owner-path-simplification/TASK.md) implements the approved
 simplification review on top of `dev`
@@ -26,9 +33,10 @@ are recorded in Task101 and the core/protocol crate guides.
 
 The preceding [Task100 review fixes](tasks/100-review-r1-r4/TASK.md) remain part of
 the baseline: creation/shutdown phase handoff, public-Turn ToolCallId rejection,
-saved-result `agent inspect`, and actual input provenance. SPEC v4.93, dependency
-pins and the lockfile remain unchanged. Long-history representation and measured
-performance changes are separate work.
+saved-result `agent inspect`, and actual input provenance. The simplification
+preserved SPEC v4.93, dependency pins and the lockfile; the 0.9.10 version bump
+updates only the 12 Host package versions in that lockfile. Long-history
+representation and measured performance changes are separate work.
 
 ## Implemented scope and closed findings
 

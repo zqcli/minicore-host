@@ -17,13 +17,15 @@ work into `dev`, preserving remote history and keeping `main` unchanged.
 
 ## Publication status
 
-The source and report are committed on local `dev`. The automatic publication
-review rejected `git push origin dev`, stating that it requires trusted explicit
-approval for this publication in the active conversation and does not accept
-retrieved historical authorization as proof. Remote `dev` remains the baseline
-`6ea03b85a318374f3dcb94c38dbe11ac1878f110`. No alternate publication route was used.
-The next step is explicit approval for the reviewed commits to be pushed to
-`zqcli/minicore-host:dev`, followed by verification of the remote HEAD and CI.
+This implementation and its review are included in the **0.9.10** release on
+`dev`, with annotated tag `v0.9.10`; [Task102](../102-release-0.9.10/TASK.md)
+records the version checkpoint and release validation.
+
+The earlier automatic publication review rejected `git push origin dev` because
+it required explicit authorization in the active conversation and did not accept
+retrieved historical authorization. No alternate route was used. The owner then
+explicitly requested the 0.9.10 version bump, tag and remote push in this
+conversation, superseding that block.
 
 ## Implementation
 
