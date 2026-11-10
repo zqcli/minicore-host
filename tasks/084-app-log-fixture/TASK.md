@@ -5,6 +5,7 @@
 Base: `985ff19457e682f4d30f6c9bb309a3cbc2d118bf`; topic
 `task/084-app-log-fixture`; isolated worktree
 `/workspace/shared/minicore-host-task084`.
+Fixed source: `68a828d0cf3d10d5a09c8f0793f59ed3183781bc`.
 The requested worker configuration is Astra/max, not independently attested.
 The parent owns PROJECT.md, independent review and aggregate integration.
 
@@ -82,6 +83,12 @@ Runtime bash, output, history and reopen assertions are unchanged.
   `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`;
   Cargo.lock SHA-256 remains
   `1c372a170c3acdfe79e795e9bf3aa5c59b3dc935636c8ef507b02b72ce8eb125`.
+- `fixed-source-gates.log` repeats the complete 26-case app suite, strict
+  scoped Clippy, formatting, whitespace and strict app documentation at the
+  clean fixed-source commit above. It records the exact commit and test-file
+  hashes and verifies that only the five owned paths differ from the base.
+  `toolchain.txt` confirms Rust/Cargo 1.90.0 on x86_64 Linux.
 
-Independent review remains pending. The workspace-wide final integration gate, live-provider/TUI
-acceptance and performance acceptance are not claimed by this fixture task.
+Independent review remains the parent's next step. The workspace-wide final
+integration gate, live-provider/TUI acceptance and performance acceptance are
+not claimed by this fixture task.
