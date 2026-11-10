@@ -110,6 +110,23 @@ impl SessionController {
             }
             _ = &mut revoked => return Err(history_reader_revoked()),
         };
+        // Only this actual backend attempt reports its failure. A query that
+        // receives Ok(None) and waits for an existing loader must not repeat
+        // that loader's primary ERROR when it later reads the retained Fault.
+        let record = if let Err(fault) = &cold
+            && fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
+        {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            Some(diagnostics::history_failed(
+                diagnostic::session_context(&self.identity()),
+                fault,
+                "cold_read",
+                state.controller_revision,
+            ))
+        } else {
+            None
+        };
+        diagnostic::emit(record);
         let content = cold.map(|entries| {
             entries.map(|entries| {
                 entries

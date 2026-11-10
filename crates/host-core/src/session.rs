@@ -1292,6 +1292,15 @@ impl SessionController {
     }
     fn preparation_failed(&self, fault: Fault) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = state.lifecycle;
+        let record = (fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)).then(|| {
+            diagnostics::history_failed(
+                diagnostic::session_context(&self.identity()),
+                &fault,
+                "prepare_load",
+                state.controller_revision,
+            )
+        });
         state.preparing = false;
         state.resume_after_load = None;
         if fault.kind() == Some(FaultKind::SessionHistoryLoadFailed) {
@@ -1302,7 +1311,12 @@ impl SessionController {
         state.driver_running = false;
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);
+        let record =
+            record.map(|record| record.published(state.controller_revision, state.runner_revision));
+        let closed = self.closed_record(&state, previous);
         drop(state);
+        diagnostic::emit(record);
+        diagnostic::emit(closed);
         self.handoff_delegation_owned();
     }
     async fn run_turn(

@@ -242,7 +242,7 @@ impl SessionController {
                                     fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
                                 }))
                         {
-                            self.start_load_owned(&mut state, true)?;
+                            self.start_load_owned(&mut state, true, request.operation_id.clone())?;
                         } else {
                             if let Some(fault) = &state.block_reason {
                                 return Err(fault.clone());
@@ -256,7 +256,7 @@ impl SessionController {
                 }
                 SessionControlKind::Load => {
                     self.access.ensure_execution_owned()?;
-                    self.start_load_owned(&mut state, false)?;
+                    self.start_load_owned(&mut state, false, request.operation_id.clone())?;
                 }
                 SessionControlKind::Unload => {
                     Self::open(&state)?;

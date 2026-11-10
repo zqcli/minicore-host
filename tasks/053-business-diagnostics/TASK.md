@@ -568,3 +568,50 @@ Current raw files are `tools-red-new-environment.log`,
 in the recovery reports directory. No full workspace or independent approval is
 claimed. Cleanup-fault, model retry/recovery, history-load, scheduling, remaining
 close/handoff and compaction diagnostics are still separate work.
+
+### Real history loading and Session metadata failures
+
+`history_read` now records only an original load Fault returned by its actual
+cold backend attempt, after the backend, admission and Session locks have ended.
+It does not log an error propagated while waiting for an already-owned load.
+The automatic preparation failure and explicit load worker each record their
+own actual failed load once; the two explicit control call sites pass their
+original operation ID. No candidate Turn or unpublished Load ID is fabricated.
+Records formed before publish are finalized with the same committed revision.
+
+The original Session metadata save completion returns one failure Record beside
+its unchanged result. It retains the same candidate, baseline and original
+Fault; explicit same-save continuation remains the only recovery mechanism.
+The worker did not previously retain an initiating operation ID, so this slice
+leaves that optional error field absent rather than inventing one. RPC/client
+summaries still carry their actual operation. Successful persisted Closed and
+actual memory close reached during load/preparation completion produce a Closed
+record from the real before/after transition. These are not accepted-close facts.
+No Agent propagated close Fault is upgraded into a second Session ERROR.
+
+The new permanent production Host/Store/Runtime/local HTTP test is red before
+this change and green afterward. It appends a malformed real history row, then
+proves one cold-read failure without a Controller mutation or Runner, one actual
+automatic-load failure retaining queued input, and one explicit-load failure.
+After restoring the original bytes, existing resume executes the same accepted
+message exactly once. Separately, replacing session.json with a directory makes
+the production metadata boundary refuse a non-file; this is not disk exhaustion
+or a claimed write-syscall errno. The original configuration/title remain live,
+logging health stays OK, explicit same-save resume commits the original update,
+and subsequent real persistent close produces one Closed record. The three
+history failures and one metadata failure retain their original Faults and no
+body, path, title, Role or key is logged.
+
+Fresh validation in the same worktree's exclusive target:
+
+- All 5 actual diagnostic focused cases passed (calls, tools, storage, terminal,
+  close bridge), with the new actual red retained separately.
+- Core all-target suite passed 302 unique cases, confirmed by `-- --list`.
+- Core/transport all-target strict Clippy, core strict rustdoc, fmt and diff
+  checks passed. SPEC, Runtime and dependency pins are unchanged.
+
+Raw outputs are `storage-{red,green,remaining-focused,core,core-list,clippy,doc}-new-environment.log`
+in the recovery reports directory. Full workspace and independent follow-up
+review remain separate. Asynchronous memory-close paths outside these actual
+completion points, other controls/scheduling, model summaries/recovery, tool
+cleanup faults, result handoff and compaction diagnostics remain open.

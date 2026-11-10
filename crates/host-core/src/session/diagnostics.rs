@@ -403,3 +403,21 @@ pub(super) fn process_exit(
         data,
     )
 }
+
+pub(super) fn metadata_failed(source: &SessionIdentity, fault: &Fault, revision: u64) -> Record {
+    Record::new(
+        event(
+            Level::ERROR,
+            Scope::Session,
+            "session.metadata",
+            "session.metadata_save_failed",
+            "Session metadata save failed; its original candidate remains owned",
+            &["phase", "controller_revision"],
+        ),
+        EventData::default()
+            .context(diagnostic::session_context(source))
+            .fault(fault)
+            .attribute("phase", "metadata_save")
+            .attribute("controller_revision", revision),
+    )
+}

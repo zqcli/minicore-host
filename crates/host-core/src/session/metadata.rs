@@ -22,6 +22,7 @@ impl SessionController {
         self: &Arc<Self>,
         state: &mut SessionState,
         resume: bool,
+        operation: OperationId,
     ) -> Result<(), Fault> {
         let load_id = LoadId::new()
             .map_err(|error| Fault::new(FaultKind::SessionInternalUnexpected, error.to_string()))?;
@@ -67,14 +68,26 @@ impl SessionController {
                 // Memory load retains the current context and partial content.
                 Ok(Vec::new())
             };
-            {
+            let records = {
                 let mut state = owner.state.lock().expect("Session mutex poisoned");
+                let previous = state.lifecycle;
                 state.preparing = false;
                 let result = result.and_then(|history| {
                     if persistent {
                         state.replace_history(&history)?;
                     }
                     Ok(())
+                });
+                let failed = result.as_ref().err().map(|fault| {
+                    diagnostics::history_failed(
+                        minicore_host_diagnostics::Context {
+                            operation_id: Some(operation),
+                            ..diagnostic::session_context(&owner.identity())
+                        },
+                        fault,
+                        "load",
+                        state.controller_revision,
+                    )
                 });
                 match result {
                     Ok(()) => {
@@ -107,7 +120,16 @@ impl SessionController {
                     }
                 }
                 owner.publish(&mut state);
-            }
+                let mut records = failed
+                    .map(|record| {
+                        record.published(state.controller_revision, state.runner_revision)
+                    })
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                records.extend(owner.closed_record(&state, previous));
+                records
+            };
+            diagnostic::emit(records);
             owner.handoff_delegation_owned();
             owner.wake();
         }));
@@ -223,8 +245,9 @@ impl SessionController {
             store.save(&saved)
         })
         .await;
-        let updated = {
+        let (updated, record) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
+            let previous = state.lifecycle;
             if state.record_work.as_ref().is_none_or(|work| {
                 work.candidate != candidate || work.baseline != expected_baseline
             }) {
@@ -260,17 +283,23 @@ impl SessionController {
                     state.close_fault = None;
                     self.finish_save_resume(&mut state);
                     self.publish(&mut state);
-                    Ok(state.info.clone())
+                    (Ok(state.info.clone()), self.closed_record(&state, previous))
                 }
                 Err(fault) => {
                     let work = state.record_work.as_mut().expect("original save retained");
                     work.running = false;
                     work.fault = Some(fault.clone());
                     self.publish(&mut state);
-                    Err(fault)
+                    let record = diagnostics::metadata_failed(
+                        &self.identity(),
+                        &fault,
+                        state.controller_revision,
+                    );
+                    (Err(fault), Some(record))
                 }
             }
         };
+        diagnostic::emit(record);
         if updated.is_ok() {
             self.handoff_delegation_owned();
             self.wake();
