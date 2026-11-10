@@ -1,5 +1,13 @@
 # MiniCore Host
 
+## Current work: performance optimization
+
+[Task104](tasks/104-performance/TASK.md) records the owner-authorized static
+performance analysis and selected implementation plan against dev `4ee5e819`.
+Three requested Astra/max workers own disjoint scopes; root integrates provider
+encoding, measurement, independent review and dev publication. Implementation
+and fresh performance evidence are in progress; no speedup is claimed yet.
+
 ## Current checkpoint: 0.9.20
 
 [Task103](tasks/103-project-organization/TASK.md) implements the approved project
