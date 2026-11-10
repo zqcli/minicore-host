@@ -108,8 +108,8 @@ impl EditJournal {
             ChangeScope::Turn { turn_id } => Some(turn_id),
             ChangeScope::Workspace => return Err(WorkspaceError::InvalidRange),
         };
-        let after = match request.cursor {
-            None => None,
+        let start = match request.cursor {
+            None => 0,
             Some(ChangesCursor::Tool {
                 session_id,
                 turn_id: cursor_turn,
@@ -118,16 +118,20 @@ impl EditJournal {
                 && cursor_turn == turn_id
                 && after_index < self.records.len() =>
             {
-                Some(after_index)
+                after_index + 1
             }
             _ => return Err(WorkspaceError::InvalidCursor),
         };
-        let mut selected = self.records.iter().enumerate().filter(|(index, record)| {
-            after.is_none_or(|after| *index > after)
-                && turn_id
+        let mut selected = self
+            .records
+            .iter()
+            .enumerate()
+            .skip(start)
+            .filter(|(_, record)| {
+                turn_id
                     .as_ref()
                     .is_none_or(|turn| record.tool_call.turn_id == *turn)
-        });
+            });
         let records: Vec<_> = selected
             .by_ref()
             .take(request.limit)

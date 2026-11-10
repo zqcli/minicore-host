@@ -260,45 +260,13 @@ fn build_diff(
     }
     let diff = config.diff_lines(old, new);
     context.check()?;
-    let mut hunks = Vec::new();
     // Context beyond the actual file is equivalent to all available lines,
     // and must not overflow Similar's grouping arithmetic.
     let available_context = diff
         .ops()
         .last()
         .map_or(0, |op| op.old_range().end.max(op.new_range().end));
-    for group in diff.grouped_ops(request.context_lines.min(available_context)) {
-        context.check()?;
-        let first = group.first().expect("nonempty group");
-        let last = group.last().expect("nonempty group");
-        let old_start = first.old_range().start;
-        let new_start = first.new_range().start;
-        let old_count = last.old_range().end - old_start;
-        let new_count = last.new_range().end - new_start;
-        let lines = group
-            .iter()
-            .flat_map(|op| diff.iter_changes(op))
-            .map(|change| DiffLine {
-                kind: match change.tag() {
-                    ChangeTag::Equal => DiffLineKind::Context,
-                    ChangeTag::Delete => DiffLineKind::Removed,
-                    ChangeTag::Insert => DiffLineKind::Added,
-                },
-                old_index: change.old_index().map(|index| index + 1),
-                new_index: change.new_index().map(|index| index + 1),
-                line_byte_offset: 0,
-                text: change.value().to_owned(),
-                line_complete: true,
-            })
-            .collect();
-        hunks.push(DiffHunk {
-            old_start: old_start + usize::from(old_count != 0),
-            old_count,
-            new_start: new_start + usize::from(new_count != 0),
-            new_count,
-            lines,
-        });
-    }
+    let groups = diff.grouped_ops(request.context_lines.min(available_context));
     let continued = request.cursor.is_some();
     let cursor = request.cursor.unwrap_or(DiffCursor {
         fingerprint: fingerprint.clone(),
@@ -306,45 +274,64 @@ fn build_diff(
         line_index: 0,
         line_byte_offset: 0,
     });
-    if hunks.is_empty() {
+    if groups.is_empty() {
         if continued {
             return Err(WorkspaceError::InvalidCursor);
         }
         return Ok(result);
     }
-    let first_line = hunks
-        .get(cursor.hunk_index)
-        .and_then(|hunk| hunk.lines.get(cursor.line_index))
-        .ok_or(WorkspaceError::InvalidCursor)?;
-    if cursor.line_byte_offset >= first_line.text.len()
-        || !first_line.text.is_char_boundary(cursor.line_byte_offset)
-    {
+    if cursor.hunk_index >= groups.len() {
         return Err(WorkspaceError::InvalidCursor);
     }
     let mut remaining = request.max_bytes;
     let mut next = None;
-    'pages: for (hi, hunk) in hunks.iter().enumerate().skip(cursor.hunk_index) {
+    // Keep full logical hunk coordinates, but borrow source lines until the
+    // requested page needs an owned fragment. Later hunk text is not copied.
+    'pages: for (hi, group) in groups.iter().enumerate().skip(cursor.hunk_index) {
+        context.check()?;
+        let first_op = group.first().expect("nonempty group");
+        let last_op = group.last().expect("nonempty group");
+        let old_start = first_op.old_range().start;
+        let new_start = first_op.new_range().start;
+        let old_count = last_op.old_range().end - old_start;
+        let new_count = last_op.new_range().end - new_start;
         let first = if hi == cursor.hunk_index {
             cursor.line_index
         } else {
             0
         };
         let mut page = DiffHunk {
-            old_start: hunk.old_start,
-            old_count: hunk.old_count,
-            new_start: hunk.new_start,
-            new_count: hunk.new_count,
+            old_start: old_start + usize::from(old_count != 0),
+            old_count,
+            new_start: new_start + usize::from(new_count != 0),
+            new_count,
             lines: Vec::new(),
         };
-        for (li, line) in hunk.lines.iter().enumerate().skip(first) {
+        let mut lines = group
+            .iter()
+            .flat_map(|op| diff.iter_changes(op))
+            .enumerate()
+            .skip(first)
+            .peekable();
+        if hi == cursor.hunk_index {
+            let (_, line) = lines.peek().ok_or(WorkspaceError::InvalidCursor)?;
+            let text = line.value();
+            if cursor.line_byte_offset >= text.len()
+                || !text.is_char_boundary(cursor.line_byte_offset)
+            {
+                return Err(WorkspaceError::InvalidCursor);
+            }
+        }
+        for (li, line) in lines {
             context.check()?;
+            let text = line.value();
             let start = if hi == cursor.hunk_index && li == cursor.line_index {
                 cursor.line_byte_offset
             } else {
                 0
             };
-            let mut end = start + (line.text.len() - start).min(remaining);
-            while !line.text.is_char_boundary(end) {
+            let mut end = start + (text.len() - start).min(remaining);
+            while !text.is_char_boundary(end) {
                 end -= 1;
             }
             if end == start {
@@ -358,13 +345,19 @@ fn build_diff(
                 break 'pages;
             }
             page.lines.push(DiffLine {
-                text: line.text[start..end].to_owned(),
+                kind: match line.tag() {
+                    ChangeTag::Equal => DiffLineKind::Context,
+                    ChangeTag::Delete => DiffLineKind::Removed,
+                    ChangeTag::Insert => DiffLineKind::Added,
+                },
+                old_index: line.old_index().map(|index| index + 1),
+                new_index: line.new_index().map(|index| index + 1),
+                text: text[start..end].to_owned(),
                 line_byte_offset: start,
-                line_complete: end == line.text.len(),
-                ..line.clone()
+                line_complete: end == text.len(),
             });
             remaining -= end - start;
-            if end != line.text.len() {
+            if end != text.len() {
                 next = Some((hi, li, end));
                 result.hunks.push(page);
                 break 'pages;

@@ -119,6 +119,32 @@ async fn utf8_diff_fragments_reconstruct_lines_across_multiple_hunks() {
     .await
     .unwrap();
     assert_eq!(full.hunks.len(), 2);
+    for (budget, expected_hunk, expected_line) in [
+        (full.hunks[0].lines[0].text.len(), 0, 1),
+        (
+            full.hunks[0].lines.iter().map(|line| line.text.len()).sum(),
+            1,
+            0,
+        ),
+    ] {
+        let page = diff_edit(
+            record.clone(),
+            request(reference.clone(), budget),
+            QueryContext::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(page.hunks[0].old_start, full.hunks[0].old_start);
+        assert_eq!(page.hunks[0].old_count, full.hunks[0].old_count);
+        assert_eq!(page.hunks[0].new_start, full.hunks[0].new_start);
+        assert_eq!(page.hunks[0].new_count, full.hunks[0].new_count);
+        let cursor = page.next_cursor.unwrap();
+        assert_eq!(cursor.hunk_index, expected_hunk);
+        assert_eq!(cursor.line_index, expected_line);
+        assert_eq!(cursor.line_byte_offset, 0);
+        let returned: usize = page.hunks[0].lines.iter().map(|line| line.text.len()).sum();
+        assert_eq!(returned, budget);
+    }
     let mut all_context = request(reference.clone(), usize::MAX);
     all_context.context_lines = usize::MAX;
     assert_eq!(
@@ -186,12 +212,47 @@ async fn utf8_diff_fragments_reconstruct_lines_across_multiple_hunks() {
         diff_edit(record.clone(), changed_context, QueryContext::default()).await,
         Err(WorkspaceError::InvalidCursor)
     ));
-    let mut wrong_offset = request(reference, 4);
-    wrong_offset.cursor = pages.iter().find_map(|page| page.next_cursor.clone());
-    wrong_offset.cursor.as_mut().unwrap().line_byte_offset = usize::MAX;
+    let original_cursor = pages[0].next_cursor.clone().unwrap();
+    let text = &full.hunks[original_cursor.hunk_index].lines[original_cursor.line_index].text;
+    let unicode_start = text
+        .char_indices()
+        .find(|(_, character)| !character.is_ascii())
+        .unwrap()
+        .0;
+    for (hunk_index, line_index, line_byte_offset) in [
+        (usize::MAX, 0, 0),
+        (0, usize::MAX, 0),
+        (
+            original_cursor.hunk_index,
+            original_cursor.line_index,
+            usize::MAX,
+        ),
+        (
+            original_cursor.hunk_index,
+            original_cursor.line_index,
+            unicode_start + 1,
+        ),
+    ] {
+        let mut invalid = request(reference.clone(), 4);
+        invalid.cursor = Some(DiffCursor {
+            fingerprint: original_cursor.fingerprint.clone(),
+            hunk_index,
+            line_index,
+            line_byte_offset,
+        });
+        assert!(matches!(
+            diff_edit(record.clone(), invalid, QueryContext::default()).await,
+            Err(WorkspaceError::InvalidCursor)
+        ));
+    }
+    let mut too_small = request(reference, 1);
+    too_small.cursor = Some(DiffCursor {
+        line_byte_offset: unicode_start,
+        ..original_cursor
+    });
     assert!(matches!(
-        diff_edit(record, wrong_offset, QueryContext::default()).await,
-        Err(WorkspaceError::InvalidCursor)
+        diff_edit(record, too_small, QueryContext::default()).await,
+        Err(WorkspaceError::InvalidRange)
     ));
 }
 
@@ -264,7 +325,7 @@ fn journal_pages_filter_actual_turns_and_reject_wrong_session_or_reference() {
     let session = SessionId::new().unwrap();
     let turn = TurnId::new().unwrap();
     let other_turn = TurnId::new().unwrap();
-    let mut journal = EditJournal::new(session);
+    let mut journal = EditJournal::new(session.clone());
     let mut references = Vec::new();
     for (index, turn) in [&turn, &other_turn, &turn].iter().enumerate() {
         references.push(
@@ -286,13 +347,55 @@ fn journal_pages_filter_actual_turns_and_reject_wrong_session_or_reference() {
     assert_eq!(first.records[0].change_ref, references[0]);
     let second = journal
         .list(ChangesListRequest {
-            scope,
+            scope: scope.clone(),
             cursor: first.next_cursor.clone(),
             limit: 1,
         })
         .unwrap();
     assert_eq!(second.records[0].change_ref, references[2]);
     assert!(second.next_cursor.is_none());
+    // A cursor is a journal position; its indexed record need not belong to
+    // the requested Turn. Filtering applies to the following records.
+    let mut continued = ChangesListRequest {
+        scope: scope.clone(),
+        cursor: Some(ChangesCursor::Tool {
+            session_id: session.clone(),
+            turn_id: Some(turn.clone()),
+            after_index: 1,
+        }),
+        limit: 1,
+    };
+    assert_eq!(journal.list(continued.clone()).unwrap(), second);
+    for after_index in [3, usize::MAX] {
+        continued.cursor = Some(ChangesCursor::Tool {
+            session_id: session.clone(),
+            turn_id: Some(turn.clone()),
+            after_index,
+        });
+        assert!(matches!(
+            journal.list(continued.clone()),
+            Err(WorkspaceError::InvalidCursor)
+        ));
+    }
+    continued.cursor = Some(ChangesCursor::Tool {
+        session_id: session,
+        turn_id: Some(turn.clone()),
+        after_index: 2,
+    });
+    let tail = journal.list(continued.clone()).unwrap();
+    assert!(tail.records.is_empty() && tail.next_cursor.is_none());
+    let appended = journal
+        .append(EditRecord {
+            tool_call: tool(&turn, "appended"),
+            path: "another-file".into(),
+            before: FileSnapshot::Missing,
+            after: FileSnapshot::Content(b"later".to_vec()),
+            outcome: EditOutcome::Applied,
+        })
+        .unwrap();
+    let later = journal.list(continued).unwrap();
+    assert_eq!(later.records[0].change_ref, appended);
+    assert!(later.next_cursor.is_none());
     assert!(matches!(
         journal.list(ChangesListRequest {
             scope: ChangeScope::Turn {
