@@ -57,3 +57,50 @@ owner-slice and independent-review results are historical, not new evidence.
 Restore the remaining owner source, rerun deterministic tests and independent
 reviews, then run a new combined gate and performance measurements. Backup every
 five commits on dev while preserving all remote history; do not merge main.
+
+## Fresh recovered checkpoint and integration
+
+The recovered initial owner/Session slices and their original review corrections
+are now integrated. The four-file close bridge is present; Session close/terminal
+review approves source `87fa305`, and initial Host/Agent lifecycle review approves
+`7781a1d`. The query pipe teardown was independently reimplemented with controlled
+red probes; its three-case fixture passes 200 producer and 20 integrator repeats.
+Cross-worktree Cargo target reuse produced stale-artifact false failures during
+review; fresh worktree-exclusive targets passed without source changes. Targets
+are now separate for every worktree.
+
+Source `101abcb25a416a81f8350ca1acdbe6078b0de0bc` is published as
+`9f75d0e770b39b99614530fa126fd90952f95fe7`, identical tree
+`16cb1a24ea981d1fb4bd43c341ffede2567634c8`. Three verified recovery backups
+preserve 353 published commits and unchanged main. The cumulative publication
+map now has 70 entries, including the explicitly labelled recovered 57-entry
+prefix. Its original recovered record is retained in
+`docs/recovery-publication-8c5fe49.json`. The fixed [review handoff](../../docs/recovery-checkpoint-review.md)
+links exact source/remote identities and separates pending review.
+
+Fresh commands at source 101abcb all exited 0:
+
+```sh
+cargo test -p minicore-host --test credential_environment --test task084_app_log_fixture --locked --offline
+CARGO_NET_OFFLINE=true ./scripts/check.sh
+cargo test --workspace --all-targets --locked --offline -- --list
+```
+
+The gate has 899 unique Rust cases, 4 doctests and 20 Python checks, with strict
+lint/docs, fmt and committed whitespace. The [manifest](../../docs/recovery-checkpoint-validation.json)
+records new log hashes. It supersedes neither older evidence nor future checks.
+Exact-head hosted CI 42739672016 was still running at the last observation.
+
+The preceding full local 985ff19 gate and remote ee9 CI failed because new owner
+host.started diagnostics exposed an unqualified process-readiness fixture lookup.
+The actual credential assertions had not run. Source 101abcb qualifies component
+and event and passes the real credential and provenance regressions; production
+credentials, environment filtering and timeouts were not changed. A separate
+earlier hosted TLS deadline fixture race remains under deterministic correction.
+
+Next source `eb1065df9aa948478b907bd06407b56665eea955` integrates
+`7c7efd9` as `32a3820` (Session history/metadata facts) and `19e7bbb` as
+`eb1065d` (Agent metadata/reconcile), after documentation source `e95b805` as
+`ac181fc`. The focused diagnostic-storage, Agent metadata and callback-lock targets
+pass, as do strict core/transport all-target Clippy, fmt and whitespace. Their
+combined gate and independent new-scope review remain separate pending work.
