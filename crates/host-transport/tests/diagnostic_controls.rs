@@ -144,7 +144,10 @@ async fn scheduling_and_cancel_records_use_committed_facts_and_only_first_claims
             assert!(!again.result.cancel_claimed);
         }
         let done = session.wait_turn(turn.clone(), options()).await.unwrap();
-        assert_eq!(done.data.info.outcome, Some(TurnOutcome::Cancelled));
+        assert_eq!(
+            done.data.info.unwrap().outcome,
+            Some(TurnOutcome::Cancelled)
+        );
         stop(&host).await;
         assert_eq!(http.count(), 1);
         http.abort().await;

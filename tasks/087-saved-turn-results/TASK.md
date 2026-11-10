@@ -69,3 +69,29 @@ Worker-local evidence and SHA-256:
 - A loaded journal's opening baseline is an existing accepted saved source, not a live disk cache. Current results are always read from their actual owner. Missing original LoadId/config/revisions/counters/full Fault stay absent. No historical execution is resumed or fabricated.
 - A read cannot restore or infer a terminal result from a valid unfinished log; it returns `SESSION_TURN_NOT_FOUND`. Whole-file storage corruption/missing-file failures remain the original load Faults. Existing pending save state is never acknowledged or repaired by reading.
 - SPEC hash, Runtime revision, lock file, TUI, and stored record schema remain unchanged. No live provider/TUI validation is claimed.
+
+## Integration and result-branch validation
+
+The three task commits are integrated as 158f0f7, 163e904 and b31f73f,
+respectively, on the coordinator development branch. A later Session control
+fixture requires only optional retained-info access; its original cancellation
+assertion is unchanged.
+
+Independent review at source6032f8f confirmed a P2 wire-contract defect in the
+first candidate: three independently optional metadata fields admitted nine
+invalid metadata/source combinations, including neither branch and both branches.
+The real stdio client accepted all18 malformed turn.result/turn.wait replies;
+a manually built invalid public struct also serialized successfully. This is
+not evidence that the real owner emitted such values. The independent red log
+has SHA-256 bea2b533f6bca1e398abe8ce2fa5646645383cdf8301bcf2f6ed1c73f8ff67d8.
+
+The coordinator's narrow correction validates both serialization and decoding:
+retained results require info+config and an actual LoadId; saved-only results
+require saved_terminal and omit LoadId. The two valid JSON shapes and public
+fields remain unchanged. Serialization borrows bodies instead of cloning them;
+unknown structured Fault leaves remain handled by their existing codec. No
+historical execution metadata is synthesized and no storage/owner behavior changes.
+Four new wire tests enumerate metadata branches, LoadId association, round trips
+and invalid public-struct serialization. Composed query tests and actual
+control/Closed plus typed/pipe/WSS saved-result tests passed before commit;
+fixed-commit strict checks and independent green replay follow separately.
