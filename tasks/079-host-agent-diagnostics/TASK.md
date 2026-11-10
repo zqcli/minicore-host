@@ -54,3 +54,15 @@ P1 now keeps `Option<Span>` in the outer Host/Agent caller. Acceptance only borr
 - `cargo fmt --all --check` and `git diff --check`: passed.
 - Raw logs: `/workspace/shared/recovery-079-second/p1-tests.log`, `p1-clippy.log`.
 - P2 remains at this commit; independent post-fix review is pending.
+
+## P2 correction
+
+A repeated request after Stopped still returns and retains its real receipt, including a requested Force strategy. It does not start another shutdown task or transition out of Stopped. Therefore it no longer creates a second `host.shutdown_accepted` lifecycle transition. This preserves the existing “repeated request returns current facts” behavior rather than hiding a real new acceptance. No persistent mode is guessed from an already released store, no immutable mode field is added for logging, and original business strategy/receipts are unchanged. The added regression asserts both receipt retention and exactly one original persistent shutdown transition.
+
+New corrected-source checks:
+
+- `cargo test -p minicore-host-core --test task079_shutdown_repetition --test task079_lock_boundary --test task079_diagnostics --test host_shutdown --test persistent_owners --test entity_retirement --locked --offline`: passed, 1 + 2 + 4 + 10 + 46 + 8 = 71 cases.
+- `cargo clippy -p minicore-host-core --lib --test task079_shutdown_repetition --test task079_lock_boundary --test task079_diagnostics --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and `git diff --check`: passed.
+- Raw logs: `/workspace/shared/recovery-079-second/p2-regression.log`, `p2-clippy.log`.
+- Unchanged three-probe replay will also run on the resulting fixed commit in a separate checkout. The independent TASK082 decision is still pending; this is not a full-workspace pass.

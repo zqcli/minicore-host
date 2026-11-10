@@ -92,19 +92,24 @@ impl Host {
                 .entry(receipt.operation_id.clone())
                 .or_default()
                 .push(Receipt::HostShutdown(receipt.clone()));
-            let diagnostic = (previous != (state.lifecycle, state.shutdown_strategy)).then(|| {
-                self.lifecycle_record(
-                    "host.shutdown_accepted",
-                    match state.lifecycle {
-                        HostLifecycle::Draining => "draining",
-                        HostLifecycle::Stopping => "stopping",
-                        HostLifecycle::Stopped => "stopped",
-                        _ => unreachable!("accepted shutdown"),
-                    },
-                    mode,
-                    Some(receipt.operation_id.clone()),
-                )
-            });
+            // A request against an already stopped Host does not begin another
+            // shutdown. Its receipt can update strategy, but its released store
+            // no longer establishes a new lifecycle transition or storage mode.
+            let diagnostic = (previous.0 != HostLifecycle::Stopped
+                && previous != (state.lifecycle, state.shutdown_strategy))
+                .then(|| {
+                    self.lifecycle_record(
+                        "host.shutdown_accepted",
+                        match state.lifecycle {
+                            HostLifecycle::Draining => "draining",
+                            HostLifecycle::Stopping => "stopping",
+                            HostLifecycle::Stopped => "stopped",
+                            _ => unreachable!("accepted shutdown"),
+                        },
+                        mode,
+                        Some(receipt.operation_id.clone()),
+                    )
+                });
             Ok((
                 (
                     state.lifecycle,
