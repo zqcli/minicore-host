@@ -1,8 +1,59 @@
 [workspace]
-members = ["crates/host-protocol", "crates/host-storage", "crates/host-provider", "crates/host-core", "crates/host-workspace", "crates/host-transport", "crates/host-tools", "crates/host-resources", "crates/host-compaction", "crates/host-local-tools", "crates/host-diagnostics", "crates/host-app"]
+members = [
+    "crates/host-protocol",
+    "crates/host-storage",
+    "crates/host-provider",
+    "crates/host-core",
+    "crates/host-workspace",
+    "crates/host-transport",
+    "crates/host-tools",
+    "crates/host-resources",
+    "crates/host-compaction",
+    "crates/host-local-tools",
+    "crates/host-diagnostics",
+    "crates/host-app",
+]
 resolver = "3"
 
 [workspace.package]
+version = "0.9.10"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
+
+[workspace.dependencies]
+bytes = "=1.12.1"
+futures-util = "=0.3.34"
+getrandom = "=0.4.3"
+httpdate = "=1.0.3"
+ignore = "=0.4.33"
+minicore-host-compaction = { path = "crates/host-compaction", version = "0.9.10" }
+minicore-host-core = { path = "crates/host-core", version = "0.9.10" }
+minicore-host-diagnostics = { path = "crates/host-diagnostics", version = "0.9.10" }
+minicore-host-local-tools = { path = "crates/host-local-tools", version = "0.9.10" }
+minicore-host-protocol = { path = "crates/host-protocol", version = "0.9.10" }
+minicore-host-provider = { path = "crates/host-provider", version = "0.9.10" }
+minicore-host-resources = { path = "crates/host-resources", version = "0.9.10" }
+minicore-host-storage = { path = "crates/host-storage", version = "0.9.10" }
+minicore-host-tools = { path = "crates/host-tools", version = "0.9.10" }
+minicore-host-transport = { path = "crates/host-transport", version = "0.9.10" }
+minicore-host-workspace = { path = "crates/host-workspace", version = "0.9.10" }
+minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
+rcgen = { version = "=0.14.10", default-features = false }
+regex = "=1.13.1"
+reqwest = { version = "=0.12.28", default-features = false }
+rustix = "=1.1.6"
+serde = "=1.0.229"
+serde_json = "=1.0.154"
+sha2 = "=0.10.9"
+similar = { version = "=3.2.0", default-features = false }
+subtle = "=2.6.1"
+tempfile = "=3.27.0"
+thiserror = "=2.0.21"
+time = "=0.3.55"
+tokio = { version = "=1.54.0", default-features = false }
+tokio-rustls = { version = "=0.26.6", default-features = false }
+tokio-tungstenite = { version = "=0.30.0", default-features = false }
+tokio-util = { version = "=0.7.20", default-features = false }
+tracing = { version = "=0.1.44", default-features = false }
+tracing-subscriber = { version = "=0.3.23", default-features = false }

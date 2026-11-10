@@ -1,23 +1,23 @@
 [package]
 name = "minicore-host-resources"
-version = "0.9.10"
-edition = "2024"
-license = "MIT OR Apache-2.0"
-rust-version = "1.90"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
 description = "Production execution resources for MiniCore Host"
 
 [dependencies]
-minicore-host-core = { path = "../host-core", version = "0.9.10" }
-minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
-minicore-host-provider = { path = "../host-provider", version = "0.9.10" }
-minicore-host-tools = { path = "../host-tools", version = "0.9.10" }
-minicore-host-workspace = { path = "../host-workspace", version = "0.9.10" }
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
-tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+minicore-host-core.workspace = true
+minicore-host-protocol.workspace = true
+minicore-host-provider.workspace = true
+minicore-host-tools.workspace = true
+minicore-host-workspace.workspace = true
+minicore-runtime.workspace = true
+tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [dev-dependencies]
-serde_json = "=1.0.154"
-tempfile = "=3.27.0"
+serde_json.workspace = true
+tempfile.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

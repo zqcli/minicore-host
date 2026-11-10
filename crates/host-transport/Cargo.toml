@@ -1,32 +1,32 @@
 [package]
 name = "minicore-host-transport"
-version = "0.9.10"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Typed in-process, stdio and authenticated WSS clients for the MiniCore Host"
 
 [dependencies]
-minicore-host-diagnostics = { path = "../host-diagnostics", version = "0.9.10" }
-tracing = { version = "=0.1.44", default-features = false, features = ["std"] }
-minicore-host-core = { path = "../host-core", version = "0.9.10" }
-minicore-host-workspace = { path = "../host-workspace", version = "0.9.10" }
-minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
-tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
+minicore-host-diagnostics.workspace = true
+tracing = { workspace = true, features = ["std"] }
+minicore-host-core.workspace = true
+minicore-host-workspace.workspace = true
+minicore-host-protocol.workspace = true
+minicore-runtime.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "net"] }
 
-futures-util = { version = "=0.3.34", features = ["sink"] }
-tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
-tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake"] }
+futures-util = { workspace = true, features = ["sink"] }
+tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
 
 [dev-dependencies]
-minicore-host-resources = { path = "../host-resources", version = "0.9.10" }
-minicore-host-provider = { path = "../host-provider", version = "0.9.10" }
-tempfile = "=3.27.0"
-rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
-tokio = { version = "=1.54.0", features = ["test-util", "net"] }
+minicore-host-resources.workspace = true
+minicore-host-provider.workspace = true
+tempfile.workspace = true
+rcgen = { workspace = true, features = ["ring"] }
+tokio = { workspace = true, default-features = true, features = ["test-util", "net"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -1,16 +1,16 @@
 [package]
 name = "minicore-host-protocol"
-version = "0.9.10"
-edition = "2024"
-rust-version = "1.90"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 description = "Strict MiniCore Host v4.93 shared contracts"
 
 [dependencies]
-getrandom = "=0.4.3"
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = "=1.0.154"
-time = { version = "=0.3.55", features = ["serde", "formatting", "parsing"] }
+getrandom.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+time = { workspace = true, features = ["serde", "formatting", "parsing"] }
 
 [lints.rust]
 unsafe_code = "forbid"

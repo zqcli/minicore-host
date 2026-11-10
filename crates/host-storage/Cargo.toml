@@ -1,22 +1,22 @@
 [package]
 name = "minicore-host-storage"
-version = "0.9.10"
-edition = "2024"
-rust-version = "1.90"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 description = "Owner-scoped durable storage for MiniCore Host"
 
 [dependencies]
 minicore-host-protocol = { path = "../host-protocol", version = "=0.9.10" }
-minicore-runtime = { git = "https://github.com/zqcli/minicore-runtime", rev = "3aa47629929906832dcb309afb7d242c1ae3e53f", version = "=0.10.0" }
-rustix = { version = "=1.1.6", features = ["fs", "process"] }
-serde = { version = "=1.0.229", features = ["derive"] }
-serde_json = { version = "=1.0.154", features = ["arbitrary_precision", "raw_value"] }
-sha2 = "=0.10.9"
-thiserror = "=2.0.21"
+minicore-runtime.workspace = true
+rustix = { workspace = true, features = ["fs", "process"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }
+sha2.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
-tempfile = "=3.27.0"
+tempfile.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"

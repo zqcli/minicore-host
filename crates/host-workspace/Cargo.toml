@@ -1,25 +1,25 @@
 [package]
 name = "minicore-host-workspace"
-version = "0.9.10"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 description = "Real workspace reads and change observations for MiniCore Host"
 
 [dependencies]
-minicore-host-protocol = { path = "../host-protocol", version = "0.9.10" }
-ignore = "=0.4.33"
-regex = "=1.13.1"
-serde = { version = "=1.0.229", features = ["derive", "rc"] }
-sha2 = "=0.10.9"
-similar = { version = "=3.2.0", default-features = false, features = ["text", "std"] }
-thiserror = "=2.0.21"
-tokio = { version = "=1.54.0", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
-tokio-util = { version = "=0.7.20", features = ["rt"] }
+minicore-host-protocol.workspace = true
+ignore.workspace = true
+regex.workspace = true
+serde = { workspace = true, features = ["derive", "rc"] }
+sha2.workspace = true
+similar = { workspace = true, features = ["text", "std"] }
+thiserror.workspace = true
+tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time"] }
+tokio-util = { workspace = true, default-features = true, features = ["rt"] }
 
 [dev-dependencies]
-serde_json = "=1.0.154"
-tempfile = "=3.27.0"
+serde_json.workspace = true
+tempfile.workspace = true
 
 [lints.rust]
 unsafe_code = "forbid"
