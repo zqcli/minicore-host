@@ -187,6 +187,49 @@ impl HistoryBackend for JournalHistory {
             })?
         })
     }
+    fn read_saved_turn(&self, id: &minicore_host_protocol::TurnId) -> LoadFuture<'_> {
+        let state = Arc::clone(&self.state);
+        let id = id.clone();
+        Box::pin(async move {
+            tokio::task::spawn_blocking(move || {
+                let current = state.lock().expect("journal mutex poisoned");
+                let store = current.store()?;
+                #[cfg(test)]
+                if let Some(gate) = &current.read_gate {
+                    gate.block();
+                }
+                if let Some(journal) = &current.journal {
+                    // This is only the already validated opening baseline of
+                    // old saved Turns, never the current execution/history cache.
+                    // The Session checks current accepted ownership on both sides
+                    // of this read, including finalizing and unconfirmed saves.
+                    return Ok(journal
+                        .loaded_records()
+                        .iter()
+                        .filter(|record| record.entry.turn_id() == Some(&id))
+                        .map(|record| record.entry.clone())
+                        .collect());
+                }
+                // Validate the whole file before filtering. Do not accept a
+                // terminal prefix from a corrupt or incomplete history file.
+                Ok(store
+                    .read_history()
+                    .map_err(load_fault)?
+                    .records
+                    .into_iter()
+                    .filter(|record| record.entry.turn_id() == Some(&id))
+                    .map(|record| record.entry)
+                    .collect())
+            })
+            .await
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::SessionHistoryLoadFailed,
+                    "saved Turn reader did not return a result",
+                )
+            })?
+        })
+    }
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
         let state = Arc::clone(&self.state);
         Box::pin(async move {

@@ -40,7 +40,7 @@ impl Host {
         self.session(caller, target)?.turn_list(caller)
     }
 
-    pub fn turn_result_snapshot(
+    pub async fn turn_result_snapshot(
         &self,
         caller: &CallerContext,
         target: &SessionRef,
@@ -48,6 +48,7 @@ impl Host {
     ) -> Result<TurnResultSnapshot, Fault> {
         self.session(caller, target)?
             .turn_result_snapshot(caller, turn_id)
+            .await
     }
 
     pub async fn wait_turn_snapshot(
@@ -56,6 +57,15 @@ impl Host {
         target: &SessionRef,
         turn_id: &TurnId,
     ) -> Result<TurnResultSnapshot, Fault> {
+        // A saved terminal result needs no execution subscription or waiter.
+        if self
+            .session(caller, target)?
+            .turn_query_finished(caller, turn_id)?
+            .unwrap_or(true)
+        {
+            return self.turn_result_snapshot(caller, target, turn_id).await;
+        }
+        // Subscribe before checking again, so completion cannot be missed.
         // The existing subscription holds only a Weak owner and light state.
         // Dropping this wait cannot retain content or cancel accepted work.
         let mut states = self.session_states(caller, target)?;
@@ -63,8 +73,9 @@ impl Host {
             if self
                 .session(caller, target)?
                 .turn_query_finished(caller, turn_id)?
+                .unwrap_or(true)
             {
-                return self.turn_result_snapshot(caller, target, turn_id);
+                return self.turn_result_snapshot(caller, target, turn_id).await;
             }
             states.changed().await?;
         }

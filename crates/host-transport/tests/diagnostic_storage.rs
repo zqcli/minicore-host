@@ -123,7 +123,10 @@ async fn real_cold_load_and_metadata_failures_keep_business_state_and_record_onl
         .await
         .unwrap();
     let finished = result(&session, &message.message_id).await;
-    assert_eq!(finished.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        finished.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert_eq!(http.count(), 2);
 
     let metadata = session_path.join("session.json");

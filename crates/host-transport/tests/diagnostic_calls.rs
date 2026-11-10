@@ -50,7 +50,10 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
     let local_target = target(&local_created);
     let local_session = local.session(local_target.clone());
     let completed = result(&local_session, &local_message.message_id).await;
-    assert_eq!(completed.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        completed.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     local_session.state(options()).await.unwrap();
     local.close();
 
@@ -66,8 +69,22 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
     let remote_target = target(&remote_created);
     let remote_session = remote.session(remote_target.clone());
     let failed = result(&remote_session, &remote_message.message_id).await;
-    assert_eq!(failed.data.info.outcome, Some(TurnOutcome::Failed));
-    assert_eq!(failed.data.info.fault.as_ref().unwrap().code(), 4204);
+    assert_eq!(
+        failed.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Failed)
+    );
+    assert_eq!(
+        failed
+            .data
+            .info
+            .as_ref()
+            .unwrap()
+            .fault
+            .as_ref()
+            .unwrap()
+            .code(),
+        4204
+    );
     remote_session.state(options()).await.unwrap();
     assert_eq!(http.count(), 2);
 
@@ -179,7 +196,10 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
         .wait_turn(turn.clone(), options())
         .await
         .unwrap();
-    assert_eq!(resumed.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        resumed.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert_eq!(http.count(), 3);
 
     assert_eq!(
@@ -445,7 +465,10 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
         .unwrap();
     assert_eq!(accepted.result.delivery, Delivery::Accepted);
     let completed = result(&remote_session, &after_close.message_id).await;
-    assert_eq!(completed.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        completed.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert_eq!(http.count(), 4);
     let logging = observer.info(options()).await.unwrap().logging;
     assert_eq!(logging.status, LoggingState::Degraded);

@@ -276,6 +276,8 @@ async fn long_turn_wait_and_waiter_cancellation_leave_real_runtime_and_connectio
             .unwrap()
             .data
             .info
+            .as_ref()
+            .unwrap()
             .outcome,
         Some(TurnOutcome::Completed)
     );

@@ -277,6 +277,8 @@ async fn accepted_creation_survives_timeout_disconnect_and_key_rotation() {
                 .unwrap()
                 .data
                 .info
+                .as_ref()
+                .unwrap()
                 .outcome,
             Some(TurnOutcome::Completed)
         );

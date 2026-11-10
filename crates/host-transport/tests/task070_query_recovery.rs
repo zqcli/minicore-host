@@ -111,8 +111,11 @@ async fn assert_retained(
     assert_eq!(result.source, expected.source);
     // JSON comparison also catches a separate result type silently omitting the
     // original terminal runner revision. State and results share one contract.
-    assert_eq!(value(&result.data.info), value(&expected.data));
-    assert_eq!(&result.data.config, original_config);
+    assert_eq!(
+        value(result.data.info.as_ref().unwrap()),
+        value(&expected.data)
+    );
+    assert_eq!(result.data.config.as_ref().unwrap(), original_config);
     assert_eq!(
         value(
             session

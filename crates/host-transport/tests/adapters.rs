@@ -38,7 +38,10 @@ async fn typed_service_runtime_and_stdio_query_parity() {
         .wait_turn(turn.clone(), options(2_000))
         .await
         .unwrap();
-    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        result.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert!(!result.data.history.is_empty());
     assert_eq!(
         value(local.info(options(2_000)).await.unwrap()),
@@ -159,7 +162,15 @@ async fn actual_os_pipes_multiplex_long_wait_cancel_and_queries() {
         value(cancellation)
     );
     assert_eq!(
-        waiting.await.unwrap().unwrap().data.info.outcome,
+        waiting
+            .await
+            .unwrap()
+            .unwrap()
+            .data
+            .info
+            .as_ref()
+            .unwrap()
+            .outcome,
         Some(TurnOutcome::Cancelled)
     );
     assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
@@ -227,6 +238,8 @@ async fn timeout_and_dropped_wait_do_not_cancel_or_resend_accepted_work() {
                 .unwrap()
                 .data
                 .info
+                .as_ref()
+                .unwrap()
                 .outcome,
             Some(TurnOutcome::Completed)
         );
@@ -320,6 +333,8 @@ async fn accepted_creation_outlives_timeout_abandonment_and_disconnect() {
                     .unwrap()
                     .data
                     .info
+                    .as_ref()
+                    .unwrap()
                     .outcome,
                 Some(TurnOutcome::Completed)
             );
@@ -815,6 +830,8 @@ async fn dropping_last_client_handle_releases_only_the_connection() {
             .unwrap()
             .data
             .info
+            .as_ref()
+            .unwrap()
             .outcome,
         Some(TurnOutcome::Completed)
     );

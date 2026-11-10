@@ -113,10 +113,27 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
         .await
         .unwrap();
     let finished = session.wait_turn(turn.clone(), options()).await.unwrap();
-    assert_eq!(finished.data.info.outcome, Some(TurnOutcome::Failed));
-    assert_eq!(finished.data.info.fault, failed.data.state.fault);
-    assert_eq!(finished.data.info.persistence, PersistenceState::Persisted);
-    assert!(finished.data.info.persistence_fault.is_none());
+    assert_eq!(
+        finished.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Failed)
+    );
+    assert_eq!(
+        finished.data.info.as_ref().unwrap().fault,
+        failed.data.state.fault
+    );
+    assert_eq!(
+        finished.data.info.as_ref().unwrap().persistence,
+        PersistenceState::Persisted
+    );
+    assert!(
+        finished
+            .data
+            .info
+            .as_ref()
+            .unwrap()
+            .persistence_fault
+            .is_none()
+    );
     assert_eq!(http.count(), 1);
     stop(&host).await;
     assert_eq!(

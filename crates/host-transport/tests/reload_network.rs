@@ -284,7 +284,10 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     finish_a.add_permits(1);
     let session = replacement.session(target);
     let first_result = session.wait_turn(first_turn, options()).await.unwrap();
-    assert_eq!(first_result.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        first_result.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     assert!(
         serde_json::to_string(&first_result.data.history)
             .unwrap()
@@ -295,7 +298,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     let second_turn = turn_id(&session, 1).await;
     let second_result = session.wait_turn(second_turn, options()).await.unwrap();
     assert_eq!(
-        second_result.data.info.outcome,
+        second_result.data.info.as_ref().unwrap().outcome,
         Some(TurnOutcome::Completed)
     );
     assert!(

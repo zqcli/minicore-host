@@ -307,7 +307,7 @@ operations! {
     ListTurns, "turn.list", SessionTarget => TurnListSnapshot, |h, c, p| { h.turn_list(&c, &p.target) };
     WaitTurn, "turn.wait", TurnTarget => TurnResultSnapshot, |h, c, p| { h.wait_turn_snapshot(&c, &p.target, &p.turn_id).await };
     CancelTurn, "turn.cancel", CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
-    GetTurnResult, "turn.result", TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id) };
+    GetTurnResult, "turn.result", TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id).await };
     ReadHistory, "session.history.read", HistoryParams => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
     ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
     GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };

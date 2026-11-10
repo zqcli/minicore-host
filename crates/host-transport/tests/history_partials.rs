@@ -226,9 +226,12 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
             .wait_turn(original.clone(), options(3000))
             .await
             .unwrap();
-        assert_eq!(result.data.info.outcome, Some(TurnOutcome::Cancelled));
         assert_eq!(
-            result.data.info.persistence,
+            result.data.info.as_ref().unwrap().outcome,
+            Some(TurnOutcome::Cancelled)
+        );
+        assert_eq!(
+            result.data.info.as_ref().unwrap().persistence,
             if mode == StorageMode::Persistent {
                 PersistenceState::Persisted
             } else {

@@ -446,7 +446,10 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
         .await
         .unwrap();
     assert_eq!(waited.source, identity);
-    assert_eq!(waited.data.info.outcome, Some(TurnOutcome::Cancelled));
+    assert_eq!(
+        waited.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Cancelled)
+    );
     assert_eq!(waited.data.partials.len(), 1);
     assert_eq!(waited.data.partials[0].response_index, 1);
     assert_eq!(

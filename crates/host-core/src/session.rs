@@ -162,6 +162,17 @@ pub trait HistoryBackend: Send + Sync + std::any::Any {
             ))
         })
     }
+    /// Read validated records of one saved Turn without loading execution,
+    /// reconciling a save, or requiring a cold journal. Loaded backends may use
+    /// their existing opening baseline; the Session's current execution wins.
+    fn read_saved_turn(&self, _id: &TurnId) -> LoadFuture<'_> {
+        Box::pin(async {
+            Err(Fault::new(
+                FaultKind::SessionHistoryLoadFailed,
+                "this history backend does not support saved Turn reads",
+            ))
+        })
+    }
     fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
     /// Explicitly continue only the original retained append. Never reload,
     /// accept another batch, or infer confirmation from readable bytes.

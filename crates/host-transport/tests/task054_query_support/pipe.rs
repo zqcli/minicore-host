@@ -213,7 +213,10 @@ async fn sdk_drop_cleanup_reply_proves_both_pipe_close_orders() {
         }
         resources.model.finish.add_permits(1);
         let result = session.wait_turn(turn, options(2000)).await.unwrap();
-        assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
+        assert_eq!(
+            result.data.info.as_ref().unwrap().outcome,
+            Some(TurnOutcome::Completed)
+        );
         assert!(
             value(&result.data.history)
                 .to_string()

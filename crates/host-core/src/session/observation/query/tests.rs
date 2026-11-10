@@ -366,13 +366,17 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
     let result = fixture
         .session
         .turn_result_snapshot(&caller, &first)
+        .await
         .unwrap();
     assert_eq!(result.source, detail.source);
-    assert_eq!(result.data.config, original);
-    assert_eq!(result.data.info.config_revision, 0);
-    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Failed));
+    assert_eq!(result.data.config.as_ref().unwrap(), &original);
+    assert_eq!(result.data.info.as_ref().unwrap().config_revision, 0);
     assert_eq!(
-        result.data.info.persistence,
+        result.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Failed)
+    );
+    assert_eq!(
+        result.data.info.as_ref().unwrap().persistence,
         PersistenceState::NotApplicable
     );
     assert_eq!(
@@ -417,9 +421,13 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
     let second = fixture
         .session
         .turn_result_snapshot(&caller, &second)
+        .await
         .unwrap();
-    assert_eq!(second.data.info.config_revision, 1);
-    assert_eq!(second.data.config.role.name, "next Turn binding");
+    assert_eq!(second.data.info.as_ref().unwrap().config_revision, 1);
+    assert_eq!(
+        second.data.config.as_ref().unwrap().role.name,
+        "next Turn binding"
+    );
     assert_eq!(
         second
             .data
@@ -433,9 +441,11 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
         fixture
             .session
             .turn_result_snapshot(&caller, &first)
+            .await
             .unwrap()
             .data
-            .config,
+            .config
+            .unwrap(),
         original
     );
     let (states, _) = fixture
@@ -489,6 +499,7 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
         fixture
             .session
             .turn_result_snapshot(&caller, &turn)
+            .await
             .unwrap_err()
             .kind(),
         Some(FaultKind::SessionTurnNotFound)
@@ -522,10 +533,17 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
     let result = fixture
         .session
         .turn_result_snapshot(&caller, &turn)
+        .await
         .unwrap();
-    assert_eq!(result.data.config, original);
-    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
-    assert_eq!(result.data.info.persistence, PersistenceState::Persisted);
+    assert_eq!(result.data.config.as_ref().unwrap(), &original);
+    assert_eq!(
+        result.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
+    assert_eq!(
+        result.data.info.as_ref().unwrap().persistence,
+        PersistenceState::Persisted
+    );
     assert!(result.data.partials.is_empty());
     assert_eq!(result.data.history.len(), 2);
     assert_eq!(result.data.history[1].response_index, Some(0));
@@ -534,3 +552,6 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
     assert!(after.starts_with(&before));
     assert_eq!(String::from_utf8(after).unwrap().lines().count(), 3);
 }
+
+#[path = "saved_tests.rs"]
+mod saved_tests;

@@ -1,3 +1,5 @@
+mod saved;
+
 use super::*;
 use crate::{
     MessageData, MessageSnapshot, TurnDetailsData, TurnDetailsSnapshot, TurnHistoryItemData,
@@ -31,11 +33,17 @@ impl SessionController {
         &self,
         caller: &CallerContext,
         id: &TurnId,
-    ) -> Result<bool, Fault> {
+    ) -> Result<Option<bool>, Fault> {
         self.access.read(caller, || {
             let state = self.state.lock().expect("Session mutex poisoned");
             visible(&state)?;
-            Ok(retained_turn(&state, id)?.state == TurnState::Finished)
+            Ok(state
+                .active
+                .as_ref()
+                .filter(|active| &active.info.id == id)
+                .map(|active| &active.info)
+                .or_else(|| state.completed.get(id).map(|result| &result.info))
+                .map(|info| info.state == TurnState::Finished))
         })
     }
 
@@ -77,20 +85,34 @@ impl SessionController {
         })
     }
 
-    pub(crate) fn turn_result_snapshot(
+    fn retained_result_snapshot(
         &self,
         caller: &CallerContext,
         id: &TurnId,
-    ) -> Result<TurnResultSnapshot, Fault> {
+    ) -> Result<Option<TurnResultSnapshot>, Fault> {
         self.access.read(caller, || {
             let state = self.state.lock().expect("Session mutex poisoned");
             visible(&state)?;
-            let result = state.completed.get(id).ok_or_else(missing_turn)?;
-            Ok(TurnResultSnapshot {
+            let Some(result) = state.completed.get(id) else {
+                // An actual current Turn, including finalizing/unconfirmed work,
+                // cannot be upgraded to finished by a stale or readable disk fact.
+                if state
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| &active.info.id == id)
+                    || state.info.mode == StorageMode::Memory
+                {
+                    return Err(missing_turn());
+                }
+                Self::available(&state)?;
+                return Ok(None);
+            };
+            Ok(Some(TurnResultSnapshot {
                 source: self.turn_identity(&result.info),
                 data: TurnResultData {
-                    info: Self::retained_turn_state(&state, &result.info),
-                    config: result.info.config.clone(),
+                    info: Some(Self::retained_turn_state(&state, &result.info)),
+                    config: Some(result.info.config.clone()),
+                    saved_terminal: None,
                     history: project_history(result, state.output.get(id))?,
                     partials: result
                         .partials
@@ -101,7 +123,7 @@ impl SessionController {
                         })
                         .collect(),
                 },
-            })
+            }))
         })
     }
 }
@@ -134,7 +156,7 @@ fn visible(state: &SessionState) -> Result<(), Fault> {
 fn missing_turn() -> Fault {
     Fault::new(
         FaultKind::SessionTurnNotFound,
-        "Turn is not held by this Session",
+        "Turn is not available in this Session",
     )
 }
 fn missing_response() -> Fault {

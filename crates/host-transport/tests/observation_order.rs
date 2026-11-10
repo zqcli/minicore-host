@@ -308,7 +308,10 @@ async fn stopped_os_pipe_reader_does_not_block_real_owner_completion() {
         .wait_turn(turn.clone(), options(5000))
         .await
         .unwrap();
-    assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
+    assert_eq!(
+        result.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
     let text = session
         .turn_output(
             turn,

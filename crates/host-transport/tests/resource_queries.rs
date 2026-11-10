@@ -525,7 +525,10 @@ async fn known_resource_references_execute_real_http_without_prior_list_queries(
         .await
         .unwrap();
         let result = session.wait_turn(turn, options()).await.unwrap();
-        assert_eq!(result.data.info.outcome, Some(TurnOutcome::Completed));
+        assert_eq!(
+            result.data.info.as_ref().unwrap().outcome,
+            Some(TurnOutcome::Completed)
+        );
         assert!(
             serde_json::to_string(&result.data.history)
                 .unwrap()

@@ -159,6 +159,8 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
                 .unwrap()
                 .data
                 .info
+                .as_ref()
+                .unwrap()
                 .outcome,
             Some(TurnOutcome::Completed)
         );

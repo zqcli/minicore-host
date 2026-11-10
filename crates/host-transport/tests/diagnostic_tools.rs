@@ -57,8 +57,11 @@ async fn actual_tool_completion_and_process_exit_keep_original_ids_and_exclude_p
     let target = target(&created);
     let session = client.session(target.clone());
     let done = result(&session, &message.message_id).await;
-    assert_eq!(done.data.info.outcome, Some(TurnOutcome::Completed));
-    assert!(done.data.info.fault.is_none());
+    assert_eq!(
+        done.data.info.as_ref().unwrap().outcome,
+        Some(TurnOutcome::Completed)
+    );
+    assert!(done.data.info.as_ref().unwrap().fault.is_none());
     let turn = done.source.turn_id;
     stop(&host).await;
     let requests = http.finish().await;

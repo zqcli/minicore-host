@@ -68,12 +68,24 @@ pub struct TurnPartialData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnResultData {
-    /// The original terminal state, shared with get/list and observations.
-    pub info: TurnStateData,
-    pub config: SessionConfig,
+    /// Original current-run metadata, shared with get/list and observations.
+    /// Absent for saved-only results: the journal does not retain these fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info: Option<TurnStateData>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub config: Option<SessionConfig>,
+    /// The exact durable terminal fact, only when reading a saved-only result.
+    /// A saved reason is not a reconstructed structured Fault.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saved_terminal: Option<SavedTurnTerminal>,
     /// Complete native records only. Unfinished responses remain in `partials`.
     pub history: Vec<TurnHistoryItemData>,
     pub partials: Vec<TurnPartialData>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SavedTurnTerminal {
+    pub outcome: TurnOutcome,
+    pub reason: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnResultSnapshot {

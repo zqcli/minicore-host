@@ -60,11 +60,11 @@ async fn actual_model_attempts_usage_and_recovery_are_turn_bound_without_invente
         let target = target(&created);
         let done = result(&client.session(target.clone()), &message.message_id).await;
         assert_eq!(
-            done.data.info.model_attempts,
+            done.data.info.as_ref().unwrap().model_attempts,
             if mode == 1 { vec![1] } else { vec![3] }
         );
         assert_eq!(
-            done.data.info.outcome,
+            done.data.info.as_ref().unwrap().outcome,
             Some(if mode == 2 {
                 TurnOutcome::Failed
             } else {
@@ -72,7 +72,17 @@ async fn actual_model_attempts_usage_and_recovery_are_turn_bound_without_invente
             })
         );
         if mode == 2 {
-            assert_eq!(done.data.info.fault.as_ref().unwrap().code(), 4201);
+            assert_eq!(
+                done.data
+                    .info
+                    .as_ref()
+                    .unwrap()
+                    .fault
+                    .as_ref()
+                    .unwrap()
+                    .code(),
+                4201
+            );
         }
         stop(&host).await;
         assert_eq!(http.finish().await.len(), if mode == 1 { 1 } else { 3 });
