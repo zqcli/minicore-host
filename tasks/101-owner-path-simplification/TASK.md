@@ -15,6 +15,16 @@ work into `dev`, preserving remote history and keeping `main` unchanged.
 - Historical result-copy/range changes require separate measurement and are not
   part of this task.
 
+## Publication status
+
+The source and report are committed on local `dev`. The automatic publication
+review rejected `git push origin dev`, stating that it requires trusted explicit
+approval for this publication in the active conversation and does not accept
+retrieved historical authorization as proof. Remote `dev` remains the baseline
+`6ea03b85a318374f3dcb94c38dbe11ac1878f110`. No alternate publication route was used.
+The next step is explicit approval for the reviewed commits to be pushed to
+`zqcli/minicore-host:dev`, followed by verification of the remote HEAD and CI.
+
 ## Implementation
 
 | Area | Change and retained boundary |

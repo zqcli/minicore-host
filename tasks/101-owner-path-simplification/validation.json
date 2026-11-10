@@ -72,9 +72,9 @@
       "after": 330
     },
     "documentation_and_validation": {
-      "added": 387,
+      "added": 408,
       "deleted": 159,
-      "net": 228,
+      "net": 249,
       "files": 8
     },
     "classification": "Physical lines incl comments/blanks. Explicit tests = tests path components, tests.rs, *_tests.rs, plus the cfg(test)-only configuration/task066_credential_environment.rs; inline tests in other files stay in non-test-source bucket."
@@ -144,5 +144,11 @@
       "sha256": "8307ff607d5980bded14722fd61e8f9c89d0637f71947f3a30f402057c6f17b5",
       "bytes": 7038
     }
+  },
+  "publication": {
+    "status": "blocked_before_remote_update",
+    "remote_dev": "6ea03b85a318374f3dcb94c38dbe11ac1878f110",
+    "reason": "Automatic approval review requires explicit current-conversation authorization for publishing these commits; historical personal-context evidence was not accepted.",
+    "hosted_ci": "not triggered by these unpublished commits"
   }
 }

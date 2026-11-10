@@ -2,6 +2,11 @@
 
 ## Current checkpoint: owner-path simplification
 
+**Publication pending.** The validated implementation is committed on local
+`dev`; remote `dev` remains `6ea03b85a318374f3dcb94c38dbe11ac1878f110`.
+The automatic publication review rejected the push and requires explicit approval
+in the active conversation. No remote update or hosted CI run is claimed here.
+
 [Task101](tasks/101-owner-path-simplification/TASK.md) implements the approved
 simplification review on top of `dev`
 [`6ea03b85a318374f3dcb94c38dbe11ac1878f110`](https://github.com/zqcli/minicore-host/commit/6ea03b85a318374f3dcb94c38dbe11ac1878f110).
