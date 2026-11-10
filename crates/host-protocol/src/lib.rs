@@ -102,8 +102,17 @@ pub use reload::*;
 mod receipt;
 pub use receipt::*;
 
-mod control;
-pub use control::*;
+mod connection;
+pub use connection::*;
+
+mod host_control;
+pub use host_control::*;
+
+mod agent_control;
+pub use agent_control::*;
+
+mod session_control;
+pub use session_control::*;
 
 mod catalog;
 pub use catalog::*;
@@ -127,8 +136,14 @@ pub use interaction::*;
 mod compaction;
 pub use compaction::*;
 
-mod public_controls;
-pub use public_controls::*;
+mod metadata;
+pub use metadata::*;
+
+mod input;
+pub use input::*;
+
+mod resources;
+pub use resources::*;
 
 mod deletion;
 pub use deletion::*;

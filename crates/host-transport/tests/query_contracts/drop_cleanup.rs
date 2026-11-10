@@ -1,7 +1,6 @@
-//! Test-only pipe lifetimes and a gated proof of the SDK drop-cleanup race.
+//! Query observation teardown: externally arm the real SDK drop-cleanup write.
 //! Request bytes are copied unchanged; Host, Runtime, SDK and writes are real.
 use crate::common::*;
-use minicore_host_core::Host;
 use minicore_host_protocol::*;
 use minicore_host_transport::{HostClient, serve_stdio};
 use serde_json::Value;
@@ -20,10 +19,6 @@ use std::{
 use tokio::{io::AsyncWrite, sync::oneshot};
 
 use crate::common::pipes::{PipeServer, ReaderLifetime, request_relay};
-
-pub async fn stdio(host: Arc<Host>) -> (HostClient, PipeServer) {
-    crate::common::pipes::stdio(host, options(2000)).await
-}
 
 struct GatedWriter<W> {
     output: W,

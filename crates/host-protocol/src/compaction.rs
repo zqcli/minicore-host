@@ -1,8 +1,21 @@
+//! Manual compaction requests, cancellation, progress, and confirmed result facts.
 use crate::{
     AgentId, Fault, HostId, HostIncarnation, OperationId, PersistenceState, Revision, SessionId,
     ValidationError, invalid,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactRequest {
+    pub operation_id: OperationId,
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactCancelRequest {
+    pub operation_id: OperationId,
+    pub target_operation_id: OperationId,
+}
 
 /// Actual replacement coverage in the original native transcript. This is a
 /// Session-local history position, not a controller revision or new identity.

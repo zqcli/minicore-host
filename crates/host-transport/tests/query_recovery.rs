@@ -1,9 +1,9 @@
-//! New recovery regressions, not a rerun of the lost task054 probe.
+//! Retained query facts across later Turns and persistent unload/reload.
 //! Scripted model streams drive real Host/Runtime owners and real OS pipes.
 #![cfg(unix)]
 mod common;
-#[path = "task081_query_support/pipe.rs"]
-mod query_pipes;
+#[path = "query_recovery/retained_cleanup.rs"]
+mod retained_cleanup;
 use common::*;
 use minicore_host_core::{
     ActivityEvent, Host, HostSettings, ObservationEvent, ObservationNotification, StateEvent,
@@ -11,7 +11,6 @@ use minicore_host_core::{
 };
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
-use query_pipes::stdio_pipes;
 use std::time::Duration;
 
 fn subscription(session: &SessionClient, turn: &TurnId) -> SubscribeRequest {
@@ -160,7 +159,7 @@ async fn finished_transition_owns_a_revision_and_all_queries_keep_it_during_late
     let owner = HostClient::in_process(host.clone()).unwrap();
     let session = create(&owner).await;
     let original = session.info(options(5000)).await.unwrap().config;
-    let (reader, server) = stdio_pipes(host).await;
+    let (reader, server) = common::pipes::stdio(host, options(5000)).await;
     let observed = reader.session(session.target().clone());
     let (finished, previous) = original_terminal(&session, &reader, &resources).await;
     assert!(
@@ -230,7 +229,7 @@ async fn persistent_unload_reload_preserves_original_terminal_revision_and_load(
         session_id: created.session_id.unwrap(),
     });
     let original = session.info(options(5000)).await.unwrap().config;
-    let (reader, server) = stdio_pipes(host).await;
+    let (reader, server) = common::pipes::stdio(host, options(5000)).await;
     let observed = reader.session(session.target().clone());
     let (finished, _) = original_terminal(&session, &reader, &resources).await;
     assert_eq!(finished.data.persistence, PersistenceState::Persisted);

@@ -1,5 +1,4 @@
 //! One typed operation table drives direct calls and RPC dispatch.
-use crate::resources::{ToolListRequest, ToolListTarget};
 use minicore_host_core::{
     AgentDetails, AgentListPage, AgentListRequest, CallerContext, Host, HostConfig,
     HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription,
@@ -18,7 +17,7 @@ use serde_json::Value;
 use std::{future::Future, sync::Arc};
 
 pub(crate) trait Operation: Serialize + DeserializeOwned + Send + 'static {
-    const METHOD: &'static str;
+    const METHOD: Method;
     type Output: Serialize + DeserializeOwned + Send + 'static;
     fn execute(
         self,
@@ -195,12 +194,12 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 macro_rules! operations {
-    ($($name:ident, $method:literal, $params:ty => $output:ty, |$host:ident, $caller:ident, $p:ident| $body:block;)+) => {
+    ($($name:ident, $method:ident, $params:ty => $output:ty, |$host:ident, $caller:ident, $p:ident| $body:block;)+) => {
         $(#[derive(Serialize, Deserialize)]
         #[serde(transparent)]
         pub(crate) struct $name(pub $params);
         impl Operation for $name {
-            const METHOD: &'static str = $method;
+            const METHOD: Method = Method::$method;
             type Output = $output;
             async fn execute(self, $host: Arc<Host>, $caller: CallerContext) -> Result<$output, Fault> {
                 let $p = self.0;
@@ -210,78 +209,78 @@ macro_rules! operations {
 
         /// Canonical resource methods backed by this adapter's real handlers.
         /// This route list is not a runtime capability negotiation.
-        pub const SUPPORTED_METHODS: &[&str] = &["events.subscribe", $($method,)+];
+        pub const SUPPORTED_METHODS: &[&str] = &[Method::EventsSubscribe.as_str(), $(Method::$method.as_str(),)+];
 
         pub(crate) async fn dispatch(host: Arc<Host>, caller: CallerContext, method: &str, params: Value) -> Result<Value, RpcError> {
-            match method {
-                $($method => run::<$name>(host, caller, params).await,)+
-                _ if method.parse::<Method>().is_ok() => Err(RpcError::business(Fault::new(
+            match method.parse::<Method>() {
+                $(Ok(Method::$method) => run::<$name>(host, caller, params).await,)+
+                Ok(_) => Err(RpcError::business(Fault::new(
                     FaultKind::HostMethodUnavailable, "this method is not implemented by the current adapter",
                 ))),
-                _ => Err(protocol_error(-32601, "Method not found")),
+                Err(_) => Err(protocol_error(-32601, "Method not found")),
             }
         }
     };
 }
 
 operations! {
-    Info, "host.info", Empty => HostInfo, |h, c, _p| { h.info(&c) };
-    GetConfig, "host.config.get", Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
-    Reload, "host.reload", HostReloadRequest<HostConfig> => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
-    ListModels, "model.list", Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
-    ListTools, "tool.list", ToolListRequest => Vec<ToolSpec>, |h, c, p| {
+    Info, HostInfo, Empty => HostInfo, |h, c, _p| { h.info(&c) };
+    GetConfig, HostConfigGet, Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
+    Reload, HostReload, HostReloadRequest<HostConfig> => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
+    ListModels, ModelList, Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
+    ListTools, ToolList, ToolListRequest => Vec<ToolSpec>, |h, c, p| {
         match p.target {
             None => h.tool_list(&c),
             Some(ToolListTarget::Agent(target)) => h.tool_list_for_agent(&c, &target),
             Some(ToolListTarget::Session(target)) => h.tool_list_for_session(&c, &target),
         }
     };
-    ReceiptGet, "host.receipt.get", OperationTarget => Receipt, |h, c, p| { h.receipt_get(&c, &p.operation_id) };
-    Shutdown, "host.shutdown", HostShutdownRequest => HostShutdownReceipt, |h, c, p| { h.shutdown(&c, p) };
-    CreateAgent, "agent.create", AgentCreate => AgentCreateReceipt, |h, c, p| { h.create_agent_async(&c, p).await };
-    GetAgent, "agent.get", AgentTarget => AgentDetails, |h, c, p| { h.agent_details(&c, &p.target) };
-    ListAgents, "agent.list", AgentListRequest => AgentListPage, |h, c, p| { h.list_agents(&c, &p) };
-    StartAgent, "agent.start", AgentOperation => AgentStartReceipt, |h, c, p| { h.agent_start(&c, &p.target, AgentStartRequest { operation_id: p.operation_id }) };
-    UpdateAgent, "agent.update", UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
-    SetDefaultSession, "agent.set_default_session", SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
-    StopAgent, "agent.stop", AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
-    DeleteAgent, "agent.delete", DeleteAgentParams => AgentDeleteReceipt, |h, c, p| { h.agent_delete(&c, &p.target, AgentDeleteRequest { operation_id: p.operation_id, scope: p.scope }) };
-    CreateSession, "session.create", SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
-    GetSession, "session.get", SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
-    GetSessionContext, "session.context", SessionTarget => SessionContextSnapshot, |h, c, p| { h.session_context(&c, &p.target).await };
-    ListSessions, "session.list", ListSessionsParams => SessionListPage, |h, c, p| { h.list_sessions(&c, &p.target, &p.query) };
-    UpdateSession, "session.update", UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
-    ListInputs, "input.list", SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
-    RemoveInput, "input.remove", RemoveInputParams => InputRemoveReceipt, |h, c, p| { h.input_remove(&c, &p.target, InputRemoveRequest { operation_id: p.operation_id, message_id: p.message_id, expected_controller_revision: p.expected_controller_revision }) };
-    SessionState, "session.state", SessionTarget => SessionSnapshot, |h, c, p| { h.session_state(&c, &p.target) };
-    LoadSession, "session.load", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_load(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
-    UnloadSession, "session.unload", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_unload(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
-    PauseSession, "session.pause", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_pause(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
-    ResumeSession, "session.resume", SessionOperation => SessionControlReceipt, |h, c, p| { h.session_resume(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
-    CancelSession, "session.cancel", CancelSessionParams => SessionCancelReceipt, |h, c, p| { h.session_cancel(&c, &p.target, SessionCancelRequest { operation_id: p.operation_id, keep_inbox: p.keep_inbox }) };
-    CloseSession, "session.close", SessionOperation => SessionCloseReceipt, |h, c, p| { h.session_close(&c, &p.target, SessionCloseRequest { operation_id: p.operation_id }) };
-    DeleteSession, "session.delete", DeleteSessionParams => SessionDeleteReceipt, |h, c, p| { h.session_delete(&c, &p.target, SessionDeleteRequest { operation_id: p.operation_id, close: p.close }) };
-    CompactSession, "session.compact", SessionOperation => CompactReceipt, |h, c, p| { h.session_compact(&c, &p.target, CompactRequest { operation_id: p.operation_id }) };
-    CancelCompact, "session.compact.cancel", CancelCompactParams => CompactCancelReceipt, |h, c, p| { h.session_compact_cancel(&c, &p.target, CompactCancelRequest { operation_id: p.operation_id, target_operation_id: p.target_operation_id }) };
-    SendMessageOp, "message.send", SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };
-    GetMessage, "message.get", MessageTargetParams => MessageSnapshot, |h, c, p| { h.message_snapshot(&c, &p.target, &p.message_id) };
-    GetTurn, "turn.get", TurnTarget => TurnDetailsSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
-    ListTurns, "turn.list", SessionTarget => TurnListSnapshot, |h, c, p| { h.turn_list(&c, &p.target) };
-    WaitTurn, "turn.wait", TurnTarget => TurnResultSnapshot, |h, c, p| { h.wait_turn_snapshot(&c, &p.target, &p.turn_id).await };
-    CancelTurn, "turn.cancel", CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
-    GetTurnResult, "turn.result", TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id).await };
-    ReadHistory, "session.history.read", SessionRequest<HistoryReadRequest> => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
-    ReadModelOutput, "turn.output.read", ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
-    GetToolcall, "toolcall.get", ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
-    ReadToolOutput, "toolcall.output.read", ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
-    WorkspaceFiles, "workspace.files", SessionRequest<FilesRequest> => WorkspaceSnapshot<FilesResult>, |h, c, p| { h.workspace_files(&c, &p.target, p.request, QueryContext::default()).await };
-    WorkspaceRead, "workspace.read", SessionRequest<ReadRequest> => WorkspaceSnapshot<ReadResult>, |h, c, p| { h.workspace_read(&c, &p.target, p.request, QueryContext::default()).await };
-    WorkspaceSearch, "workspace.search", SessionRequest<SearchRequest> => WorkspaceSnapshot<SearchResult>, |h, c, p| { h.workspace_search(&c, &p.target, p.request, QueryContext::default()).await };
-    ChangesList, "changes.list", SessionRequest<ChangesListRequest> => WorkspaceSnapshot<ChangesListResult>, |h, c, p| { h.changes_list(&c, &p.target, p.request, QueryContext::default()).await };
-    ChangesDiff, "changes.diff", SessionRequest<DiffRequest> => WorkspaceSnapshot<DiffResult>, |h, c, p| { h.changes_diff(&c, &p.target, p.request, QueryContext::default()).await };
-    WorkspaceStatus, "workspace.status", SessionTarget => WorkspaceSnapshot<StatusResult>, |h, c, p| { h.workspace_status(&c, &p.target, QueryContext::default()).await };
-    AnswerInteraction, "interaction.answer", SessionRequest<InteractionAnswerRequest<InteractionAnswerData>> => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
-    Unsubscribe, "events.unsubscribe", UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
+    ReceiptGet, HostReceiptGet, OperationTarget => Receipt, |h, c, p| { h.receipt_get(&c, &p.operation_id) };
+    Shutdown, HostShutdown, HostShutdownRequest => HostShutdownReceipt, |h, c, p| { h.shutdown(&c, p) };
+    CreateAgent, AgentCreate, AgentCreate => AgentCreateReceipt, |h, c, p| { h.create_agent_async(&c, p).await };
+    GetAgent, AgentGet, AgentTarget => AgentDetails, |h, c, p| { h.agent_details(&c, &p.target) };
+    ListAgents, AgentList, AgentListRequest => AgentListPage, |h, c, p| { h.list_agents(&c, &p) };
+    StartAgent, AgentStart, AgentOperation => AgentStartReceipt, |h, c, p| { h.agent_start(&c, &p.target, AgentStartRequest { operation_id: p.operation_id }) };
+    UpdateAgent, AgentUpdate, UpdateAgentParams => AgentUpdateReceipt, |h, c, p| { h.agent_update(&c, &p.target, AgentUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
+    SetDefaultSession, AgentSetDefaultSession, SetDefaultSessionParams => AgentSetDefaultSessionReceipt, |h, c, p| { h.agent_set_default_session(&c, &p.target, AgentSetDefaultSessionRequest { operation_id: p.operation_id, session_id: p.session_id }) };
+    StopAgent, AgentStop, AgentOperation => AgentStopReceipt, |h, c, p| { h.agent_stop(&c, &p.target, AgentStopRequest { operation_id: p.operation_id }) };
+    DeleteAgent, AgentDelete, DeleteAgentParams => AgentDeleteReceipt, |h, c, p| { h.agent_delete(&c, &p.target, AgentDeleteRequest { operation_id: p.operation_id, scope: p.scope }) };
+    CreateSession, SessionCreate, SessionCreate => SessionCreateReceipt, |h, c, p| { h.create_session_async(&c, p).await };
+    GetSession, SessionGet, SessionTarget => SessionInfo, |h, c, p| { h.session_info(&c, &p.target) };
+    GetSessionContext, SessionContext, SessionTarget => SessionContextSnapshot, |h, c, p| { h.session_context(&c, &p.target).await };
+    ListSessions, SessionList, ListSessionsParams => SessionListPage, |h, c, p| { h.list_sessions(&c, &p.target, &p.query) };
+    UpdateSession, SessionUpdate, UpdateSessionParams => SessionUpdateReceipt, |h, c, p| { h.session_update(&c, &p.target, SessionUpdateRequest { operation_id: p.operation_id, expected_config_revision: p.expected_config_revision, changes: p.changes }).await };
+    ListInputs, InputList, SessionTarget => InputList, |h, c, p| { h.input_list(&c, &p.target) };
+    RemoveInput, InputRemove, RemoveInputParams => InputRemoveReceipt, |h, c, p| { h.input_remove(&c, &p.target, InputRemoveRequest { operation_id: p.operation_id, message_id: p.message_id, expected_controller_revision: p.expected_controller_revision }) };
+    SessionState, SessionState, SessionTarget => SessionSnapshot, |h, c, p| { h.session_state(&c, &p.target) };
+    LoadSession, SessionLoad, SessionOperation => SessionControlReceipt, |h, c, p| { h.session_load(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
+    UnloadSession, SessionUnload, SessionOperation => SessionControlReceipt, |h, c, p| { h.session_unload(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
+    PauseSession, SessionPause, SessionOperation => SessionControlReceipt, |h, c, p| { h.session_pause(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
+    ResumeSession, SessionResume, SessionOperation => SessionControlReceipt, |h, c, p| { h.session_resume(&c, &p.target, SessionControlRequest { operation_id: p.operation_id }) };
+    CancelSession, SessionCancel, CancelSessionParams => SessionCancelReceipt, |h, c, p| { h.session_cancel(&c, &p.target, SessionCancelRequest { operation_id: p.operation_id, keep_inbox: p.keep_inbox }) };
+    CloseSession, SessionClose, SessionOperation => SessionCloseReceipt, |h, c, p| { h.session_close(&c, &p.target, SessionCloseRequest { operation_id: p.operation_id }) };
+    DeleteSession, SessionDelete, DeleteSessionParams => SessionDeleteReceipt, |h, c, p| { h.session_delete(&c, &p.target, SessionDeleteRequest { operation_id: p.operation_id, close: p.close }) };
+    CompactSession, SessionCompact, SessionOperation => CompactReceipt, |h, c, p| { h.session_compact(&c, &p.target, CompactRequest { operation_id: p.operation_id }) };
+    CancelCompact, SessionCompactCancel, CancelCompactParams => CompactCancelReceipt, |h, c, p| { h.session_compact_cancel(&c, &p.target, CompactCancelRequest { operation_id: p.operation_id, target_operation_id: p.target_operation_id }) };
+    SendMessageOp, MessageSend, SendMessage => MessageAccepted, |h, c, p| { h.send(&c, p) };
+    GetMessage, MessageGet, MessageTargetParams => MessageSnapshot, |h, c, p| { h.message_snapshot(&c, &p.target, &p.message_id) };
+    GetTurn, TurnGet, TurnTarget => TurnDetailsSnapshot, |h, c, p| { h.turn_snapshot(&c, &p.target, &p.turn_id) };
+    ListTurns, TurnList, SessionTarget => TurnListSnapshot, |h, c, p| { h.turn_list(&c, &p.target) };
+    WaitTurn, TurnWait, TurnTarget => TurnResultSnapshot, |h, c, p| { h.wait_turn_snapshot(&c, &p.target, &p.turn_id).await };
+    CancelTurn, TurnCancel, CancelTurnParams => TurnCancelReceipt, |h, c, p| { h.turn_cancel(&c, &p.target, TurnCancelRequest { operation_id: p.operation_id, turn_id: p.turn_id, keep_inbox: p.keep_inbox }) };
+    GetTurnResult, TurnResult, TurnTarget => TurnResultSnapshot, |h, c, p| { h.turn_result_snapshot(&c, &p.target, &p.turn_id).await };
+    ReadHistory, SessionHistoryRead, SessionRequest<HistoryReadRequest> => SessionHistorySnapshot, |h, c, p| { h.history_read(&c, &p.target, &p.request).await };
+    ReadModelOutput, TurnOutputRead, ModelReadParams => ModelTextSnapshot, |h, c, p| { h.turn_output_read(&c, &p.target, &p.turn_id, p.response_index, &p.request) };
+    GetToolcall, ToolcallGet, ToolTargetParams => ToolCallSnapshot, |h, c, p| { h.toolcall_get(&c, &p.target, &p.tool) };
+    ReadToolOutput, ToolcallOutputRead, ToolReadParams => ToolTextSnapshot, |h, c, p| { h.toolcall_output_read(&c, &p.target, &p.tool, &p.request) };
+    WorkspaceFiles, WorkspaceFiles, SessionRequest<FilesRequest> => WorkspaceSnapshot<FilesResult>, |h, c, p| { h.workspace_files(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceRead, WorkspaceRead, SessionRequest<ReadRequest> => WorkspaceSnapshot<ReadResult>, |h, c, p| { h.workspace_read(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceSearch, WorkspaceSearch, SessionRequest<SearchRequest> => WorkspaceSnapshot<SearchResult>, |h, c, p| { h.workspace_search(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesList, ChangesList, SessionRequest<ChangesListRequest> => WorkspaceSnapshot<ChangesListResult>, |h, c, p| { h.changes_list(&c, &p.target, p.request, QueryContext::default()).await };
+    ChangesDiff, ChangesDiff, SessionRequest<DiffRequest> => WorkspaceSnapshot<DiffResult>, |h, c, p| { h.changes_diff(&c, &p.target, p.request, QueryContext::default()).await };
+    WorkspaceStatus, WorkspaceStatus, SessionTarget => WorkspaceSnapshot<StatusResult>, |h, c, p| { h.workspace_status(&c, &p.target, QueryContext::default()).await };
+    AnswerInteraction, InteractionAnswer, SessionRequest<InteractionAnswerRequest<InteractionAnswerData>> => InteractionAnswerReceipt, |h, c, p| { h.answer_interaction(&c, &p.target, p.request) };
+    Unsubscribe, EventsUnsubscribe, UnsubscribeRequest => UnsubscribeResult, |h, c, p| { h.events_unsubscribe(&c, &p) };
 }
 
 async fn run<O: Operation>(

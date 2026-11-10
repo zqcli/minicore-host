@@ -1,6 +1,6 @@
 //! Resource query selection. Results reuse the real Host configuration and
 //! Runtime tool declarations rather than introducing another resource catalog.
-use minicore_host_protocol::{AgentRef, SessionRef};
+use crate::{AgentRef, SessionRef};
 use serde::{Deserialize, Serialize};
 
 /// Omit the target to list every tool available on this Host. A target reads

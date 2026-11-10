@@ -5,6 +5,30 @@ This crate does not implement Host services, authentication, execution, storage,
 transports, or TUI integration. A method's presence in the canonical catalog is
 not a claim that its handler is implemented.
 
+## Source organization
+
+Public value types remain available from the crate root. Functional families
+keep their requests, facts, and receipts together:
+
+- [`connection.rs`](src/connection.rs) contains caller wait options and actual
+  connection/control facts, separate from business controls.
+- [`host_control.rs`](src/host_control.rs),
+  [`agent_control.rs`](src/agent_control.rs), and
+  [`session_control.rs`](src/session_control.rs) contain the respective owner
+  controls. Agent start and stop share one module.
+- [`metadata.rs`](src/metadata.rs) contains Agent/Session metadata updates and
+  their shared save/commit result; [`input.rs`](src/input.rs) contains the two
+  input queues and explicit input removal.
+- [`compaction.rs`](src/compaction.rs) contains manual compaction and cancellation
+  requests alongside their progress, result, and receipt types.
+- [`resources.rs`](src/resources.rs) contains `ToolListRequest` and
+  `ToolListTarget`. The transport crate reexports these same types.
+- [`catalog.rs`](src/catalog.rs) remains the sole method-name catalog. Transport
+  operation definitions refer to its `Method` variants.
+
+These module boundaries do not add protocol identities or change JSON layouts,
+root exports, validation, or the direct owners of business state.
+
 ## Invariants
 
 - MiniCore IDs are distinct Rust newtypes, encoded as exactly 20 lowercase symbols

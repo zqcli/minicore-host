@@ -1,93 +1,9 @@
+//! Session scheduling, residency, close, and exact Turn cancellation facts.
 use crate::{
-    AgentId, Fault, HostId, HostIncarnation, HostLifecycle, LoadId, OperationId, Residency,
-    Revision, Scheduling, SessionId, TurnId, TurnState, ValidationError, invalid,
+    AgentId, Fault, HostId, HostIncarnation, LoadId, OperationId, Residency, Revision, Scheduling,
+    SessionId, TurnId, TurnState, ValidationError, invalid,
 };
 use serde::{Deserialize, Serialize};
-
-pub const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
-
-crate::validated_dto!(#[derive(Default)] CallOptions, CallOptionsWire, "CallOptionsWire" {
-    #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::present")]
-    wait_timeout_ms: Option<u64>,
-});
-impl CallOptions {
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.wait_timeout_ms == Some(0) {
-            Err(invalid(
-                "wait_timeout_ms must be positive integer milliseconds",
-            ))
-        } else {
-            Ok(())
-        }
-    }
-    pub fn timeout_ms(&self) -> u64 {
-        self.wait_timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ControlStateData {
-    pub occupied: bool,
-    pub revision: Revision,
-}
-crate::validated_dto!(ConnectionInfo, ConnectionInfoWire, "ConnectionInfoWire" {
-    host_id: HostId,
-    host_incarnation: HostIncarnation,
-    can_operate: bool,
-    control: ControlStateData,
-});
-impl ConnectionInfo {
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        if self.can_operate && !self.control.occupied {
-            Err(invalid(
-                "an operating connection implies occupied Host control",
-            ))
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HostShutdownStrategy {
-    Graceful,
-    Force,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct HostShutdownRequest {
-    pub operation_id: OperationId,
-    pub strategy: HostShutdownStrategy,
-}
-crate::validated_dto!(HostShutdownResult, HostShutdownResultWire, "HostShutdownResultWire" {
-    strategy: HostShutdownStrategy,
-    lifecycle: HostLifecycle,
-});
-impl HostShutdownResult {
-    pub fn validate(&self) -> Result<(), ValidationError> {
-        match (self.strategy, self.lifecycle) {
-            (
-                HostShutdownStrategy::Graceful,
-                HostLifecycle::Draining | HostLifecycle::Stopping | HostLifecycle::Stopped,
-            )
-            | (HostShutdownStrategy::Force, HostLifecycle::Stopping | HostLifecycle::Stopped) => {
-                Ok(())
-            }
-            _ => Err(invalid(
-                "shutdown requires its actual stopping/draining state; force cannot drain",
-            )),
-        }
-    }
-}
-crate::control_receipt!(
-    HostShutdownReceipt,
-    HostShutdownKind,
-    HostShutdown,
-    "host.shutdown",
-    HostShutdownResult
-);
 
 /// Requests below use the already-selected Session's trusted typed context.
 /// Independent RPC adapters must additionally carry that target SessionRef.
@@ -115,22 +31,6 @@ pub struct SessionCloseRequest {
 #[serde(deny_unknown_fields)]
 pub struct SessionControlRequest {
     pub operation_id: OperationId,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentStopRequest {
-    pub operation_id: OperationId,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CompactRequest {
-    pub operation_id: OperationId,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CompactCancelRequest {
-    pub operation_id: OperationId,
-    pub target_operation_id: OperationId,
 }
 
 crate::validated_dto!(TurnCancelResult, TurnCancelResultWire, "TurnCancelResultWire" {
@@ -162,19 +62,6 @@ pub struct SessionCloseResult {
     pub controller_revision: Revision,
 }
 crate::control_receipt!(SessionCloseReceipt, SessionCloseKind, SessionClose, "session.close", SessionCloseResult, agent_id: AgentId, session_id: SessionId);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentStopLifecycle {
-    Stopping,
-    Stopped,
-}
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AgentStopResult {
-    pub lifecycle: AgentStopLifecycle,
-}
-crate::control_receipt!(AgentStopReceipt, AgentStopKind, AgentStop, "agent.stop", AgentStopResult, agent_id: AgentId);
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

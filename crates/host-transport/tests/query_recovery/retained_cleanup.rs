@@ -1,7 +1,6 @@
-//! Test-only pipe lifetimes for the retained-query fixture.
+//! Retained-query teardown: gate the actual ended=false cleanup response.
 //! The relay copies requests unchanged; Host, Runtime, SDK and pipes are real.
 use crate::{assert_retained, common::*, original_terminal};
-use minicore_host_core::Host;
 use minicore_host_protocol::TurnOutcome;
 use minicore_host_transport::{HostClient, serve_stdio};
 use serde_json::Value;
@@ -10,17 +9,12 @@ use std::{
     io,
     os::fd::AsFd,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll, ready},
     time::Duration,
 };
 use tokio::{io::AsyncWrite, sync::oneshot};
 
 use crate::common::pipes::{PipeServer, ReaderLifetime, request_relay};
-
-pub async fn stdio_pipes(host: Arc<Host>) -> (HostClient, PipeServer) {
-    crate::common::pipes::stdio(host, options(5000)).await
-}
 
 struct CleanupWriter<W> {
     output: W,

@@ -7,6 +7,38 @@ or persistent Host. No fixture model or process configuration is installed.
 Network listeners and TLS configurations are explicitly supplied by the embedding
 application; network access is disabled until configured on the Host.
 
+## Source organization
+
+The public entry points remain reexported from the crate root. The implementation
+is grouped by the boundary each module adapts:
+
+- [`src/client/connection.rs`](src/client/connection.rs) owns connection setup,
+  `HostService`, and the typed local `Operation::execute` call path.
+- [`src/client/host.rs`](src/client/host.rs) and
+  [`src/client/session.rs`](src/client/session.rs) provide Host/Agent methods and
+  the address-only Session context. [`src/client/subscription.rs`](src/client/subscription.rs)
+  keeps observation setup and the public stream lifetime together.
+- [`src/rpc/framing.rs`](src/rpc/framing.rs) handles complete frames;
+  [`src/rpc/wire.rs`](src/rpc/wire.rs) defines request and notification envelopes;
+  [`src/rpc/server.rs`](src/rpc/server.rs) initializes connections and dispatches
+  requests to their existing owners.
+- [`src/rpc/client.rs`](src/rpc/client.rs) keeps pending calls, setup buffering,
+  the RAII waiter, and subscription cancellation association together. Its
+  [correlation tests](src/rpc/client/observation_correlation_tests.rs) exercise
+  early resync and cancellation after stream registration.
+- [`src/operations.rs`](src/operations.rs) maps the protocol's existing `Method`
+  variants to typed requests and real handlers. Streaming subscription setup
+  retains its distinct path.
+
+The query suites are [`tests/query_contracts.rs`](tests/query_contracts.rs) and
+[`tests/query_recovery.rs`](tests/query_recovery.rs). Their
+[drop cleanup](tests/query_contracts/drop_cleanup.rs) and
+[retained cleanup](tests/query_recovery/retained_cleanup.rs) scenario modules
+preserve separate writer gates: one is explicitly armed before SDK Drop, while
+the other selects the actual `ended=false` cleanup response. Both reuse the
+existing [pipe fixture](tests/common/pipes.rs). Diagnostic integration binaries
+remain separate so each can install its own process-global subscriber.
+
 ## Typed entry points
 
 - `HostService` implements the protocol `MessageService<CallerContext>` directly.
@@ -158,7 +190,8 @@ Missing/reclaimed sources return the real owner's Fault, not an empty success.
 Host configuration owners on all three connections. `host.config.get` and
 `model.list` take `{}`. `tool.list` takes `{}` for available tools, or
 `{ "target": AgentRef }` / `{ "target": SessionRef }` for that owner's committed
-enabled selection. `ToolListRequest` and `ToolListTarget` are the typed forms.
+enabled selection. `ToolListRequest` and `ToolListTarget` are protocol query DTOs, reexported here
+for the existing typed API.
 Mixed or incomplete references are rejected, and an Agent's Host qualifier is
 never stripped. A Session may select tools outside its Agent's default list.
 
