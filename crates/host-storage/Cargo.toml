@@ -7,7 +7,7 @@ license.workspace = true
 description = "Owner-scoped durable storage for MiniCore Host"
 
 [dependencies]
-minicore-host-protocol = { path = "../host-protocol", version = "=0.9.10" }
+minicore-host-protocol = { path = "../host-protocol", version = "=0.9.20" }
 minicore-runtime.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 serde = { workspace = true, features = ["derive"] }
