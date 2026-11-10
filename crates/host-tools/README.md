@@ -33,6 +33,14 @@ Saved-only results contain no fabricated Load ID, config or revision. Default
 Turn inspection and explicit output ranges retain current execution semantics;
 Turn inspect never exposes the full bound configuration.
 
+`core_adapter.rs` performs the actual capability checks and owner queries.
+Its private `core_adapter/inspect.rs` projections select the existing tool JSON
+fields from those facts, including optional configuration and body reads. They
+reuse owner state/history/partial values and do not query, retain results, or
+introduce another public read contract. Full Turn results and current Turn
+inspection remain separate projections because only the former can read
+saved-only terminal facts after restart.
+
 The tool layer re-exports core's factual Turn source and delegation registration,
 disposition, completion, and input-range types. The input range serializes into
 completion notifications; these facts do not grant authority. Opaque owner
@@ -61,8 +69,6 @@ scope keeps only active relationships and payloads being transferred. Failure
 of notification ends that attempt and is reported to its permit, without retry
 or retargeting.
 
-No remote push is authorized. No TUI files or SPEC are modified.
-
 ## Ordinary local-tool binding
 
 `ToolRegistry::register_local_tools` registers the compiled read/edit/write/bash declarations from `minicore-host-local-tools`. It does not automatically select or enable them. Selected local tools require `BoundLocalTools::prepare` with the actual prepared Turn binding, a frozen `Workspace`, and a real `LocalToolInvocationSink`; ordinary `bind` explicitly rejects them without those resources.
@@ -71,6 +77,12 @@ The invocation adapter checks the existing Turn capability, receives a real owne
 
 `BoundLocalTools::production` constructs the real Session adapter used by `HostResourceBuilder`. The adapter holds only original invocation leases, byte offsets and incomplete UTF-8 code points. Edit observations enter the existing Session-owned journal; native ToolResults remain authoritative and use the existing history barrier. There is no second command-result store or tool scheduler. No production write uses `NoopLocalToolSink`.
 
+`local_binding.rs` keeps the frozen local-tool wrapper, Turn cleanup registration,
+Session recording adapter, and UTF-8 stream projection together. These are one
+binding's execution and owner handoff responsibilities. `registry.rs` retains
+the concrete Factory, BuiltinAgent, and Local registration facts; exact
+declaration lookup does not bind a tool or grant a built-in exemption.
+
 UTF-8 decoding preserves characters split across real chunks. A binary suffix stops text projection and marks that text range explicitly unavailable; existing prefixes remain unchanged. The successful native command result retains raw bytes. Leases are weak, expire only at actual tool cleanup, and cannot keep a reclaimed Session alive. Journal/process observations are not independently persisted or restored after restart.
 
-The in-memory sink in `tests/local_binding.rs` remains an explicit test fixture, not durable edit capture or a production fallback. `host-resources/tests/task042.rs` covers the real production adapter.
+The in-memory sink in `tests/local_binding.rs` remains an explicit test fixture, not durable edit capture or a production fallback. `host-resources/tests/local_tools.rs` covers the real production adapter, including the separate completion and process witnesses in `tests/local_tools/`.

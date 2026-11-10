@@ -115,6 +115,10 @@ impl ToolRegistry {
             .map(|entry| entry.spec().clone())
             .collect()
     }
+    /// The exact registered declaration, without binding or executing a tool.
+    pub fn spec(&self, name: &str) -> Option<&ToolSpec> {
+        self.entries.get(name).map(RegisteredTool::spec)
+    }
     pub fn bind(
         &self,
         selected: &[ToolBinding],

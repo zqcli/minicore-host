@@ -6,6 +6,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use std::sync::{Arc, Weak};
 
+mod inspect;
+
 pub struct CoreTurnPort {
     capability: core::TurnCapability,
     source: ToolSource,
@@ -34,14 +36,12 @@ impl CoreTurnPort {
                 self.check_host(&host_id)?;
                 let target = AgentRef { host_id, agent_id };
                 let summary = self.capability.agent_summary(&target)?;
-                let mut data = encoded(&summary)?;
-                remove(&mut data, &["id", "host_id"]);
-                if request.include_config {
-                    data["config"] = encoded(self.capability.agent_snapshot(&target)?.config)?;
-                }
-                Ok(
-                    json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":summary.id,"data":data}),
-                )
+                let config = if request.include_config {
+                    Some(self.capability.agent_snapshot(&target)?.config)
+                } else {
+                    None
+                };
+                inspect::agent(&self.source, &summary, config.as_ref())
             }
             InspectTarget::Session {
                 agent_id,
@@ -53,22 +53,16 @@ impl CoreTurnPort {
                 };
                 let state = self.capability.session_state(&target)?;
                 let info = self.capability.session_snapshot(&target)?;
-                let mut result = encoded(state)?;
-                result["data"]["title"] = encoded(info.title)?;
-                result["data"]["config_revision"] = encoded(info.config_revision)?;
-                result["data"]["agent_config_revision"] = encoded(info.agent_config_revision)?;
-                if request.include_config {
-                    result["data"]["config"] = encoded(info.config)?;
-                }
-                if request.include_output {
+                let history = if request.include_output {
                     let page = request.history_page.unwrap_or(HistoryReadRequest {
                         cursor: None,
                         limit: u64::MAX,
                     });
-                    let history = self.capability.history_read(&target, &page).await?;
-                    result["data"]["history"] = encoded(history.data)?;
-                }
-                Ok(result)
+                    Some(self.capability.history_read(&target, &page).await?.data)
+                } else {
+                    None
+                };
+                inspect::session(state, info, request.include_config, history)
             }
             InspectTarget::Turn {
                 agent_id,
@@ -80,46 +74,37 @@ impl CoreTurnPort {
                     session_id,
                 };
                 let data = if request.include_output && request.output_range.is_none() {
-                    // Full result reads share the public held/saved owner path.
-                    // Saved-only results have no current execution metadata.
+                    // Full reads retain the public held/saved owner path. Saved
+                    // results have no current execution metadata to project.
                     let result = self
                         .capability
                         .turn_result_snapshot(&target, &turn_id)
                         .await?;
-                    let mut data = match result.data.info {
-                        Some(info) => encoded(info)?,
-                        None => json!({}),
-                    };
-                    if let Some(load_id) = result.source.load_id {
-                        data["load_id"] = encoded(load_id)?;
-                    }
-                    if let Some(terminal) = result.data.saved_terminal {
-                        data["saved_terminal"] = encoded(terminal)?;
-                    }
-                    data["history"] = encoded(result.data.history)?;
-                    // Keep the tool's flat partial shape and public response index.
-                    data["partials"]=json!(result.data.partials.into_iter().map(|value| json!({"response_index":value.response_index,"content":value.partial.content,"incomplete_tool_calls":value.partial.incomplete_tool_calls,"usage":value.partial.usage})).collect::<Vec<_>>());
-                    data
+                    inspect::turn_result(&result)?
                 } else {
+                    // Lightweight and explicit range reads use current facts.
                     let info = self.capability.turn_info(&target, &turn_id)?;
-                    let mut data = encoded(&info)?;
-                    // Lightweight/current-range reads retain current execution facts.
-                    remove(&mut data, &["id", "session_id", "config"]);
-                    if let Some(range) = request.output_range {
-                        let output = self.capability.turn_output_read(
-                            &target,
-                            &turn_id,
-                            request.response_index.expect("validated model range"),
-                            &range,
-                        )?;
-                        data["output"] = encoded(output.data)?;
-                        data["response_index"] = encoded(output.source.response_index)?;
-                    }
-                    data
+                    let output = request
+                        .output_range
+                        .map(|range| {
+                            self.capability.turn_output_read(
+                                &target,
+                                &turn_id,
+                                request.response_index.expect("validated model range"),
+                                &range,
+                            )
+                        })
+                        .transpose()?;
+                    inspect::current_turn(&info, output.as_ref())?
                 };
-                Ok(
-                    json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":target.agent_id,"session_id":target.session_id,"turn_id":turn_id,"data":data}),
-                )
+                Ok(json!({
+                    "host_id": self.source.host_id,
+                    "host_incarnation": self.source.host_incarnation,
+                    "agent_id": target.agent_id,
+                    "session_id": target.session_id,
+                    "turn_id": turn_id,
+                    "data": data,
+                }))
             }
             InspectTarget::Toolcall {
                 agent_id,
@@ -135,22 +120,12 @@ impl CoreTurnPort {
                     turn_id,
                     tool_call_id,
                 };
-                let mut result = encoded(self.capability.toolcall_get(&target, &tool)?)?;
-                if !request.include_output {
-                    remove(&mut result["data"], &["arguments"]);
-                }
-                if (!request.include_output || request.output_range.is_some())
-                    && let Some(actual) = result["data"]["result"].as_object_mut()
-                {
-                    actual.remove("output");
-                }
-                if let Some(range) = request.output_range {
-                    let output = self
-                        .capability
-                        .toolcall_output_read(&target, &tool, &range)?;
-                    result["data"]["output"] = encoded(output.data)?;
-                }
-                Ok(result)
+                let snapshot = self.capability.toolcall_get(&target, &tool)?;
+                let output = request
+                    .output_range
+                    .map(|range| self.capability.toolcall_output_read(&target, &tool, &range))
+                    .transpose()?;
+                inspect::toolcall(&snapshot, request.include_output, output.as_ref())
             }
             InspectTarget::Message {
                 agent_id,
@@ -162,13 +137,12 @@ impl CoreTurnPort {
                     session_id,
                 };
                 let record = self.capability.message(&target, &message_id)?;
-                let mut data = encoded(record)?;
-                remove(&mut data["input"], &["message_id"]);
-                if !request.include_output {
-                    remove(&mut data["input"], &["text"]);
-                }
-                Ok(
-                    json!({"host_id":self.source.host_id,"host_incarnation":self.source.host_incarnation,"agent_id":target.agent_id,"session_id":target.session_id,"message_id":message_id,"data":data}),
+                inspect::message(
+                    &self.source,
+                    &target,
+                    &message_id,
+                    &record,
+                    request.include_output,
                 )
             }
             InspectTarget::Receipt {
@@ -398,11 +372,4 @@ impl core::DelegationSink for CoreSink {
 fn encoded(value: impl Serialize) -> Result<Value, Fault> {
     serde_json::to_value(value)
         .map_err(|error| Fault::new(FaultKind::HostInternalUnexpected, error.to_string()))
-}
-fn remove(value: &mut Value, keys: &[&str]) {
-    if let Some(map) = value.as_object_mut() {
-        for key in keys {
-            map.remove(*key);
-        }
-    }
 }

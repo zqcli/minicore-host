@@ -150,6 +150,138 @@ fn assert_public_binding(f: &Fixture, source: &TurnSource) {
 }
 
 #[tokio::test]
+async fn message_and_toolcall_inspect_preserve_body_selection_and_actual_result_shapes() {
+    let mut f = Fixture::new();
+    let session = f.agent().await;
+    let message_id = f.send(&session, "original message — 原文");
+    let first = f.next(&session).await;
+    let message_request = json!({
+        "action": "inspect",
+        "target": {
+            "kind": "message", "agent_id": session.agent_id,
+            "session_id": session.session_id, "message_id": message_id,
+        },
+        "include_output": true,
+    });
+    first.tool("message-body", message_request.clone());
+    let next = f.next(&session).await;
+    let full = next.last_tool_result();
+    assert_eq!(full["message_id"], json!(message_id));
+    assert_eq!(
+        full["data"]["input"],
+        json!({
+            "mode": "follow_up", "text": "original message — 原文",
+        })
+    );
+    assert_eq!(full["data"]["source"], json!({"kind": "user"}));
+    assert_eq!(
+        full["data"]["binding"],
+        json!({
+            "state": "bound", "turn_id": first.source.turn.turn_id,
+        })
+    );
+    let mut summary_request = message_request;
+    summary_request["include_output"] = json!(false);
+    next.tool("message-summary", summary_request);
+    let next = f.next(&session).await;
+    let mut expected = full;
+    expected["data"]["input"]
+        .as_object_mut()
+        .unwrap()
+        .remove("text");
+    assert_eq!(next.last_tool_result(), expected);
+
+    let reply = MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode: MessageMode::FollowUp,
+        text: "queued reply".into(),
+        in_reply_to: Some(message_id),
+    };
+    f.host
+        .send(
+            &f.connection.caller(),
+            SendMessage::new(reply.clone(), session.clone()),
+        )
+        .unwrap();
+    next.tool(
+        "reply-body",
+        json!({
+            "action": "inspect",
+            "target": {
+                "kind": "message", "agent_id": session.agent_id,
+                "session_id": session.session_id, "message_id": reply.message_id,
+            },
+            "include_output": true,
+        }),
+    );
+    let next = f.next(&session).await;
+    let actual = next.last_tool_result();
+    assert_eq!(
+        actual["data"]["input"],
+        json!({
+            "mode": "follow_up", "text": reply.text, "in_reply_to": reply.in_reply_to,
+        })
+    );
+    assert_eq!(actual["data"]["binding"], json!({"state": "queued"}));
+
+    let call = ToolCallRef {
+        turn_id: first.source.turn.turn_id.clone(),
+        tool_call_id: ToolCallId("message-body".into()),
+    };
+    let tool_request = json!({
+        "action": "inspect",
+        "target": {
+            "kind": "toolcall", "agent_id": session.agent_id,
+            "session_id": session.session_id, "turn_id": call.turn_id,
+            "tool_call_id": call.tool_call_id,
+        },
+        "include_output": true,
+    });
+    next.tool("tool-body", tool_request.clone());
+    let next = f.next(&session).await;
+    let public = f
+        .host
+        .toolcall_get(&f.connection.caller(), &session, &call)
+        .unwrap();
+    let mut expected = serde_json::to_value(public).unwrap();
+    assert_eq!(next.last_tool_result(), expected);
+    let mut summary_request = tool_request;
+    summary_request["include_output"] = json!(false);
+    next.tool("tool-summary", summary_request);
+    let next = f.next(&session).await;
+    expected["data"]
+        .as_object_mut()
+        .unwrap()
+        .remove("arguments");
+    expected["data"]["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("output");
+    assert_eq!(next.last_tool_result(), expected);
+
+    next.tool(
+        "inspect-unfinished",
+        json!({
+            "action": "inspect",
+            "target": {
+                "kind": "toolcall", "agent_id": session.agent_id,
+                "session_id": session.session_id, "turn_id": call.turn_id,
+                "tool_call_id": "inspect-unfinished",
+            },
+        }),
+    );
+    let next = f.next(&session).await;
+    let actual = next.last_tool_result();
+    assert_eq!(actual["data"].get("result"), Some(&Value::Null));
+    assert!(actual["data"].get("arguments").is_none());
+    next.complete("inspection complete");
+    f.finished(&next.source).await;
+    let reply_turn = f.next(&session).await;
+    reply_turn.complete("queued reply consumed");
+    f.finished(&reply_turn.source).await;
+}
+
+#[tokio::test]
 async fn active_turn_inspect_is_lightweight_while_public_get_keeps_bound_configuration() {
     let mut f = Fixture::new();
     let session = f.agent().await;
