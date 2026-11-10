@@ -1,5 +1,7 @@
 //! New recovery probes using real Host/Runtime and agent-tool execution.
 //! The model stream is an explicit test fixture. No capability or owner is faked.
+#[path = "../../host-core/tests/support/input_context.rs"]
+mod input_context;
 use futures_util::stream;
 use minicore_host_core::{
     BoundResources, ConnectionHandle, Host, PreparedTurnBinding, ResourceFuture, ResourceResolver,
@@ -384,7 +386,7 @@ async fn active_turn_inspect_is_lightweight_while_public_get_keeps_bound_configu
 async fn completed_turn_inspect_omits_config_with_and_without_actual_output() {
     let mut f = Fixture::new();
     let session = f.agent();
-    f.send(&session, "complete the original Turn");
+    let original_message = f.send(&session, "complete the original Turn");
     let first = f.next(&session).await;
     first.complete("actual retained completion");
     f.finished(&first.source).await;
@@ -400,6 +402,15 @@ async fn completed_turn_inspect_omits_config_with_and_without_actual_output() {
     let with_output = next.last_tool_result();
     assert_tool_summary(&with_output, &first.source, "finished");
     assert!(with_output["data"]["history"].is_array());
+    assert_eq!(
+        with_output["data"]["history"][0]["message_id"],
+        json!(original_message)
+    );
+    assert_eq!(
+        with_output["data"]["history"][0]["source"],
+        json!({"kind":"user"})
+    );
+    assert_eq!(with_output["data"]["history"][0]["mode"], "follow_up");
     assert!(
         with_output["data"]["history"]
             .to_string()
@@ -491,6 +502,268 @@ async fn agent_inspect_reads_saved_turn_after_restart_without_inventing_executio
     assert!(!actual.to_string().contains("original bound instructions"));
     after_tool.complete("inspection complete");
     f.finished(&after_tool.source).await;
+    f.stop().await;
+    drop(f);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+fn input_row(message: &MessageInput, source: MessageSource) -> Value {
+    let mut row = json!({
+        "kind":"user", "text":message.text, "message_id":message.message_id,
+        "mode":message.mode, "source":source,
+    });
+    if let Some(reply) = &message.in_reply_to {
+        row["in_reply_to"] = json!(reply);
+    }
+    row
+}
+fn user_rows(items: Value) -> Vec<Value> {
+    items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "user")
+        .cloned()
+        .collect()
+}
+async fn history_rows(f: &Fixture, target: &SessionRef) -> Vec<Value> {
+    let history = f
+        .host
+        .history_read(
+            &f.connection.caller(),
+            target,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: u64::MAX,
+            },
+        )
+        .await
+        .unwrap();
+    user_rows(serde_json::to_value(history.data.items).unwrap())
+}
+async fn result_rows(f: &Fixture, source: &TurnSource) -> Vec<Value> {
+    let result = f
+        .host
+        .turn_result_snapshot(
+            &f.connection.caller(),
+            &source.session,
+            &source.turn.turn_id,
+        )
+        .await
+        .unwrap();
+    user_rows(serde_json::to_value(result.data.history).unwrap())
+}
+
+#[tokio::test]
+async fn identical_inputs_keep_identity_mode_and_reply_in_live_held_and_saved_history() {
+    let path = std::env::temp_dir().join(format!(
+        "minicore-input-history-{}",
+        OperationId::new().unwrap()
+    ));
+    let mut f = Fixture::open(&path).await;
+    let target = f.persistent_agent().await;
+    let first = MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode: MessageMode::FollowUp,
+        text: "same original body\n原文 — no inferred source".into(),
+        in_reply_to: None,
+    };
+    let second = MessageInput {
+        message_id: MessageId::new().unwrap(),
+        mode: MessageMode::Steer,
+        text: first.text.clone(),
+        in_reply_to: Some(first.message_id.clone()),
+    };
+    let expected = vec![
+        input_row(&first, MessageSource::User),
+        input_row(&second, MessageSource::User),
+    ];
+    let mut sources = Vec::new();
+    for message in [&first, &second] {
+        f.host
+            .send(
+                &f.connection.caller(),
+                SendMessage::new(message.clone(), target.clone()),
+            )
+            .unwrap();
+        let call = f.next(&target).await;
+        call.complete("actual completed answer");
+        f.finished(&call.source).await;
+        sources.push(call.source);
+    }
+    assert_eq!(history_rows(&f, &target).await, expected);
+    // The first result must still use its original slice after another Turn.
+    for (index, source) in sources.iter().enumerate() {
+        assert_eq!(result_rows(&f, source).await, vec![expected[index].clone()]);
+    }
+    f.host
+        .session_unload(
+            &f.connection.caller(),
+            &target,
+            SessionControlRequest {
+                operation_id: OperationId::new().unwrap(),
+            },
+        )
+        .unwrap();
+    // Execution reloads the validated append-only native history and provenance.
+    f.send(&target, "reload then query earlier inputs");
+    let later = f.next(&target).await;
+    later.complete("reload complete");
+    f.finished(&later.source).await;
+    for (index, source) in sources.iter().enumerate() {
+        assert_eq!(result_rows(&f, source).await, vec![expected[index].clone()]);
+    }
+    let live = history_rows(&f, &target).await;
+    assert_eq!(&live[..2], &expected);
+    f.stop().await;
+    drop(f);
+    let f = Fixture::open(&path).await;
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &target)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(history_rows(&f, &target).await, live);
+    for (index, source) in sources.iter().enumerate() {
+        assert_eq!(result_rows(&f, source).await, vec![expected[index].clone()]);
+    }
+    // History exposes these identities without restoring the old message queue.
+    for message in [&first, &second] {
+        assert!(
+            f.host
+                .message(&f.connection.caller(), &target, &message.message_id)
+                .is_err()
+        );
+    }
+    f.stop().await;
+    drop(f);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[tokio::test]
+async fn actual_child_input_and_completion_notification_keep_sources_after_restart() {
+    let path = std::env::temp_dir().join(format!(
+        "minicore-agent-history-{}",
+        OperationId::new().unwrap()
+    ));
+    let mut f = Fixture::open(&path).await;
+    let parent = f.persistent_agent().await;
+    f.send(&parent, "delegate actual persistent work");
+    let start = f.next(&parent).await;
+    start.tool(
+        "delegate-persistent",
+        json!({
+            "action":"create", "resource":"session", "target":{
+                "host_id":start.source.host_id, "agent_id":parent.agent_id,
+            }, "mode":"persistent", "text":"actual child input\n完整任务原文",
+        }),
+    );
+    let a = tokio::time::timeout(Duration::from_secs(5), f.calls.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let b = tokio::time::timeout(Duration::from_secs(5), f.calls.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let (parent_call, child_call) = if a.source.session == parent {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    assert_eq!(parent_call.source.session, parent);
+    let launch = parent_call.last_tool_result();
+    assert_eq!(launch["result"]["delivery"], "accepted");
+    let child = child_call.source.session.clone();
+    assert_eq!(launch["session_id"], json!(child.session_id));
+    let child_input = MessageInput {
+        message_id: serde_json::from_value(launch["message_id"].clone()).unwrap(),
+        mode: MessageMode::FollowUp,
+        text: "actual child input\n完整任务原文".into(),
+        in_reply_to: None,
+    };
+    parent_call.complete("delegation launched");
+    f.finished(&parent_call.source).await;
+    child_call.complete("actual child answer — 完整结果");
+    f.finished(&child_call.source).await;
+    let notification = f.next(&parent).await;
+    let text = notification
+        .request
+        .messages()
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            ModelMessage::User(text) => Some(text.as_ref()),
+            _ => None,
+        })
+        .unwrap();
+    let (context, body) = input_context::decode(text);
+    assert_eq!(
+        context.source,
+        MessageSource::Agent {
+            source: child.clone()
+        }
+    );
+    assert_eq!(context.in_reply_to, Some(child_input.message_id.clone()));
+    assert!(body.contains("actual child answer — 完整结果"));
+    let notification_input = MessageInput {
+        message_id: context.message_id,
+        mode: MessageMode::FollowUp,
+        text: body.to_owned(),
+        in_reply_to: context.in_reply_to,
+    };
+    notification.complete("notification consumed");
+    f.finished(&notification.source).await;
+    let child_expected = input_row(
+        &child_input,
+        MessageSource::Agent {
+            source: parent.clone(),
+        },
+    );
+    let notification_expected = input_row(
+        &notification_input,
+        MessageSource::Agent {
+            source: child.clone(),
+        },
+    );
+    assert_eq!(history_rows(&f, &child).await, vec![child_expected.clone()]);
+    assert_eq!(
+        result_rows(&f, &child_call.source).await,
+        vec![child_expected.clone()]
+    );
+    let parent_history = history_rows(&f, &parent).await;
+    assert_eq!(parent_history.last(), Some(&notification_expected));
+    assert_eq!(
+        result_rows(&f, &notification.source).await,
+        vec![notification_expected.clone()]
+    );
+    f.stop().await;
+    drop(f);
+
+    let f = Fixture::open(&path).await;
+    assert_eq!(history_rows(&f, &child).await, vec![child_expected.clone()]);
+    assert_eq!(
+        result_rows(&f, &child_call.source).await,
+        vec![child_expected]
+    );
+    assert_eq!(history_rows(&f, &parent).await, parent_history);
+    assert_eq!(
+        result_rows(&f, &notification.source).await,
+        vec![notification_expected]
+    );
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &child)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        f.host
+            .turns(&f.connection.caller(), &parent)
+            .unwrap()
+            .is_empty()
+    );
     f.stop().await;
     drop(f);
     std::fs::remove_dir_all(path).unwrap();

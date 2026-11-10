@@ -205,7 +205,7 @@ impl SessionController {
                 .readable_history
                 .as_mut()
                 .expect("history loaded before execution")
-                .extend(items.iter().map(HistoryItemData::from));
+                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
             let diagnostics = self.observe_history(&mut state, items);
             self.publish(&mut state);
             (binding, entries, diagnostics)
@@ -569,7 +569,13 @@ impl SessionController {
             }
         }
         Self::record_delegated_result(&mut state, &result, inputs);
-        state.completed.insert(turn_id.clone(), result);
+        state.completed.insert(
+            turn_id.clone(),
+            RetainedTurnResult {
+                result,
+                start_history: active.start_history,
+            },
+        );
         let previous = state.lifecycle;
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);

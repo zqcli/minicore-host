@@ -411,7 +411,7 @@ async fn delayed_read_returns_newer_owner_records_not_opening_baseline() {
     let page = read.await.unwrap().unwrap();
     assert_eq!(page.data.items.len(), 3);
     assert!(
-        matches!(&page.data.items[1], HistoryItemData::User { text } if text == "accepted after the opening read")
+        matches!(&page.data.items[1], HistoryItemData::User { text, .. } if text == "accepted after the opening read")
     );
     assert!(matches!(
         &page.data.items[2],
@@ -445,7 +445,7 @@ async fn delayed_cold_snapshot_yields_to_newer_retained_history() {
     let page = read.await.unwrap().unwrap();
     assert_eq!(page.data.items.len(), 3);
     assert!(
-        matches!(&page.data.items[1], HistoryItemData::User { text } if text == "newer than cold snapshot")
+        matches!(&page.data.items[1], HistoryItemData::User { text, .. } if text == "newer than cold snapshot")
     );
 }
 

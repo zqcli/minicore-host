@@ -50,6 +50,14 @@ Session history is written through real storage at Runtime's complete-response, 
 
 Explicit Session `resume` captures its own failed original history ranges and metadata candidate. It confirms those originals independently, never reruns a model/tool or reappends confirmed bytes, and cannot unblock queued execution while any captured required save still fails. A partial or changed original remains blocked rather than being repaired. Primary execution outcome remains unchanged.
 
+Public input history includes the actual MessageId, trusted source, scheduling
+mode and optional reply association alongside the complete original text. Live
+history, held Turn results, saved Turn results and cold history use the same
+projection. Native-only legacy input omits unknown metadata; it is never inferred
+from text. Held results retain their original native history offset, so repeated
+text, later Turns, compaction markers and validated reloads do not move identities.
+These read projections do not restore a previous inbox or execution.
+
 All disk work runs outside owner/access locks. The backend's separate disk-only mutex protects its journal and original pending range. Reload reopens and validates the actual file only when no pending/uncertain history save owns it. `loaded_records()` is an opening baseline, so same-process write -> unload -> load does not reuse it as a stale live cache. A failed reload does not replace retained memory with an unvalidated prefix, truncate files or skip bad records.
 
 The data-root lease lasts through accepted work, including memory execution and detached caller waits. It does not serialize unrelated Sessions. Controlled Host shutdown retains the directory through genuine joins, pending saves and cleanup, then drops the resource graph even if old observers or Host handles remain. Persistent Sessions are not implicitly closed or deleted.

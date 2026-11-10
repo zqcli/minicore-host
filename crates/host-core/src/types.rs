@@ -205,6 +205,15 @@ pub struct ToolCallSnapshot {
 pub enum HistoryItemData {
     User {
         text: String,
+        /// Absent only when the native history has no original Host input facts.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message_id: Option<MessageId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source: Option<MessageSource>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mode: Option<MessageMode>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        in_reply_to: Option<MessageId>,
     },
     Assistant {
         response: crate::ModelResponseData,
@@ -244,6 +253,10 @@ impl From<&HistoryItem> for HistoryItemData {
         match value {
             HistoryItem::User(value) => Self::User {
                 text: value.input.as_text().to_owned(),
+                message_id: None,
+                source: None,
+                mode: None,
+                in_reply_to: None,
             },
             HistoryItem::Assistant(value) => Self::Assistant {
                 response: value.into(),

@@ -155,7 +155,7 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             .await
             .unwrap();
         assert!(
-            matches!(&page.data.items[0], HistoryItemData::User { text } if text == "真实输入")
+            matches!(&page.data.items[0], HistoryItemData::User { text, .. } if text == "真实输入")
         );
         let page = session
             .history(

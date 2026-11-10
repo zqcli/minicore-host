@@ -76,11 +76,9 @@ fn project_saved(id: &TurnId, entries: &[HistoryEntry]) -> Result<TurnResultData
     let mut terminal = None;
     for entry in entries.iter().filter(|entry| entry.turn_id() == Some(id)) {
         match entry {
-            HistoryEntry::Input { user, .. } => history.push(TurnHistoryItemData {
+            HistoryEntry::Input { .. } => history.push(TurnHistoryItemData {
                 response_index: None,
-                item: HistoryItemData::User {
-                    text: user.input.as_text().to_owned(),
-                },
+                item: HistoryItemData::from_entry(entry).expect("Input has public history content"),
             }),
             HistoryEntry::Runtime {
                 response_index,

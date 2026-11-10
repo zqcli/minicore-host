@@ -11,6 +11,9 @@ use std::ops::Range;
 struct InputContext {
     message_id: MessageId,
     source: MessageSource,
+    // Scheduling is public input history data; keep the prompt context unchanged.
+    #[serde(skip)]
+    mode: MessageMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     in_reply_to: Option<MessageId>,
 }
@@ -26,6 +29,7 @@ impl InputProvenance {
         if let HistoryEntry::Input {
             message_id,
             source,
+            mode,
             in_reply_to,
             ..
         } = entry
@@ -35,9 +39,25 @@ impl InputProvenance {
                 InputContext {
                     message_id: message_id.clone(),
                     source: source.clone(),
+                    mode: *mode,
                     in_reply_to: in_reply_to.clone(),
                 },
             );
+        }
+    }
+
+    /// Public reads use the original native position, never equal-text matching
+    /// or model-prompt parsing. Native-only input keeps its metadata absent.
+    pub(super) fn history_item(&self, position: usize, item: &HistoryItem) -> HistoryItemData {
+        match (item, self.0.get(&position)) {
+            (HistoryItem::User(user), Some(context)) => HistoryItemData::from_input(
+                user,
+                &context.message_id,
+                &context.source,
+                context.mode,
+                context.in_reply_to.as_ref(),
+            ),
+            _ => item.into(),
         }
     }
 
@@ -74,6 +94,7 @@ impl InputProvenance {
                 InputContext {
                     message_id: input.message.message_id.clone(),
                     source: input.source.clone(),
+                    mode: input.message.mode,
                     in_reply_to: input.message.in_reply_to.clone(),
                 },
             );

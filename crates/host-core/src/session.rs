@@ -311,6 +311,20 @@ impl ActiveTurn {
         (self.claim_terminal(outcome, fault), forwarded_primary)
     }
 }
+/// A held result keeps its original native slice position in the Session's
+/// append-only history. No second input index or projected transcript is stored.
+struct RetainedTurnResult {
+    result: TurnResult,
+    start_history: usize,
+}
+impl std::ops::Deref for RetainedTurnResult {
+    type Target = TurnResult;
+
+    fn deref(&self) -> &Self::Target {
+        &self.result
+    }
+}
+
 struct SessionState {
     info: SessionInfo,
     lifecycle: SessionLifecycle,
@@ -330,7 +344,7 @@ struct SessionState {
     next_turn_order: u64,
     messages: Vec<MessageRecord>,
     active: Option<ActiveTurn>,
-    completed: BTreeMap<TurnId, TurnResult>,
+    completed: BTreeMap<TurnId, RetainedTurnResult>,
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
     history: Vec<HistoryItem>,
@@ -1054,7 +1068,7 @@ impl SessionController {
                 .expect("Session mutex poisoned")
                 .completed
                 .get(id)
-                .cloned()
+                .map(|held| held.result.clone())
                 .ok_or_else(|| {
                     Fault::new(
                         FaultKind::SessionTurnNotFound,

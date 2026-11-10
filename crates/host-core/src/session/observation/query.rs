@@ -113,7 +113,11 @@ impl SessionController {
                     info: Some(Self::retained_turn_state(&state, &result.info)),
                     config: Some(result.info.config.clone()),
                     saved_terminal: None,
-                    history: project_history(result, state.output.get(id))?,
+                    history: project_history(
+                        result,
+                        state.output.get(id),
+                        &state.input_provenance,
+                    )?,
                     partials: result
                         .partials
                         .iter()
@@ -172,8 +176,9 @@ fn missing_response() -> Fault {
 /// mistake a per-Loop request index for a public Turn index. The temporary
 /// mapping only joins tool records to their original native model response.
 fn project_history(
-    result: &TurnResult,
+    result: &RetainedTurnResult,
     output: Option<&TurnObservation>,
+    input_provenance: &input_provenance::InputProvenance,
 ) -> Result<Vec<TurnHistoryItemData>, Fault> {
     let mut indexes = output.into_iter().flat_map(|output| {
         output
@@ -184,7 +189,7 @@ fn project_history(
     });
     let mut responses = BTreeMap::new();
     let mut history = Vec::with_capacity(result.history.len());
-    for item in &result.history {
+    for (offset, item) in result.history.iter().enumerate() {
         let response_index = match item {
             HistoryItem::Assistant(value) => {
                 let index = indexes.next().ok_or_else(missing_response)?;
@@ -200,7 +205,7 @@ fn project_history(
         };
         history.push(TurnHistoryItemData {
             response_index,
-            item: item.into(),
+            item: input_provenance.history_item(result.start_history + offset, item),
         });
     }
     if indexes.next().is_some() {

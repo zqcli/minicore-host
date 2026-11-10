@@ -1154,7 +1154,7 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
         )
         .await
         .unwrap();
-    assert!(matches!(&first.data.items[0],HistoryItemData::User {text} if text=="observe"));
+    assert!(matches!(&first.data.items[0],HistoryItemData::User {text, ..} if text=="observe"));
     let old_cursor = first.data.next_cursor.clone().unwrap();
     let second = host
         .history_read(

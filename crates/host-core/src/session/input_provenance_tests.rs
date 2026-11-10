@@ -187,7 +187,21 @@ async fn task055_validated_load_and_summary_slices_keep_native_positions_not_row
         );
         known(&messages[4], &final_input);
     }
-    assert_eq!(owner.state.lock().unwrap().history, original);
+    let state = owner.state.lock().unwrap();
+    assert_eq!(state.history, original);
+    // Public held-result projection uses native positions, excluding terminal
+    // and compaction rows just like the original prompt provenance table.
+    for (position, entry) in [(2, &peer), (4, &final_input)] {
+        assert_eq!(
+            serde_json::to_value(
+                state
+                    .input_provenance
+                    .history_item(position, &state.history[position])
+            )
+            .unwrap(),
+            serde_json::to_value(HistoryItemData::from_entry(entry).unwrap()).unwrap(),
+        );
+    }
 }
 
 #[tokio::test]
@@ -254,6 +268,30 @@ async fn task055_native_legacy_rows_are_not_assigned_adjacent_known_input_facts(
     assert_eq!(messages[1], ModelMessage::user("same text").unwrap());
     known(&messages[2], &entry);
     assert_eq!(messages[3], ModelMessage::user("same text").unwrap());
+    let state = owner.state.lock().unwrap();
+    let public = state.readable_history.as_ref().unwrap();
+    for position in [0, 2] {
+        let expected = serde_json::json!({"kind":"user", "text":"same text"});
+        assert_eq!(serde_json::to_value(&public[position]).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(
+                state
+                    .input_provenance
+                    .history_item(position, &state.history[position])
+            )
+            .unwrap(),
+            expected
+        );
+    }
+    let known = serde_json::to_value(&public[1]).unwrap();
+    assert_eq!(known["message_id"], serde_json::json!(id(&entry)));
+    assert_eq!(known["source"], serde_json::json!({"kind":"user"}));
+    assert_eq!(known["mode"], "follow_up");
+    assert!(known.get("in_reply_to").is_none());
+    assert_eq!(
+        serde_json::to_value(state.input_provenance.history_item(1, &state.history[1])).unwrap(),
+        known
+    );
 }
 
 #[test]

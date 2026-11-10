@@ -2,11 +2,37 @@ use super::*;
 use crate::{HistoryItemData, SessionHistorySnapshot};
 
 impl HistoryItemData {
+    pub(super) fn from_input(
+        user: &minicore_runtime::UserHistory,
+        message_id: &MessageId,
+        source: &MessageSource,
+        mode: MessageMode,
+        in_reply_to: Option<&MessageId>,
+    ) -> Self {
+        Self::User {
+            text: user.input.as_text().to_owned(),
+            message_id: Some(message_id.clone()),
+            source: Some(source.clone()),
+            mode: Some(mode),
+            in_reply_to: in_reply_to.cloned(),
+        }
+    }
     pub(super) fn from_entry(entry: &HistoryEntry) -> Option<Self> {
         match entry {
-            HistoryEntry::Input { user, .. } => Some(Self::User {
-                text: user.input.as_text().to_owned(),
-            }),
+            HistoryEntry::Input {
+                user,
+                message_id,
+                source,
+                mode,
+                in_reply_to,
+                ..
+            } => Some(Self::from_input(
+                user,
+                message_id,
+                source,
+                *mode,
+                in_reply_to.as_ref(),
+            )),
             HistoryEntry::Runtime { item, .. } => Some(item.into()),
             HistoryEntry::Partial { partial, .. } => Some(Self::Partial {
                 partial: partial.into(),
