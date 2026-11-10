@@ -283,3 +283,116 @@ It does not replace the immutable earlier evidence manifest.
 No full workspace gate, performance/live-provider/TUI acceptance or publication
 is claimed by this follow-up. The later composed compaction baseline and the
 subsequent thin failure/save-resume scheduling patch are separate review scopes.
+
+## Follow-up B: thin failure and recovery scheduling records
+
+### Final fixed delta and verdict
+
+**APPROVE** for the delta
+`579edef82ed3e288a2b2786470e813c6037f667e..ecb8af14925d0231ffd1454a88a0a64ee19da393`.
+The verified final source tree is `47486a7203a0c5be5fb6f0ac88a9b774cfaadf96`.
+There is no unresolved finding in this additional scope. The prior two scoped
+verdicts and their immutable evidence are retained above, not retroactively
+expanded into a full-workspace or complete-first-version approval.
+
+This composed source starts from coordinator `50a1b2f`, which already includes
+task092's separately reviewed compaction/primary-Fault work. The three prior
+slices are mapped once: `7bcc10e -> dcbfa00`, `55bd353 -> 06bf117`, and
+`11e5bf5 -> 579edef`. Their actual added/deleted production and fixture lines
+match. The preparation stable patch ID differs only because its surrounding
+module context now includes `mod compaction`; its added/deleted lines do not
+differ. No second copy of any slice is authorized by this mapping.
+
+### Static review
+
+- Every new scheduling summary reuses the existing five-scalar comparison:
+  explicit pause, execution-failure pause, unloaded-with-input, residency and
+  blocked. It compares state around the original mutation/publication, not an
+  observation-stream reconstruction. Unchanged scalars yield no record. Queue
+  lengths are actual metadata in a changed summary, not another state mirror.
+- History/preparation, report claim, finalization, metadata completion, original
+  save continuation and cleanup use the same original mutations, callback order,
+  I/O, return values and recovery barriers. Records are extracted under state
+  and emitted after release. Cleanup still drops confirmed handles before output.
+  No additional ERROR is introduced; these summaries are DEBUG without a Fault
+  dump or body, and do not decide whether a failure is primary.
+- Metadata completion clones the operation from its original retained work
+  before that work can be cleared. Manual-compaction history saves use their
+  actual bound operation. The history-resume worker has no retained operation
+  and honestly omits one. No new operation lifetime or inference is introduced.
+- `claim_report`, `claim_terminal` and the entire Session source prefix through
+  ActiveTurn fields are byte-identical across this delta. Their SHA-256 values
+  are respectively `281e498263d182751736171bc28ec86a6b7185b82534d43bdec6b0ceef585896`
+  and `8519fef28ad6623b3a1124cf01f255a329ec2e87eb6b847aeff3c33f39ca1aa8`.
+  The compaction implementation has no diff. This check guards the already
+  reviewed original-Fault slot and cancellation/save precedence; it is not a new
+  independent approval of task092. SPEC and Cargo.lock bytes also remain unchanged.
+
+### Actual focused tests and independent probes
+
+Five committed actual-path tests passed: terminal failure/history repair,
+metadata operations, independent cleanup, cold storage failures and compaction.
+They preserve one real execution-failure pause, true/false history blocking,
+explicit same-save resume, original metadata operation, no invented unpaused
+transition and no duplicate primary ERROR. Compaction is a regression check of
+the composition, not an expansion of this review into its separately owned work.
+
+Five additional private cases adapt those mature real Host/Runtime/HTTP/storage
+fixtures. At each scheduling callback, a bounded worker reenters public
+Host/admission, Agent and Session reads. It verifies the readable Controller
+revision is not earlier than the logged publication. At an equal revision, all
+five scheduling scalars and both queue counts must exactly match the owner's
+public snapshot. These checks passed for failure/repair, metadata, cold load
+and cleanup. They do not equate reading a diagnostic line with business success.
+
+The fifth case deliberately combines **real HTTP 401 + real original history
+inode refusal + an explicitly unconfirmed cleanup-owner fixture**. After the
+original inode is restored and the same save is explicitly resumed:
+
+- primary 4204 and independent cleanup 4999 remain separate;
+- cleanup is invoked once, the original Turn remains Finalizing and has no
+  readable finished result;
+- the required cleanup block and failure pause remain, even though the history
+  persistence fault has been cleared;
+- no false `blocked=false`, `save_resume_finished` or `turn.finished` appears;
+- the already-existing history block means cleanup itself introduces no new
+  five-scalar change, so it does not manufacture a cleanup scheduling record.
+
+All five private cases passed on their first corrected-source run; no production
+or private-probe fix was needed for this scheduling scope. The cleanup result is
+an explicit fixture, not an actual process/device failure. The history refusal
+is a real Store identity check, not a claimed disk-full or syscall-errno test.
+
+### Commands, counts and immutable evidence
+
+The same exclusive review target and environment above were retained. Actual
+commands on the fixed `ecb8af1` source were:
+
+- `cargo test -p minicore-host-transport --test diagnostic_terminal_failures --test diagnostic_metadata_operations --test diagnostic_cleanup --test diagnostic_storage --test diagnostic_compaction --locked --offline`: **5 passed**.
+- `cargo test --manifest-path ../evidence/scheduling-probes/Cargo.toml --locked --offline --no-fail-fast -- --nocapture`: **5 passed** in the final combined run.
+- `cargo test -p minicore-host-core --all-targets --locked --offline -- --list`,
+  followed by the same command without `-- --list`: **338 unique core cases
+  listed, 338 passed, 0 failed/ignored**. This includes the composed baseline's
+  additional core case; it is not the prior source11 337 count or a workspace sum.
+- `cargo fmt --all --check`,
+  `cargo clippy -p minicore-host-core -p minicore-host-transport --all-targets --locked --offline -- -D warnings`,
+  `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core --no-deps --locked --offline`,
+  `./scripts/check-whitespace.sh`, and `git diff --check`: **passed**.
+
+Private evidence is in `ecb-*.log` and `evidence/scheduling-probes/`. Its separate
+`SCHEDULING_ECB_SHA256SUMS` manifest SHA-256 is
+`150d1cd76dbfe49b700920dc2e6eac32553bef9e5d15be1a850615994f2b0fc4`.
+
+- Focused log: `f3c9df0cf9e6957d0e98efe9a2022a904e4b7b662d29e12b23f60674f2bf4b7d`
+- Final private probes: `7dad07873e13a916395deaddede7e48b54ab37a6c7b3f974e3a6d79eb347eda4`
+- Core list: `b9db7e6b5346e5b9c0e367399c5229deab6091bc69f118d2beba427b398d95ab`
+- Core run: `fc76ee9f7cb854b576938534c567c08fc4fa45db401ff6ff3e4b6d495f96d8cb`
+- Strict Clippy: `9cf5b7209cff81aed92b070b69cead501fa4358ec7f4c41e98b19c7709b39102`
+- Strict rustdoc: `9fd7e0cb2d640ed3a9d843107827e42d92341f8bf33646942e34e858f1a3f58c`
+- Critical-function/replay audit: `9f716db932b33e78980c74516534048edd45950d35c5cd2d90922698e7d95655`
+
+The report remains the reviewer's only tracked change. No remote push, main
+change, dependency change or TUI change was made. The coordinator owns final
+composition, workspace-wide test inventory/full gate and any authorized
+publication. Saved-result read diagnostics/task095, performance, live providers
+and TUI acceptance are outside these scoped approvals.
