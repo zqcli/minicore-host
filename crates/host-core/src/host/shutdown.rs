@@ -20,11 +20,7 @@ impl Host {
         request: HostShutdownRequest,
     ) -> Result<HostShutdownReceipt, Fault> {
         let executor = tokio::runtime::Handle::try_current().ok();
-        let mode = if self.store().is_some() {
-            StorageMode::Persistent
-        } else {
-            StorageMode::Memory
-        };
+        let mode = self.mode;
         let context = Context {
             operation_id: Some(request.operation_id.clone()),
             ..self.diagnostic_context()

@@ -72,3 +72,16 @@ Unchanged external probe replay completed on fixed new commit `3bd6f054bc47076c6
 ## Remaining scope
 
 The previous environment's uncommitted metadata save/reconcile and additional reclamation instrumentation was lost. It is not part of these restored commits and its old focused results are not current evidence. That work must be reconstructed and tested as a later independent slice after synchronizing with the shared close/delete bridge. No new recovery entry, automatic shutdown retry or lifecycle framework is planned.
+
+## Shutdown mode race follow-up
+
+On the fixed integrated `985ff19457e682f4d30f6c9bb309a3cbc2d118bf` base, TASK082 found a concrete remaining interleaving: the shutdown worker releases `store` before publishing Stopped, so a concurrent Force request can observe no store while its accepted lifecycle is still Stopping. Reconstructing mode from a live resource handle could therefore emit false `memory` again. The reviewer ran 300 public-API race iterations without hitting that interval; this is static interleaving evidence, not a reproduced red test or an asserted observed failure.
+
+The follow-up preserves the immutable construction mode in Host and reads it for shutdown diagnostics. It changes no lifecycle, strategy, receipt, worker or resource-release ordering. The earlier rule that a request against Stopped creates no new shutdown transition remains intact. This supersedes only the earlier choice to avoid retaining construction mode, now needed to report a fact independently of resource retirement.
+
+Fresh checks in `fix/079-host-mode-diagnostics` / `/workspace/shared/minicore-host-task079-mode`, same Rust environment and isolated target as above:
+
+- `cargo test -p minicore-host-core --test task079_shutdown_repetition --test task079_lock_boundary --test task079_diagnostics --test host_shutdown --test persistent_owners --test entity_retirement --locked --offline`: 71 passed.
+- `cargo clippy -p minicore-host-core --lib --test task079_shutdown_repetition --test task079_lock_boundary --test task079_diagnostics --locked --offline -- -D warnings`: passed.
+- `cargo fmt --all --check` and `git diff --check`: passed.
+- Logs: `/workspace/shared/task079-mode-evidence/regression.log`, `clippy.log`. Independent TASK082 follow-up and a complete workspace gate remain separate.

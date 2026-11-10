@@ -36,6 +36,8 @@ pub struct Host {
     self_weak: Weak<Self>,
     id: HostId,
     incarnation: HostIncarnation,
+    // Construction mode remains factual after shutdown releases the store.
+    mode: StorageMode,
     access: Arc<ConnectionRegistry>,
     resources: Mutex<Option<Arc<dyn ResourceResolver>>>,
     state: Mutex<HostState>,
@@ -98,6 +100,11 @@ impl Host {
             self_weak: weak.clone(),
             id,
             incarnation,
+            mode: if store.is_some() {
+                StorageMode::Persistent
+            } else {
+                StorageMode::Memory
+            },
             access,
             resources: Mutex::new(Some(resources)),
             store: Mutex::new(store),
