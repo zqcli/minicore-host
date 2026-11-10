@@ -211,9 +211,9 @@ macro_rules! operations {
         /// This route list is not a runtime capability negotiation.
         pub const SUPPORTED_METHODS: &[&str] = &[Method::EventsSubscribe.as_str(), $(Method::$method.as_str(),)+];
 
-        pub(crate) async fn dispatch(host: Arc<Host>, caller: CallerContext, method: &str, params: Value) -> Result<Value, RpcError> {
+        pub(crate) async fn dispatch(host: Arc<Host>, caller: CallerContext, method: &str, params: Value, id: &RpcId) -> Result<Vec<u8>, RpcError> {
             match method.parse::<Method>() {
-                $(Ok(Method::$method) => run::<$name>(host, caller, params).await,)+
+                $(Ok(Method::$method) => run::<$name>(host, caller, params, id).await,)+
                 Ok(_) => Err(RpcError::business(Fault::new(
                     FaultKind::HostMethodUnavailable, "this method is not implemented by the current adapter",
                 ))),
@@ -287,14 +287,21 @@ async fn run<O: Operation>(
     host: Arc<Host>,
     caller: CallerContext,
     params: Value,
-) -> Result<Value, RpcError> {
+    id: &RpcId,
+) -> Result<Vec<u8>, RpcError> {
     let request: O = serde_json::from_value(params)
         .map_err(|_| protocol_error(-32602, "Invalid method parameters"))?;
     let result = request
         .execute(host, caller)
         .await
         .map_err(RpcError::business)?;
-    serde_json::to_value(result)
+    encode_success(id, result)
+}
+
+pub(crate) fn encode_success(id: &RpcId, result: impl Serialize) -> Result<Vec<u8>, RpcError> {
+    // Finish encoding before reporting success or queuing a frame. A failed
+    // result drops its partial bytes and keeps the original protocol error.
+    serde_json::to_vec(&RpcResponse::success(id.clone(), result))
         .map_err(|_| protocol_error(-32603, "Unable to encode the business result"))
 }
 

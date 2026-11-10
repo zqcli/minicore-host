@@ -177,19 +177,25 @@ pub(crate) async fn serve_frames(
                             Err(error) => return queue_error(&outgoing, Some(id), error),
                         }
                     }
-                    let result = dispatch(host, caller, &request.method, request.params).instrument(span).await;
+                    let result = dispatch(host, caller, &request.method, request.params, &id).instrument(span).await;
                     diagnostic.server_finished(&result);
-                    let response = match result {
-                        Ok(result) => RpcResponse::success(id, result),
-                        Err(error) => RpcResponse::Failure(RpcFailure { jsonrpc: JsonRpcVersion::V2, id: Some(id), error }),
-                    };
-                    queue_response(&outgoing, &response)
+                    queue_dispatch_result(&outgoing, id, result)
                 });
             }
             Some(joined) = requests.join_next(), if !requests.is_empty() => {
                 joined.map_err(|_| io::Error::other("JSON-RPC request dispatcher terminated unexpectedly"))??;
             }
         }
+    }
+}
+fn queue_dispatch_result(
+    out: &mpsc::UnboundedSender<Vec<u8>>,
+    id: RpcId,
+    result: Result<Vec<u8>, RpcError>,
+) -> io::Result<()> {
+    match result {
+        Ok(bytes) => queue_bytes(out, bytes),
+        Err(error) => queue_error(out, Some(id), error),
     }
 }
 fn queue_error(
@@ -210,6 +216,68 @@ fn queue_response<T: Serialize>(
     out: &mpsc::UnboundedSender<Vec<u8>>,
     response: &T,
 ) -> io::Result<()> {
-    out.send(serde_json::to_vec(response).map_err(io::Error::other)?)
+    queue_bytes(out, serde_json::to_vec(response).map_err(io::Error::other)?)
+}
+fn queue_bytes(out: &mpsc::UnboundedSender<Vec<u8>>, bytes: Vec<u8>) -> io::Result<()> {
+    out.send(bytes)
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "JSON-RPC writer closed"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operations::encode_success;
+    use serde::ser::SerializeStruct;
+    use std::cell::Cell;
+
+    struct FailingResult {
+        prefix_encoded: Cell<bool>,
+    }
+    impl Serialize for FailingResult {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut state = serializer.serialize_struct("FailingResult", 2)?;
+            state.serialize_field("body", "private partial result")?;
+            self.prefix_encoded.set(true);
+            Err(serde::ser::Error::custom("private encoding failure"))
+        }
+    }
+
+    #[test]
+    fn mid_result_encoding_failure_queues_only_the_correlated_protocol_error() {
+        let (outgoing, mut frames) = mpsc::unbounded_channel();
+        let id = RpcId::String("original-call".into());
+        let value = FailingResult {
+            prefix_encoded: Cell::new(false),
+        };
+        let result = encode_success(&id, &value);
+        assert!(value.prefix_encoded.get());
+        assert!(result.is_err());
+        queue_dispatch_result(&outgoing, id.clone(), result).unwrap();
+
+        let bytes = frames.try_recv().unwrap();
+        let response: RpcResponse<Value> = serde_json::from_slice(&bytes).unwrap();
+        let RpcResponse::Failure(failure) = response else {
+            panic!("failed result encoding must not queue a success frame");
+        };
+        assert_eq!(failure.id, Some(id));
+        assert_eq!(failure.error.code, -32603);
+        assert_eq!(
+            failure.error.message,
+            "Unable to encode the business result"
+        );
+        assert!(failure.error.data.is_none());
+        assert!(!String::from_utf8(bytes).unwrap().contains("private"));
+        assert!(matches!(
+            frames.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
+
+        // This call's encoding fault leaves the shared outgoing channel usable.
+        let next = RpcId::Integer(2);
+        queue_dispatch_result(&outgoing, next.clone(), encode_success(&next, true)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<RpcResponse<bool>>(&frames.try_recv().unwrap()).unwrap(),
+            RpcResponse::success(next, true)
+        );
+    }
 }
