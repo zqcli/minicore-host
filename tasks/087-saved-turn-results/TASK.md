@@ -41,3 +41,31 @@ All task087 Cargo commands use Rust 1.90, `RUSTUP_HOME=/workspace/shared/rustup`
 - New fixture defects discovered and corrected while constructing tests: retirement sets its internal fence before publishing a state notification, so the deterministic test now polls that actual fence; the scripted complete empty model response requires a valid ProviderReplay marker, as in the existing multi-Loop fixture. These were new-test defects, not weakened assertions or production workarounds.
 
 Full affected tests/lint/docs/list are pending at this checkpoint. Root owns composed workspace gate, independent review and publication.
+
+## Verified affected gate
+
+Implementation fixed commit: `98d476f045e1f775a56696339a65451a7b1f10ed`, tree `547bed720aa62be36978fef584742e2d9b944d3e`. The only earlier task commit is `71d393f` (old-source red). All commands below completed successfully against that code in the task-exclusive build directory:
+
+1. `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh`, `git diff --check`.
+2. `cargo clippy -p minicore-host-core -p minicore-host-transport --all-targets --locked --offline -- -D warnings`.
+3. `cargo test -p minicore-host-core -p minicore-host-transport --all-targets --locked --offline`: **480 unique Rust tests passed**, with no failures. The new saved-result adapter test runs exactly once, without importing a second copy of an unrelated pipe-fixture test.
+4. `cargo test -p minicore-host-core -p minicore-host-transport --doc --locked --offline`: **1 doc test passed** (core has 0).
+5. `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core -p minicore-host-transport --no-deps --locked --offline`.
+6. `PYTHONDONTWRITEBYTECODE=1 python3 scripts/task059_projection_test.py` and `PYTHONDONTWRITEBYTECODE=1 python3 scripts/task058_rss_test.py`: **15 + 5 Python tests passed**.
+7. `cargo test -p minicore-host-core -p minicore-host-transport --all-targets --locked --offline -- --list`: **480 unique (test binary, test name) cases**, matching the affected run.
+
+Worker-local evidence and SHA-256:
+
+- `/workspace/shared/task087-evidence/old-source-red.log`: `d0be3978b1fee2fdd98fc1ee73b3c3d68e94665947c8fbbe5d68ef82b3c6030d`.
+- `/workspace/shared/task087-evidence/restart-regression.log`: `b51db18c7c4d4026dfeb462cc04f525cc5f9de2a6c5434004931274b61b28717`.
+- `/workspace/shared/task087-evidence/query-unit.log`: `12996ff00c399d90b8985047aaa400df845047ad490e425f64935e3b105e8a36`.
+- `/workspace/shared/task087-evidence/affected-gate.log`: `6978a027a65b21478c9c7db4bf918a44afb3dbd123d3cf17caef7828b3d50791`.
+- `/workspace/shared/task087-evidence/affected-test-list.log`: `aa6dfda8909055fe60dafeb81a61e5eab0001792c63f072379473b6dfd71ff05`.
+
+## Remaining boundaries
+
+- This is an **affected-package** gate, not the root's composed full-workspace run or independent review. Root owns integration with concurrent diagnostics changes, full workspace `--list`/gate, and publication. No push, remote or main action was performed here.
+- The existing raw native owner/collaboration execution APIs remain retained-execution APIs; public `turn.result`/`turn.wait` routing and the typed/stdio/WSS query DTO use the saved-fact projection. `turn.get`, `turn.list`, tool/output APIs and execution caches were not expanded into historical execution recovery.
+- A loaded journal's opening baseline is an existing accepted saved source, not a live disk cache. Current results are always read from their actual owner. Missing original LoadId/config/revisions/counters/full Fault stay absent. No historical execution is resumed or fabricated.
+- A read cannot restore or infer a terminal result from a valid unfinished log; it returns `SESSION_TURN_NOT_FOUND`. Whole-file storage corruption/missing-file failures remain the original load Faults. Existing pending save state is never acknowledged or repaired by reading.
+- SPEC hash, Runtime revision, lock file, TUI, and stored record schema remain unchanged. No live provider/TUI validation is claimed.
