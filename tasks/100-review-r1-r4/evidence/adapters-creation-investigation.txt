@@ -1,0 +1,42 @@
+Existing adapters creation test hang investigation
+Base integrated commit: ac503cd7b4ba85a62594f34f10120f0dd7b60752
+Investigator: R1 worker; requested Astra/xhigh (not independently verified).
+
+Observed failure and evidence limits
+- Root's second full workspace gate stopped making progress in adapters::accepted_creation_outlives_timeout_abandonment_and_disconnect; the test reported running over 60s and remained unfinished for several minutes. No validation-gate 10s panic appeared. Root preserved that exact run as integrated/full-gate-timeout-hang.log, then interrupted it (exit 130).
+- The original uninstrumented hanging process was not captured with a thread stack. We do not claim its exact suspended await was dynamically identified. Its symptom is consistent with the concrete, independently reproduced fixture bug below.
+- The first full-gate attempt had passed this same test. A later guarded diagnostic run also passed its original four cases. Those passing runs do not negate the reproduced timing assumption defect.
+
+Concrete root cause in the fixture
+- Local HostClient::create_agent wraps the whole operation in its client Deadline.
+- Host::accept_agent_creation awaits spawn_blocking validation #1 before registering any accepted creation owner/receipt.
+- The old test used a 30ms client wait while gating validation #2 (the accepted default Session). If scheduling/validation consumes the 30ms first, the local waiting future is dropped before admission. Its blocking validation alone may finish, but no Agent owner/receipt/default Session creation exists and validation #2 will never run.
+- The test unconditionally awaited gate.entered for #2 without a deadline. The gate's own 10s safeguard cannot trigger because its blocking method was never entered. Thus a legitimate pre-admission timeout can make the test itself wait forever.
+- This precedes R1's Session publication handoff and R2's model binding. No production creation/stdio regression was established.
+
+Controlled dynamic reproduction
+Temporary fixture-only probe deliberately blocked validation #1, then awaited the actual 30ms SDK call. Logged facts:
+  outcome = WaitTimeout { wait_timeout_ms: 30 }
+  validate_calls = 1
+  receipt = HostReceiptNotFound (no owner retains facts)
+After releasing #1 and arming #2, a bounded observation found #2 unentered and validate_calls still 1. The original unbounded wait would have no producer. No artificial sleep was used to force the deadline: the explicit validation gate held the pre-admission work.
+Log: adapters-creation-diagnosis.log. Same run instrumented original gate, server-close and model-start awaits with 3s stage guards and printed all four branch stages; those original cases passed in that run.
+
+Narrow final test-only repair (root approved approach)
+- AgentCreate continues to test accepted work surviving abandonment and disconnect, in both local and stdio modes, only after the default-Session gate proves actual admission.
+- Existing-Agent SessionCreate tests both the real 30ms SDK WaitTimeout and abandonment in both modes. Its direct owner accepts synchronously before its first await, so a local client timeout cannot cancel pre-admission validation as in AgentCreate. For RPC, request bytes are queued before the response wait; client timeout only removes correlation, and the test waits for actual Session acceptance before closing the channel.
+- Shared helper retains the creation receipt and successful initial-message assertions, replacement operation right, real model completion and exactly one model call. It now also checks exact Session count, alongside the existing exactly-one-Agent check, to exclude duplicate creation/resend.
+- Acceptance gate, aborted waiter, client deadline, stdio close and model-start waits have bounded, named phase diagnostics. Existing receipt-settlement wait remains bounded. No production timeout, validation, owner, transport or manifest changed; the 30ms timeout is not increased.
+- Added a focused pre-admission timeout case that explicitly expects no retained receipt and no Agent. It releases the validation worker before assertions to avoid leaving a gate blocked on assertion failure.
+
+Validation
+- cargo test -p minicore-host-transport --test adapters --locked -- --nocapture: 13 passed, 0 failed, 0 ignored, 0.16s (includes six accepted-creation mode/exit combinations and the separate pre-admission case).
+- cargo fmt --all --check and git diff --check: clean.
+- Final log: adapters-creation-green.log.
+- Full integrated gate remains root's responsibility; no repeat full gate was run here.
+
+Final commit and lint
+- Commit: c8076980306a6c7e581d90513edd50038c764c8e
+- Subject: test(transport): fence creation waits after actual acceptance
+- cargo clippy -p minicore-host-transport --test adapters --locked -- -D warnings: passed, exit 0 (14.02s).
+- Worktree clean; no push.

@@ -1,6 +1,40 @@
 # MiniCore Host
 
-## Fixed backend review entry
+## Review fixes on dev
+
+The first two independent-review batches, **R1-R4**, are implemented at code
+checkpoint [564a4865cbd979d6dab61498c52453e322ef2aad](https://github.com/zqcli/minicore-host/commit/564a4865cbd979d6dab61498c52453e322ef2aad),
+equivalent to verified source `094d261d42449fc0612a5755763f22c086332967`, tree
+`b932ddd3c3579eff1c8080544b6d24c7a4f44cae`. The review/fix base is
+`628c17312149d76ab1d3ecc84bdb1723e6d6309a`.
+
+- Session publication inherits the accepted Agent shutdown phase before creation
+  work settles, preserving actual cleanup and root-lock release barriers.
+- A repeated upstream ToolCallId within one public Turn is rejected before
+  Runtime assembly, tool execution or accepted history. Prior tool facts remain
+  intact, and failed persistent Turns and force shutdown can finish.
+- Full `agent inspect` Turn output uses the existing held/saved result path,
+  including after restart, without fabricated execution metadata.
+- Public live/held/saved/cold input history preserves actual message identity,
+  source, mode and reply association through the existing provenance records.
+
+The integrated full gate passes **953 unique Rust tests, 4 doctests and 28 Python
+checks**, with strict Clippy/rustdoc, rustfmt and whitespace. The unique inventory
+adds 14 cases over the review baseline. All four fixes passed independent source
+review. Integration also corrected two existing test assumptions; the report
+records both failures, the controlled diagnosis and the final passing result.
+Production Rust changes are +239/-34 text lines; SPEC v4.93, Runtime 0.10.0 at
+`3aa47629929906832dcb309afb7d242c1ae3e53f`, manifests and Cargo.lock are unchanged.
+
+[Task100](tasks/100-review-r1-r4/TASK.md) and its
+[validation manifest](tasks/100-review-r1-r4/validation.json) give exact code
+objects, scope, review records and reproduction commands. Original test logs are
+retained locally and excluded from this publication after an automatic approval
+review rejected a raw-log upload. Actual TUI/external
+provider acceptance and measured long-history performance remain later review
+batches. The following entries preserve the earlier backend checkpoints.
+
+## Previous fixed backend review entry
 
 Review the backend code at **[`be0e99552d283289fb1c0cc13915874ce0ba757f`](https://github.com/zqcli/minicore-host/commit/be0e99552d283289fb1c0cc13915874ce0ba757f)** on `dev`, exact source `c22d8c8af058b756d5f37bc6d1a01f1dc7749934`, tree `a805cb4f6bf0d817fdf5d06226f8638e14ba95e6`. For whole-backend review compare with unchanged README-only `main` `b341b163e14543bfbe7f8d392ea243b4a123cdf7`; for the final diagnostic increment compare with `53167d3117323d2b126c453fbb53fa980bdb72ee`.
 

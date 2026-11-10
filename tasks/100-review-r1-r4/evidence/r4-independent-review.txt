@@ -1,0 +1,35 @@
+R4 independent review
+Reviewed commit: 4e6a41fa57db214daa24f0b39c4d4f85dac8e704
+Parent: 310d4c9f9cc1064fdf26a24537facbaf79acf607
+Reviewer: R2 worker, requested Astra / xhigh (effective runtime setting not independently verified)
+Date: 2026-11-10
+
+Conclusion: PASS. No blocking correctness, ownership, provenance or compatibility finding in the R4 delta. Reviewed exact commit with git show and read the matching clean host-fix-r34 worktree. No production/test edits and no duplicate test runs; author evidence was inspected and root owns the integrated full gate.
+
+Public input facts:
+- HistoryItemData::User gains optional message_id, source, mode and in_reply_to, with default/omit-None wire handling. Existing native-only input intentionally produces no fabricated metadata.
+- from_input copies the actual Host MessageId, trusted MessageSource, original MessageMode and optional reply association. It retains the native input text, without parsing prompt text or matching equal bodies.
+- from_entry forwards actual HistoryEntry::Input to the same from_input helper. Live acceptance now projects the already-constructed entries rather than Runtime HistoryItem values that lack those Host facts. Cold history, validated reload and saved Turn Input projection reuse from_entry.
+- Existing typed pattern matches gained '..'; their text assertions were not weakened or replaced. No storage schema, source-authority or ID generation changes.
+
+Held-result native position invariant:
+- ActiveTurn.start_history is captured from SessionState.history.len() at public Turn binding, before its first accepted input. Completion still copies the native suffix beginning at that position. The new private RetainedTurnResult stores that same start once, alongside the existing result, without another message index/transcript.
+- project_history enumerates the retained native slice and consults the existing InputProvenance at start_history + offset. It does not use response_index, public readable-row positions, message order guesses, matching text, or the latest Turn.
+- accept_history creates one HistoryEntry per Runtime native item, records input provenance at prior native length + item offset, then extends native history and readable history in the same owner lock. The existing accepted/save ordering is preserved.
+- InputProvenance carries MessageMode solely for public rendering; serde(skip) preserves the exact previous private model-prompt metadata format.
+
+Lifecycle and alternate-history checks:
+- replace_history builds local raw/provenance/projection values before replacing owner fields. It records provenance using raw.len() only for entries with runtime_item(), so terminal rows, partials and compaction markers cannot shift native offsets. Failed compaction validation leaves original owner values intact.
+- Compaction changes the separate projection and readable marker, not SessionState.history's raw native prefix. Synthetic summaries do not receive fabricated input facts.
+- Unload keeps native history, provenance and completed results while changing residency/load flags. Validated subsequent loads rebuild the native sequence from the same append-only journal. The retained starting position therefore continues to identify each earlier native slice across ordinary unload/reload and later Turns.
+- Reclamation removes completed results, native history and provenance together, sets reclaimed, and queries check visibility; an old held result cannot remain queryable against a cleared provenance table.
+- Saved-only results retain the existing disk-only semantics: no old LoadId/config/revision/queue is reconstructed. Only actual Input rows acquire metadata, and response indexes for input remain absent.
+
+Regression/evidence inspected (not claimed as independently rerun):
+- r34/inspect-and-history.log: 5/5 cases, including two equal original bodies with distinct IDs and a Steer/reply relation; held results after later Turns and unload/reload; cold/saved parity after restart; old message lookup remains unavailable.
+- The actual child creation/completion-notification case exercises the real AgentTool, child owner, parent notification and Runtime. It asserts parent-as-source on child input, child-as-source on notification, task MessageId reply relation, full body, live/held/cold/saved consistency, and no restarted execution.
+- r34/core-lib.log: 111/111 cases. Added InputProvenance assertions cover terminal/compaction/native position distinctions and unknown legacy metadata adjacent to equal-text known input. Existing prompt-shape tests remain intact.
+- r34/saved-result-restart.log: 4/4; r34/host-integration.log: 9/9.
+- r34/clippy.log and r34/rustdoc.log finish successfully; format log is clean.
+
+No additional test was run because source inspection found no concrete uncovered defect requiring another probe. New fixtures are explicitly scripted models with real Host/Runtime/AgentTool/storage; this review does not establish live provider, TUI, long-duration or capacity acceptance.
