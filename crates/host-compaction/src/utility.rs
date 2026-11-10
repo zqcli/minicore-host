@@ -1,5 +1,6 @@
 use crate::{
     CompactionCandidate, CompactionError, CompactionPlan, estimate_request_tokens,
+    plan::{serialized_request_bytes, serialized_string_content_bytes},
     source::group_data,
 };
 use futures_util::StreamExt;
@@ -82,6 +83,10 @@ async fn generate_inner(
     while position < plan.groups.len() {
         check_active(&context)?;
         let mut records = Vec::new();
+        // The empty request supplies the actual Runtime envelope, instructions,
+        // prior summary, limits and reasoning. Only the array's contents grow.
+        let mut request_bytes =
+            serialized_request_bytes(&utility_request(plan, previous.as_ref(), &[])?)?;
         let mut end = position;
         // Leave the desired summary room when possible; this is a chunking
         // signal, not a hard token ceiling or an application capacity quota.
@@ -93,16 +98,21 @@ async fn generate_inner(
         loop {
             check_active(&context)?;
             let group = &plan.groups[end];
-            records.push(group_data(
+            let record = group_data(
                 &plan.source.items[group.clone()],
                 &plan.original.messages()
                     [plan.message_offset + group.start..plan.message_offset + group.end],
-            )?);
-            let proposed = utility_request(plan, previous.as_ref(), &records)?;
-            if end > position && estimate_request_tokens(&proposed)? > chunk_goal {
-                records.pop();
+            )?;
+            let proposed_bytes = request_bytes
+                .saturating_add(utility_record_bytes(&record)?)
+                .saturating_add(u64::from(!records.is_empty()));
+            // Round once for the complete request. A first oversized exchange
+            // remains indivisible and is still sent to the actual provider.
+            if end > position && proposed_bytes.div_ceil(4) > chunk_goal {
                 break;
             }
+            records.push(record);
+            request_bytes = proposed_bytes;
             end += 1;
             if end == plan.groups.len() {
                 break;
@@ -163,6 +173,19 @@ async fn generate_inner(
         after_tokens,
         utility_usage: Vec::new(),
     })
+}
+
+fn utility_record_bytes(record: &Value) -> Result<u64, CompactionError> {
+    let text = serde_json::to_string(record).map_err(|_| CompactionError::Serialization)?;
+    // Validate before the size decision, including a rejected next exchange.
+    // JSON escapes C0 controls, but can still contain other invalid user text.
+    // The same Runtime constructor validates the fully materialized request.
+    let ModelMessage::User(text) =
+        ModelMessage::user(text).map_err(|_| CompactionError::Serialization)?
+    else {
+        unreachable!("Runtime's user constructor returns a user message")
+    };
+    serialized_string_content_bytes(&text)
 }
 
 fn utility_request(
@@ -291,3 +314,6 @@ async fn call_model(
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

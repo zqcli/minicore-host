@@ -213,9 +213,20 @@ pub fn estimate_context(
 }
 
 pub fn estimate_request_tokens(request: &ModelRequest) -> Result<u64, CompactionError> {
+    Ok(serialized_request_bytes(request)?.div_ceil(4))
+}
+
+pub(crate) fn serialized_request_bytes(request: &ModelRequest) -> Result<u64, CompactionError> {
     let mut counter = ByteCounter::default();
     serde_json::to_writer(&mut counter, request).map_err(|_| CompactionError::Serialization)?;
-    Ok(counter.tokens())
+    Ok(counter.0)
+}
+
+/// Bytes added inside a JSON string, excluding its two enclosing quotes.
+pub(crate) fn serialized_string_content_bytes(text: &str) -> Result<u64, CompactionError> {
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer(&mut counter, text).map_err(|_| CompactionError::Serialization)?;
+    Ok(counter.0.saturating_sub(2))
 }
 fn estimate_messages(messages: &[ModelMessage]) -> Result<u64, CompactionError> {
     let mut counter = ByteCounter::default();
