@@ -2,6 +2,8 @@
 //! Scripted model streams drive real Host/Runtime owners and real OS pipes.
 #![cfg(unix)]
 mod common;
+#[path = "task081_query_support/pipe.rs"]
+mod query_pipes;
 use common::*;
 use minicore_host_core::{
     ActivityEvent, Host, HostSettings, ObservationEvent, ObservationNotification, StateEvent,
@@ -9,6 +11,7 @@ use minicore_host_core::{
 };
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
+use query_pipes::stdio_pipes;
 use std::time::Duration;
 
 fn subscription(session: &SessionClient, turn: &TurnId) -> SubscribeRequest {
@@ -199,8 +202,7 @@ async fn finished_transition_owns_a_revision_and_all_queries_keep_it_during_late
     resources.model.finish.add_permits(1);
     session.wait_turn(second, options(5000)).await.unwrap();
     assert_retained(&reader, &observed, &finished, &original).await;
-    reader.close();
-    server.await.unwrap().unwrap();
+    server.close(&reader).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -262,6 +264,5 @@ async fn persistent_unload_reload_preserves_original_terminal_revision_and_load(
     resources.model.finish.add_permits(1);
     session.wait_turn(next, options(5000)).await.unwrap();
     assert_retained(&reader, &observed, &finished, &original).await;
-    reader.close();
-    server.await.unwrap().unwrap();
+    server.close(&reader).await;
 }
