@@ -108,13 +108,10 @@ impl SessionController {
             None
         };
         diagnostic::emit(record);
-        let content = cold.map(|entries| {
-            entries.map(|entries| {
-                entries
-                    .iter()
-                    .filter_map(HistoryItemData::from_entry)
-                    .collect::<Vec<_>>()
-            })
+        let mut content = cold.and_then(|entries| {
+            entries
+                .map(|entries| self.cold_history_page(&entries, start, request.limit))
+                .transpose()
         });
         loop {
             // Register before checking publication, including when load completed
@@ -131,8 +128,8 @@ impl SessionController {
                     return self.history_page(history, start, request.limit).map(Some);
                 }
                 Self::available(&state)?;
-                match &content {
-                    Ok(Some(history)) => self.history_page(history, start, request.limit).map(Some),
+                match &mut content {
+                    Ok(page @ Some(_)) => Ok(page.take()),
                     Ok(None) if state.preparing => Ok(None),
                     Ok(None) => Err(state.block_reason.clone().unwrap_or_else(|| {
                         Fault::new(
@@ -152,6 +149,38 @@ impl SessionController {
             }
         }
     }
+    fn cold_history_page(
+        &self,
+        history: &[HistoryEntry],
+        start: usize,
+        limit: u64,
+    ) -> Result<SessionHistorySnapshot, Fault> {
+        // The backend has already validated every record, including the suffix
+        // outside this page. Count public positions without projecting bodies.
+        let mut entries = history
+            .iter()
+            .filter(|entry| !matches!(entry, HistoryEntry::TurnFinished { .. }));
+        if entries.by_ref().take(start).count() < start {
+            return Err(history_cursor_beyond_tail());
+        }
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let items = entries
+            .by_ref()
+            .take(limit)
+            .map(|entry| {
+                HistoryItemData::from_entry(entry).expect("content entry has public history data")
+            })
+            .collect::<Vec<_>>();
+        let end = start.saturating_add(items.len());
+        let next_cursor = entries
+            .next()
+            .is_some()
+            .then(|| format!("v1.{}.{}.{}", self.incarnation, self.id, end));
+        Ok(SessionHistorySnapshot {
+            source: self.identity(),
+            data: HistoryPageData { items, next_cursor },
+        })
+    }
     fn history_page(
         &self,
         history: &[HistoryItemData],
@@ -159,10 +188,7 @@ impl SessionController {
         limit: u64,
     ) -> Result<SessionHistorySnapshot, Fault> {
         if start > history.len() {
-            return Err(Fault::new(
-                FaultKind::SessionHistoryCursorInvalid,
-                "history cursor is beyond the retained content",
-            ));
+            return Err(history_cursor_beyond_tail());
         }
         let limit = usize::try_from(limit).unwrap_or(usize::MAX);
         let end = start.saturating_add(limit).min(history.len());
@@ -201,6 +227,13 @@ impl SessionController {
         }
         Ok(index)
     }
+}
+
+fn history_cursor_beyond_tail() -> Fault {
+    Fault::new(
+        FaultKind::SessionHistoryCursorInvalid,
+        "history cursor is beyond the retained content",
+    )
 }
 
 fn history_reader_revoked() -> Fault {

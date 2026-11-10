@@ -615,6 +615,154 @@ async fn cold_read_is_read_only_and_preserves_pause_and_queued_input() {
 }
 
 #[tokio::test]
+async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent_records() {
+    use minicore_runtime::{
+        AssistantHistory, UserHistory, UserMessageKind,
+        model::{AssistantPart, ModelPartial, Usage},
+    };
+
+    let fixture = setup(|inner| inner);
+    let turn_id = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let message_id = MessageId::new().unwrap();
+    let reply = MessageId::new().unwrap();
+    // Explicit saved-record fixture spanning every public content variant.
+    let entries = vec![
+        HistoryEntry::Input {
+            turn_id: turn_id.clone(),
+            message_id: message_id.clone(),
+            source: MessageSource::User,
+            mode: MessageMode::Steer,
+            in_reply_to: Some(reply.clone()),
+            user: UserHistory {
+                loop_id,
+                kind: UserMessageKind::Steering,
+                input: UserInput::text("original input 原文").unwrap(),
+            },
+        },
+        HistoryEntry::Runtime {
+            turn_id: turn_id.clone(),
+            response_index: 0,
+            item: HistoryItem::Assistant(AssistantHistory {
+                loop_id,
+                request_index: 0,
+                model: "test/model".parse().unwrap(),
+                reasoning: ReasoningPreference::Auto,
+                content: vec![AssistantPart::Text("complete response".into())],
+                provider_replay: None,
+                finish_reason: ModelFinishReason::Stop,
+                usage: Usage::default(),
+            }),
+        },
+        HistoryEntry::Partial {
+            turn_id: turn_id.clone(),
+            loop_id,
+            response_index: 1,
+            partial: ModelPartial {
+                request_index: 1,
+                content: vec![AssistantPart::Text("unfinished response".into())],
+                incomplete_tool_calls: Vec::new(),
+                usage: None,
+                provider_replay: None,
+            },
+        },
+        HistoryEntry::TurnFinished {
+            turn_id,
+            outcome: TurnOutcome::Cancelled,
+            reason: Some("saved-record fixture".into()),
+        },
+        summary("literal summary"),
+        HistoryEntry::Compaction {
+            source_position: 6,
+            covered_items: 1,
+            summary: SummaryHistory {
+                content: Text::new("compacted seed"),
+            },
+        },
+        HistoryEntry::TurnFinished {
+            turn_id: TurnId::new().unwrap(),
+            outcome: TurnOutcome::Completed,
+            reason: None,
+        },
+    ];
+    let mut journal = fixture.store.open_journal().unwrap();
+    journal.accept(entries.clone()).unwrap();
+    journal.persist_pending().unwrap();
+    drop(journal);
+    let expected = std::iter::once(summary("persisted seed"))
+        .chain(entries)
+        .filter_map(|entry| HistoryItemData::from_entry(&entry))
+        .collect::<Vec<_>>();
+    assert_eq!(expected.len(), 6);
+    assert!(matches!(
+        &expected[1],
+        HistoryItemData::User {
+            text, message_id: Some(id), source: Some(MessageSource::User),
+            mode: Some(MessageMode::Steer), in_reply_to: Some(actual_reply),
+        } if text == "original input 原文" && id == &message_id && actual_reply == &reply
+    ));
+    for limit in [1, 2, 3, 100] {
+        let mut cursor = None;
+        let mut actual = Vec::new();
+        loop {
+            let page = fixture
+                .session
+                .history_read(
+                    &fixture.connection.caller(),
+                    &HistoryReadRequest { cursor, limit },
+                )
+                .await
+                .unwrap();
+            actual.extend(page.data.items);
+            cursor = page.data.next_cursor;
+            if cursor.is_none() {
+                break;
+            }
+            assert_eq!(
+                cursor,
+                Some(format!(
+                    "v1.{}.{}.{}",
+                    fixture.session.incarnation,
+                    fixture.session.id,
+                    actual.len()
+                ))
+            );
+        }
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(&expected).unwrap()
+        );
+    }
+    for position in [expected.len(), expected.len() + 1] {
+        let result = fixture
+            .session
+            .history_read(
+                &fixture.connection.caller(),
+                &HistoryReadRequest {
+                    cursor: Some(format!(
+                        "v1.{}.{}.{position}",
+                        fixture.session.incarnation, fixture.session.id
+                    )),
+                    limit: 1,
+                },
+            )
+            .await;
+        if position == expected.len() {
+            let page = result.unwrap();
+            assert!(page.data.items.is_empty());
+            assert!(page.data.next_cursor.is_none());
+        } else {
+            assert_eq!(
+                result.unwrap_err().kind(),
+                Some(FaultKind::SessionHistoryCursorInvalid)
+            );
+        }
+    }
+    assert!(!fixture.session.state.lock().unwrap().history_loaded);
+    assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn corrupt_and_partial_cold_histories_fail_without_repair_or_prefix() {
     use std::io::Write;
     for tail in [b"{broken}\n".as_slice(), b"{\"schema_version\":".as_slice()] {
