@@ -393,3 +393,21 @@ fixtures and are not called live provider tests. Outputs are
 `task053-session-acceptance-tests.log`, `task053-session-acceptance-fences.log`
 and `task053-session-acceptance-clippy.log`. Formatting and diff checks passed.
 The remaining Session terminal/save/cleanup/close paths are not yet claimed.
+
+The first later full core run found one private task071 fixture that directly
+called `receive_delegated_owned` and ignored its new must-use Record. All core
+business cases passed, but strict Clippy correctly rejected that unused record.
+The fixture now emits its returned Record after the direct call returns (it has
+no outer admission guard). Its original business assertions are unchanged. The
+three task071 private cases and core+transport all-target strict Clippy pass after
+this adaptation; the original warning/failure output remains in
+`task053-terminal-core-all.log` and `task053-terminal-clippy.log`. This small
+fixture adjustment belongs to the accepted-input signature, not a production
+terminal-state change.
+
+Second environment replacement: the preceding fixture change and task paragraph
+are recovered from exact visible edit/append commands for old source
+50a644ad552ae6c790ab67ce39e366bfefaa773d. The cited old local log files no longer
+exist. Their outcomes above are historical, not a fresh validation claim. This
+isolated reconstruction starts from verified remote 8c5fe493f9b9e78e15ef831c532bc267d0c7fb53;
+new environment validation is pending. No root checkout or remote was modified.

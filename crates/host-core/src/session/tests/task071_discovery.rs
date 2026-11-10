@@ -302,7 +302,9 @@ async fn task071_result_handoff_and_scope_cleanup_are_published_before_waits() {
     fixture
         .session
         .receive_delegated_owned(&registration, &scope.state, root_ref, message)
-        .unwrap();
+        .unwrap()
+        .1
+        .emit();
     fixture.session.wake_owned();
     tokio::time::timeout(Duration::from_secs(5), sink.entered.acquire())
         .await
