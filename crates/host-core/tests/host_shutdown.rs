@@ -16,8 +16,8 @@ use minicore_runtime::{
 use std::{
     collections::BTreeSet,
     sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -489,6 +489,241 @@ fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_messag
         let creation = worker.await.unwrap().unwrap();
         assert!(!creation.result.steps.message.as_ref().unwrap().succeeded());
         stopped(&host, &caller).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_ok());
+    });
+}
+
+struct CreationSaveGate {
+    resources: Arc<dyn ResourceResolver>,
+    validations: AtomicUsize,
+    block_on_validation: usize,
+    blocker_started: Arc<Semaphore>,
+    release: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    park_armed: Arc<AtomicBool>,
+    parked: Arc<Semaphore>,
+}
+impl ResourceResolver for CreationSaveGate {
+    fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        self.resources.validate(config)?;
+        if self.validations.fetch_add(1, Ordering::SeqCst) + 1 == self.block_on_validation {
+            let release = self.release.lock().unwrap().take().unwrap();
+            // Validation runs on the only blocking worker. Queue this fixture
+            // before returning, so the next real creation save cannot execute.
+            let blocker_started = self.blocker_started.clone();
+            tokio::task::spawn_blocking(move || {
+                blocker_started.add_permits(1);
+                let _ = release.recv();
+            });
+        }
+        Ok(())
+    }
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
+        self.resources.resolve(config)
+    }
+}
+impl CreationSaveGate {
+    async fn wait_for_save(&self) {
+        // The blocker starts after validation has returned its result. Wait for
+        // it before arming the current-thread runtime's next idle boundary.
+        tokio::time::timeout(Duration::from_secs(3), self.blocker_started.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+        self.park_armed.store(true, Ordering::SeqCst);
+        // At idle, the runnable creation has resumed from validation and queued
+        // its real save behind the blocker. No fixed sleep/yield count is needed.
+        tokio::time::timeout(Duration::from_secs(3), self.parked.acquire())
+            .await
+            .unwrap()
+            .unwrap()
+            .forget();
+    }
+}
+fn creation_save_gate(
+    block_on_validation: usize,
+) -> (
+    tokio::runtime::Runtime,
+    Arc<CreationSaveGate>,
+    std::sync::mpsc::Sender<()>,
+    Arc<AtomicUsize>,
+) {
+    let park_armed = Arc::new(AtomicBool::new(false));
+    let parked = Arc::new(Semaphore::new(0));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .on_thread_park({
+            let park_armed = park_armed.clone();
+            let parked = parked.clone();
+            move || {
+                if park_armed.swap(false, Ordering::SeqCst) {
+                    parked.add_permits(1);
+                }
+            }
+        })
+        .build()
+        .unwrap();
+    let (resources, _, _, calls) = resources();
+    let (release, receiver) = std::sync::mpsc::channel();
+    let gate = Arc::new(CreationSaveGate {
+        resources,
+        validations: AtomicUsize::new(0),
+        block_on_validation,
+        blocker_started: Arc::new(Semaphore::new(0)),
+        release: Mutex::new(Some(receiver)),
+        park_armed,
+        parked,
+    });
+    (runtime, gate, release, calls)
+}
+
+async fn stopped_after_creation(host: &Host, caller: &CallerContext) {
+    let info = until(|| {
+        let info = host.info(caller).unwrap();
+        (info.lifecycle == HostLifecycle::Stopped || info.shutdown_fault.is_some()).then_some(info)
+    })
+    .await;
+    assert_eq!(info.lifecycle, HostLifecycle::Stopped, "{info:?}");
+    assert!(info.shutdown_fault.is_none());
+}
+
+fn shutdown_at_default_save(strategy: HostShutdownStrategy, before_publication: bool) {
+    // Agent admission validates first; its accepted default Session validates
+    // second. A memory default has no Session save before the Agent default save.
+    let (runtime, resources, release, calls) = creation_save_gate(2);
+    runtime.block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let mut request = request(StorageMode::Persistent);
+        request.default_session = Some(SessionOptions {
+            mode: Some(StorageMode::Memory),
+            overrides: None,
+        });
+        if before_publication && strategy == HostShutdownStrategy::Force {
+            request.initial_message = Some(input("must not start after default save"));
+        }
+        let operation = request.operation_id.clone();
+        let creating = tokio::spawn({
+            let host = host.clone();
+            let caller = caller.clone();
+            async move { host.create_agent_async(&caller, request).await }
+        });
+        resources.wait_for_save().await;
+        let receipts = host.creation_receipts(&caller, &operation).unwrap();
+        assert_eq!(resources.validations.load(Ordering::SeqCst), 2);
+        assert!(receipts[0].agent_id.is_some());
+        assert!(receipts[0].session_id.is_none());
+        assert!(receipts[0].result.steps.agent.succeeded());
+        assert_eq!(receipts[0].result.steps.session, CreateStep::Running);
+        if before_publication {
+            shutdown(&host, &caller, strategy);
+            assert_ne!(
+                host.info(&caller).unwrap().lifecycle,
+                HostLifecycle::Stopped
+            );
+            assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_err());
+        }
+        release.send(()).unwrap();
+        let created = tokio::time::timeout(Duration::from_secs(3), creating)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(created.result.steps.session.succeeded(), "{created:?}");
+        if before_publication && strategy == HostShutdownStrategy::Force {
+            assert!(matches!(
+                created.result.steps.message,
+                Some(CreateStep::Failed { ref error })
+                    if error.kind() == Some(FaultKind::HostLifecycleUnavailable)
+            ));
+        }
+        if !before_publication {
+            shutdown(&host, &caller, strategy);
+        }
+        stopped_after_creation(&host, &caller).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_ok());
+    });
+}
+
+#[test]
+fn force_during_default_save_reaches_stopped_without_initial_execution() {
+    shutdown_at_default_save(HostShutdownStrategy::Force, true);
+}
+
+#[test]
+fn force_after_default_publication_reaches_stopped() {
+    shutdown_at_default_save(HostShutdownStrategy::Force, false);
+}
+
+#[test]
+fn graceful_during_default_save_reaches_stopped() {
+    shutdown_at_default_save(HostShutdownStrategy::Graceful, true);
+}
+
+#[test]
+fn force_during_existing_agent_session_save_reaches_stopped() {
+    // The first two validations create the Agent and its default Session.
+    let (runtime, resources, release, calls) = creation_save_gate(3);
+    runtime.block_on(async {
+        let dir = tempfile::tempdir().unwrap();
+        let host = Host::open_persistent(dir.path(), settings(), resources.clone())
+            .await
+            .unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let original = create(&host, &caller, StorageMode::Persistent).await;
+        let target = AgentRef {
+            host_id: host.info(&caller).unwrap().host_id,
+            agent_id: original.agent_id,
+        };
+        let operation = OperationId::new().unwrap();
+        let creating = tokio::spawn({
+            let host = host.clone();
+            let caller = caller.clone();
+            let target = target.clone();
+            let operation_id = operation.clone();
+            async move {
+                host.create_session_async(
+                    &caller,
+                    SessionCreate {
+                        operation_id,
+                        target,
+                        mode: Some(StorageMode::Persistent),
+                        overrides: None,
+                        initial_message: Some(input("must not start after Session save")),
+                    },
+                )
+                .await
+            }
+        });
+        resources.wait_for_save().await;
+        let pending = host
+            .session_creation_receipt(&caller, &target, &operation)
+            .unwrap();
+        assert_eq!(pending.result.steps.session, CreateStep::Running);
+        assert!(pending.session_id.is_none());
+        shutdown(&host, &caller, HostShutdownStrategy::Force);
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_err());
+        release.send(()).unwrap();
+        let created = tokio::time::timeout(Duration::from_secs(3), creating)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(created.result.steps.session.succeeded(), "{created:?}");
+        assert!(matches!(
+            created.result.steps.message,
+            Some(CreateStep::Failed { ref error })
+                if error.kind() == Some(FaultKind::HostLifecycleUnavailable)
+        ));
+        stopped_after_creation(&host, &caller).await;
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_ok());
     });
