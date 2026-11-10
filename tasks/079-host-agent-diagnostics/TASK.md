@@ -104,7 +104,7 @@ Fresh validation with the Rust environment/isolated target above:
 - The first all-core run exposed a fixture race: it closed the writer immediately after observing business publication while another Runtime poll could still emit its diagnostic tail. The fixture now shuts down its test-owned Runtime before flushing the independent writer. It does not make production business publication wait for logging. The corrected gated-save test passed 12 consecutive runs, then the complete core suite passed. No old environment result is counted.
 - Logs are in `/workspace/shared/task079-metadata-evidence/`: `core-tests-final.log`, `core-list.log`, `clippy-final.log`, `rustdoc-final.log`, `owned-poll-repeat.log`. Earlier diagnostic/harness failures remain in `core-tests.log` and the initial focused logs rather than being reported as green.
 
-Independent review of this new metadata scope is pending. Reclamation and later deletion/shutdown summaries remain a separate next slice.
+At publication, independent review of this new metadata scope was pending. TASK082 has subsequently approved fixed source `19e7bbba78f70be61732452d34fbfc717e564e15`; the approval and later reclaim scope are distinguished in the final checkpoint below.
 
 ## Owner reclamation and resource-release slice
 
@@ -123,6 +123,16 @@ Fresh validation, same pinned Rust/dependency environment and isolated target:
 - The first reaper test initially used an already completed Runtime, which legitimately retired synchronously and retained its known close operation. The fixture now keeps the real Runtime running on an explicitly pending model stream before close, exercising the intended asynchronous reaper without weakening its no-borrowed-operation assertion. This was a test-boundary correction, not a production failure or an old red/green claim.
 - `cargo clippy -p minicore-host-core --lib --tests --locked --offline -- -D warnings`: passed. `RUSTDOCFLAGS='-D warnings' cargo doc -p minicore-host-core --no-deps --locked --offline`: passed. `cargo fmt --all --check` and `git diff --check`: passed.
 - Logs: `/workspace/shared/task079-retirement-evidence/core-tests-final.log`, `core-list-final.log`, `clippy-final.log`, `rustdoc-final.log`; the initial fixture failure remains in `focused.log`.
-- Independent review and integrated-root checks remain pending. The metadata source commit is separately under TASK082 review; this reclamation slice is not covered by an earlier approval.
+- Independent review and integrated-root checks for this reclamation slice remain pending. The metadata source commit has separately received TASK082 scoped approval; that does not cover reclamation.
 
 TASK053's subsequent Session metadata operation bridge has an exact three-line Agent caller patch at `/workspace/shared/task079-session-operation-bridge/agent-callers.patch`, SHA-256 `680218bba204f0703b151cb5be85c6ecc77413b67d0bdefaee744c3b5b51a839`. It was apply-checked against 19e7bbba and handed to TASK053 for one compilable combined Session/caller commit. This branch does not pre-apply those pending Session signatures or duplicate that work.
+
+
+## Final handoff checkpoint
+
+- Completed source increments: mode-race correction `7b44dab873fe8c5143930f130c8c1fec5dcf21d7`; metadata `19e7bbba78f70be61732452d34fbfc717e564e15`; reclamation `28a09dc128ad60d3ea53491054666e2c6ef15ef7`. All three producer worktrees are clean. No push or co-author trailer was added by this worker.
+- TASK082 independently **APPROVED the metadata increment only** at 19e7bbba. Its actual new runs include 317 core cases, 5 extra reviewer cases repeated 20 times, strict lint, rustdoc, fmt and whitespace checks. Report: `/workspace/shared/task082-agent-metadata-review/artifacts/REVIEW-METADATA.md`. Reviewer probe SHA-256: `f83ef5cf34a32886d131e91c15a6c1c4837aef9f69de7231e4fd99fba6408070`; evidence archive SHA-256: `d58cc104075f22ec8a9018571d2e08c93836eed3f750c79b851c05f8e024fac9`. Repeats are not additional unique cases.
+- The parent reports its separate integrated `587318b69a2e1f72d0f82999d3f6f6badacfe0e4` workspace gate passed 908 cases. That source predates 28a09dc; the result is not attributed to this worker or transferred to reclamation.
+- Final producer reclamation evidence remains 324 unique core cases and the strict/doc/fmt checks above. TASK082 reclamation review and the parent's new integrated gate remain due. Existing join-failure diagnostic branches were source-reviewed/instrumented but no private-state forced-panic coverage is claimed.
+- Final range check confirms no Session, shared diagnostic helper, host/collaboration, configuration/resource/schema, Runtime, TUI, SPEC or Cargo.lock modification in the reclamation increment. SPEC and lock hashes remain the pinned values above. PROJECT.md remains parent-owned.
+- Implementation stops at this assigned scope. The pending Session-operation bridge and Runtime-timing work belong to their assigned workers. No new Host/Agent logging scope or extra recovery work is begun.
