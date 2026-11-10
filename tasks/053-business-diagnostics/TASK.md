@@ -1092,3 +1092,83 @@ unique-test inventory are pending on the fixed code commit; no full gate or
 independent approval of this final slice is claimed yet. SPEC/TUI/pins/lock are
 unchanged by the slice. The separate saved-result read-failure check belongs to
 task095, not to a new recovery or logging framework here.
+
+## Final reconstructed producer checkpoint
+
+Fixed code `ecb8af14925d0231ffd1454a88a0a64ee19da393`, tree
+`47486a7203a0c5be5fb6f0ac88a9b774cfaadf96`, now passes this worker's complete
+`./scripts/check.sh` on the separate scheduling target. This is a new run, not a
+restatement of the coordinator's combined gate or of the lost implementation's
+historical approval. The subsequent locked offline all-target inventory contains
+939 unique Rust cases in 126 nonempty test executables. All 939 cases, 4 doctests
+and 20 Python tests pass, together with workspace all-target strict Clippy,
+strict rustdoc, rustfmt and full-history/cached/worktree whitespace checks.
+The tested worktree was clean. Nested storage subprocess output is not counted
+again. `FINAL-SCHEDULING-VALIDATION.json` fixes the source, ordered replay map,
+commands, actual inventory, toolchain, adopted dependency pin and evidence hashes.
+
+Raw outputs from this run are `scheduling-final-full-gate.log` and
+`scheduling-final-workspace-list.log` in
+`/workspace/shared/recovery-053-second/reports`. The final four-slice sequence is
+`dcbfa00`, `06bf117`, `579edef`, `ecb8af1`; the earlier source/replay commits above
+must not also be applied. This documentation checkpoint changes no production
+code or test semantics.
+
+### Section 12 producer audit
+
+- Process ownership and health: one installed application pipeline, shared by
+  multiple real Hosts; an unbound Host has disabled/unknown rather than fabricated
+  counters. HostInfo reads observed atomic facts and never receives the writer
+  guard or depends on successful logging. A Host shutdown cannot own another
+  Host's shared output lifecycle.
+- Transport and provider: actual typed/local/RPC completion, known timeout versus
+  abandoned wait, independent valid identity leaves on rejected requests, and
+  actual provider poll/status/usage facts. No request serialization solely for
+  logging, no second local operation, and no forwarded primary ERROR.
+- Session input and scheduling: real acceptance and binding carry original
+  message links, queue counts and committed revisions. Public controls, load,
+  failure, save continuation and cleanup compare only the existing five scalar
+  scheduling facts. Unchanged facts do not generate a scheduling record.
+- Turn and model: started, first cancellation claim, immediate primary failure,
+  independent finalizing/cleanup failures and true finished barriers are separate.
+  Attempts, usage and retry wait duration come from the actual Runtime report;
+  the earlier missing-wait limitation was resolved by the separately published
+  Runtime `3aa4762` source measurement, not by Host observer timestamps.
+- Storage, close and metadata: actual workers report their own failures, preserving
+  original Faults and known operation identities through the existing explicit
+  continuation. Close accepted and actual Closed remain distinct. No log failure
+  changes persistence, cleanup, memory-retirement or business completion facts.
+- Tools and messages: the original ToolCall owns the actual completion and process
+  wait/exit/cleanup scalars. Actual result handoff and rejected internal send/notify
+  preserve their own original message/task links without inventing a current
+  parent Turn. The same internal work is exercised with no subscriber.
+- The composed base also contains task079's Host/Agent creation, resource,
+  metadata, stop and retirement boundaries, including unpublished-object storage
+  failure ownership, and task088's compaction boundaries and exact original-Fault
+  handoff. Their separate scope/review records remain authoritative; this gate
+  tests their composition rather than claiming to author or independently review
+  them again. The coordinator's task095 audit confirmed saved-result reads already
+  use the existing direct-owner failure record; no extra hook was added here.
+
+### Remaining limits and deliberate exclusions
+
+The authorized producer slices are fixed; final independent diagnostic review
+(including the last scheduling slice) and publication/whole-product acceptance
+remain coordinator work. Passing this workspace gate is not an independent
+APPROVE, live-provider test, TUI validation or full first-version completion.
+
+The two force-cancellation callees and the existing history-save continuation do
+not retain an operation ID. Their actual Session/Turn/Load and phase/reason are
+logged, while that unavailable operation remains absent. In particular, a later
+force claim does not borrow an earlier graceful request's identity. No cross-layer
+lookup, retained log state or extra business parameter chain is invented to fill
+the gap. Unknown process/usage/identity measurements likewise remain absent.
+
+Logging still permits loss; injected/closed-output degradation is not described
+as disk exhaustion, and real storage path/inode refusal is not a fabricated write
+errno. No stdout diagnostic output, bodies, scripts, credentials, whole config,
+Role, owner/event dumps or raw paths are added. No quota/retention budget, export
+service, independent Host writer, speculative rotation policy, logging retry,
+recovery interface or additional business barrier was introduced. SPEC and TUI
+are unchanged. Runtime and Cargo.lock are exactly the adopted public-pin baseline.
+No push was performed by this worker.
