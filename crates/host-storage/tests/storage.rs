@@ -427,7 +427,7 @@ fn corruption_truncation_duplicate_unknown_fields_are_never_repaired() {
     wrong_session["session_id"] = serde_json::json!(SessionId::new().unwrap());
     let mut gap: serde_json::Value = serde_json::from_slice(&good).unwrap();
     gap["position"] = serde_json::json!(2);
-    let bad_cases = vec![
+    let mut bad_cases = vec![
         good[..good.len() - 5].to_vec(),
         [good.clone(), b"{not json}\n".to_vec()].concat(),
         [good.clone(), good.clone()].concat(),
@@ -437,6 +437,23 @@ fn corruption_truncation_duplicate_unknown_fields_are_never_repaired() {
         serde_json::to_vec(&gap).unwrap(),
         b"{\"schema_version\":1,\"schema_version\":1}".to_vec(),
     ];
+    let tool = String::from_utf8(record_bytes(
+        &f.session,
+        vec![tool_response(
+            TurnId::new().unwrap(),
+            LoopId::new().unwrap(),
+        )],
+    ))
+    .unwrap();
+    let arguments = r#"{"path":"file.txt"}"#;
+    assert!(tool.contains(arguments));
+    for duplicate in [
+        r#"{"nested":{"path":"one","path":"two"}}"#,
+        r#"{"nested":[{"path":"one","\u0070ath":"two"}]}"#,
+        r#"{"nested":[{"deeper":[{"n":1,"n":2}]}]}"#,
+    ] {
+        bad_cases.push(tool.replace(arguments, duplicate).into_bytes());
+    }
     for bad in bad_cases {
         fs::write(f.history_path(), &bad).unwrap();
         assert!(f.session.read_history().is_err());
@@ -1047,11 +1064,17 @@ fn a_terminal_partial_prevents_further_records_for_that_loop_without_mutating_ac
 fn exact_json_numbers_are_preserved_or_explicitly_rejected_by_native_codec() {
     let f = Fixture::new();
     let exact = "18446744073709551617";
-    let config: serde_json::Value = serde_json::from_str(&format!("{{\"n\":{exact}}}")).unwrap();
+    let mut config: serde_json::Value =
+        serde_json::from_str(&format!("{{\"n\":{exact}}}")).unwrap();
+    config["nested"] = serde_json::from_str(
+        r#"[{"escaped":"\u4e2d\n\\\"","values":[-18446744073709551617,1.234567890123456789,1e400]}]"#,
+    )
+    .unwrap();
     let host = HostRecord::new(f.host.id().clone(), config, 2);
     f.host.save_host(&host).unwrap();
     let loaded = f.root.load_host::<serde_json::Value>().unwrap().unwrap();
     assert_eq!(loaded.data.config["n"].to_string(), exact);
+    assert_eq!(loaded.data.config, host.data.config);
     let turn = TurnId::new().unwrap();
     let loop_id = LoopId::new().unwrap();
     let good = record_bytes(&f.session, vec![tool_response(turn, loop_id)]);
@@ -1086,6 +1109,28 @@ fn exact_json_numbers_are_preserved_or_explicitly_rejected_by_native_codec() {
         other => panic!("unexpected numeric loading result: {other:?}"),
     }
     assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+}
+#[test]
+fn literal_numeric_transport_marker_keys_remain_ordinary_typed_object_fields() {
+    let f = Fixture::new();
+    let config = std::collections::BTreeMap::from([
+        (
+            "$serde_json::private::Number".to_owned(),
+            "literal text".to_owned(),
+        ),
+        ("escaped".to_owned(), "中\n\\\"".to_owned()),
+    ]);
+    let record = HostRecord::new(f.host.id().clone(), config, 2);
+    f.host.save_host(&record).unwrap();
+    let path = f.host.canonical_path().join("host.json");
+    let bytes = fs::read(&path).unwrap();
+    let loaded = f
+        .root
+        .load_host::<std::collections::BTreeMap<String, String>>()
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded, record);
+    assert_eq!(fs::read(path).unwrap(), bytes);
 }
 #[test]
 fn failed_batch_validation_never_commits_a_finished_turn_or_native_normalization() {
