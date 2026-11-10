@@ -255,93 +255,185 @@ async fn timeout_and_dropped_wait_do_not_cancel_or_resend_accepted_work() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn accepted_creation_outlives_timeout_abandonment_and_disconnect() {
     for rpc in [false, true] {
+        // Agent admission awaits validation first, so an arbitrary short client
+        // deadline does not establish that its creation was ever accepted.
+        // Exercise Agent abandonment only after its default-Session gate proves
+        // acceptance. Session creation accepts before its first await and can
+        // also deterministically exercise the SDK's real short wait timeout.
+        accepted_creation_wait(rpc, false, true).await;
         for abandon in [false, true] {
-            let (host, resources) = fixture();
-            let gate = ValidationGate::new();
-            *resources.gate.lock().unwrap() = Some((2, gate.clone()));
-            let (client, server) = if rpc {
-                let (c, s) = stdio(host.clone()).await;
-                (c, Some(s))
-            } else {
-                (HostClient::in_process(host.clone()).unwrap(), None)
-            };
-            let mut request = create_request();
-            request.initial_message = Some(input("accepted creation input"));
-            let operation = request.operation_id.clone();
-            let calling = {
-                let client = client.clone();
-                tokio::spawn(async move {
-                    client
-                        .create_agent(request, options(if abandon { 5_000 } else { 30 }))
-                        .await
-                })
-            };
-            gate.entered.acquire().await.unwrap().forget();
-            // Slow creation cannot obstruct unrelated traffic on the connection.
-            assert_eq!(
-                client.info(options(500)).await.unwrap().lifecycle,
-                HostLifecycle::Running
-            );
-            if abandon {
-                calling.abort();
-                let _ = calling.await;
-            } else {
-                assert_eq!(
-                    calling.await.unwrap().unwrap_err(),
-                    CallError::WaitTimeout {
-                        wait_timeout_ms: 30
-                    }
-                );
-            }
-            client.close();
-            if let Some(server) = server {
-                server.await.unwrap().unwrap();
-            }
-            let replacement = HostClient::in_process(host.clone()).unwrap();
-            assert!(replacement.initial_info().can_operate);
-            gate.release();
-            let created = tokio::time::timeout(Duration::from_secs(3), async {
-                loop {
-                    let Receipt::AgentCreate(receipt) = replacement
-                        .receipt(operation.clone(), options(500))
-                        .await
-                        .unwrap()
-                    else {
-                        panic!("wrong receipt kind")
-                    };
-                    if receipt.session_id.is_some()
-                        && receipt.result.steps.message == Some(CreateStep::Succeeded)
-                    {
-                        break receipt;
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .unwrap();
-            let session = replacement.session(SessionRef {
-                agent_id: created.agent_id.unwrap(),
-                session_id: created.session_id.unwrap(),
-            });
-            resources.model.started.acquire().await.unwrap().forget();
-            let turn = running(&session).await;
-            resources.model.finish.add_permits(1);
-            assert_eq!(
-                session
-                    .wait_turn(turn, options(2_000))
-                    .await
-                    .unwrap()
-                    .data
-                    .info
-                    .as_ref()
-                    .unwrap()
-                    .outcome,
-                Some(TurnOutcome::Completed)
-            );
-            assert_eq!(replacement.agents(options(500)).await.unwrap().len(), 1);
-            assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
+            accepted_creation_wait(rpc, true, abandon).await;
         }
     }
+}
+
+async fn accepted_creation_wait(rpc: bool, session_creation: bool, abandon: bool) {
+    let (host, resources) = fixture();
+    let (client, server) = if rpc {
+        let (c, s) = stdio(host.clone()).await;
+        (c, Some(s))
+    } else {
+        (HostClient::in_process(host.clone()).unwrap(), None)
+    };
+    let existing = if session_creation {
+        Some(create(&client).await.target().clone())
+    } else {
+        None
+    };
+    let gate = ValidationGate::new();
+    let validation =
+        resources.validate_calls.load(Ordering::SeqCst) + if session_creation { 1 } else { 2 };
+    *resources.gate.lock().unwrap() = Some((validation, gate.clone()));
+    let operation = OperationId::new().unwrap();
+    let calling = {
+        let client = client.clone();
+        let operation_id = operation.clone();
+        tokio::spawn(async move {
+            let wait = options(if abandon { 5_000 } else { 30 });
+            if let Some(existing) = existing {
+                client
+                    .create_session(
+                        SessionCreate {
+                            operation_id,
+                            target: AgentRef {
+                                host_id: client.initial_info().host_id.clone(),
+                                agent_id: existing.agent_id,
+                            },
+                            mode: None,
+                            overrides: None,
+                            initial_message: Some(input("accepted creation input")),
+                        },
+                        wait,
+                    )
+                    .await
+                    .map(Receipt::SessionCreate)
+            } else {
+                let mut request = create_request();
+                request.operation_id = operation_id;
+                request.initial_message = Some(input("accepted creation input"));
+                client
+                    .create_agent(request, wait)
+                    .await
+                    .map(Receipt::AgentCreate)
+            }
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.acquire())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "creation acceptance gate: rpc={rpc}, session={session_creation}, abandon={abandon}, validations={}, caller_finished={}",
+                resources.validate_calls.load(Ordering::SeqCst),
+                calling.is_finished()
+            )
+        })
+        .unwrap()
+        .forget();
+    // Slow accepted creation cannot obstruct unrelated connection traffic.
+    assert_eq!(
+        client.info(options(500)).await.unwrap().lifecycle,
+        HostLifecycle::Running
+    );
+    if abandon {
+        calling.abort();
+        assert!(
+            tokio::time::timeout(Duration::from_secs(3), calling)
+                .await
+                .expect("abandoned creation waiter did not stop")
+                .unwrap_err()
+                .is_cancelled()
+        );
+    } else {
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(3), calling)
+                .await
+                .expect("accepted creation wait deadline did not finish")
+                .unwrap()
+                .unwrap_err(),
+            CallError::WaitTimeout {
+                wait_timeout_ms: 30
+            }
+        );
+    }
+    client.close();
+    if let Some(server) = server {
+        tokio::time::timeout(Duration::from_secs(3), server)
+            .await
+            .expect("stdio close waited for accepted creation")
+            .unwrap()
+            .unwrap();
+    }
+    let replacement = HostClient::in_process(host.clone()).unwrap();
+    assert!(replacement.initial_info().can_operate);
+    gate.release();
+    let target = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let receipt = replacement
+                .receipt(operation.clone(), options(500))
+                .await
+                .unwrap();
+            let (agent_id, session_id, message) = match receipt {
+                Receipt::AgentCreate(receipt) if !session_creation => (
+                    receipt.agent_id,
+                    receipt.session_id,
+                    receipt.result.steps.message,
+                ),
+                Receipt::SessionCreate(receipt) if session_creation => (
+                    Some(receipt.agent_id),
+                    receipt.session_id,
+                    receipt.result.steps.message,
+                ),
+                _ => panic!("wrong creation receipt kind"),
+            };
+            if let (Some(agent_id), Some(session_id), Some(CreateStep::Succeeded)) =
+                (agent_id, session_id, message)
+            {
+                break SessionRef {
+                    agent_id,
+                    session_id,
+                };
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted creation did not finish after releasing validation");
+    let session = replacement.session(target.clone());
+    tokio::time::timeout(Duration::from_secs(3), resources.model.started.acquire())
+        .await
+        .expect("accepted creation input did not start its model")
+        .unwrap()
+        .forget();
+    let turn = running(&session).await;
+    resources.model.finish.add_permits(1);
+    assert_eq!(
+        session
+            .wait_turn(turn, options(2_000))
+            .await
+            .unwrap()
+            .data
+            .info
+            .as_ref()
+            .unwrap()
+            .outcome,
+        Some(TurnOutcome::Completed)
+    );
+    assert_eq!(replacement.agents(options(500)).await.unwrap().len(), 1);
+    assert_eq!(
+        replacement
+            .sessions(
+                AgentRef {
+                    host_id: replacement.initial_info().host_id.clone(),
+                    agent_id: target.agent_id,
+                },
+                options(500),
+            )
+            .await
+            .unwrap()
+            .len(),
+        if session_creation { 2 } else { 1 }
+    );
+    assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -835,4 +927,43 @@ async fn dropping_last_client_handle_releases_only_the_connection() {
             .outcome,
         Some(TurnOutcome::Completed)
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_creation_timeout_before_admission_retains_no_receipt() {
+    let (host, resources) = fixture();
+    let gate = ValidationGate::new();
+    *resources.gate.lock().unwrap() = Some((1, gate.clone()));
+    let client = HostClient::in_process(host).unwrap();
+    let request = create_request();
+    let operation = request.operation_id.clone();
+    let calling = {
+        let client = client.clone();
+        tokio::spawn(async move { client.create_agent(request, options(30)).await })
+    };
+    tokio::time::timeout(Duration::from_secs(3), gate.entered.acquire())
+        .await
+        .expect("pre-admission validation gate did not start")
+        .unwrap()
+        .forget();
+    let outcome = tokio::time::timeout(Duration::from_secs(3), calling)
+        .await
+        .expect("pre-admission call deadline did not finish")
+        .unwrap();
+    // Release the pure validation worker before assertions, including failure.
+    // Its awaiting creation future is already gone; it cannot accept an Agent.
+    gate.release();
+    assert_eq!(
+        outcome.unwrap_err(),
+        CallError::WaitTimeout {
+            wait_timeout_ms: 30
+        }
+    );
+    assert!(matches!(
+        client.receipt(operation, options(500)).await,
+        Err(CallError::Business(ref fault))
+            if fault.kind() == Some(FaultKind::HostReceiptNotFound)
+    ));
+    assert_eq!(resources.validate_calls.load(Ordering::SeqCst), 1);
+    assert!(client.agents(options(500)).await.unwrap().is_empty());
 }
