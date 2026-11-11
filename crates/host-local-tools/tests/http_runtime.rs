@@ -1,4 +1,3 @@
-#![cfg(unix)]
 mod support;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_runtime::{LoopOptions, LoopOutcome};

@@ -227,6 +227,9 @@ impl Process {
     pub fn alive(&mut self) -> bool {
         self.child.try_wait().unwrap().is_none()
     }
+    pub fn kill(&mut self) {
+        self.child.kill().unwrap();
+    }
     #[cfg(unix)]
     pub fn signal(&self, signal: &str) {
         assert!(
@@ -394,4 +397,23 @@ pub fn options() -> CallOptions {
     CallOptions {
         wait_timeout_ms: Some(5_000),
     }
+}
+
+/// Only platform startup paths survive an otherwise isolated child environment.
+pub fn isolated_platform_environment(command: &mut Command) {
+    #[cfg(windows)]
+    for name in [
+        "SystemRoot",
+        "WINDIR",
+        "PATH",
+        "ProgramFiles",
+        "ProgramFiles(x86)",
+        "LocalAppData",
+    ] {
+        if let Some(value) = std::env::var_os(name) {
+            command.env(name, value);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = command;
 }

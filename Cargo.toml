@@ -57,3 +57,6 @@ tokio-tungstenite = { version = "=0.30.0", default-features = false }
 tokio-util = { version = "=0.7.20", default-features = false }
 tracing = { version = "=0.1.44", default-features = false }
 tracing-subscriber = { version = "=0.3.23", default-features = false }
+winapi-util = "=0.1.11"
+windows-permissions = "=0.2.4"
+winsafe = { version = "=0.0.29", default-features = false }

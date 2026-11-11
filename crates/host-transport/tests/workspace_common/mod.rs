@@ -137,6 +137,7 @@ pub fn diff(change_ref: ChangeRef, comparison: DiffComparison) -> DiffRequest {
 }
 pub fn git(root: &Path, args: &[&str]) {
     let output = Command::new("git")
+        .args(["-c", "core.autocrlf=false"])
         .args(args)
         .current_dir(root)
         .env("GIT_CONFIG_NOSYSTEM", "1")

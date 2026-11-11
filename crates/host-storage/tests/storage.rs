@@ -854,7 +854,11 @@ fn atomic_object_save_keeps_original_on_real_os_write_failure() {
     // SIGXFSZ is ignored only in this subprocess, so write(2) returns EFBIG.
     // This is a real kernel file write failure, not a production capacity rule.
     let status = Command::new("sh")
-        .args(["-c", "trap '' 25; ulimit -f 1; exec \"$@\"", "storage-test"])
+        .args([
+            "-c",
+            "trap '' XFSZ; ulimit -f 1; exec \"$@\"",
+            "storage-test",
+        ])
         .arg(std::env::current_exe().unwrap())
         .args(["--exact", "object_write_failure_probe", "--nocapture"])
         .env("MINICORE_STORAGE_FAILURE_PROBE", &root_path)
@@ -929,7 +933,11 @@ fn real_os_partial_history_write_remains_blocked_without_repair() {
     drop(f.host);
     drop(f.root);
     let status = Command::new("sh")
-        .args(["-c", "trap '' 25; ulimit -f 4; exec \"$@\"", "storage-test"])
+        .args([
+            "-c",
+            "trap '' XFSZ; ulimit -f 4; exec \"$@\"",
+            "storage-test",
+        ])
         .arg(std::env::current_exe().unwrap())
         .args(["--exact", "journal_write_failure_probe", "--nocapture"])
         .env("MINICORE_STORAGE_JOURNAL_FAILURE_PROBE", &root_path)

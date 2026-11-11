@@ -1,15 +1,16 @@
 //! Actual output file ownership, including a blocked OS writer after timeout.
-use minicore_host_diagnostics::{
-    EventData, EventSpec, InitError, Options, Output, Scope, ShutdownOutcome, prepare,
-};
+#[cfg(unix)]
+use minicore_host_diagnostics::{EventData, EventSpec, Scope};
+use minicore_host_diagnostics::{InitError, Options, Output, ShutdownOutcome, prepare};
+#[cfg(unix)]
+use std::{fs::OpenOptions, sync::mpsc};
 use std::{
-    fs::OpenOptions,
     io::{Read, Write},
     path::Path,
     process::{Command, Stdio},
-    sync::mpsc,
     time::Duration,
 };
+#[cfg(unix)]
 use tracing::Level;
 
 fn options(path: &Path) -> Options {

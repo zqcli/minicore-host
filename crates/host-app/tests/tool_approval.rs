@@ -1,6 +1,5 @@
 //! Actual minicore-host process, stdio/WSS, production resource resolver, HTTP/SSE
 //! and pinned Runtime. Only the explicitly local model replies are fixtures.
-#![cfg(unix)]
 mod support;
 #[allow(dead_code)]
 mod tool_support;

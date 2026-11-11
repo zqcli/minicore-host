@@ -40,6 +40,7 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
+        .read(true)
         .open(&path)
         .unwrap();
     std::fs::hard_link(&path, &alias).unwrap();
@@ -86,8 +87,6 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     assert!(child.wait().unwrap().success());
     assert!(child_was_alive);
     assert_eq!(outcome, ShutdownOutcome::Flushed);
-    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    assert_eq!(record["event"], "test.inherited_lease");
     let (_dispatch, next_guard) = reopened.unwrap();
     // Closing the inherited, already-unlocked description must not release the
     // new writer's independent lease.
@@ -96,4 +95,6 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
         next_guard.shutdown(Duration::from_secs(2)),
         ShutdownOutcome::Flushed
     );
+    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(record["event"], "test.inherited_lease");
 }

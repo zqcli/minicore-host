@@ -28,7 +28,14 @@ fn git(root: &Path, args: &[&str]) -> String {
 fn repository() -> TempDir {
     let root = TempDir::new().unwrap();
     git(root.path(), &["init", "-b", "main"]);
+    git(root.path(), &["config", "core.autocrlf", "false"]);
     root
+}
+fn shell_path(path: &Path) -> String {
+    let path = path.to_str().unwrap();
+    #[cfg(windows)]
+    let path = path.trim_start_matches(r"\\?\").replace('\\', "/");
+    format!("'{}'", path.replace('\'', "'\\''"))
 }
 fn list(limit: usize) -> ChangesListRequest {
     ChangesListRequest {
@@ -182,7 +189,7 @@ async fn duplicate_paths_in_git_status_can_be_paged_without_losing_records() {
 #[tokio::test]
 async fn unborn_repository_staged_addition_and_empty_directory_are_distinct() {
     // Keep this genuine non-repository fixture outside checkout ancestors.
-    let plain = TempDir::new_in("/tmp").unwrap();
+    let plain = TempDir::new_in(std::env::temp_dir()).unwrap();
     let ws = Workspace::open(plain.path()).await.unwrap();
     let status = ws.status(QueryContext::default()).await.unwrap();
     assert!(!status.repo_available);
@@ -424,7 +431,12 @@ async fn git_symlink_diffs_read_link_text_not_outside_contents() {
 #[tokio::test]
 async fn git_paths_are_literal_and_detached_and_bare_states_are_real() {
     let root = repository();
+    #[cfg(not(windows))]
     let paths = [":(glob)*", "--option", "tab\tand\nnewline", "中文"];
+    // Bracket glob syntax and option-like names are legal Windows filenames;
+    // colon, star, tab and newline are not. Keep literal path coverage native.
+    #[cfg(windows)]
+    let paths = ["[literal]", "--option", "space name", "中文"];
     for path in paths {
         fs::write(root.path().join(path), path).unwrap();
     }
@@ -577,7 +589,7 @@ async fn active_clean_filter_never_runs_from_status_list_or_diff() {
         .find(|record| record.path == "file.txt")
         .unwrap();
     let marker = root.path().join("filter-ran");
-    let command = format!("printf called >> '{}'; cat", marker.display());
+    let command = format!("printf called >> {}; cat", shell_path(&marker));
     git(root.path(), &["config", "filter.marker.clean", &command]);
     // Identical content still requires a clean conversion when Git refreshes
     // stale stat information. The query must not execute that conversion.
@@ -611,7 +623,7 @@ async fn active_clean_filter_never_runs_from_status_list_or_diff() {
 async fn active_process_filter_is_rejected_before_starting_its_protocol() {
     let root = filtered_repository();
     let marker = root.path().join("process-ran");
-    let command = format!("printf called > '{}'; exit 1", marker.display());
+    let command = format!("printf called > {}; exit 1", shell_path(&marker));
     git(root.path(), &["config", "filter.marker.process", &command]);
     fs::write(root.path().join("file.txt"), "same\n").unwrap();
     let workspace = Workspace::open(root.path()).await.unwrap();
@@ -628,9 +640,9 @@ async fn cancellation_cannot_leave_an_external_filter_holding_query_pipes() {
     let root = filtered_repository();
     let marker = root.path().join("slow-filter-ran");
     let command = format!(
-        "printf started > '{}'; sleep 5; printf later >> '{}'; cat",
-        marker.display(),
-        marker.display()
+        "printf started > {}; sleep 5; printf later >> {}; cat",
+        shell_path(&marker),
+        shell_path(&marker)
     );
     git(root.path(), &["config", "filter.marker.clean", &command]);
     fs::write(root.path().join("file.txt"), "same\n").unwrap();
@@ -676,7 +688,7 @@ async fn initialized_submodule_filters_are_checked_without_scanning_uninitialize
     let module = parent.path().join("module");
     let workspace = Workspace::open(parent.path()).await.unwrap();
     let clean_marker = parent.path().join("submodule-clean-ran");
-    let command = format!("printf called > '{}'; cat", clean_marker.display());
+    let command = format!("printf called > {}; cat", shell_path(&clean_marker));
     git(&module, &["config", "filter.marker.clean", &command]);
     fs::write(module.join("file.txt"), "same\n").unwrap();
     assert!(matches!(
@@ -686,7 +698,7 @@ async fn initialized_submodule_filters_are_checked_without_scanning_uninitialize
     assert!(!clean_marker.exists());
     git(&module, &["config", "--unset", "filter.marker.clean"]);
     let process_marker = parent.path().join("submodule-process-ran");
-    let command = format!("printf called > '{}'; exit 1", process_marker.display());
+    let command = format!("printf called > {}; exit 1", shell_path(&process_marker));
     git(&module, &["config", "filter.marker.process", &command]);
     assert!(matches!(
         workspace.status(QueryContext::default()).await,
@@ -720,7 +732,7 @@ async fn nested_workspace_filter_preflight_uses_repository_relative_attributes()
     git(root.path(), &["add", "."]);
     git(root.path(), &["commit", "-m", "scoped filter fixture"]);
     let marker = root.path().join("sibling-filter-ran");
-    let command = format!("printf called > '{}'; cat", marker.display());
+    let command = format!("printf called > {}; cat", shell_path(&marker));
     git(root.path(), &["config", "filter.marker.clean", &command]);
     fs::write(root.path().join("sibling/file.txt"), "same\n").unwrap();
     fs::write(root.path().join("selected/file.txt"), "changed\n").unwrap();
@@ -760,7 +772,7 @@ async fn a_gitlink_directory_symlink_is_rejected_without_inspecting_its_target()
     );
     git(parent.path(), &["commit", "-am", "gitlink fixture"]);
     let marker = outside.path().join("outside-filter-ran");
-    let command = format!("printf called > '{}'; cat", marker.display());
+    let command = format!("printf called > {}; cat", shell_path(&marker));
     git(outside.path(), &["config", "filter.marker.clean", &command]);
     fs::remove_dir_all(parent.path().join("module")).unwrap();
     symlink(outside.path(), parent.path().join("module")).unwrap();
@@ -793,8 +805,8 @@ async fn inherited_config_cannot_hide_active_filters_or_block_unused_global_driv
     fs::write(
         &global,
         format!(
-            "[filter \"unused\"]\n clean = printf called > '{}'\n",
-            marker.display()
+            "[filter \"unused\"]\n clean = printf called > {}\n",
+            shell_path(&marker)
         ),
     )
     .unwrap();
@@ -820,7 +832,7 @@ async fn inherited_config_cannot_hide_active_filters_or_block_unused_global_driv
         );
     };
     run(false);
-    let command = format!("printf called > '{}'; cat", marker.display());
+    let command = format!("printf called > {}; cat", shell_path(&marker));
     git(root.path(), &["config", "filter.marker.clean", &command]);
     fs::write(root.path().join("file.txt"), "same\n").unwrap();
     run(true);

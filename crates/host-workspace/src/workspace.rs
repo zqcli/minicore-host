@@ -132,7 +132,16 @@ pub(crate) fn normalize(path: &str, allow_root: bool) -> Result<PathBuf> {
     let mut result = PathBuf::new();
     for part in Path::new(path).components() {
         match part {
-            Component::Normal(value) => result.push(value),
+            Component::Normal(value) => {
+                #[cfg(windows)]
+                if value
+                    .to_str()
+                    .is_none_or(|value| value.contains(':') || value.ends_with(['.', ' ']))
+                {
+                    return Err(WorkspaceError::InvalidPath);
+                }
+                result.push(value);
+            }
             Component::CurDir => (),
             _ => return Err(WorkspaceError::InvalidPath),
         }
@@ -145,6 +154,14 @@ pub(crate) fn normalize(path: &str, allow_root: bool) -> Result<PathBuf> {
 
 pub(crate) fn path_text(path: &Path) -> Result<&str> {
     path.to_str().ok_or(WorkspaceError::NonUtf8Path)
+}
+
+pub(crate) fn relative_path_text(path: &Path) -> Result<String> {
+    let text = path_text(path)?;
+    #[cfg(windows)]
+    return Ok(text.replace('\\', "/"));
+    #[cfg(not(windows))]
+    Ok(text.to_owned())
 }
 
 pub(crate) fn read_bytes(mut file: impl Read, context: &QueryContext) -> Result<Vec<u8>> {

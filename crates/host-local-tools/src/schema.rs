@@ -36,7 +36,7 @@ pub fn local_tool_specs() -> Vec<ToolSpec> {
         ),
         spec(
             "bash",
-            "Run /bin/bash in the bound workspace (Unix only). Returns byte-exact stdout and stderr plus the actual exit status. Cancellation stops and waits for the child. Arbitrary shell file changes are unknown, not inferred from Git.",
+            "Run Bash in the bound workspace (Unix Bash or Windows Git Bash). Returns byte-exact stdout and stderr plus the actual exit status. Cancellation stops and waits for the process group or job. Arbitrary shell file changes are unknown, not inferred from Git.",
             json!({
                 "command":{"type":"string","minLength":1},
                 "cwd":{"type":"string","default":".","description":"A workspace-relative directory."},

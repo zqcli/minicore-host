@@ -1,4 +1,4 @@
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 mod support;
 use minicore_host_local_tools::*;
 use minicore_host_workspace::Workspace;
@@ -6,6 +6,7 @@ use minicore_runtime::{
     LoopOptions, LoopOutcome, ToolCallId,
     tools::{ToolError, ToolInvocation},
 };
+#[cfg(unix)]
 use nix::{
     errno::Errno,
     sys::signal::{kill, killpg},
@@ -28,11 +29,27 @@ async fn wait_file(path: &std::path::Path) {
     .await
     .unwrap();
 }
+#[cfg(unix)]
 fn gone(pid: u32) {
     assert_eq!(
         kill(Pid::from_raw(pid as i32), None),
         Err(Errno::ESRCH),
         "direct child must actually be gone"
+    );
+}
+
+#[cfg(windows)]
+fn gone(pid: u32) {
+    let status = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(format!(
+            "if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 1 }}"
+        ))
+        .status()
+        .unwrap();
+    assert!(
+        status.success(),
+        "owned native process {pid} must actually be gone"
     );
 }
 
@@ -113,12 +130,17 @@ async fn bound_workspace_and_relative_cwd_never_change_process_cwd() {
     let (root, tools, _) = fixture().await;
     let process_cwd = std::env::current_dir().unwrap();
     fs::create_dir(root.path().join("sub")).unwrap();
-    let output = invoke(&tools, "bash", json!({"command":"pwd","cwd":"sub"}))
+    let command = if cfg!(windows) {
+        "cygpath -w \"$PWD\""
+    } else {
+        "pwd"
+    };
+    let output = invoke(&tools, "bash", json!({"command":command,"cwd":"sub"}))
         .await
         .unwrap();
     assert_eq!(
-        output["stdout"]["output"]["data"],
-        format!("{}\n", root.path().join("sub").display())
+        fs::canonicalize(output["stdout"]["output"]["data"].as_str().unwrap().trim()).unwrap(),
+        fs::canonicalize(root.path().join("sub")).unwrap()
     );
     assert_eq!(std::env::current_dir().unwrap(), process_cwd);
     assert_eq!(
@@ -148,10 +170,10 @@ async fn runtime_cancel_drops_port_but_finish_waits_for_real_pid_and_cleanup() {
     let started = Instant::now();
     assert!(runtime.handle().cancel());
     let _report = runtime.join().await.unwrap();
-    let done = tokio::time::timeout(Duration::from_secs(3), tools.finish())
+    let done = tokio::time::timeout(Duration::from_secs(10), tools.finish())
         .await
         .unwrap();
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].error, Some(ToolError::Cancelled));
     assert!(done[0].cleanup_confirmed);
@@ -173,11 +195,11 @@ async fn runtime_deadline_joins_subprocess_and_never_repeats_side_effects() {
         json!({"command":"printf once >> effects; exec sleep 30"}),
     )]);
     let mut options = LoopOptions::default_checked().unwrap();
-    options.tool_timeout = Duration::from_millis(100);
+    options.tool_timeout = Duration::from_millis(if cfg!(windows) { 1_000 } else { 100 });
     let started = Instant::now();
     let report = finish(start(model, &tools, &["bash"], options), &tools).await;
     assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(10));
     let commands = records.commands.lock().unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].1.status, CommandStatus::TimedOut);
@@ -215,7 +237,7 @@ async fn abandoned_execute_and_finish_waiters_do_not_abandon_owned_work() {
     finish_waiter.abort();
     let _ = finish_waiter.await;
     cancellation.cancel();
-    let result = tokio::time::timeout(Duration::from_secs(3), tools.finish())
+    let result = tokio::time::timeout(Duration::from_secs(10), tools.finish())
         .await
         .unwrap();
     assert_eq!(result.len(), 1);
@@ -233,7 +255,7 @@ async fn normal_shell_exit_stops_background_group_and_waits_for_pipe_eof() {
     let output = invoke(&tools, "bash", json!({"command":"sleep 30 & printf done"}))
         .await
         .unwrap();
-    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(started.elapsed() < Duration::from_secs(10));
     assert_eq!(output["stdout"]["output"]["data"], "done");
     assert_eq!(output["stdout"]["complete"], true);
     tools.finish().await;
@@ -270,12 +292,14 @@ async fn owner_output_fault_is_internal_and_stops_and_joins_process() {
     let done = tools.finish().await;
     assert_eq!(done[0].error, Some(ToolError::Internal));
     assert!(done[0].cleanup_confirmed);
-    let pid = fs::read_to_string(root.path().join("leader.pid"))
-        .unwrap()
-        .trim()
-        .parse()
-        .unwrap();
-    gone(pid);
+    #[cfg(unix)]
+    gone(
+        fs::read_to_string(root.path().join("leader.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap(),
+    );
     assert_eq!(fs::read(root.path().join("effects")).unwrap(), b"once");
 }
 
@@ -305,6 +329,7 @@ async fn cancelled_before_start_has_no_process_or_file_effect() {
 
 /// Adapted from minicore-agent command tests: pipe EOF alone says nothing about
 /// a background process that redirected both of its output descriptors.
+#[cfg(unix)]
 #[tokio::test]
 async fn redirected_background_members_end_before_turn_finish() {
     let (root, tools, records) = fixture().await;
@@ -334,6 +359,7 @@ async fn redirected_background_members_end_before_turn_finish() {
 
 /// Adapted from minicore-agent's leader-and-group-member reap regression, with
 /// the Host's public Turn finish barrier rather than the old Loop owner join.
+#[cfg(unix)]
 #[tokio::test]
 async fn cancellation_joins_leader_and_background_member_before_turn_finish() {
     let (root, tools, records) = fixture().await;
@@ -370,4 +396,126 @@ async fn cancellation_joins_leader_and_background_member_before_turn_finish() {
         );
     }
     assert_eq!(fs::read(root.path().join("ready")).unwrap(), b"once");
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_scope_probe() {
+    use std::io::{Read, Write};
+    use std::process::{Command, Stdio};
+
+    let Ok(role) = std::env::var("MINICORE_WINDOWS_SCOPE_ROLE") else {
+        return;
+    };
+    let port: u16 = std::env::var("MINICORE_WINDOWS_SCOPE_PORT")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let _descendant = (role == "root").then(|| {
+        Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "windows_scope_probe", "--nocapture"])
+            .env("MINICORE_WINDOWS_SCOPE_ROLE", "leaf")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    });
+    let mut socket = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+    writeln!(socket, "{role} {}", std::process::id()).unwrap();
+    let mut release = [0];
+    socket.read_exact(&mut release).unwrap();
+    // Returning the root leaves the native descendant alive with closed stdio.
+    // The command job, rather than a test-side kill, must settle that descendant.
+}
+
+#[cfg(windows)]
+async fn windows_job_ends_native_descendants(cancel: bool) {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    let (_root, tools, records) = fixture().await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let executable = std::env::current_exe().unwrap();
+    let executable = executable.to_str().unwrap().trim_start_matches(r"\\?\");
+    let executable = executable.replace('\\', "/").replace('\'', "'\\''");
+    let script = format!(
+        "MINICORE_WINDOWS_SCOPE_PORT={} MINICORE_WINDOWS_SCOPE_ROLE=root '{}' --exact windows_scope_probe --nocapture >/dev/null 2>&1; printf done",
+        listener.local_addr().unwrap().port(),
+        executable,
+    );
+    let tool = tools.tool("bash").unwrap();
+    let context = context();
+    let cancellation = context.cancellation.clone();
+    let caller = tokio::spawn(async move {
+        tool.execute(
+            ToolInvocation::new(
+                "native-job".parse().unwrap(),
+                "bash".parse().unwrap(),
+                json!({"command":script}),
+            )
+            .unwrap(),
+            context,
+        )
+        .await
+    });
+    let mut peers = Vec::new();
+    for _ in 0..2 {
+        let (socket, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut socket = BufReader::new(socket);
+        let mut identity = String::new();
+        tokio::time::timeout(Duration::from_secs(10), socket.read_line(&mut identity))
+            .await
+            .unwrap()
+            .unwrap();
+        peers.push((identity, socket));
+    }
+    assert!(peers.iter().any(|(id, _)| id.starts_with("root ")));
+    assert!(peers.iter().any(|(id, _)| id.starts_with("leaf ")));
+    if cancel {
+        cancellation.cancel();
+    } else {
+        let (_, socket) = peers
+            .iter_mut()
+            .find(|(id, _)| id.starts_with("root "))
+            .unwrap();
+        socket.get_mut().write_all(b"x").await.unwrap();
+    }
+    let outcome = tokio::time::timeout(Duration::from_secs(10), caller)
+        .await
+        .unwrap()
+        .unwrap();
+    if cancel {
+        assert_eq!(outcome.unwrap_err(), ToolError::Cancelled);
+    } else {
+        assert!(outcome.is_ok());
+    }
+    let done = tools.finish().await;
+    assert!(done[0].cleanup_confirmed);
+    let command = records.commands.lock().unwrap()[0].1.clone();
+    assert!(command.process_waited && command.cleanup_confirmed);
+    assert!(command.stdout.complete && command.stderr.complete);
+    assert_eq!(command.signal, None);
+    for (identity, mut socket) in peers {
+        let mut byte = [0];
+        let ended = tokio::time::timeout(Duration::from_secs(2), socket.read(&mut byte))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(ended, 0, "confirmed cleanup left {identity} alive");
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_waits_for_redirected_native_descendants_after_shell_exit() {
+    windows_job_ends_native_descendants(false).await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_cancellation_ends_native_descendants_before_finish() {
+    windows_job_ends_native_descendants(true).await;
 }

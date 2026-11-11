@@ -1,5 +1,4 @@
 //! Real process diagnostics; no provider or TUI acceptance claim.
-#![cfg(unix)]
 mod support;
 
 use minicore_host_core::LogLevel;
@@ -28,6 +27,7 @@ async fn process_readiness_selects_its_component_after_owner_started() {
         .arg(certificate)
         .arg("--tls-key")
         .arg(key);
+    isolated_platform_environment(&mut command);
     let mut process = Process::command(command);
     let selected = process.event("host.process", "host.started").await;
     let initial = process.rpc("initialize", json!({})).await;

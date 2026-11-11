@@ -1,6 +1,5 @@
 //! Real binary, provider authentication, WSS and Runtime bash execution. Only
 //! loopback model replies are scripted; no ambient credentials enter the child.
-#![cfg(unix)]
 mod support;
 #[allow(dead_code)]
 mod tool_support;
@@ -38,6 +37,12 @@ fn isolated_process(
         .arg(certificate)
         .arg("--tls-key")
         .arg(key);
+    support::isolated_platform_environment(&mut command);
+    #[cfg(windows)]
+    command
+        .env("TEMP", home)
+        .env("TMP", home)
+        .env("USERPROFILE", home);
     if let Some(config) = config {
         command.arg("--config").arg(config);
     }

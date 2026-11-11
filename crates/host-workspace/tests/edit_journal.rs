@@ -30,7 +30,7 @@ fn request(reference: ChangeRef, bytes: usize) -> DiffRequest {
 #[tokio::test]
 async fn retained_tool_edits_use_real_snapshots_not_later_filesystem_or_git_state() {
     // This test deliberately observes a directory with no repository ancestors.
-    let root = TempDir::new_in("/tmp").unwrap();
+    let root = TempDir::new_in(std::env::temp_dir()).unwrap();
     fs::write(root.path().join("file"), "before\n").unwrap();
     let ws = Workspace::open(root.path()).await.unwrap();
     let before = ws

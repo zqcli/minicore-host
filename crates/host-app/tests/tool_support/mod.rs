@@ -263,7 +263,7 @@ pub fn repository(path: &Path) {
         .args(["init", "-q"])
         .current_dir(path)
         .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_GLOBAL", path.join("nonexistent-global-config"))
         .output()
         .unwrap();
     assert!(

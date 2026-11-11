@@ -6,9 +6,9 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 compile_error!(
-    "MiniCore Host storage currently supports Linux only; no weaker lock/path fallback is provided"
+    "MiniCore Host storage requires Linux or macOS filesystem primitives; no weaker lock/path fallback is provided"
 );
 
 mod compaction;

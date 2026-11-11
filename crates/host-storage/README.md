@@ -10,11 +10,13 @@ implementations does not create a second history authority or a recovery service
 
 ## Supported platform and root ownership
 
-The first implementation explicitly supports Linux. It needs a filesystem that
-honors advisory inode locks, atomic same-directory rename and file/directory
-`fsync`. Unsupported locking or synchronization fails rather than weakening the
-contract. No claim of power-loss testing, network-filesystem validation or other
-platform support is made.
+The Unix backend targets Linux and macOS. It needs a filesystem that honors
+advisory inode locks, atomic same-directory rename and file/directory
+synchronization. Rust's `File::sync_all` uses `fsync` on Linux and `F_FULLFSYNC`
+on macOS; unsupported locking or synchronization fails rather than weakening
+the contract. Windows is not enabled by a weaker path or durability fallback.
+Native CI checks each supported platform; no claim of power-loss testing or
+network-filesystem validation is made.
 
 `DataRoot::acquire(path)` resolves the actual root and takes a nonblocking OS
 exclusive lock on the directory inode itself. Root symlink aliases resolve to the
@@ -231,7 +233,7 @@ The tests use real temporary directories and files. They cover intra-process and
 cross-process locks, aliases and abnormal process exit; schema/ownership/path
 errors; exact native histories and partials; no-file memory modes; complete tails
 without newline; strict corruption and duplicate detection; confirmed ranges and
-reopening; and explicit deletion boundaries. Linux subprocesses with a test-only
-file-size rlimit produce real `EFBIG` errors for atomic object and partial JSONL
-writes. Separate, explicitly named test hooks inject failed sync/zero-write/partial
+reopening; and explicit deletion boundaries. Unix subprocesses with a test-only
+file-size rlimit and symbolic `SIGXFSZ` handling produce real `EFBIG` errors for
+atomic object and partial JSONL writes. Separate, explicitly named test hooks inject failed sync/zero-write/partial
 write outcomes around real files to verify precise same-run reconciliation.

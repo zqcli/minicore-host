@@ -351,3 +351,58 @@ async fn symlinks_cannot_escape_and_directory_links_are_not_walked() {
         .unwrap();
     assert!(found.matches.is_empty());
 }
+
+#[cfg(windows)]
+#[tokio::test]
+async fn junctions_cannot_escape_and_are_not_recursively_walked() {
+    let root = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(outside.path().join("secret"), "secret").unwrap();
+    fs::write(root.path().join("local"), "local").unwrap();
+    for (name, destination) in [("escape", outside.path()), ("cycle", root.path())] {
+        let output = std::process::Command::new("cmd.exe")
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(root.path().join(name))
+            .arg(destination)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+    }
+    let ws = Workspace::open(root.path()).await.unwrap();
+    assert!(matches!(
+        ws.read(read("escape/secret", 0, None, 20), QueryContext::default())
+            .await,
+        Err(WorkspaceError::OutsideWorkspace)
+    ));
+    assert!(matches!(
+        ws.capture("escape/missing".into(), QueryContext::default())
+            .await,
+        Err(WorkspaceError::OutsideWorkspace)
+    ));
+    assert!(matches!(
+        ws.files(files("escape", true, 20), QueryContext::default())
+            .await,
+        Err(WorkspaceError::OutsideWorkspace)
+    ));
+    let entries = ws
+        .files(files("", true, 20), QueryContext::default())
+        .await
+        .unwrap();
+    assert_eq!(entries.entries.len(), 3);
+    assert_eq!(
+        entries
+            .entries
+            .iter()
+            .filter(|entry| entry.kind == FileKind::Symlink)
+            .count(),
+        2
+    );
+    let found = ws
+        .search(search("", "secret", 20), QueryContext::default())
+        .await
+        .unwrap();
+    assert!(found.matches.is_empty());
+    for name in ["escape", "cycle"] {
+        fs::remove_dir(root.path().join(name)).unwrap();
+    }
+}

@@ -1,5 +1,4 @@
 //! Real executables and local HTTP/TLS fixtures; no live provider or TUI claims.
-#![cfg(unix)]
 mod support;
 use minicore_host_core::LogOutput;
 use minicore_host_protocol::*;
@@ -140,8 +139,13 @@ async fn graceful_process_shutdown_keeps_root_until_accepted_http_work_really_fi
     http.request().await;
     let receipt = child.rpc("host.shutdown", shutdown("graceful")).await;
     assert_eq!(receipt["result"]["lifecycle"], "draining");
-    child.signal("-TERM");
-    child.event("host.process", "host.shutdown_requested").await;
+    #[cfg(unix)]
+    {
+        child.signal("-TERM");
+        child.event("host.process", "host.shutdown_requested").await;
+    }
+    #[cfg(windows)]
+    child.rpc("host.shutdown", shutdown("graceful")).await;
     let facts = child.rpc("host.info", json!({})).await;
     assert_eq!(facts["lifecycle"], "draining");
     assert_eq!(facts["shutdown_strategy"], "graceful");
@@ -297,6 +301,7 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
     output.safe_diagnostics();
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn repeated_signals_do_not_force_paused_backlog_but_explicit_rpc_force_finishes() {
     let http = HttpFixture::start().await;
@@ -357,7 +362,7 @@ async fn failed_original_save_stays_stopping_and_external_kill_is_not_logged_as_
     let conflict = Process::start(&root, None, true, None).finish().await;
     assert!(!conflict.status.success());
     assert!(child.alive());
-    child.signal("-KILL");
+    child.kill();
     let output = child.finish().await;
     assert!(!output.status.success());
     output.protocol_only();
@@ -563,9 +568,16 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
         .join("history.jsonl");
     let history_before = std::fs::read(&history).unwrap();
     assert!(!history_before.is_empty());
-    let alias = dir.path().join("metadata-log-alias");
-    std::os::unix::fs::symlink(root.join("host.json"), &alias).unwrap();
-    for destination in [root.join("host.json"), history.clone(), alias] {
+    let destinations = vec![root.join("host.json"), history.clone()];
+    #[cfg(unix)]
+    let destinations = {
+        let alias = dir.path().join("metadata-log-alias");
+        std::os::unix::fs::symlink(root.join("host.json"), &alias).unwrap();
+        let mut destinations = destinations;
+        destinations.push(alias);
+        destinations
+    };
+    for destination in destinations {
         let metadata_before = saved_log_output(&root, &destination);
         let output = Process::start(&root, None, true, None).finish().await;
         assert!(!output.status.success());

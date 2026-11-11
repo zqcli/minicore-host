@@ -250,6 +250,61 @@ async fn symlinks_do_not_escape_reads_or_redirect_writes_and_permissions_survive
     tools.finish().await;
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+#[tokio::test]
+async fn git_metadata_case_aliases_are_not_writable() {
+    let (root, tools, _) = fixture().await;
+    fs::create_dir(root.path().join(".git")).unwrap();
+    fs::write(root.path().join(".git/config"), "retained").unwrap();
+    for path in [".GIT/config", ".Git/new"] {
+        let result = invoke(&tools, "write", json!({"path":path,"content":"bad"}))
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "failed");
+    }
+    assert_eq!(
+        fs::read(root.path().join(".git/config")).unwrap(),
+        b"retained"
+    );
+    assert!(!root.path().join(".git/new").exists());
+    tools.finish().await;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_aliases_and_junctions_cannot_redirect_file_operations() {
+    let (root, tools, _) = fixture().await;
+    let outside = tempfile::TempDir::new().unwrap();
+    fs::write(root.path().join("file"), "retained").unwrap();
+    fs::write(outside.path().join("secret"), "secret").unwrap();
+    let junction = root.path().join("outside");
+    let output = std::process::Command::new("cmd.exe")
+        .args(["/D", "/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(outside.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    for path in ["file:stream", "file.", "file ", "outside/new"] {
+        let result = invoke(&tools, "write", json!({"path":path,"content":"bad"}))
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "failed", "{path}: {result}");
+    }
+    for path in ["file:stream", "file.", "file ", "outside/secret"] {
+        let result = invoke(&tools, "read", json!({"path":path,"limit":1}))
+            .await
+            .unwrap();
+        assert_eq!(result["status"], "failed", "{path}: {result}");
+    }
+    assert_eq!(fs::read(root.path().join("file")).unwrap(), b"retained");
+    assert_eq!(fs::read(outside.path().join("secret")).unwrap(), b"secret");
+    assert!(!outside.path().join("new").exists());
+    assert!(!root.path().join("file:stream").exists());
+    fs::remove_dir(junction).unwrap();
+    tools.finish().await;
+}
+
 struct RejectEdits;
 impl LocalToolSink for RejectEdits {
     fn output(

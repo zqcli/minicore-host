@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     QueryContext, Result, Workspace, WorkspaceError,
     context::blocking,
-    workspace::{normalize, path_text, read_bytes},
+    workspace::{normalize, path_text, read_bytes, relative_path_text},
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -214,7 +214,7 @@ impl Workspace {
             }
             let end_returned = request.start + bytes.len() as u64;
             Ok(ReadResult {
-                path: path_text(&normalize(&request.path, false)?)?.to_owned(),
+                path: relative_path_text(&normalize(&request.path, false)?)?,
                 start: request.start,
                 end: end_returned,
                 text: String::from_utf8(bytes).map_err(|_| WorkspaceError::Binary)?,
@@ -265,7 +265,7 @@ impl Workspace {
                 workspace.walk(&request.path, true, context)?
             } else if resolved.is_file() {
                 vec![FileEntry {
-                    path: path_text(&path)?.to_owned(),
+                    path: relative_path_text(&path)?,
                     kind: FileKind::File,
                     size: None,
                 }]
@@ -380,7 +380,7 @@ impl Workspace {
                 FileKind::Other
             };
             entries.push(FileEntry {
-                path: path_text(relative)?.to_owned(),
+                path: relative_path_text(relative)?,
                 kind,
                 size: metadata.is_file().then_some(metadata.len()),
             });

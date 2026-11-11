@@ -115,9 +115,12 @@ pub fn prepare(options: Options) -> Result<(Dispatch, Guard), InitError> {
     match &options.output {
         Output::Stderr => prepare_writer(options, io::stderr(), |_| Ok(())),
         Output::File(path) => {
-            let writer = OpenOptions::new()
-                .create(true)
-                .append(true)
+            let mut opening = OpenOptions::new();
+            opening.create(true).append(true);
+            // Windows file locking requires read or write access, not append alone.
+            #[cfg(windows)]
+            opening.read(true);
+            let writer = opening
                 .open(path)
                 .map_err(|error| InitError::OpenOutput(error.kind()))?;
             prepare_file(options, writer)

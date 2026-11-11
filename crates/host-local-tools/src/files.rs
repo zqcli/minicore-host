@@ -83,7 +83,16 @@ pub(crate) fn normalize(path: &str, root: bool) -> Result<PathBuf, &'static str>
     let mut relative = PathBuf::new();
     for part in Path::new(path).components() {
         match part {
-            Component::Normal(name) => relative.push(name),
+            Component::Normal(name) => {
+                #[cfg(windows)]
+                if name
+                    .to_str()
+                    .is_none_or(|name| name.contains(':') || name.ends_with(['.', ' ']))
+                {
+                    return Err("alternate streams and ambiguous Windows paths are not supported");
+                }
+                relative.push(name);
+            }
             Component::CurDir => (),
             _ => return Err("path must be relative and cannot contain '..'"),
         }
@@ -287,12 +296,18 @@ fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), 
         let Component::Normal(name) = component else {
             unreachable!()
         };
-        if name == ".git" {
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let git_metadata = name == ".git";
+        #[cfg(any(windows, target_os = "macos"))]
+        let git_metadata = name
+            .to_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".git"));
+        if git_metadata {
             return Err(Failure::Invalid("writes to Git metadata are not supported"));
         }
         target.push(name);
         match fs::symlink_metadata(&target) {
-            Ok(metadata) if metadata.is_symlink() => {
+            Ok(metadata) if is_link(&metadata) => {
                 return Err(Failure::Invalid(
                     "writes through symlinks are not supported",
                 ));
@@ -308,13 +323,23 @@ fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), 
             Err(error) => return Err(error.into()),
         }
     }
-    Ok((
-        relative
-            .to_str()
-            .ok_or(Failure::Invalid("non-UTF-8 path"))?
-            .to_owned(),
-        target,
-    ))
+    let path = relative
+        .to_str()
+        .ok_or(Failure::Invalid("non-UTF-8 path"))?;
+    #[cfg(windows)]
+    let path = path.replace('\\', "/");
+    Ok((path.to_owned(), target))
+}
+
+fn is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    metadata.is_symlink()
 }
 
 fn capture(path: &Path, context: Option<&ToolContext>) -> Result<FileSnapshot, Failure> {
@@ -449,10 +474,10 @@ fn mutate_sync(
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 pub(crate) fn unsupported_command() -> Result<ToolExecutionOutcome, ToolError> {
     crate::business_error(
         "unsupported_platform",
-        "bash process-group execution is supported only on Unix",
+        "bash execution is supported only on Unix and Windows",
     )
 }

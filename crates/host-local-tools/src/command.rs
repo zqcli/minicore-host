@@ -30,42 +30,40 @@ pub(crate) async fn run(
     {
         return crate::scope::OwnedOutcome::settled(Err(ToolError::InvalidInvocation));
     }
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     {
         let mut cleanup_confirmed = true;
-        let result = unix::run(binding, id, input, context, &mut cleanup_confirmed).await;
+        let result = native::run(binding, id, input, context, &mut cleanup_confirmed).await;
         crate::scope::OwnedOutcome {
             result,
             cleanup_confirmed,
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     {
         let _ = (binding, id, input, context);
         crate::scope::OwnedOutcome::settled(crate::files::unsupported_command())
     }
 }
 
-#[cfg(unix)]
-mod unix {
+#[cfg(any(unix, windows))]
+mod platform;
+
+#[cfg(any(unix, windows))]
+mod native {
+    use super::platform;
     use super::*;
     use crate::{
         CommandFileChanges, CommandResult, CommandStatus, CommandStream, LocalToolSink,
         OutputChannel, business_error, check, completed,
     };
-    use nix::{
-        errno::Errno,
-        sys::signal::{Signal, killpg},
-        unistd::Pid,
-    };
-    use process_wrap::tokio::{KillOnDrop, ProcessGroup, TokioCommandWrap};
+    use process_wrap::tokio::{KillOnDrop, TokioCommandWrap};
     use std::{
         io,
-        os::unix::process::ExitStatusExt,
         process::Stdio,
         time::{Duration, Instant},
     };
-    use tokio::{io::AsyncReadExt, process::Command};
+    use tokio::io::AsyncReadExt;
 
     struct Stream {
         channel: OutputChannel,
@@ -146,28 +144,36 @@ mod unix {
         };
         check(&context)?;
         let excluded_names = binding.environment.excluded_names();
-        let mut command = Command::new("/bin/bash");
+        let mut command = match platform::shell_command() {
+            Ok(command) => command,
+            Err(error) => return business_error("process_start", error.to_string()),
+        };
+        let mut capture = match platform::Capture::new().await {
+            Ok(capture) => capture,
+            Err(error) => return business_error("process_start", error.to_string()),
+        };
+        check(&context)?;
         for name in excluded_names {
             command.env_remove(name);
         }
         command
             .args(["--noprofile", "--norc", "-c", &input.command])
             .current_dir(cwd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .stdin(Stdio::null());
+        capture.configure(&mut command);
         // Adapted from minicore-agent's command owner: the wrapper owns the
-        // real group wait. KillOnDrop is a backstop, never completion evidence.
+        // real scope wait. KillOnDrop is a backstop, never completion evidence.
         let mut command = TokioCommandWrap::from(command);
-        command.wrap(ProcessGroup::leader()).wrap(KillOnDrop);
+        platform::wrap_scope(&mut command);
+        command.wrap(KillOnDrop);
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) => return business_error("process_start", error.to_string()),
         };
         *cleanup_confirmed = false;
         let pid = child.id().expect("spawned child has a process ID");
-        let mut stdout = child.stdout().take().expect("configured stdout pipe");
-        let mut stderr = child.stderr().take().expect("configured stderr pipe");
+        let (mut stdout, mut stderr) = capture.take_readers(&mut child);
+        drop(command);
         let mut out = Stream::new(OutputChannel::Stdout);
         let mut err = Stream::new(OutputChannel::Stderr);
         let mut out_buffer = [0; 16 * 1024];
@@ -202,11 +208,9 @@ mod unix {
             }
         }
         // Stop descendants even after a natural leader exit and pipe EOF.
-        // A successful signal request is not evidence that the group is gone.
-        if let Err(error) = killpg(Pid::from_raw(pid as i32), Signal::SIGKILL)
-            && error != Errno::ESRCH
-        {
-            errors.push(format!("process-group stop failed: {error}"));
+        // A successful stop request is not evidence that the scope is gone.
+        if let Err(error) = platform::stop_scope(&mut child, pid) {
+            errors.push(format!("process-scope stop failed: {error}"));
             handling_failed = true;
         }
         if waited.is_none()
@@ -216,7 +220,7 @@ mod unix {
             handling_failed = true;
         }
         // Perform one full wrapper wait, never drop it partway through. Its
-        // direct-child wait and group-child reap run alongside both drains.
+        // direct-child wait and scope wait run alongside both drains.
         // No reader task is detached. An escaped descendant can hold a pipe;
         // that bounded observation ends incomplete, not with a fabricated EOF.
         let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
@@ -225,7 +229,7 @@ mod unix {
                 tokio::select! {
                     biased;
                     _ = tokio::time::sleep_until(cleanup_deadline) => {
-                        errors.push("output pipe did not reach EOF after process-group cleanup".to_owned());
+                        errors.push("output pipe did not reach EOF after process-scope cleanup".to_owned());
                         handling_failed = true;
                         break;
                     }
@@ -243,22 +247,22 @@ mod unix {
         let exit = match reaped {
             Ok(exit) => Some(exit),
             Err(error) => {
-                errors.push(format!("process-group wait failed: {error}"));
+                errors.push(format!("process-scope wait failed: {error}"));
                 handling_failed = true;
                 waited.and_then(Result::ok)
             }
         };
-        // The wrapper can reap only children of this process. A remaining
-        // group member need not be our child, so ECHILD is not scope evidence.
-        let group_gone = match confirmed_group_gone(pid).await {
+        // Unix also probes the group; Windows wrapper wait observes the empty job.
+        // Neither a leader exit nor pipe EOF alone confirms the scope ended.
+        let scope_gone = match platform::confirmed_scope_gone(pid, wrapper_waited).await {
             Ok(true) => true,
             Ok(false) => {
-                errors.push("process group still exists after cleanup observation".to_owned());
+                errors.push("process scope still exists after cleanup observation".to_owned());
                 handling_failed = true;
                 false
             }
             Err(error) => {
-                errors.push(format!("process-group end could not be confirmed: {error}"));
+                errors.push(format!("process-scope end could not be confirmed: {error}"));
                 handling_failed = true;
                 false
             }
@@ -266,12 +270,12 @@ mod unix {
         if handling_failed && status == CommandStatus::Exited {
             status = CommandStatus::Failed;
         }
-        *cleanup_confirmed = wrapper_waited && group_gone && out.closed && err.closed;
+        *cleanup_confirmed = wrapper_waited && scope_gone && out.closed && err.closed;
         let result = CommandResult {
             status,
             pid,
             exit_code: exit.as_ref().and_then(|exit| exit.code()),
-            signal: exit.as_ref().and_then(|exit| exit.signal()),
+            signal: exit.as_ref().and_then(platform::exit_signal),
             process_waited: exit.is_some(),
             cleanup_confirmed: *cleanup_confirmed,
             stdout: out.result(),
@@ -292,27 +296,6 @@ mod unix {
             CommandStatus::TimedOut => Err(ToolError::TimedOut),
             CommandStatus::Failed => Err(ToolError::Internal),
             CommandStatus::Exited => completed(result),
-        }
-    }
-
-    /// Adapted from minicore-agent's scope observation. ESRCH is the only
-    /// affirmative group-end evidence; a present or unobservable group stays
-    /// unconfirmed even when its leader exited and both pipes reached EOF.
-    async fn confirmed_group_gone(pid: u32) -> Result<bool, Errno> {
-        for _ in 0..10 {
-            if probe_group(pid)? {
-                return Ok(true);
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        probe_group(pid)
-    }
-
-    fn probe_group(pid: u32) -> Result<bool, Errno> {
-        match killpg(Pid::from_raw(pid as i32), None) {
-            Ok(()) => Ok(false),
-            Err(Errno::ESRCH) => Ok(true),
-            Err(error) => Err(error),
         }
     }
 }

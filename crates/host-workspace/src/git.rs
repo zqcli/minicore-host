@@ -15,7 +15,7 @@ use tokio::{
 use crate::{
     QueryContext, Result, Workspace, WorkspaceError,
     context::blocking,
-    workspace::{normalize, path_text},
+    workspace::{normalize, relative_path_text},
 };
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialOrd, PartialEq, Serialize, Deserialize)]
@@ -132,7 +132,7 @@ impl Repository {
             .success("repository root")?;
         let text = std::str::from_utf8(result.stdout.strip_suffix(b"\n").unwrap_or(&result.stdout))
             .map_err(|_| WorkspaceError::NonUtf8Path)?;
-        let root = PathBuf::from(text);
+        let root = fs::canonicalize(PathBuf::from(text))?;
         let prefix = workspace
             .root()
             .strip_prefix(&root)
@@ -388,11 +388,11 @@ impl Repository {
         let relative = path
             .strip_prefix(&self.prefix)
             .map_err(|_| WorkspaceError::OutsideWorkspace)?;
-        Ok(path_text(relative)?.to_owned())
+        relative_path_text(relative)
     }
 
     fn repo_path(&self, path: &str) -> Result<String> {
-        Ok(path_text(&self.prefix.join(normalize(path, false)?))?.to_owned())
+        relative_path_text(&self.prefix.join(normalize(path, false)?))
     }
 
     pub(crate) async fn head_bytes(

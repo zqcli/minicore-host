@@ -45,6 +45,27 @@ impl Drop for TemporaryDirectory {
     }
 }
 
+fn process_exists(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    }
+    #[cfg(windows)]
+    {
+        let output = std::process::Command::new("tasklist.exe")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "native process query must succeed");
+        String::from_utf8_lossy(&output.stdout).contains(&format!(",\"{pid}\","))
+    }
+}
+
 #[derive(Default)]
 struct FixtureRecords {
     outputs: Mutex<BTreeMap<String, ToolOutputLease>>,
@@ -604,7 +625,7 @@ async fn cancelled_real_bash_is_waited_before_finished_and_same_call_id_is_turn_
     let command = records.commands.lock().unwrap()[0].1.clone();
     assert_eq!(command.status, CommandStatus::Cancelled);
     assert!(command.process_waited && command.cleanup_confirmed);
-    assert!(!std::path::Path::new(&format!("/proc/{}", command.pid)).exists());
+    assert!(!process_exists(command.pid));
     assert!(!output.emit("stdout", "late"));
     send(&host, &caller, &target);
     let second = finish(&host, &caller, &target, 2).await;

@@ -1,5 +1,15 @@
 # MiniCore Host
 
+## Current work: native multi-platform CI
+
+[Task 105](tasks/105-multiplatform-ci/TASK.md) implements the requested Host CI
+and distribution matrix against dev `6ea85fda737635e26b9d7cad17c3df1e54911bd9`.
+Runtime is compiled into the Host executable through its existing pinned Cargo
+dependency; Host/Runtime interfaces, version 0.9.20 and SPEC remain unchanged.
+Platform adapters and native validation are in progress. The task records actual
+results separately from configured CI targets; no unverified platform support
+or successful publication is asserted here.
+
 ## Current performance checkpoint
 
 [Task104](tasks/104-performance/TASK.md) implements eight selected optimizations

@@ -18,6 +18,10 @@ sandbox, and configured credential exclusion does not isolate same-user processe
 
 ## Local checks
 
+See [native CI and distribution packages](docs/ci.md) for platform jobs, release
+archives and the fixed Runtime library compiled into each Host executable.
+The initial configuration template is [example.host.json](example.host.json).
+
 Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for formatting, Clippy, tests and documentation checks. Dependencies are pinned and the root lock is committed. Whitespace checks include committed changes and require full Git history; CI uses `fetch-depth: 0`.
 
 Shared package metadata and dependency pins are declared in the root

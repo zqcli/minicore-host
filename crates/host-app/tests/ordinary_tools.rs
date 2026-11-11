@@ -1,6 +1,5 @@
 //! Actual minicore-host binary -> stdio/WSS -> owners -> production HTTP adapter
 //! -> pinned Runtime -> ordinary tools. Only loopback model replies are scripted.
-#![cfg(unix)]
 mod support;
 mod tool_support;
 
@@ -330,8 +329,14 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
     let initial_bytes = "left=old right=old\n";
     fs::write(original.path().join("file"), initial_bytes).unwrap();
     fs::write(other.path().join("file"), "different root\n").unwrap();
-    let alias = app.directory.path().join("workspace-alias");
-    std::os::unix::fs::symlink(original.path(), &alias).unwrap();
+    #[cfg(unix)]
+    let alias = {
+        let alias = app.directory.path().join("workspace-alias");
+        std::os::unix::fs::symlink(original.path(), &alias).unwrap();
+        alias
+    };
+    #[cfg(windows)]
+    let alias = original.path().join(".");
     let target = app.create(original.path(), &["edit", "read"]).await;
     let wrong = app.create(other.path(), &["read"]).await;
     app.process
