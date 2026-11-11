@@ -67,6 +67,12 @@ documents. Unix executables retain mode `0755` inside the tar archive. Links to
 source and historical records not included in the package point to that build's
 exact Git commit; links between bundled documents remain relative.
 
+After creating the archive, the helper reads it back and requires exactly the
+staged files, one Host executable, and the same executable SHA-256 as the binary
+that passed the native smoke check. Unix archives must retain mode `0755` for
+Host and contain no other executable files or links. The job prints both Host
+and archive SHA-256 values for verification against the downloaded artifact.
+
 Download the archive from a successful workflow run's **Artifacts** section and
 extract it before starting Host. The example configuration deliberately uses an
 invalid placeholder provider endpoint. Supply your actual provider, model and

@@ -52,11 +52,13 @@ jobs:
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.90.0 --profile minimal --component clippy
       - name: Lint native platform code
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings
       - name: Test native platform contracts
         run: cargo test --workspace --all-targets --locked --no-fail-fast
       - name: Test documentation examples
         run: cargo test --workspace --doc --locked
+      - name: List unique native test cases
+        run: cargo test --workspace --all-targets --locked -- --list
       - name: Test storage and Host as a standard Windows user
         if: runner.os == 'Windows'
         shell: pwsh

@@ -159,6 +159,33 @@ checkpoint is reconstructed from the published third source and reviewed edits,
 and must pass its own native CI; the earlier local result is not treated as proof
 of byte-for-byte identity with that reconstructed checkpoint.
 
+## Reconstructed checkpoint and native verification
+
+The reconstructed candidate is remote `9c5d0e6c24057c71993b78d4f87a9957bec78c79`,
+tree `1f0bca3b297e33230e73975829cd19ffe3b5571a`. Its 43 changed files were
+assembled from immutable Git trees with disjoint paths and no deleted files.
+All four pipe-fixture blobs match their recorded pre-outage full hashes.
+Other files were restored through checked source transformations; the candidate
+is validated independently of the earlier local run.
+
+[The fourth native run](https://github.com/zqcli/minicore-host/actions/runs/43042556299)
+identified three rustfmt-only differences in reconstructed test files. The
+follow-up applies exactly rustfmt's reported import order and panic formatting.
+Windows strict Clippy also found helper/import usage hidden by old Unix-only
+resource-test gates. Portable resource tests now use the actual Windows local
+tools, while genuine FIFO and Linux process-inspection fixtures retain their
+specific platform requirements.
+
+Native Clippy keeps going across independent targets while still treating every
+warning as an error. The native matrix additionally lists its actual test cases
+with `cargo test --workspace --all-targets --locked -- --list`; nested subprocess
+probe output is not used as an additional case count.
+
+Package validation now reopens each completed archive, checks its exact file
+set and single Host executable, verifies Unix modes and compares archived Host
+bytes with the binary that passed the native smoke check. It prints both binary
+and archive SHA-256 values.
+
 Full final gates, independent final review, final source identities, native CI
 results and four-platform artifact verification are pending. A configured
 matrix, cross-check or standalone probe does not establish platform support.

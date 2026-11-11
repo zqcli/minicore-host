@@ -4,7 +4,6 @@
 #[cfg(target_os = "linux")]
 #[path = "local_tools/completion.rs"]
 mod completion;
-#[cfg(unix)]
 #[path = "local_tools/process.rs"]
 mod process;
 #[path = "support/production.rs"]
@@ -116,7 +115,6 @@ async fn next(subscription: &mut EventSubscription) -> ObservationEvent {
     }
 }
 
-#[cfg(unix)]
 #[tokio::test]
 async fn ordinary_tools_execute_and_retain_actual_results_edits_and_output_without_observers() {
     let mut server = Server::start(vec![

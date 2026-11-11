@@ -628,9 +628,7 @@ async fn cancelled_real_bash_is_waited_before_finished_and_same_call_id_is_turn_
     .unwrap_or_else(|error| {
         let commands = records.commands.lock().unwrap().clone();
         let turns = host.turns(&caller, &target).unwrap();
-        panic!(
-            "cancelled Turn did not finish: {error}; commands: {commands:?}; turns: {turns:?}"
-        )
+        panic!("cancelled Turn did not finish: {error}; commands: {commands:?}; turns: {turns:?}")
     })
     .unwrap();
     assert_eq!(result.info.outcome, Some(TurnOutcome::Cancelled));

@@ -1,6 +1,8 @@
 use super::*;
+#[cfg(unix)]
 use std::{collections::BTreeMap, io::Write, path::Path};
 
+#[cfg(unix)]
 fn fifo(path: &Path) {
     assert!(
         std::process::Command::new("mkfifo")
@@ -10,6 +12,7 @@ fn fifo(path: &Path) {
             .success()
     );
 }
+#[cfg(unix)]
 async fn tool_delta(events: &mut EventSubscription) -> (ToolCallIdentity, OutputDelta) {
     loop {
         if let ObservationEvent::Activity(ActivityEvent::ToolOutput { source, data }) =
@@ -20,6 +23,7 @@ async fn tool_delta(events: &mut EventSubscription) -> (ToolCallIdentity, Output
     }
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn live_process_output_preserves_split_utf8_ranges_source_identity_and_native_result() {
     let mut server = Server::start(vec![
