@@ -25,14 +25,14 @@ use windows_sys::Win32::{
     Foundation::{ERROR_NO_MORE_FILES, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT},
     System::{
         Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First,
-            Thread32Next,
+            CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
         },
         IO::{CreateIoCompletionPort, GetQueuedCompletionStatus, OVERLAPPED},
         JobObjects::{
             IsProcessInJob, JOBOBJECT_ASSOCIATE_COMPLETION_PORT,
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectAssociateCompletionPortInformation,
-            JobObjectBasicAccountingInformation, QueryInformationJobObject, SetInformationJobObject,
+            JobObjectBasicAccountingInformation, QueryInformationJobObject,
+            SetInformationJobObject,
         },
         SystemServices::JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO,
         Threading::{
@@ -89,7 +89,9 @@ pub(super) async fn spawn(
                         }
                     }
                     None if !started => Ok(()),
-                    None => Err(io::Error::other("suspended child cleanup was not confirmed")),
+                    None => Err(io::Error::other(
+                        "suspended child cleanup was not confirmed",
+                    )),
                 },
             };
             return Err(start_error(error, cleanup));
@@ -162,7 +164,9 @@ fn terminate_and_wait(process: BorrowedHandle<'_>) -> io::Result<()> {
     if wait(process, INFINITE)? {
         Ok(())
     } else {
-        Err(io::Error::other("infinite process wait unexpectedly timed out"))
+        Err(io::Error::other(
+            "infinite process wait unexpectedly timed out",
+        ))
     }
 }
 
@@ -308,11 +312,15 @@ fn monitor(
             return Err(error);
         }
         if received_key != key {
-            return Err(io::Error::other("completion packet belongs to a different Job"));
+            return Err(io::Error::other(
+                "completion packet belongs to a different Job",
+            ));
         }
         if code == JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO {
             if !payload.is_null() {
-                return Err(io::Error::other("ACTIVE_PROCESS_ZERO has an invalid payload"));
+                return Err(io::Error::other(
+                    "ACTIVE_PROCESS_ZERO has an invalid payload",
+                ));
             }
             return Ok(true);
         }
@@ -352,8 +360,13 @@ fn validate_suspended_root(job: &JobObjectHandle, root: BorrowedHandle<'_>) -> i
     let mut member = 0;
     // SAFETY: root is the retained native process handle; the exact Job clone
     // remains owned, and member is a valid writable BOOL for the whole call.
-    if unsafe { IsProcessInJob(root.as_raw_handle(), job.as_handle().as_raw_handle(), &mut member) }
-        == 0
+    if unsafe {
+        IsProcessInJob(
+            root.as_raw_handle(),
+            job.as_handle().as_raw_handle(),
+            &mut member,
+        )
+    } == 0
     {
         return Err(io::Error::last_os_error());
     }
@@ -373,7 +386,9 @@ fn validate_suspended_root(job: &JobObjectHandle, root: BorrowedHandle<'_>) -> i
         return Err(io::Error::last_os_error());
     }
     if member == 0 || info.TotalProcesses != 1 || info.ActiveProcesses != 1 || wait(root, 0)? {
-        return Err(io::Error::other("Job initialization did not retain its single suspended root"));
+        return Err(io::Error::other(
+            "Job initialization did not retain its single suspended root",
+        ));
     }
     Ok(())
 }
@@ -425,7 +440,9 @@ fn resume_threads(root: BorrowedHandle<'_>) -> io::Result<()> {
                 return Err(io::Error::last_os_error());
             }
             if owner != pid {
-                return Err(io::Error::other("snapshot thread no longer belongs to the root"));
+                return Err(io::Error::other(
+                    "snapshot thread no longer belongs to the root",
+                ));
             }
             threads.push(thread);
         }
@@ -488,7 +505,11 @@ mod tests {
     async fn monitor_is_ready_while_the_actual_root_is_still_suspended() {
         let mut command = suspended_command();
         let mut child = command.spawn().unwrap();
-        let root = child.process_handle().unwrap().try_clone_to_owned().unwrap();
+        let root = child
+            .process_handle()
+            .unwrap()
+            .try_clone_to_owned()
+            .unwrap();
         let mut completion = Completion::attach(child.as_ref(), root.as_handle()).unwrap();
         completion.ready.take().unwrap().await.unwrap();
         let still_suspended = !wait(root.as_handle(), 0).unwrap();
@@ -507,7 +528,11 @@ mod tests {
     async fn missing_job_notification_is_not_replaced_by_zero_accounting() {
         let mut command = suspended_command();
         let mut child = command.spawn().unwrap();
-        let root = child.process_handle().unwrap().try_clone_to_owned().unwrap();
+        let root = child
+            .process_handle()
+            .unwrap()
+            .try_clone_to_owned()
+            .unwrap();
         let mut completion = Completion::attach(child.as_ref(), root.as_handle()).unwrap();
         // Real OS fault injection: detach the monitor port while the process
         // is still suspended, so its eventual ZERO cannot reach this monitor.

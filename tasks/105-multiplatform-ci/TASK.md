@@ -438,3 +438,15 @@ the large-history fixture-only budget change. These sources have not been run in
 the unavailable local executor. Their integrated formatting, compilation, native
 contracts, ordinary-user checks and package gates remain pending before platform
 acceptance or dev publication.
+
+## Ninth integration checkpoint
+
+The integrated source is `77b7cb3b9b7461d8733cc15c5d7fcd699b93aa13`, tree
+`915f7a9ee80798f572d7b2f52f201130c636b9a4`.
+[Run 43067522158](https://github.com/zqcli/minicore-host/actions/runs/43067522158)
+passes the 28 Python evidence checks, then rustfmt reports eleven formatting
+hunks in the new private Windows module. The follow-up applies those exact
+Rust 1.90.0 formatter changes; no process, timeout, ownership or test assertion
+is altered by that formatting correction. Native jobs are still in progress
+at this documentation checkpoint, and the quality failure correctly blocks
+all package jobs.
