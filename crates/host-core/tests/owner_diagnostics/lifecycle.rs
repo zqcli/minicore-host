@@ -4,7 +4,10 @@ use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::OpenOptionsExt;
 use tracing::instrument::WithSubscriber;
 
 #[tokio::test]
@@ -244,13 +247,30 @@ async fn accepted_partial_creation_survives_dropped_wait_and_reports_actual_defa
             .join(progress.agent_id.as_ref().unwrap().as_str());
         // Real Session writes remain allowed, but Agent default publication is refused.
         std::fs::create_dir(path.join("sessions")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500)).unwrap();
-        assert_eq!(
-            std::fs::write(path.join("write-probe"), b"probe")
-                .unwrap_err()
-                .kind(),
-            std::io::ErrorKind::PermissionDenied
-        );
+        #[cfg(unix)]
+        {
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500)).unwrap();
+            assert_eq!(
+                std::fs::write(path.join("write-probe"), b"probe")
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied
+            );
+        }
+        #[cfg(windows)]
+        let publication_guard = {
+            // Keep ordinary metadata reads and Session creation available, but
+            // deny the actual atomic replacement of the Agent's existing file.
+            let record = path.join("agent.json");
+            let held = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1 | 2) // FILE_SHARE_READ | FILE_SHARE_WRITE, without DELETE.
+                .open(&record)
+                .unwrap();
+            let error = std::fs::rename(&record, path.join("agent.json.blocked")).unwrap_err();
+            assert_eq!(error.raw_os_error(), Some(32));
+            held
+        };
         waiting.abort();
         gate.release();
         let receipt = until(|| {
@@ -264,7 +284,10 @@ async fn accepted_partial_creation_survives_dropped_wait_and_reports_actual_defa
             CreateStep::Failed { .. }
         ));
         assert!(receipt.session_id.is_none());
+        #[cfg(unix)]
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        #[cfg(windows)]
+        drop(publication_guard);
         assert!(
             std::fs::read_dir(path.join("sessions"))
                 .unwrap()

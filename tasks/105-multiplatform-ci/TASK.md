@@ -186,6 +186,22 @@ set and single Host executable, verifies Unix modes and compares archived Host
 bytes with the binary that passed the native smoke check. It prints both binary
 and archive SHA-256 values.
 
+The fourth run passes the complete Linux and Apple Silicon macOS native jobs.
+The macOS log confirms both the new unreaped-group regression and the original
+cancellation/Turn-finish cases pass. Intel macOS was still running when this
+checkpoint was recorded.
+
+The fifth candidate is `088bc6d6106f925c17e52e136acf3d7f63d0a630`,
+tree `e24269d8f780395a6f07e5ab970fff51a3514c2e`.
+[Its Windows Clippy job](https://github.com/zqcli/minicore-host/actions/runs/43043643222)
+identified one remaining Unix permission fixture in owner diagnostics.
+That test retains its real Unix directory-permission failure. On Windows it now
+holds the actual Agent metadata file without delete sharing and verifies that
+a real rename is denied. Session writes remain possible, while the Agent's
+default-metadata atomic replacement fails at the original business boundary.
+The accepted-work, dropped-waiter, receipt and diagnostic assertions are unchanged;
+no production dependency or implementation changed in this correction.
+
 Full final gates, independent final review, final source identities, native CI
 results and four-platform artifact verification are pending. A configured
 matrix, cross-check or standalone probe does not establish platform support.
