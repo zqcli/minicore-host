@@ -1,6 +1,5 @@
 //! Synthetic environment in a subprocess, with real Host resources, Runtime,
 //! bash and loopback HTTP/SSE. No ambient credential values are read.
-#![cfg(unix)]
 
 #[allow(dead_code)]
 #[path = "support/production.rs"]
@@ -41,12 +40,21 @@ fn credential_exclusions_follow_publication_without_rebinding_old_turns() {
             "--nocapture",
         ])
         .env_clear()
-        .env("PATH", "/bin:/usr/bin")
         .env("HOME", isolated_home.path())
         .env("TMPDIR", isolated_home.path())
+        .env("TEMP", isolated_home.path())
+        .env("TMP", isolated_home.path())
         .env("LANG", "C.UTF-8")
         .env(CHILD, "1")
         .env("TASK066_ORDINARY", "ordinary bytes retained");
+    #[cfg(unix)]
+    child.env("PATH", "/bin:/usr/bin");
+    #[cfg(windows)]
+    for name in ["PATH", "SystemRoot", "ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(value) = std::env::var_os(name) {
+            child.env(name, value);
+        }
+    }
     for name in NAMES {
         child.env(name, format!("synthetic-{name}-value"));
     }
@@ -61,7 +69,7 @@ fn credential_exclusions_follow_publication_without_rebinding_old_turns() {
 
 fn probe() -> Value {
     json!({"command": format!(
-        "for name in {}; do if [[ -v \"$name\" ]]; then printf '%s=present\\n' \"$name\"; else printf '%s=absent\\n' \"$name\"; fi; done; printf 'ordinary=%s\\n' \"$TASK066_ORDINARY\"",
+        "for name in {}; do if printenv \"$name\" > /dev/null; then printf '%s=present\\n' \"$name\"; else printf '%s=absent\\n' \"$name\"; fi; done; printf 'ordinary=%s\\n' \"$TASK066_ORDINARY\"",
         NAMES.join(" ")
     )})
 }

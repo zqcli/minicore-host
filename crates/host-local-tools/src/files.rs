@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 
 use crate::{Binding, CapturedEdit, check, completed};
 
+#[cfg(windows)]
+mod windows;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ReadInput {
@@ -443,7 +446,10 @@ fn mutate_sync(
             .persist(&target)
             .map_err(|error| Failure::Io(error.error))?;
         applied = true;
+        #[cfg(not(windows))]
         File::open(parent)?.sync_all()?;
+        #[cfg(windows)]
+        windows::sync_directory(parent)?;
         Ok(json!({"status":"applied","path":path,"bytes":bytes.len(),"replacements":replacements}))
     })();
     // This capture is cleanup after an attempted mutation. Cancellation cannot

@@ -55,6 +55,62 @@ fn entry(text: &str) -> HistoryEntry {
     }
 }
 
+// Windows byte-range locks prevent unrelated handles from reading a writer's
+// file. Inspect the actual owned file without releasing the lease or disturbing
+// its cursor; accepted/persisted assertions still observe real stored bytes.
+fn read_owned(journal: &SessionJournal) -> Vec<u8> {
+    let Backend::Persistent(backend) = &journal.backend else {
+        panic!("persistent fixture")
+    };
+    let mut file = &*backend.file;
+    let position = file.stream_position().unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).unwrap();
+    file.seek(SeekFrom::Start(position)).unwrap();
+    bytes
+}
+
+fn corrupt_owned(journal: &SessionJournal, bytes: &[u8]) {
+    let Backend::Persistent(backend) = &journal.backend else {
+        panic!("persistent fixture")
+    };
+    // This is an explicit corruption fixture. Windows cannot use a second
+    // write handle through the mandatory lease, so mutate through its owner.
+    let mut file = &*backend.file;
+    let position = file.stream_position().unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
+    file.write_all(bytes).unwrap();
+    file.set_len(bytes.len() as u64).unwrap();
+    file.seek(SeekFrom::Start(position)).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_stamp_preserves_cursor_and_detects_equal_length_content_rewrite() {
+    let (_temp, session) = fixture();
+    let mut journal = session.open_journal().unwrap();
+    journal.accept(vec![entry("original")]).unwrap();
+    journal.persist_pending().unwrap();
+    let Backend::Persistent(backend) = &journal.backend else {
+        panic!("persistent fixture")
+    };
+    let mut file = &*backend.file;
+    file.seek(SeekFrom::Start(3)).unwrap();
+    let modified = file.metadata().unwrap().modified().unwrap();
+    let before = FileStamp::read(file, &backend.dir.path).unwrap();
+    assert_eq!(file.stream_position().unwrap(), 3);
+    let changed = String::from_utf8(read_owned(&journal))
+        .unwrap()
+        .replace("original", "modified");
+    corrupt_owned(&journal, changed.as_bytes());
+    file.set_modified(modified).unwrap();
+    let after = FileStamp::read(file, &backend.dir.path).unwrap();
+    assert_eq!(file.stream_position().unwrap(), 3);
+    assert_eq!(before.len, after.len);
+    assert!(before != after);
+}
+
 #[test]
 fn failed_zero_byte_write_reconciles_original_range_once() {
     let (_temp, session) = fixture();
@@ -85,14 +141,13 @@ fn failed_zero_byte_write_reconciles_original_range_once() {
 #[test]
 fn complete_write_failed_sync_is_readable_but_not_confirmed_then_synced_without_duplicate() {
     let (_temp, session) = fixture();
-    let path = session.canonical_path().join("history.jsonl");
     let mut journal = session.open_journal().unwrap();
     let range = journal
         .accept(vec![entry("completed but unsynced")])
         .unwrap();
     journal.failure = Some(TestFailure::FileSync);
     assert!(journal.persist_pending().is_err());
-    let bytes_before = std::fs::read(&path).unwrap();
+    let bytes_before = read_owned(&journal);
     assert!(!bytes_before.is_empty());
     assert_eq!(
         decode_history(&bytes_before, session.id())
@@ -104,7 +159,7 @@ fn complete_write_failed_sync_is_readable_but_not_confirmed_then_synced_without_
     );
     assert_eq!(journal.positions().persisted, Some(0));
     assert_eq!(journal.reconcile_pending().unwrap().range, range);
-    assert_eq!(std::fs::read(&path).unwrap(), bytes_before);
+    assert_eq!(read_owned(&journal), bytes_before);
     assert_eq!(journal.positions().persisted, Some(1));
 }
 #[test]
@@ -114,17 +169,17 @@ fn partial_write_stays_blocked_and_reopen_never_truncates() {
     let mut journal = session.open_journal().unwrap();
     journal.accept(vec![entry("first confirmed")]).unwrap();
     journal.persist_pending().unwrap();
-    let original = std::fs::read(&path).unwrap();
+    let original = read_owned(&journal);
     journal.accept(vec![entry("second range")]).unwrap();
     journal.failure = Some(TestFailure::WritePrefix(17));
     assert!(journal.persist_pending().is_err());
-    let partial = std::fs::read(&path).unwrap();
+    let partial = read_owned(&journal);
     assert!(partial.starts_with(&original));
     assert!(matches!(
         journal.reconcile_pending(),
         Err(StorageError::UncertainWrite)
     ));
-    assert_eq!(std::fs::read(&path).unwrap(), partial);
+    assert_eq!(read_owned(&journal), partial);
     assert_eq!(
         journal.positions(),
         SavePositions {
@@ -139,29 +194,27 @@ fn partial_write_stays_blocked_and_reopen_never_truncates() {
 #[test]
 fn reconciliation_rejects_changed_prefix_even_when_suffix_matches() {
     let (_temp, session) = fixture();
-    let path = session.canonical_path().join("history.jsonl");
     let mut journal = session.open_journal().unwrap();
     journal.accept(vec![entry("original")]).unwrap();
     journal.persist_pending().unwrap();
     journal.accept(vec![entry("next")]).unwrap();
     journal.failure = Some(TestFailure::FileSync);
     assert!(journal.persist_pending().is_err());
-    let original = std::fs::read_to_string(&path).unwrap();
+    let original = String::from_utf8(read_owned(&journal)).unwrap();
     let changed = original.replace("original", "altered!");
     assert_eq!(changed.len(), original.len());
-    std::fs::write(&path, &changed).unwrap();
+    corrupt_owned(&journal, changed.as_bytes());
     assert!(matches!(
         journal.reconcile_pending(),
         Err(StorageError::UncertainWrite)
     ));
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), changed);
+    assert_eq!(String::from_utf8(read_owned(&journal)).unwrap(), changed);
     assert_eq!(journal.positions().persisted, Some(1));
 }
 
 #[test]
 fn directory_sync_failure_does_not_confirm_a_readable_fully_written_range() {
     let (_temp, session) = fixture();
-    let path = session.canonical_path().join("history.jsonl");
     let mut journal = session.open_journal().unwrap();
     let range = journal.accept(vec![entry("file sync succeeded")]).unwrap();
     journal.failure = Some(TestFailure::DirectorySync);
@@ -172,11 +225,11 @@ fn directory_sync_failure_does_not_confirm_a_readable_fully_written_range() {
             ..
         })
     ));
-    let before = std::fs::read(&path).unwrap();
+    let before = read_owned(&journal);
     assert!(!before.is_empty());
     assert_eq!(journal.positions().persisted, Some(0));
     assert_eq!(journal.reconcile_pending().unwrap().range, range);
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(read_owned(&journal), before);
     assert_eq!(journal.positions().persisted, Some(1));
 }
 
@@ -208,15 +261,33 @@ fn directory_replacement_during_sync_cannot_be_confirmed() {
     let mut journal = session.open_journal().unwrap();
     journal.accept(vec![entry("accepted")]).unwrap();
     journal.failure = Some(TestFailure::ReplaceDirectoryAfterSync);
+    #[cfg(unix)]
     assert!(matches!(
         journal.persist_pending(),
         Err(StorageError::UncertainWrite)
     ));
-    assert_eq!(journal.positions().persisted, Some(0));
-    assert_eq!(
-        std::fs::read(session.canonical_path().join("history.jsonl")).unwrap(),
-        b"replacement"
-    );
+    #[cfg(windows)]
+    {
+        // The hook must observe the OS rejecting the directory replacement.
+        journal.persist_pending().unwrap();
+        assert_eq!(journal.positions().persisted, Some(1));
+        assert_eq!(
+            decode_history(&read_owned(&journal), session.id())
+                .unwrap()
+                .0
+                .records
+                .len(),
+            1
+        );
+    }
+    #[cfg(unix)]
+    {
+        assert_eq!(journal.positions().persisted, Some(0));
+        assert_eq!(
+            std::fs::read(session.canonical_path().join("history.jsonl")).unwrap(),
+            b"replacement"
+        );
+    }
 }
 
 mod compaction;

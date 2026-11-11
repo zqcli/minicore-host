@@ -400,6 +400,10 @@ async fn cancellation_joins_leader_and_background_member_before_turn_finish() {
 
 #[cfg(windows)]
 #[test]
+#[allow(
+    clippy::zombie_processes,
+    reason = "the probe deliberately leaves a live descendant for the actual job owner to settle"
+)]
 fn windows_scope_probe() {
     use std::io::{Read, Write};
     use std::process::{Command, Stdio};
@@ -430,8 +434,111 @@ fn windows_scope_probe() {
 }
 
 #[cfg(windows)]
+async fn windows_scope_peers(
+    listener: &tokio::net::TcpListener,
+) -> Vec<(String, tokio::io::BufReader<tokio::net::TcpStream>)> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    let mut peers = Vec::new();
+    for _ in 0..2 {
+        let (socket, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
+            .await
+            .unwrap()
+            .unwrap();
+        let mut socket = BufReader::new(socket);
+        let mut identity = String::new();
+        tokio::time::timeout(Duration::from_secs(10), socket.read_line(&mut identity))
+            .await
+            .unwrap()
+            .unwrap();
+        peers.push((identity, socket));
+    }
+    assert!(peers.iter().any(|(id, _)| id.starts_with("root ")));
+    assert!(peers.iter().any(|(id, _)| id.starts_with("leaf ")));
+    peers
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_job_wait_does_not_confuse_a_leader_exit_with_an_empty_job() {
+    use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
+    use std::process::Stdio;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+    command
+        .args(["--exact", "windows_scope_probe", "--nocapture"])
+        .env("MINICORE_WINDOWS_SCOPE_ROLE", "root")
+        .env(
+            "MINICORE_WINDOWS_SCOPE_PORT",
+            listener.local_addr().unwrap().port().to_string(),
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut command = CommandWrap::from(command);
+    command.wrap(JobObject).wrap(KillOnDrop);
+    let mut child = command.spawn().unwrap();
+    let mut peers = windows_scope_peers(&listener).await;
+    peers
+        .iter_mut()
+        .find(|(id, _)| id.starts_with("root "))
+        .unwrap()
+        .1
+        .get_mut()
+        .write_all(b"x")
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(10), child.inner_mut().wait())
+            .await
+            .unwrap()
+            .unwrap()
+            .success()
+    );
+
+    // The job has received NEW_PROCESS and EXIT_PROCESS notifications, while
+    // the native descendant still blocks on its socket with both pipes closed.
+    // Keep the same wait future alive across the observation and release.
+    let mut waiting = child.wait();
+    let early = tokio::time::timeout(Duration::from_millis(200), &mut waiting).await;
+    let returned_early = early.is_ok();
+    peers
+        .iter_mut()
+        .find(|(id, _)| id.starts_with("leaf "))
+        .unwrap()
+        .1
+        .get_mut()
+        .write_all(b"x")
+        .await
+        .unwrap();
+    let exit = match early {
+        Ok(exit) => exit.unwrap(),
+        Err(_) => tokio::time::timeout(Duration::from_secs(10), waiting)
+            .await
+            .unwrap()
+            .unwrap(),
+    };
+    assert!(exit.success());
+    for (_, mut socket) in peers {
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+    }
+    assert!(
+        !returned_early,
+        "job wait returned while a native descendant was alive"
+    );
+}
+
+#[cfg(windows)]
 async fn windows_job_ends_native_descendants(cancel: bool) {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let (_root, tools, records) = fixture().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -458,22 +565,7 @@ async fn windows_job_ends_native_descendants(cancel: bool) {
         )
         .await
     });
-    let mut peers = Vec::new();
-    for _ in 0..2 {
-        let (socket, _) = tokio::time::timeout(Duration::from_secs(10), listener.accept())
-            .await
-            .unwrap()
-            .unwrap();
-        let mut socket = BufReader::new(socket);
-        let mut identity = String::new();
-        tokio::time::timeout(Duration::from_secs(10), socket.read_line(&mut identity))
-            .await
-            .unwrap()
-            .unwrap();
-        peers.push((identity, socket));
-    }
-    assert!(peers.iter().any(|(id, _)| id.starts_with("root ")));
-    assert!(peers.iter().any(|(id, _)| id.starts_with("leaf ")));
+    let mut peers = windows_scope_peers(&listener).await;
     if cancel {
         cancellation.cancel();
     } else {

@@ -57,7 +57,7 @@ mod native {
         CommandFileChanges, CommandResult, CommandStatus, CommandStream, LocalToolSink,
         OutputChannel, business_error, check, completed,
     };
-    use process_wrap::tokio::{KillOnDrop, TokioCommandWrap};
+    use process_wrap::tokio::{CommandWrap, KillOnDrop};
     use std::{
         io,
         process::Stdio,
@@ -163,12 +163,22 @@ mod native {
         capture.configure(&mut command);
         // Adapted from minicore-agent's command owner: the wrapper owns the
         // real scope wait. KillOnDrop is a backstop, never completion evidence.
-        let mut command = TokioCommandWrap::from(command);
+        let mut command = CommandWrap::from(command);
         platform::wrap_scope(&mut command);
         command.wrap(KillOnDrop);
-        let mut child = match command.spawn() {
+        let mut native_started = false;
+        let mut child = match command.spawn_with(|command| {
+            let child = command.spawn()?;
+            native_started = true;
+            Ok(child)
+        }) {
             Ok(child) => child,
-            Err(error) => return business_error("process_start", error.to_string()),
+            Err(error) => {
+                // Scope attachment can fail after the native child starts.
+                // The wrapper's kill-on-drop is a backstop, not joined cleanup.
+                *cleanup_confirmed = !native_started;
+                return business_error("process_start", error.to_string());
+            }
         };
         *cleanup_confirmed = false;
         let pid = child.id().expect("spawned child has a process ID");
@@ -242,7 +252,7 @@ mod native {
                 }
             }
         };
-        let (reaped, ()) = tokio::join!(Box::into_pin(child.wait()), drains);
+        let (reaped, ()) = tokio::join!(child.wait(), drains);
         let wrapper_waited = reaped.is_ok();
         let exit = match reaped {
             Ok(exit) => Some(exit),

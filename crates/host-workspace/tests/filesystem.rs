@@ -67,8 +67,12 @@ async fn binds_only_explicit_existing_directory_without_chdir() {
 async fn files_are_sorted_scoped_ignore_aware_and_page_without_limits() {
     let root = TempDir::new().unwrap();
     fs::create_dir(root.path().join("src")).unwrap();
-    fs::create_dir(root.path().join(".git")).unwrap();
-    fs::write(root.path().join(".git/secret"), "private").unwrap();
+    #[cfg(any(windows, target_os = "macos"))]
+    let git_metadata = ".GiT";
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let git_metadata = ".git";
+    fs::create_dir(root.path().join(git_metadata)).unwrap();
+    fs::write(root.path().join(git_metadata).join("secret"), "private").unwrap();
     fs::write(root.path().join(".gitignore"), "ignored\n").unwrap();
     for path in ["src/中文.rs", "src/a.rs", "z.txt", "ignored", ".hidden"] {
         fs::write(root.path().join(path), "text").unwrap();
@@ -100,8 +104,8 @@ async fn files_are_sorted_scoped_ignore_aware_and_page_without_limits() {
     assert!(
         all.entries
             .iter()
-            .all(|entry| !entry.path.starts_with(".git/")
-                && entry.path != ".git"
+            .all(|entry| !entry.path.starts_with(&format!("{git_metadata}/"))
+                && entry.path != git_metadata
                 && entry.path != "ignored")
     );
     let top = ws

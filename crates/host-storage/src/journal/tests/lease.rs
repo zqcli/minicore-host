@@ -15,7 +15,6 @@ fn held(session: &SessionStore) {
 #[test]
 fn writer_releases_only_after_actual_owner_finishes_with_inherited_descriptor() {
     let (_temp, session) = fixture();
-    let path = session.canonical_path().join("history.jsonl");
     let mut journal = session.open_journal().unwrap();
     let Backend::Persistent(backend) = &journal.backend else {
         unreachable!()
@@ -27,11 +26,11 @@ fn writer_releases_only_after_actual_owner_finishes_with_inherited_descriptor() 
     assert!(journal.persist_pending().is_err());
     held(&session);
     assert_eq!(journal.positions().persisted, Some(0));
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = read_owned(&journal);
     assert!(!bytes.is_empty());
     assert_eq!(journal.reconcile_pending().unwrap().range, range);
     held(&session); // Save confirmation does not release the live writer.
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(read_owned(&journal), bytes);
     drop(journal);
     let loaded = session.read_history();
     assert!(child.is_alive());
@@ -186,7 +185,7 @@ fn releasing_one_reader_does_not_unlock_another_active_reader() {
 #[test]
 fn failed_deletion_releases_its_history_lease_without_deleting_original_bytes() {
     use crate::lease_tests::on_next_lock;
-    use std::{cell::RefCell, os::unix::fs::PermissionsExt, rc::Rc};
+    use std::{cell::RefCell, rc::Rc};
     let (_temp, session) = fixture();
     let mut record = session.load().unwrap();
     record.data.closed = Some(crate::SessionClosure {
@@ -202,7 +201,7 @@ fn failed_deletion_releases_its_history_lease_without_deleting_original_bytes() 
     on_next_lock(move |file| {
         *child.borrow_mut() = Some(InheritedDescriptor::new(file));
         // External permission mutation makes the next guarded removal fail.
-        std::fs::set_permissions(changed, std::fs::Permissions::from_mode(0o666)).unwrap();
+        crate::test_support::set_mode(&changed, 0o666);
     });
     let result = session.delete_closed();
     let mut child = retained.borrow_mut().take().unwrap();

@@ -12,10 +12,11 @@ use crate::{
 };
 use minicore_host_protocol::{PersistenceState, SessionId};
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    os::unix::fs::MetadataExt,
     path::Path,
 };
 
@@ -507,10 +508,21 @@ struct FileStamp {
     dev: u64,
     ino: u64,
     len: u64,
+    #[cfg(unix)]
     mtime: (i64, i64),
+    #[cfg(unix)]
     ctime: (i64, i64),
+    #[cfg(windows)]
+    write_time: u64,
+    #[cfg(windows)]
+    creation_time: u64,
+    #[cfg(windows)]
+    attributes: u32,
+    #[cfg(windows)]
+    content_hash: [u8; 32],
 }
 impl FileStamp {
+    #[cfg(unix)]
     fn read(file: &File, dir: &Path) -> Result<Self, StorageError> {
         let m = file.metadata().map_err(|e| {
             crate::error::io_error("inspect history range", dir.join("history.jsonl"), e)
@@ -521,6 +533,67 @@ impl FileStamp {
             len: m.len(),
             mtime: (m.mtime(), m.mtime_nsec()),
             ctime: (m.ctime(), m.ctime_nsec()),
+        })
+    }
+
+    #[cfg(windows)]
+    fn read(file: &File, dir: &Path) -> Result<Self, StorageError> {
+        use std::os::windows::fs::{FileExt, MetadataExt};
+        let inspect = || {
+            file.metadata().map_err(|e| {
+                crate::error::io_error("inspect history range", dir.join("history.jsonl"), e)
+            })
+        };
+        let before = inspect()?;
+        let (dev, ino) = crate::filesystem::identity(file)?;
+        // Stable Rust does not expose Windows ChangeTime. Compare actual bytes
+        // as well as identity/length/timestamps instead of silently omitting the
+        // Unix stamp's protection against an in-place rewrite of equal length.
+        // Windows seek_read changes the shared cursor, unlike Unix read_at.
+        // Restore it even when verification fails; the journal owns all I/O on
+        // this handle, so no other worker can race the temporary position.
+        let mut cursor = file;
+        let position = cursor.stream_position().map_err(|e| {
+            crate::error::io_error("capture history cursor", dir.join("history.jsonl"), e)
+        })?;
+        let hashed = (|| {
+            let mut hash = Sha256::new();
+            let mut offset = 0u64;
+            let mut buffer = [0u8; 8192];
+            while offset < before.len() {
+                let count = usize::try_from((before.len() - offset).min(buffer.len() as u64))
+                    .expect("bounded by buffer length");
+                let read = file.seek_read(&mut buffer[..count], offset).map_err(|e| {
+                    crate::error::io_error("verify history bytes", dir.join("history.jsonl"), e)
+                })?;
+                if read == 0 {
+                    return Err(StorageError::UncertainWrite);
+                }
+                hash.update(&buffer[..read]);
+                offset += read as u64;
+            }
+            Ok(hash.finalize().into())
+        })();
+        cursor.seek(SeekFrom::Start(position)).map_err(|e| {
+            crate::error::io_error("restore history cursor", dir.join("history.jsonl"), e)
+        })?;
+        let content_hash = hashed?;
+        let after = inspect()?;
+        if before.len() != after.len()
+            || before.last_write_time() != after.last_write_time()
+            || before.creation_time() != after.creation_time()
+            || before.file_attributes() != after.file_attributes()
+        {
+            return Err(StorageError::UncertainWrite);
+        }
+        Ok(Self {
+            dev,
+            ino,
+            len: after.len(),
+            write_time: after.last_write_time(),
+            creation_time: after.creation_time(),
+            attributes: after.file_attributes(),
+            content_hash,
         })
     }
 }
@@ -552,13 +625,21 @@ fn test_after_sync(
         }
         Some(TestFailure::ReplaceDirectoryAfterSync) => {
             *failure = None;
-            std::fs::rename(
+            let moved = std::fs::rename(
                 &backend.dir.path,
                 backend.dir.path.with_extension("detached"),
-            )
-            .unwrap();
-            std::fs::create_dir(&backend.dir.path).unwrap();
-            std::fs::write(backend.dir.path.join("history.jsonl"), b"replacement").unwrap();
+            );
+            #[cfg(windows)]
+            {
+                let error = moved.expect_err("owned directory must reject replacement");
+                assert!(matches!(error.raw_os_error(), Some(5 | 32)));
+            }
+            #[cfg(unix)]
+            {
+                moved.unwrap();
+                std::fs::create_dir(&backend.dir.path).unwrap();
+                std::fs::write(backend.dir.path.join("history.jsonl"), b"replacement").unwrap();
+            }
         }
         _ => {}
     }

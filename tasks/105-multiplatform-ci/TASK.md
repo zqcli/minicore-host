@@ -58,6 +58,44 @@ the lockfile, top-level records, integration and publication.
   x86_64-pc-windows-msvc -p minicore-host-local-tools --lib`; cross-checking is not
   native process execution.
 
-Full gates, independent final review, final source identities, native CI results
-and artifact verification are pending. This record does not claim that a
-configured matrix or standalone probe establishes platform support.
+## Native implementation checkpoint
+
+The first CI source is remote `30a33abf64b20d298e0001822f4699df1e9362cf`, with
+tree `44dee3ed5c85ec3bbc30151df3270fac19a366ac`, identical to local `2040f163`.
+[Its native run](https://github.com/zqcli/minicore-host/actions/runs/43030627462)
+passes both Linux gates. macOS ARM64 exposed five platform assumptions: FIFO
+locking, two canonicalized temporary-path sync hooks, workspace root aliases
+and Bash 3.2 variable-presence syntax. These have targeted fixes, preserving
+real locking, fault injection and credential assertions. Windows was explicitly
+blocked by the unfinished storage backend at that checkpoint.
+
+The [standard-user Windows probe](https://github.com/zqcli/minicore-host/actions/runs/43031057105)
+also passes on source `87b87201e2ba1f23cef233d71a59294dbcad539f` and confirms
+`IsAdministrator=false`. Directory flushes work inside that user's profile;
+opening `C:\Users` or the volume root for write is denied. The implementation
+therefore uses the actual OS Known Folder Profile as an explicit existing
+namespace boundary. It pins that directory before any Host mkdir, flushes the
+profile and every descendant ancestor on acquisition (including failed earlier
+creation attempts), and retains read-only no-delete handles above it. Roots
+outside that profile still require every ancestor's real write/sync permission.
+There is no PermissionDenied or filesystem-sync no-op fallback.
+
+Windows storage now checks actual NTFS volume identity, owner/DACL permissions,
+file IDs, hardlinks and reparse points. Directory share modes provide the root
+lease and stable owned ancestry; journals retain actual OS file locks. Explicit
+deletion drops the now-empty target guard before removing its parent entry.
+Native confirmation of the full backend remains pending at this checkpoint.
+
+Review found a concrete Windows cleanup defect in process-wrap 8.2.2 and released
+10.0.1: their completion-port wait can accept a notification while descendants
+remain alive. The dependency is now fixed to official source
+[`2f4bc393d8bd03b4b1c81fee2e13ce82dd42906e`](https://github.com/watchexec/process-wrap/commit/2f4bc393d8bd03b4b1c81fee2e13ce82dd42906e),
+version 10.0.1, which checks actual active-process accounting. A native Windows
+regression keeps a real descendant alive after its leader exits and requires
+wait to remain pending until that descendant is explicitly released. Private
+adapter API changes pass the Linux process/app regressions and Windows cross
+Clippy; Runtime's pin and interfaces are unchanged.
+
+Full final gates, independent final review, final source identities, native CI
+results and artifact verification are pending. A configured matrix, cross-check
+or standalone probe does not establish platform support.

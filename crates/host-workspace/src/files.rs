@@ -357,7 +357,19 @@ impl Workspace {
             .require_git(false)
             .follow_links(false)
             .max_depth((!recursive).then_some(1))
-            .filter_entry(|entry| entry.file_name() != ".git");
+            .filter_entry(|entry| {
+                #[cfg(any(windows, target_os = "macos"))]
+                {
+                    !entry
+                        .file_name()
+                        .to_str()
+                        .is_some_and(|name| name.eq_ignore_ascii_case(".git"))
+                }
+                #[cfg(not(any(windows, target_os = "macos")))]
+                {
+                    entry.file_name() != ".git"
+                }
+            });
         let mut entries = Vec::new();
         for entry in builder.build() {
             context.check()?;

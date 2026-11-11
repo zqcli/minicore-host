@@ -1,12 +1,14 @@
 //! Hold the same open-file description in a real child without timing a fork.
 use crate::{
-    EventData, EventSpec, InitError, Options, Output, Scope, ShutdownOutcome, prepare, prepare_file,
+    EventData, EventSpec, InitError, Options, Output, Scope, ShutdownOutcome, prepare,
+    prepare_file, prepare_writer,
 };
 use std::{
     fs::OpenOptions,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Stdio},
+    sync::mpsc,
     time::Duration,
 };
 
@@ -15,6 +17,88 @@ fn options(path: &Path) -> Options {
         output: Output::File(path.to_owned()),
         ..Options::new("inherited-lease-test")
     }
+}
+
+/// Only timing is controlled: the worker owns an actual locked regular file,
+/// and performs the real write, flush, and unlock after the test releases it.
+struct GatedFileWriter {
+    file: std::fs::File,
+    entered: mpsc::Sender<()>,
+    proceed: Option<mpsc::Receiver<()>>,
+    released: mpsc::Sender<()>,
+}
+
+impl Write for GatedFileWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if let Some(proceed) = self.proceed.take() {
+            self.entered.send(()).unwrap();
+            proceed.recv().unwrap();
+        }
+        self.file.write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+#[test]
+fn bounded_shutdown_timeout_keeps_a_blocked_workers_actual_file_lease() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("blocked-output.jsonl");
+    let alias = directory.path().join("blocked-alias.jsonl");
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(&path)
+        .unwrap();
+    std::fs::hard_link(&path, &alias).unwrap();
+    file.try_lock().unwrap();
+    let (entered, observe) = mpsc::channel();
+    let (proceed, release) = mpsc::channel();
+    let (released, finished) = mpsc::channel();
+    let writer = GatedFileWriter {
+        file,
+        entered,
+        proceed: Some(release),
+        released,
+    };
+    let (dispatch, guard) = prepare_writer(options(&path), writer, |writer| {
+        writer.file.unlock()?;
+        writer.released.send(()).unwrap();
+        Ok(())
+    })
+    .unwrap();
+    tracing::dispatcher::with_default(&dispatch, || {
+        EventSpec {
+            level: tracing::Level::INFO,
+            scope: Scope::Host,
+            component: "test.writer",
+            event: "test.writer_blocked",
+            message: "Controlled regular file writer fixture",
+            attributes: &[],
+        }
+        .emit(EventData::default);
+    });
+    observe.recv_timeout(Duration::from_secs(2)).unwrap();
+    drop(dispatch);
+    assert_eq!(
+        guard.shutdown(Duration::from_millis(20)),
+        ShutdownOutcome::TimedOut
+    );
+    held(&path);
+    held(&alias);
+    assert!(finished.try_recv().is_err());
+    proceed.send(()).unwrap();
+    finished.recv_timeout(Duration::from_secs(2)).unwrap();
+    let record: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(record["event"], "test.writer_blocked");
+    let (_dispatch, next_guard) = prepare(options(&alias)).unwrap();
+    assert_eq!(
+        next_guard.shutdown(Duration::from_secs(2)),
+        ShutdownOutcome::Flushed
+    );
 }
 
 fn held(path: &Path) {

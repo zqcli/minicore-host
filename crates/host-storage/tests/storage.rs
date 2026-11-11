@@ -9,12 +9,11 @@ use minicore_runtime::{
     model::{AssistantPart, ModelFinishReason, ReasoningPreference, Usage},
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    os::unix::fs::{PermissionsExt, symlink},
-    process::Command,
-};
+use std::{fs, process::Command};
+#[path = "../src/test_support.rs"]
+mod test_support;
 use tempfile::TempDir;
+use test_support::{set_mode, symlink};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -22,11 +21,12 @@ struct HostConfig {
     label: String,
 }
 struct Fixture {
-    temp: TempDir,
     root: DataRoot,
     host: HostStore,
     agent: AgentStore,
     session: SessionStore,
+    // Windows directory handles prohibit cleanup while storage still owns them.
+    temp: TempDir,
 }
 impl Fixture {
     fn new() -> Self {
@@ -511,12 +511,12 @@ fn symlink_hardlink_and_foreign_writable_paths_are_rejected() {
     ));
     fs::remove_file(&path).unwrap();
     fs::write(&path, b"").unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+    set_mode(&path, 0o666);
     assert!(matches!(
         f.session.open_journal(),
         Err(StorageError::UnsafePath { .. })
     ));
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    set_mode(&path, 0o600);
     let session_path = f.session.canonical_path();
     let parked = session_path.with_extension("parked");
     fs::rename(&session_path, &parked).unwrap();
@@ -587,12 +587,12 @@ fn root_and_object_initialization_failure_release_lock() {
     let temp = tempfile::tempdir().unwrap();
     let root_path = temp.path().join("host");
     fs::create_dir(&root_path).unwrap();
-    fs::set_permissions(&root_path, fs::Permissions::from_mode(0o777)).unwrap();
+    set_mode(&root_path, 0o777);
     assert!(matches!(
         DataRoot::acquire(&root_path),
         Err(StorageError::UnsafePath { .. })
     ));
-    fs::set_permissions(&root_path, fs::Permissions::from_mode(0o700)).unwrap();
+    set_mode(&root_path, 0o700);
     let root = DataRoot::acquire(&root_path).unwrap();
     fs::write(root_path.join("host.json"), b"broken").unwrap();
     assert!(root.load_host::<HostConfig>().is_err());
@@ -797,15 +797,28 @@ fn moved_session_directory_blocks_original_writer() {
         .unwrap();
     let original = f.session.canonical_path();
     let moved = original.with_extension("moved");
-    fs::rename(&original, &moved).unwrap();
-    fs::create_dir(&original).unwrap();
-    fs::write(original.join("history.jsonl"), b"replacement").unwrap();
-    assert!(journal.persist_pending().is_err());
-    assert_eq!(fs::read(moved.join("history.jsonl")).unwrap(), b"");
-    assert_eq!(
-        fs::read(original.join("history.jsonl")).unwrap(),
-        b"replacement"
-    );
+    let replacement = fs::rename(&original, &moved);
+    #[cfg(windows)]
+    {
+        let error = replacement.expect_err("live journal must retain its directory");
+        assert!(matches!(error.raw_os_error(), Some(5 | 32)));
+        journal.persist_pending().unwrap();
+        drop(journal);
+        assert_eq!(f.session.read_history().unwrap().records.len(), 1);
+        assert!(!moved.exists());
+    }
+    #[cfg(unix)]
+    {
+        replacement.unwrap();
+        fs::create_dir(&original).unwrap();
+        fs::write(original.join("history.jsonl"), b"replacement").unwrap();
+        assert!(journal.persist_pending().is_err());
+        assert_eq!(fs::read(moved.join("history.jsonl")).unwrap(), b"");
+        assert_eq!(
+            fs::read(original.join("history.jsonl")).unwrap(),
+            b"replacement"
+        );
+    }
 }
 #[test]
 fn deletion_waits_for_existing_history_writer() {
@@ -825,6 +838,7 @@ fn deletion_waits_for_existing_history_writer() {
     f.session.delete_closed().unwrap();
 }
 #[test]
+#[cfg(unix)]
 fn object_write_failure_probe() {
     let Ok(path) = std::env::var("MINICORE_STORAGE_FAILURE_PROBE") else {
         return;
@@ -843,6 +857,7 @@ fn object_write_failure_probe() {
     ));
 }
 #[test]
+#[cfg(unix)]
 fn atomic_object_save_keeps_original_on_real_os_write_failure() {
     let f = Fixture::new();
     let root_path = f.root.canonical_path().to_owned();
@@ -880,6 +895,7 @@ fn atomic_object_save_keeps_original_on_real_os_write_failure() {
     DataRoot::acquire(&root_path).unwrap();
 }
 #[test]
+#[cfg(unix)]
 fn journal_write_failure_probe() {
     let Ok(path) = std::env::var("MINICORE_STORAGE_JOURNAL_FAILURE_PROBE") else {
         return;
@@ -924,6 +940,7 @@ fn journal_write_failure_probe() {
     ));
 }
 #[test]
+#[cfg(unix)]
 fn real_os_partial_history_write_remains_blocked_without_repair() {
     let f = Fixture::new();
     let root_path = f.root.canonical_path().to_owned();
@@ -1252,9 +1269,7 @@ fn make_child_entry_unsafe(
     kind: UnsafeChildEntry,
 ) {
     match kind {
-        UnsafeChildEntry::WritableDirectory => {
-            fs::set_permissions(path, fs::Permissions::from_mode(0o777)).unwrap()
-        }
+        UnsafeChildEntry::WritableDirectory => set_mode(path, 0o777),
         UnsafeChildEntry::File => {
             fs::rename(path, outside).unwrap();
             fs::write(path, b"not a directory").unwrap();

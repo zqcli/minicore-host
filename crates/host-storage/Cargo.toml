@@ -20,7 +20,7 @@ rustix = { workspace = true, features = ["fs", "process"] }
 [target.'cfg(windows)'.dependencies]
 winapi-util.workspace = true
 windows-permissions.workspace = true
-winsafe = { workspace = true, features = ["advapi"] }
+winsafe = { workspace = true, features = ["advapi", "shell"] }
 
 [dev-dependencies]
 tempfile.workspace = true

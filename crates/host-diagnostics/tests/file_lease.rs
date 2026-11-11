@@ -1,8 +1,8 @@
 //! Actual output file ownership, including a blocked OS writer after timeout.
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use minicore_host_diagnostics::{EventData, EventSpec, Scope};
 use minicore_host_diagnostics::{InitError, Options, Output, ShutdownOutcome, prepare};
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::{fs::OpenOptions, sync::mpsc};
 use std::{
     io::{Read, Write},
@@ -10,7 +10,7 @@ use std::{
     process::{Command, Stdio},
     time::Duration,
 };
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use tracing::Level;
 
 fn options(path: &Path) -> Options {
@@ -100,9 +100,11 @@ fn another_process_cannot_open_an_existing_writer_and_can_open_after_exit() {
     );
 }
 
-#[cfg(unix)]
+// Linux supports flock on FIFOs. macOS does not; the cross-platform regular-file
+// ownership regression lives in backend::tests::file_lease with a gated writer.
+#[cfg(target_os = "linux")]
 #[test]
-fn bounded_shutdown_timeout_does_not_release_a_blocked_writers_real_file_lease() {
+fn linux_fifo_timeout_does_not_release_a_blocked_writers_real_file_lease() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("blocked-output");
     assert!(

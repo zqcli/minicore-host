@@ -273,6 +273,9 @@ impl AgentStore {
             dir.remove_empty_child("sessions")?;
         }
         dir.remove_file("agent.json")?;
+        // Windows directory guards reject replacement while owned. Release the
+        // now-empty target before its parent performs the explicit deletion.
+        drop(dir);
         self.host
             .root
             .inner
@@ -443,6 +446,7 @@ impl SessionStore {
             dir.remove_file("history.jsonl")?;
         }
         dir.remove_file("session.json")?;
+        drop(dir);
         self.agent
             .directory(false)?
             .child("sessions", false)?

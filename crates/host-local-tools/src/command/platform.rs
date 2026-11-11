@@ -1,4 +1,4 @@
-use process_wrap::tokio::{TokioChildWrapper, TokioCommandWrap};
+use process_wrap::tokio::{ChildWrapper, CommandWrap};
 use std::{io, process::ExitStatus};
 use tokio::{io::AsyncRead, process::Command};
 
@@ -52,14 +52,14 @@ pub(super) fn shell_command() -> io::Result<Command> {
     ))
 }
 
-pub(super) fn wrap_scope(command: &mut TokioCommandWrap) {
+pub(super) fn wrap_scope(command: &mut CommandWrap) {
     #[cfg(unix)]
     command.wrap(process_wrap::tokio::ProcessGroup::leader());
     #[cfg(windows)]
     command.wrap(process_wrap::tokio::JobObject);
 }
 
-pub(super) fn stop_scope(child: &mut Box<dyn TokioChildWrapper>, pid: u32) -> io::Result<()> {
+pub(super) fn stop_scope(child: &mut Box<dyn ChildWrapper>, pid: u32) -> io::Result<()> {
     #[cfg(unix)]
     {
         use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
@@ -91,8 +91,8 @@ pub(super) async fn confirmed_scope_gone(pid: u32, wrapper_waited: bool) -> io::
     #[cfg(windows)]
     {
         let _ = pid;
-        // The one uninterrupted wrapper wait consumes the job's active-process-zero
-        // notification, including descendants that closed both output handles.
+        // The pinned wrapper queries the job's actual ActiveProcesses count;
+        // notifications only wake that query and do not prove completion.
         Ok(wrapper_waited)
     }
 }
@@ -137,7 +137,7 @@ impl Capture {
 
     pub(super) fn take_readers(
         self,
-        child: &mut Box<dyn TokioChildWrapper>,
+        child: &mut Box<dyn ChildWrapper>,
     ) -> (OutputReader, OutputReader) {
         (
             Box::new(child.stdout().take().expect("configured stdout pipe")),
@@ -175,7 +175,7 @@ impl Capture {
 
     pub(super) fn take_readers(
         self,
-        _: &mut Box<dyn TokioChildWrapper>,
+        _: &mut Box<dyn ChildWrapper>,
     ) -> (OutputReader, OutputReader) {
         (Box::new(self.stdout.server), Box::new(self.stderr.server))
     }

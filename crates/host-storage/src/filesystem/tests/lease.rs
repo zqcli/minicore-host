@@ -34,7 +34,7 @@ fn final_directory_owner_releases_root_with_unrelated_inherited_descriptor() {
 #[test]
 fn failed_root_sync_releases_acquired_lease_with_inherited_descriptor() {
     let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("host");
+    let path = std::fs::canonicalize(temp.path()).unwrap().join("host");
     fail(&path);
     inherit_next_lock();
     let result = Directory::root(&path);

@@ -1,7 +1,8 @@
+#[cfg(unix)]
+use std::os::fd::{AsFd, BorrowedFd};
 use std::{
     fs::{File, TryLockError},
     ops::{Deref, DerefMut},
-    os::fd::{AsFd, BorrowedFd},
 };
 
 /// One owned descriptor and, when acquired, its advisory lease. Root directory
@@ -49,6 +50,7 @@ impl DerefMut for FileHandle {
         &mut self.file
     }
 }
+#[cfg(unix)]
 impl AsFd for FileHandle {
     fn as_fd(&self) -> BorrowedFd<'_> {
         self.file.as_fd()

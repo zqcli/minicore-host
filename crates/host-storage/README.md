@@ -13,25 +13,28 @@ implementations does not create a second history authority or a recovery service
 The Unix backend targets Linux and macOS. It needs a filesystem that honors
 advisory inode locks, atomic same-directory rename and file/directory
 synchronization. Rust's `File::sync_all` uses `fsync` on Linux and `F_FULLFSYNC`
-on macOS; unsupported locking or synchronization fails rather than weakening
-the contract. Windows is not enabled by a weaker path or durability fallback.
-Native CI checks each supported platform; no claim of power-loss testing or
-network-filesystem validation is made.
+on macOS. The Windows backend requires a checked local NTFS volume; network
+drives and other filesystem types are rejected. It opens directories with
+read/write access and `FILE_FLAG_BACKUP_SEMANTICS`, then calls the real
+`File::sync_all` / `FlushFileBuffers`. Unsupported locking, paths, permissions or
+synchronization fail rather than selecting a weaker fallback. Native CI is
+functional validation, not a power-loss test or network-filesystem certification.
 
 `DataRoot::acquire(path)` resolves the actual root and takes a nonblocking OS
-exclusive lock on the directory inode itself. Root symlink aliases resolve to the
+exclusive lease on the directory itself. Root symlink aliases resolve to the
 same lock; no deletable lock-file marker or PID timeout decides ownership. A
 second handle opened independently, including in the same process, is rejected.
 Child storage handles and Directory clones retain the same root guard. The
-final actual owner explicitly unlocks before closing its descriptor, including
+Unix final owner explicitly unlocks before closing its descriptor, including
 initialization failures, so an unrelated forked child's inherited descriptor
-cannot prolong the lease. A caller's departure or save confirmation does not
+cannot prolong the lease. Windows opens the root without write or delete sharing;
+the owned, non-inheritable handle supplies the lease. A caller's departure or save confirmation does not
 release live owner handles. Dropping the final handle is permitted only after
 the owner has joined all execution and necessary save work. Abnormal exit
 relies on the OS closing all copies of the locked description; leftover marker
 files do not establish occupancy.
 
-Below the established root, all operations are relative to open directory file
+On Unix, below the established root all operations are relative to open directory file
 descriptors. Components are fixed filenames or strictly validated protocol IDs.
 `O_NOFOLLOW` rejects links; stored files must be regular, owned by the current
 user, single-linked and not writable by other users. Directories must also be
@@ -40,6 +43,29 @@ owned and not writable by other users. New directories are mode 0700 and files
 silently changed. This is not an isolation boundary against a malicious process
 running as the same operating-system user. Root/path configuration is trusted;
 tool workspaces are not managed by this adapter.
+
+On Windows, retained no-delete directory handles pin every canonical component
+while the safe standard-library API opens child paths. Reparse points, alternate
+streams, reserved device names, ambiguous components and files with multiple
+hardlinks are rejected. Identity checks compare the volume serial and file ID
+of the actual handles. Owner and DACL checks allow the current user, SYSTEM and
+built-in Administrators; other principals cannot hold mutation rights. The
+system principals already have administrative control of the machine. Newly
+created entries inherit the checked directory's ACL and are checked before any
+content is written; existing ACLs are never silently changed.
+
+Windows treats the OS-established current-user Profile as an existing external
+namespace boundary. The known-folder API resolves it, and acquisition pins its
+already-existing directory before creating the data root. Environment variables
+do not establish this boundary. For roots under the Profile, every acquisition
+really synchronizes the Profile and each directory below it, including visible
+ancestors from an earlier failed creation. The existing namespace above the
+Profile is retained with read-only no-delete handles; it is an OS-managed
+precondition, not newly published storage state. For roots outside the Profile,
+every ancestor still requires a real read/write open and synchronization, so
+insufficient access fails explicitly. No automatic elevation, system-ACL change
+or ignored synchronization error is used. This does not claim a power-loss
+guarantee for arbitrary externally created ancestors above that trust boundary.
 
 ## Layout and object envelopes
 
@@ -84,7 +110,8 @@ new configuration revision; Session creation provenance remains immutable.
 temporary file in the same directory, `sync_all` it, rename over the original,
 then `sync_all` the containing directory and its owned ancestry. Root acquisition
 confirms the ancestry needed to locate the root, including retries where a prior
-failed synchronization left new directories visible. Existing empty initial
+failed synchronization left new directories visible, subject to the explicit
+Windows Profile boundary above. Existing empty initial
 histories are synchronized again before Session publication. The returned `ObjectSave` binds the original configuration
 revision and reports persisted only after these operations succeed. A failure
 after rename may leave the new version visible: the business owner must check
@@ -179,6 +206,10 @@ The writer releases its history lease only when its actual owning worker drops
 it, before releasing the retained root owners. Temporary shared readers and
 explicit-deletion leases release on return, including error paths. None of these
 lease releases performs synchronization or confirms a pending save range.
+On Windows these are mandatory byte-range locks: an unrelated raw file handle
+may be refused even for a read while the writer is live. Storage reads continue
+to acquire their own shared lease; tests inspecting an unconfirmed range use the
+actual writer handle without dropping its lease.
 Each direct owner must serialize accepted saves of its own object outside its
 business-state lock. File-local metadata coordination is not a compare-and-swap
 for competing same-object revision updates or a multi-object transaction.
@@ -200,6 +231,12 @@ The SHA-256 prefix state is a same-run reconciliation witness only, not an
 on-disk integrity proof or security boundary. Successful incremental saves update
 it without copying or encoding the old history. Before confirmation, writers
 recheck the current directory, filename identity and exact file length after I/O.
+Unix range stamps also compare modification and change timestamps. Stable Rust
+does not expose the Windows change timestamp, so this backend additionally hashes
+the current file bytes when taking a range stamp instead of omitting that check.
+That Windows verification reads the existing history on each save boundary and
+is not an incremental-I/O performance claim; the bytes actually appended remain
+only the accepted new range.
 Loading reads native history
 once; `take_loaded_history()` moves that initial context to its Session owner.
 Reopening performs a fresh explicit baseline sync before initializing the new

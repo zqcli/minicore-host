@@ -13,7 +13,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }
 tempfile.workspace = true
-process-wrap = { version = "=8.2.2", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
+process-wrap = { git = "https://github.com/watchexec/process-wrap", rev = "2f4bc393d8bd03b4b1c81fee2e13ce82dd42906e", version = "=10.0.1", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "=0.30.1", default-features = false, features = ["signal", "process"] }

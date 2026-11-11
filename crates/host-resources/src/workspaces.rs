@@ -71,7 +71,10 @@ mod tests {
             "cache must not retain abandoned roots"
         );
         let rebound = bindings.bind(&selection).await.unwrap();
-        assert_eq!(rebound.root(), directory.path());
+        assert_eq!(
+            rebound.root(),
+            std::fs::canonicalize(directory.path()).unwrap()
+        );
         assert_eq!(bindings.0.lock().unwrap().len(), 1);
     }
 }

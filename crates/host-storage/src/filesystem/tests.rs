@@ -14,7 +14,11 @@ fn clear_trace() {
 #[test]
 fn root_retry_syncs_visible_ancestors_after_failed_creation_sync() {
     let temp = tempfile::tempdir().unwrap();
-    let parent = temp.path().join("new-parent");
+    // macOS's temporary path can use /var while storage resolves /private/var.
+    // Target the actual directory that the synchronization hook observes.
+    let parent = std::fs::canonicalize(temp.path())
+        .unwrap()
+        .join("new-parent");
     let path = parent.join("host");
     fail(&parent);
     assert!(Directory::root(&path).is_err());
@@ -197,7 +201,8 @@ fn metadata_snapshot_excludes_only_its_same_path_publisher() {
 
 #[test]
 fn metadata_snapshots_reject_unknown_mutations_without_repair_or_retry() {
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use crate::test_support::symlink;
+    use std::os::unix::fs::PermissionsExt;
     for mutation in [
         "replace",
         "move_replace",

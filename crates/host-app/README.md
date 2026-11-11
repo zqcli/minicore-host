@@ -50,7 +50,7 @@ are private preparation inputs, not saved Host JSON. The process does not scan
 arbitrary environment variables, call a model at startup, or install tools.
 Selected tools must exist in the compiled production registry.
 
-The builtins are `read`, `write`, `edit`, Unix `bash`, and the six-action `agent`
+The builtins are `read`, `write`, `edit`, `bash`, and the six-action `agent`
 tool. `apply_patch` is not registered. Registration does not enable tools:
 `HostConfig.tools` selects available definitions and each Session's `tools`
 selects its bound set, both using entries such as `{"name":"read"}`. The
@@ -152,7 +152,14 @@ leases, production HTTP adapter against a gated local HTTP/SSE fixture, and
 locally generated TLS certificates. It validates identity/reopen, access rights,
 accepted-work survival, controlled and abnormal exit, stdout isolation and file
 output ownership. It is not live-provider, external-device or TUI validation.
-The tested platform is Linux; the repository's storage implementation is Unix.
+The CI matrix runs the native executable and Runtime integration on Linux,
+macOS (Intel and Apple Silicon), and Windows. Bash requires `/bin/bash` on Unix
+and Git Bash on Windows; Git queries require the platform's Git executable.
+Unix process groups and Windows Job Objects retain child cleanup ownership.
+Platform-specific signal/FIFO tests remain scoped to the OS mechanism they test;
+ordinary tool, approval, credential, lease, and process tests run on each platform.
+Exact runner results and remaining platform limits are tracked in
+[`../../docs/ci.md`](../../docs/ci.md).
 
 ```sh
 cargo test --locked -p minicore-host --all-targets

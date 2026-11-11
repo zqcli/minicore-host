@@ -6,14 +6,18 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 compile_error!(
-    "MiniCore Host storage requires Linux or macOS filesystem primitives; no weaker lock/path fallback is provided"
+    "MiniCore Host storage requires Linux, macOS or Windows NTFS primitives; no weaker lock/path fallback is provided"
 );
 
 mod compaction;
 mod error;
 mod file_handle;
+#[cfg(unix)]
+mod filesystem;
+#[cfg(windows)]
+#[path = "filesystem_windows.rs"]
 mod filesystem;
 mod journal;
 mod objects;
@@ -48,3 +52,5 @@ pub const STORAGE_SCHEMA_VERSION: u32 = SCHEMA_VERSION;
 
 #[cfg(test)]
 mod lease_tests;
+#[cfg(test)]
+mod test_support;

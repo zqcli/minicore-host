@@ -3,7 +3,6 @@ use crate::{EventData, EventSpec, Options, Scope, prepare_writer};
 use std::{process::Command, time::Instant};
 use tracing::Level;
 
-#[cfg(target_os = "linux")]
 mod file_lease;
 
 const EVENT: EventSpec = EventSpec {
