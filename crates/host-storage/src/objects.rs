@@ -441,7 +441,7 @@ impl SessionStore {
             return Err(StorageError::DirectoryNotEmpty);
         }
         if dir.contains("history.jsonl")? {
-            let history = dir.open_file("history.jsonl", true, false)?;
+            let history = dir.open_history(true)?;
             let _history = crate::journal::lock_history(history, &dir.path)?;
             dir.remove_file("history.jsonl")?;
         }

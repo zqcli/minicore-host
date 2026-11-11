@@ -1,4 +1,5 @@
 mod common;
+mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
 use minicore_host_transport::*;

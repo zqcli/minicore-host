@@ -1,5 +1,6 @@
 //! Real TLS, production HTTP/SSE resource clients and Runtime execution. The
 //! local scripted provider and credential source are fixtures, not a live model.
+mod os_pipe;
 mod reload_common;
 mod wss_common;
 

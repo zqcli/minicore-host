@@ -7,7 +7,6 @@ use serde_json::Value;
 use std::{
     future::Future,
     io,
-    os::fd::AsFd,
     pin::Pin,
     sync::{
         Arc,
@@ -62,11 +61,11 @@ async fn sdk_drop_cleanup_reply_proves_both_pipe_close_orders() {
             .unwrap();
         resources.model.started.acquire().await.unwrap().forget();
         let turn = running(&session).await;
-        let (to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
+        let (to_server, input) = crate::os_pipe::pipe().await.unwrap();
         // This duplicate keeps request EOF under test control even when the
         // SDK aborts its writer. No bytes are written through the duplicate.
-        let request_lifetime = to_server.as_fd().try_clone_to_owned().unwrap();
-        let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+        let request_lifetime = crate::os_pipe::duplicate_writer(&to_server).unwrap();
+        let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
         let (writer, requests) = request_relay(to_server);
         let armed = Arc::new(AtomicBool::new(false));
         let (entered, write_started) = oneshot::channel();

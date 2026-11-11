@@ -1,6 +1,6 @@
 //! Canonical query routing, real filesystem/Git sources, and all three adapters.
-#![cfg(unix)]
 mod compaction_common;
+mod os_pipe;
 mod workspace_common;
 mod wss_common;
 
@@ -165,7 +165,10 @@ async fn missing_wrong_and_unsafe_targets_never_fall_back_to_an_active_session()
     let root = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();
     fs::write(outside.path().join("secret"), "not public").unwrap();
+    #[cfg(unix)]
     std::os::unix::fs::symlink(outside.path(), root.path().join("escape")).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(outside.path(), root.path().join("escape")).unwrap();
     let target = create(&host, &operator.caller(), Some(root.path()), vec![]).await;
     let other = create(&host, &operator.caller(), None, vec![]).await;
     let foreign_host = workspace_common::host(&http, vec![]).await;

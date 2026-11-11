@@ -1,6 +1,6 @@
 //! Real Store validation failures, not injected logger failures or disk exhaustion.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::{MessageBinding, SessionSnapshot};
 use minicore_host_diagnostics::{LoggingState, Options, Output, ShutdownOutcome};

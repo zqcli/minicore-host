@@ -13,6 +13,48 @@ use std::{fs, process::Command};
 #[path = "../src/test_support.rs"]
 mod test_support;
 use tempfile::TempDir;
+
+#[cfg(unix)]
+fn read_history_bytes(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
+    fs::read(path)
+}
+
+#[cfg(windows)]
+fn read_history_bytes(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
+    use winsafe::{HFILE, co};
+    // A real read-only view can inspect bytes while LockFileEx protects the
+    // writer's range. This is a test fixture, not the production history-reader
+    // path, and never releases the writer or fabricates bytes from memory state.
+    let path = path
+        .as_ref()
+        .to_str()
+        .ok_or_else(|| std::io::Error::other("non-UTF-8 history fixture path"))?;
+    let error = |e: co::ERROR| std::io::Error::from_raw_os_error(e.raw() as i32);
+    let (file, _) = HFILE::CreateFile(
+        path,
+        co::GENERIC::READ,
+        Some(co::FILE_SHARE::READ | co::FILE_SHARE::WRITE | co::FILE_SHARE::DELETE),
+        None,
+        co::DISPOSITION::OPEN_EXISTING,
+        co::FILE_ATTRIBUTE::NORMAL,
+        None,
+        None,
+        None,
+    )
+    .map_err(error)?;
+    let length = usize::try_from(file.GetFileSizeEx().map_err(error)?)
+        .map_err(|_| std::io::Error::other("history fixture too large to map"))?;
+    if length == 0 {
+        return Ok(Vec::new());
+    }
+    let mapping = file
+        .CreateFileMapping(None, co::PAGE::READONLY, None, None, None)
+        .map_err(error)?;
+    let view = mapping
+        .MapViewOfFile(co::FILE_MAP::READ, 0, None)
+        .map_err(error)?;
+    Ok(view.as_slice(length).to_vec())
+}
 use test_support::{set_mode, symlink};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -340,7 +382,7 @@ fn writes_confirm_exact_boundaries_and_reopen_native_content() {
             persisted: Some(0)
         }
     );
-    assert_eq!(fs::read(f.history_path()).unwrap(), b"");
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), b"");
     assert_eq!(journal.persist_pending().unwrap().range, first_range);
     assert_eq!(journal.positions().persisted, Some(2));
     let end = HistoryEntry::TurnFinished {
@@ -409,7 +451,7 @@ fn complete_final_record_without_newline_is_read_and_append_preserves_prefix() {
         .unwrap();
     journal.persist_pending().unwrap();
     drop(journal);
-    let result = fs::read(f.history_path()).unwrap();
+    let result = read_history_bytes(f.history_path()).unwrap();
     assert!(result.starts_with(&bytes));
     assert_eq!(result[bytes.len()], b'\n');
     assert_eq!(f.session.read_history().unwrap().records.len(), 2);
@@ -458,7 +500,7 @@ fn corruption_truncation_duplicate_unknown_fields_are_never_repaired() {
         fs::write(f.history_path(), &bad).unwrap();
         assert!(f.session.read_history().is_err());
         assert!(f.session.open_journal().is_err());
-        assert_eq!(fs::read(f.history_path()).unwrap(), bad);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), bad);
     }
 }
 #[test]
@@ -480,7 +522,7 @@ fn unsupported_history_schema_has_original_position_and_is_unchanged() {
     assert!(
         matches!(f.session.read_history(), Err(StorageError::UnsupportedSchema { found: 999, position: Some(FilePosition { line: 2, byte_offset }), .. }) if byte_offset == first.len() as u64)
     );
-    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
 }
 #[test]
 fn missing_existing_history_is_not_recreated() {
@@ -543,7 +585,10 @@ fn replaced_history_blocks_original_writer_without_touching_replacement() {
         journal.reconcile_pending(),
         Err(StorageError::UncertainWrite)
     ));
-    assert_eq!(fs::read(f.history_path()).unwrap(), b"replacement");
+    assert_eq!(
+        read_history_bytes(f.history_path()).unwrap(),
+        b"replacement"
+    );
     assert_eq!(
         journal.positions(),
         SavePositions {
@@ -655,7 +700,7 @@ fn native_tool_history_and_unclosed_old_calls_are_valid_without_recovery() {
     fs::write(f.history_path(), &bytes).unwrap();
     let loaded = f.session.read_history().unwrap();
     assert_eq!(loaded.records.len(), 2);
-    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
     let mut writer = f.session.open_journal().unwrap();
     writer.accept(vec![tool_result(turn, loop_id)]).unwrap();
     writer.persist_pending().unwrap();
@@ -708,7 +753,7 @@ fn orphan_mismatched_duplicate_tool_results_and_response_gaps_are_invalid() {
         let bytes = record_bytes(&f.session, entries);
         fs::write(f.history_path(), &bytes).unwrap();
         assert!(f.session.read_history().is_err());
-        assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
     }
 }
 #[test]
@@ -759,7 +804,10 @@ fn partial_model_fragments_are_distinct_and_never_projected_as_complete_assistan
     let complete_then_partial = record_bytes(&f.session, vec![response(turn, loop_id), partial]);
     fs::write(f.history_path(), &complete_then_partial).unwrap();
     assert!(f.session.read_history().is_err());
-    assert_eq!(fs::read(f.history_path()).unwrap(), complete_then_partial);
+    assert_eq!(
+        read_history_bytes(f.history_path()).unwrap(),
+        complete_then_partial
+    );
 }
 #[test]
 fn native_record_unknown_null_empty_input_and_content_normalization_are_rejected() {
@@ -785,7 +833,7 @@ fn native_record_unknown_null_empty_input_and_content_normalization_are_rejected
             f.session.read_history().is_err(),
             "invalid native payload case {case} was accepted"
         );
-        assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
     }
 }
 #[test]
@@ -1076,7 +1124,7 @@ fn a_terminal_partial_prevents_further_records_for_that_loop_without_mutating_ac
         let bad = record_bytes(&f.session, entries);
         fs::write(f.history_path(), &bad).unwrap();
         assert!(f.session.read_history().is_err());
-        assert_eq!(fs::read(f.history_path()).unwrap(), bad);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), bad);
     }
     let valid = record_bytes(
         &f.session,
@@ -1133,7 +1181,7 @@ fn exact_json_numbers_are_preserved_or_explicitly_rejected_by_native_codec() {
         ),
         other => panic!("unexpected numeric loading result: {other:?}"),
     }
-    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
 }
 #[test]
 fn literal_numeric_transport_marker_keys_remain_ordinary_typed_object_fields() {
@@ -1490,7 +1538,7 @@ fn concurrent_parent_child_metadata_saves_preserve_confirmed_records() {
     });
     assert_eq!(f.agent.load().unwrap(), agent_record);
     assert_eq!(f.session.load().unwrap(), session_record);
-    assert_eq!(std::fs::read(f.history_path()).unwrap(), b"");
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), b"");
 
     let path = f.root.canonical_path().to_path_buf();
     let host_id = f.host.id().clone();

@@ -1,6 +1,7 @@
 //! Raw stdio/TLS parameters retain canonical identities and strict boundaries.
 mod common;
 mod compaction_common;
+mod os_pipe;
 mod wss_common;
 
 use compaction_common::*;

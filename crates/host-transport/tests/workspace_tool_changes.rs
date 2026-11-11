@@ -1,6 +1,6 @@
 //! Original tool observations, never Git heuristics or intended-write fixtures.
-#![cfg(unix)]
 mod compaction_common;
+mod os_pipe;
 mod workspace_common;
 mod wss_common;
 

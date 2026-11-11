@@ -1,6 +1,6 @@
 //! Real production tools and child wait; the HTTP server supplies only model replies.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::Host;
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};

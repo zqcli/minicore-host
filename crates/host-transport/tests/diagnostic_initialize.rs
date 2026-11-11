@@ -1,7 +1,7 @@
 //! Real Host setup over OS pipes and authenticated loopback TLS/WebSocket.
 //! A test wire relay holds the actual response, not a fabricated Host event.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 mod wss_common;
 use diagnostic_support::{WAIT, host, stop};
 use futures_util::{SinkExt, StreamExt};
@@ -18,12 +18,7 @@ use std::{
     task::{Context, Poll, ready},
     time::Duration,
 };
-use tokio::{
-    io::AsyncWrite,
-    net::{TcpListener, unix::pipe},
-    sync::oneshot,
-    task::JoinHandle,
-};
+use tokio::{io::AsyncWrite, net::TcpListener, sync::oneshot, task::JoinHandle};
 
 struct GateWriter<W> {
     inner: W,
@@ -69,8 +64,8 @@ async fn finish(client: JoinHandle<Result<HostClient, CallError>>, abandoned: bo
     }
 }
 async fn stdio(host: Arc<Host>, abandoned: bool) {
-    let (send, input) = pipe::pipe().unwrap();
-    let (output, receive) = pipe::pipe().unwrap();
+    let (send, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, receive) = crate::os_pipe::pipe().await.unwrap();
     let (entered, response) = oneshot::channel();
     let (release, released) = oneshot::channel();
     let server = tokio::spawn(serve_stdio(

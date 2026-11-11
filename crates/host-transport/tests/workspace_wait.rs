@@ -1,6 +1,6 @@
 //! Query waits have no authority over the separately owned real Runtime Turn.
-#![cfg(unix)]
 mod compaction_common;
+mod os_pipe;
 mod workspace_common;
 mod wss_common;
 

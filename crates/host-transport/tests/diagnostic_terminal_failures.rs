@@ -1,7 +1,7 @@
 //! Actual production Store inode refusal plus actual provider HTTP 401.
 //! This is not an injected log writer failure, disk exhaustion or syscall errno.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{LoggingState, Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;

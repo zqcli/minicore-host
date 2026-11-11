@@ -1,5 +1,6 @@
 //! Delay only genuine server response bytes. Acceptance and publication still
 //! run through serve_stdio / serve_wss and the production resource assembler.
+mod os_pipe;
 mod reload_common;
 mod wss_common;
 

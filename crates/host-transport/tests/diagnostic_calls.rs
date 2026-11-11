@@ -1,7 +1,7 @@
 //! Actual direct clients, production owners, Runtime, local HTTP and OS pipes.
 //! These tests do not claim the yet-unrestored owner ERROR/lifecycle coverage.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{LoggingState, Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;
@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::unix::pipe,
     sync::Semaphore,
 };
 
@@ -90,8 +89,8 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
 
     // Real invalid raw wire input keeps valid correlation leaves without
     // changing the original protocol refusal or entering a model call.
-    let (mut send, input_pipe) = pipe::pipe().unwrap();
-    let (output_pipe, receive) = pipe::pipe().unwrap();
+    let (mut send, input_pipe) = crate::os_pipe::pipe().await.unwrap();
+    let (output_pipe, receive) = crate::os_pipe::pipe().await.unwrap();
     let raw_server = tokio::spawn(serve_stdio(host.clone(), input_pipe, output_pipe));
     let mut receive = BufReader::new(receive);
     let rejected = input();

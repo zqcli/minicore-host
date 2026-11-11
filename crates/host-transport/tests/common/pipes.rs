@@ -35,7 +35,7 @@ impl PipeServer {
 }
 /// Copy request bytes unchanged; aborting the relay closes the real write end.
 pub fn request_relay(
-    mut to_server: tokio::net::unix::pipe::Sender,
+    mut to_server: crate::os_pipe::Sender,
 ) -> (DuplexStream, JoinHandle<io::Result<u64>>) {
     let (writer, mut requests) = tokio::io::duplex(4096);
     let requests =
@@ -43,8 +43,8 @@ pub fn request_relay(
     (writer, requests)
 }
 pub async fn stdio(host: Arc<Host>, options: CallOptions) -> (HostClient, PipeServer) {
-    let (to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
-    let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+    let (to_server, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
     let (writer, requests) = request_relay(to_server);
     let server = tokio::spawn(serve_stdio(host, input, output));
     let client = HostClient::stdio(from_server, writer, options)

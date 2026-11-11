@@ -23,6 +23,7 @@ const OPEN_REPARSE_POINT: u32 = 0x0020_0000;
 const REPARSE_POINT: u32 = 0x0000_0400;
 const SHARE_READ: u32 = 1;
 const SHARE_WRITE: u32 = 2;
+const SHARE_DELETE: u32 = 4;
 
 #[derive(Clone)]
 pub(crate) struct Directory {
@@ -71,6 +72,9 @@ impl Directory {
         check_directory(&file)?;
         check_ntfs(&canonical, &file)?;
         let under_profile = canonical.starts_with(&profile_path);
+        if canonical == profile_path && identity(&file)? != identity(&profile)? {
+            return Err(StorageError::UncertainWrite);
+        }
         let mut ancestors = Vec::new();
         for parent in canonical.ancestors().skip(1) {
             let needs_sync = !under_profile || parent.starts_with(&profile_path);
@@ -146,6 +150,29 @@ impl Directory {
             .custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS)
             .open(self.path.join(name))
             .map_err(|e| io_error("open storage file", self.path.join(name), e))?;
+        check_file(&file)?;
+        Ok(file)
+    }
+
+    pub fn open_history(&self, write: bool) -> Result<File, StorageError> {
+        // Sharing is checked by Windows against existing write handles and
+        // writable file mappings, before we acquire the byte-range lock. Keep
+        // delete sharing so a changed filename remains detectable by identity.
+        // Metadata-only opens use open_file's ordinary sharing instead.
+        let path = self.path.join("history.jsonl");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(write)
+            .share_mode(SHARE_READ | SHARE_DELETE)
+            .custom_flags(OPEN_REPARSE_POINT | BACKUP_SEMANTICS)
+            .open(&path)
+            .map_err(|e| {
+                if matches!(e.raw_os_error(), Some(32 | 33)) {
+                    StorageError::HistoryInUse
+                } else {
+                    io_error("open history lease", &path, e)
+                }
+            })?;
         check_file(&file)?;
         Ok(file)
     }

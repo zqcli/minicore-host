@@ -1,6 +1,7 @@
 //! Canonical reload uses the same real owner from typed, duplex stdio and TLS
 //! WebSocket callers. Credential and scheduling fixtures are named explicitly.
 mod common;
+mod os_pipe;
 mod reload_common;
 mod wss_common;
 

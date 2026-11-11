@@ -1,7 +1,7 @@
 //! Retained query facts across later Turns and persistent unload/reload.
 //! Scripted model streams drive real Host/Runtime owners and real OS pipes.
-#![cfg(unix)]
 mod common;
+mod os_pipe;
 #[path = "query_recovery/retained_cleanup.rs"]
 mod retained_cleanup;
 use common::*;

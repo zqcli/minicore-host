@@ -96,6 +96,32 @@ wait to remain pending until that descendant is explicitly released. Private
 adapter API changes pass the Linux process/app regressions and Windows cross
 Clippy; Runtime's pin and interfaces are unchanged.
 
+The second CI source is remote `271a18b3de034f9560fc1e4ece3cc30f3a476c16`,
+tree `8e2bfc01dcf4b4ced81ec6f8e79491d6a19879b3`, identical to local `f3d3330f`.
+[Its run](https://github.com/zqcli/minicore-host/actions/runs/43033621867) passes
+both Linux gates. Windows compiles the production crates, then exposes
+Unix-only pipe assumptions in transport tests. Shared test fixtures now use
+actual Unix pipes or Windows named byte pipes, retaining real OS endpoint
+lifetimes and backpressure. Tests previously excluded only for Unix pipes now
+execute on Windows as well. The new ordinary-user CI step runs five existing
+storage/app contracts and rejects missing, skipped or zero-test results.
+
+Final review also replaces per-boundary Windows history hashing with a native
+history lease that denies write sharing, including existing writable mappings.
+The original byte locks, file-identity checks and uncertain-write prefix hashes
+remain. Real mapping and child-process tests cover those lease boundaries;
+the ordinary metadata path retains its original sharing. Windows atomic local
+file replacements now preserve the source owner and effective DACL, including
+protected/unprotected inheritance, before writing body bytes. Unsupported owner
+changes or mismatched inherited ACLs are explicit failures.
+
+Local Linux `scripts/check.sh` passes at the second checkpoint, including
+965 unique Rust cases, 4 doctests and 28 Python checks. The native Linux release
+build and packaging helper also pass: the archive contains one executable with
+mode 0755, example configuration and documentation; `--help` succeeds on stderr
+with empty stdout. `ldd` reports only system libraries, no Runtime shared object.
+This local package is validation evidence, not a published final release.
+
 Full final gates, independent final review, final source identities, native CI
-results and artifact verification are pending. A configured matrix, cross-check
-or standalone probe does not establish platform support.
+results and four-platform artifact verification are pending. A configured
+matrix, cross-check or standalone probe does not establish platform support.

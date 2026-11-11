@@ -1,4 +1,5 @@
 mod common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use futures_util::SinkExt;

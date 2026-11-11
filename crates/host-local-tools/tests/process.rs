@@ -374,11 +374,16 @@ async fn cancellation_joins_leader_and_background_member_before_turn_finish() {
     });
     wait_file(&root.path().join("ready")).await;
     cancellation.cancel();
-    assert_eq!(caller.await.unwrap().unwrap_err(), ToolError::Cancelled);
+    let outcome = caller.await.unwrap();
     let done = tools.finish().await;
-    assert!(done[0].cleanup_confirmed);
     let commands = records.commands.lock().unwrap();
     let command = &commands[0].1;
+    assert_eq!(
+        outcome.unwrap_err(),
+        ToolError::Cancelled,
+        "actual command cleanup: {command:?}"
+    );
+    assert!(done[0].cleanup_confirmed, "{command:?}");
     assert_eq!(command.status, CommandStatus::Cancelled);
     assert!(command.process_waited && command.cleanup_confirmed);
     assert!(command.stdout.complete && command.stderr.complete);

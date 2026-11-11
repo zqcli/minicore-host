@@ -1,8 +1,8 @@
 //! Real Host, Runtime, HTTP provider and append-only Store. Only the loopback
 //! responses and response gates are scripted; file replacement exercises the
 //! production Journal's original-inode check, not a simulated disk failure.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::{CallerContext, CompactionSource, Host, SessionSnapshot};
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};

@@ -1,6 +1,6 @@
 //! Real scheduling mutations and first cancellation claims, without observation listeners.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;

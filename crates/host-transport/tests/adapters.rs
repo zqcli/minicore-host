@@ -1,4 +1,5 @@
 mod common;
+mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -106,7 +107,6 @@ async fn typed_service_runtime_and_stdio_query_parity() {
     server.await.unwrap().unwrap();
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn actual_os_pipes_multiplex_long_wait_cancel_and_queries() {
     let (host, resources) = fixture();
@@ -656,7 +656,6 @@ async fn partial_create_and_accepted_start_error_remain_full_rpc_results() {
     server.await.unwrap().unwrap();
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn os_pipe_frames_have_no_added_application_size_quota_and_shutdown_is_receipt_only() {
     let (host, resources) = fixture();

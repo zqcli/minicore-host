@@ -1,6 +1,7 @@
 //! Deterministic OS-pipe teardown orders against a real Host and Runtime.
 mod common;
 mod observation_common;
+mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
@@ -59,8 +60,8 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
         let (host, events, mut started) = setup(2, None);
         let owner = HostClient::in_process(host.clone()).unwrap();
         let session = create(&owner).await;
-        let (mut to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
-        let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+        let (mut to_server, server_input) = crate::os_pipe::pipe().await.unwrap();
+        let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
         let armed = Arc::new(AtomicBool::new(false));
         let (entered, write_started) = oneshot::channel();
         let (release, gate) = oneshot::channel();

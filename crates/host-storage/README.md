@@ -206,10 +206,16 @@ The writer releases its history lease only when its actual owning worker drops
 it, before releasing the retained root owners. Temporary shared readers and
 explicit-deletion leases release on return, including error paths. None of these
 lease releases performs synchronization or confirms a pending save range.
-On Windows these are mandatory byte-range locks: an unrelated raw file handle
-may be refused even for a read while the writer is live. Storage reads continue
-to acquire their own shared lease; tests inspecting an unconfirmed range use the
-actual writer handle without dropping its lease.
+On Windows these are mandatory byte-range locks, combined with history handles
+that deny write sharing. Existing writable handles or writable memory mappings
+prevent lease acquisition; new writable opens are refused while it is owned.
+Delete sharing remains enabled so replacement is detected by filename identity.
+An unrelated raw file handle may also be refused for a read while the writer is
+live. Tests inspecting an unconfirmed range use the actual writer handle without
+dropping its lease. Windows handles are non-inheritable in ordinary process
+spawns; explicitly exporting a duplicate handle also retains its sharing rights
+until that duplicate closes. The Unix fork/inherited-descriptor tests exercise
+that platform's different inheritance and explicit-unlock rules.
 Each direct owner must serialize accepted saves of its own object outside its
 business-state lock. File-local metadata coordination is not a compare-and-swap
 for competing same-object revision updates or a multi-object transaction.
@@ -231,12 +237,11 @@ The SHA-256 prefix state is a same-run reconciliation witness only, not an
 on-disk integrity proof or security boundary. Successful incremental saves update
 it without copying or encoding the old history. Before confirmation, writers
 recheck the current directory, filename identity and exact file length after I/O.
-Unix range stamps also compare modification and change timestamps. Stable Rust
-does not expose the Windows change timestamp, so this backend additionally hashes
-the current file bytes when taking a range stamp instead of omitting that check.
-That Windows verification reads the existing history on each save boundary and
-is not an incremental-I/O performance claim; the bytes actually appended remain
-only the accepted new range.
+Unix range stamps also compare modification and change timestamps. Windows
+range stamps check identity, length, timestamps and attributes while the owned
+no-write-sharing lease excludes external writers and writable mappings. The
+ordinary Windows save path does not reread the whole history to take a stamp;
+original-prefix hashing remains part of explicit uncertain-range reconciliation.
 Loading reads native history
 once; `take_loaded_history()` moves that initial context to its Session owner.
 Reopening performs a fresh explicit baseline sync before initializing the new

@@ -1,6 +1,6 @@
 //! Production resource assembly with actual Host owners, OS pipes and loopback
 //! TLS. The HTTP/SSE provider is a local fixture, never an external model.
-#![cfg(unix)]
+mod os_pipe;
 mod wss_common;
 
 use minicore_host_core::*;
@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, unix::pipe},
+    net::TcpListener,
     sync::mpsc,
     task::JoinHandle,
 };
@@ -214,8 +214,8 @@ async fn prepare(builder: &HostResourceBuilder, config: HostConfig) -> PreparedH
 }
 use wss_common::tls_server;
 async fn pipe_client(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
-    let (to_server, input) = pipe::pipe().unwrap();
-    let (output, from_server) = pipe::pipe().unwrap();
+    let (to_server, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
     let task = tokio::spawn(serve_stdio(host, input, output));
     (
         HostClient::stdio(from_server, to_server, options())
@@ -531,14 +531,14 @@ async fn known_resource_references_execute_real_http_without_prior_list_queries(
 }
 
 struct RawPipe {
-    reader: BufReader<pipe::Receiver>,
-    writer: pipe::Sender,
+    reader: BufReader<crate::os_pipe::Receiver>,
+    writer: crate::os_pipe::Sender,
     task: JoinHandle<std::io::Result<()>>,
 }
 impl RawPipe {
-    fn new(host: Arc<Host>) -> Self {
-        let (writer, input) = pipe::pipe().unwrap();
-        let (output, reader) = pipe::pipe().unwrap();
+    async fn new(host: Arc<Host>) -> Self {
+        let (writer, input) = crate::os_pipe::pipe().await.unwrap();
+        let (output, reader) = crate::os_pipe::pipe().await.unwrap();
         Self {
             reader: BufReader::new(reader),
             writer,
@@ -569,7 +569,7 @@ impl RawPipe {
 async fn resource_rpc_shape_and_validation_match_on_real_pipes_and_tls() {
     let resources = Resources::new().await;
     let _operator = resources.host.connect().unwrap();
-    let mut pipe = RawPipe::new(resources.host.clone());
+    let mut pipe = RawPipe::new(resources.host.clone()).await;
     let tls = tls_server(resources.host.clone()).await;
     let mut wss = tls.raw().await;
     assert_eq!(

@@ -1,6 +1,7 @@
 //! A relay only delays genuine Host frames; it never creates business facts.
 mod common;
 mod observation_common;
+mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -30,9 +31,9 @@ impl Drop for Relay {
     }
 }
 async fn delayed_setup(host: Arc<Host>) -> (HostClient, Relay) {
-    let (to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
-    let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
-    let (mut to_client, from_relay) = tokio::net::unix::pipe::pipe().unwrap();
+    let (to_server, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
+    let (mut to_client, from_relay) = crate::os_pipe::pipe().await.unwrap();
     let server = tokio::spawn(serve_stdio(host, input, output));
     let release = Arc::new(Semaphore::new(0));
     let released = release.clone();
@@ -269,8 +270,8 @@ async fn stopped_os_pipe_reader_does_not_block_real_owner_completion() {
     let (host, events, mut started) = setup(1, None);
     let owner = HostClient::in_process(host.clone()).unwrap();
     let session = create(&owner).await;
-    let (mut to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
-    let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+    let (mut to_server, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
     let server = tokio::spawn(serve_stdio(host, input, output));
     let mut reader = BufReader::new(from_server);
     let mut response = String::new();

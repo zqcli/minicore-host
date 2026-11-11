@@ -75,7 +75,7 @@ fn assert_invalid_file(f: &Fixture, bytes: &[u8]) {
     fs::write(f.history_path(), bytes).unwrap();
     assert!(f.session.read_history().is_err());
     assert!(f.session.open_journal().is_err());
-    assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
 }
 
 #[test]
@@ -85,10 +85,10 @@ fn repeated_compaction_reload_keeps_raw_bytes_and_projects_only_latest_summary()
     original.extend(complete_turn());
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, original.clone());
-    let first_prefix = fs::read(f.history_path()).unwrap();
+    let first_prefix = read_history_bytes(f.history_path()).unwrap();
     let first = projection(6, 3, "first actual summary fixture");
     append(&mut journal, vec![first.clone().into_entry()]);
-    let first_compacted = fs::read(f.history_path()).unwrap();
+    let first_compacted = read_history_bytes(f.history_path()).unwrap();
     assert!(first_compacted.starts_with(&first_prefix));
     drop(journal);
 
@@ -100,11 +100,11 @@ fn repeated_compaction_reload_keeps_raw_bytes_and_projects_only_latest_summary()
     let next = complete_turn();
     original.extend(next.clone());
     append(&mut journal, next);
-    let second_prefix = fs::read(f.history_path()).unwrap();
+    let second_prefix = read_history_bytes(f.history_path()).unwrap();
     let second = projection(10, 5, "second summary includes the earlier summary");
     let range = append(&mut journal, vec![second.clone().into_entry()]);
     assert_eq!(range, SaveRange { start: 10, end: 11 });
-    let second_compacted = fs::read(f.history_path()).unwrap();
+    let second_compacted = read_history_bytes(f.history_path()).unwrap();
     assert!(second_compacted.starts_with(&second_prefix));
     assert!(second_prefix.starts_with(&first_compacted));
     // A successful save has no marker to replay or append on a later check.
@@ -112,7 +112,10 @@ fn repeated_compaction_reload_keeps_raw_bytes_and_projects_only_latest_summary()
         journal.reconcile_pending().unwrap().range,
         SaveRange { start: 11, end: 11 }
     );
-    assert_eq!(fs::read(f.history_path()).unwrap(), second_compacted);
+    assert_eq!(
+        read_history_bytes(f.history_path()).unwrap(),
+        second_compacted
+    );
     drop(journal);
 
     let loaded = f.session.read_history().unwrap();
@@ -132,7 +135,10 @@ fn repeated_compaction_reload_keeps_raw_bytes_and_projects_only_latest_summary()
     );
     assert!(loaded.records[6].entry.runtime_item().is_none());
     assert!(loaded.records[6].entry.turn_id().is_none());
-    assert_eq!(fs::read(f.history_path()).unwrap(), second_compacted);
+    assert_eq!(
+        read_history_bytes(f.history_path()).unwrap(),
+        second_compacted
+    );
 }
 
 #[test]
@@ -166,7 +172,7 @@ fn original_v1_shapes_and_literal_summary_remain_exact_when_v2_is_appended() {
         vec![projection(10, 5, "replacement with explicit cumulative coverage").into_entry()],
     );
     drop(journal);
-    let written = fs::read(f.history_path()).unwrap();
+    let written = read_history_bytes(f.history_path()).unwrap();
     assert!(written.starts_with(&bytes));
     let loaded = f.session.read_history().unwrap();
     assert!(
@@ -246,7 +252,7 @@ fn invalid_source_empty_out_of_range_and_nonadvancing_markers_preserve_prior_sta
     let original = raw(&entries);
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, entries.clone());
-    let bytes = fs::read(f.history_path()).unwrap();
+    let bytes = read_history_bytes(f.history_path()).unwrap();
     for candidate in [
         projection(2, 1, "stale"),
         projection(4, 1, "future"),
@@ -263,15 +269,15 @@ fn invalid_source_empty_out_of_range_and_nonadvancing_markers_preserve_prior_sta
                 persisted: Some(3)
             }
         );
-        assert_eq!(fs::read(f.history_path()).unwrap(), bytes);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
     }
     append(&mut journal, vec![projection(3, 1, "first").into_entry()]);
-    let first = fs::read(f.history_path()).unwrap();
+    let first = read_history_bytes(f.history_path()).unwrap();
     for covered in [0, 1] {
         let candidate = projection(4, covered, "nonadvancing");
         assert!(candidate.validate(&original, 4, 1).is_err());
         assert!(journal.accept(vec![candidate.into_entry()]).is_err());
-        assert_eq!(fs::read(f.history_path()).unwrap(), first);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), first);
     }
     append(
         &mut journal,
@@ -313,11 +319,11 @@ fn cuts_cannot_split_tool_call_results_or_cover_an_unclosed_tail() {
     let original = raw(&entries);
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, entries.clone());
-    let before = fs::read(f.history_path()).unwrap();
+    let before = read_history_bytes(f.history_path()).unwrap();
     let split = projection(3, 2, "would orphan result");
     assert!(split.validate(&original, 3, 0).is_err());
     assert!(journal.accept(vec![split.clone().into_entry()]).is_err());
-    assert_eq!(fs::read(f.history_path()).unwrap(), before);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), before);
     drop(journal);
     entries.push(split.into_entry());
     assert_invalid_file(&f, &record_bytes(&f.session, entries));
@@ -378,7 +384,11 @@ fn historical_missing_and_mixed_results_remain_raw_without_fabricated_outcomes()
     drop(journal);
     let loaded = f.session.read_history().unwrap();
     assert_eq!(loaded.runtime_history(), original);
-    assert!(fs::read(f.history_path()).unwrap().starts_with(&bytes));
+    assert!(
+        read_history_bytes(f.history_path())
+            .unwrap()
+            .starts_with(&bytes)
+    );
     let projected = loaded.model_history().unwrap();
     assert_eq!(&projected[1..], &original[3..]);
     assert_eq!(
@@ -450,10 +460,10 @@ fn a_later_result_cannot_cross_already_committed_coverage() {
     let candidate = projection(2, 1, "old call with no recorded result");
     candidate.validate(&raw(&entries), 2, 0).unwrap();
     append(&mut journal, vec![candidate.clone().into_entry()]);
-    let original = fs::read(f.history_path()).unwrap();
+    let original = read_history_bytes(f.history_path()).unwrap();
     let result = tool_result(turn, loop_id);
     assert!(journal.accept(vec![result.clone()]).is_err());
-    assert_eq!(fs::read(f.history_path()).unwrap(), original);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), original);
     drop(journal);
     let mut crossing = entries;
     crossing.push(result.clone());
@@ -469,7 +479,7 @@ fn invalid_batch_does_not_install_compaction_coverage_before_acceptance() {
     let entries = complete_turn();
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, entries);
-    let before = fs::read(f.history_path()).unwrap();
+    let before = read_history_bytes(f.history_path()).unwrap();
     assert!(
         journal
             .accept(vec![
@@ -485,7 +495,7 @@ fn invalid_batch_does_not_install_compaction_coverage_before_acceptance() {
             persisted: Some(3)
         }
     );
-    assert_eq!(fs::read(f.history_path()).unwrap(), before);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), before);
     append(
         &mut journal,
         vec![projection(3, 1, "valid first marker").into_entry()],
@@ -581,12 +591,12 @@ fn coverage_cannot_stop_between_results_in_one_multi_tool_batch() {
     let native = raw(&entries);
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, entries.clone());
-    let before = fs::read(f.history_path()).unwrap();
+    let before = read_history_bytes(f.history_path()).unwrap();
     for cut in [2, 3] {
         let candidate = projection(4, cut, "must keep both actual results with their calls");
         assert!(candidate.validate(&native, 4, 0).is_err());
         assert!(journal.accept(vec![candidate.into_entry()]).is_err());
-        assert_eq!(fs::read(f.history_path()).unwrap(), before);
+        assert_eq!(read_history_bytes(f.history_path()).unwrap(), before);
     }
     let valid = projection(4, 4, "whole exchange");
     valid.validate(&native, 4, 0).unwrap();
@@ -606,11 +616,11 @@ fn nonadjacent_recorded_result_still_cannot_cross_covered_prefix() {
     // This pre-existing native association is valid history, not task recovery.
     let mut journal = f.session.open_journal().unwrap();
     append(&mut journal, entries.clone());
-    let before = fs::read(f.history_path()).unwrap();
+    let before = read_history_bytes(f.history_path()).unwrap();
     let cut = projection(4, 2, "would leave the actual result without its call");
     assert!(cut.validate(&native, 4, 0).is_err());
     assert!(journal.accept(vec![cut.clone().into_entry()]).is_err());
-    assert_eq!(fs::read(f.history_path()).unwrap(), before);
+    assert_eq!(read_history_bytes(f.history_path()).unwrap(), before);
     drop(journal);
     entries.push(cut.into_entry());
     assert_invalid_file(&f, &record_bytes(&f.session, entries));

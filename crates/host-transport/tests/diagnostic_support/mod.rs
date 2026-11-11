@@ -15,7 +15,7 @@ use std::{
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, unix::pipe},
+    net::TcpListener,
     sync::Semaphore,
     task::JoinHandle,
 };
@@ -104,8 +104,8 @@ pub async fn persistent_host(path: &std::path::Path, endpoint: &str) -> Arc<Host
     .unwrap()
 }
 pub async fn pipes(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
-    let (send, input) = pipe::pipe().unwrap();
-    let (output, receive) = pipe::pipe().unwrap();
+    let (send, input) = crate::os_pipe::pipe().await.unwrap();
+    let (output, receive) = crate::os_pipe::pipe().await.unwrap();
     let server = tokio::spawn(serve_stdio(host, input, output));
     (
         HostClient::stdio(receive, send, options()).await.unwrap(),

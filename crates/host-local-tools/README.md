@@ -49,6 +49,13 @@ reparse points and mismatched file identities fail explicitly. Other Windows
 filesystems are unsupported; sync failures after replacement retain
 `write_outcome: applied` together with the actual before/after capture, never
 reporting a successful durable write or pretending to roll it back.
+Before writing replacement content, Windows copies the existing file's complete
+effective DACL, its protected/unprotected inheritance setting, and the read-only
+attribute to the empty temporary file. It reads the copied DACL back before body
+writes; a changed ACE sequence, protection setting, different source owner, or
+permission-copy failure rejects the operation before publication. Newly created
+files retain the directory's normal inheritance rules. Unix retains the existing
+permission-mode preservation.
 
 Bash executes `/bin/bash` on Linux/macOS and an installed Git Bash on Windows,
 with `--noprofile --norc -c`, child-local cwd and null stdin. Windows binds an

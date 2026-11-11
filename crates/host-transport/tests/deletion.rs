@@ -1,5 +1,6 @@
 //! Same direct owners through typed calls, real OS pipes, and authenticated TLS WSS.
 mod common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_protocol::*;

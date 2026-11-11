@@ -20,6 +20,7 @@ nix = { version = "=0.30.1", default-features = false, features = ["signal", "pr
 
 [target.'cfg(windows)'.dependencies]
 winapi-util.workspace = true
+windows-permissions.workspace = true
 winsafe = { workspace = true, features = ["kernel"] }
 
 [dev-dependencies]

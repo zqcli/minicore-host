@@ -16,6 +16,16 @@ documentation examples. A failed matrix member remains a failure and does not
 cancel the other members. Packaging requires both the quality gate and the
 complete native test matrix to pass.
 
+The Windows job additionally runs five existing storage and Host process
+contracts as a temporary ordinary account with its actual OS profile loaded.
+These cover object/history save and reopen, explicit deletion, stable Host
+identity and a real loopback HTTP model request persisted by Host. The helper
+checks the account SID, rejects administrator membership, verifies each exact
+test exists and requires one executed passing test per selection. The account
+can read/execute the compiled programs but cannot modify the checkout; test
+data belongs to its own profile. Account, processes, profile and temporary
+permissions are cleaned up even after failure.
+
 | Native runner | Release target | Archive |
 | --- | --- | --- |
 | `ubuntu-24.04` | `x86_64-unknown-linux-gnu` | `.tar.gz` |

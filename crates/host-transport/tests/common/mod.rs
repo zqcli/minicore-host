@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 //! Explicit model/resource fixtures. Host owners and Runtime remain real.
-#[cfg(unix)]
 pub mod pipes;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
@@ -209,10 +208,9 @@ pub async fn stdio(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<(
         server,
     )
 }
-#[cfg(unix)]
 pub async fn stdio_pipes(host: Arc<Host>) -> (HostClient, JoinHandle<std::io::Result<()>>) {
-    let (to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
-    let (server_output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+    let (to_server, server_input) = crate::os_pipe::pipe().await.unwrap();
+    let (server_output, from_server) = crate::os_pipe::pipe().await.unwrap();
     let server = tokio::spawn(serve_stdio(host, server_input, server_output));
     (
         HostClient::stdio(from_server, to_server, options(2_000))

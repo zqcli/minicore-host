@@ -1,7 +1,7 @@
 //! Real Host/Runtime/HTTP; the bound delegation tool and gated result sink are
 //! explicit test fixtures. No public observer or synthesized diagnostic is used.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::{
     BoundResources, DelegationCompletion, DelegationDisposition, DelegationPermit,

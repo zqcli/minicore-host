@@ -121,6 +121,10 @@ impl Directory {
         Ok(file)
     }
 
+    pub fn open_history(&self, write: bool) -> Result<File, StorageError> {
+        self.open_file("history.jsonl", write, false)
+    }
+
     pub fn read(&self, name: &str) -> Result<Vec<u8>, StorageError> {
         let mut file = self.open_file(name, false, false)?;
         let mut bytes = Vec::new();

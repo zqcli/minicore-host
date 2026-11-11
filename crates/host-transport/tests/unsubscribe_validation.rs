@@ -1,6 +1,7 @@
 //! Regression: a locally rejected call has not changed the real Host stream.
 mod common;
 mod observation_common;
+mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
 use minicore_runtime::model::ModelEvent;

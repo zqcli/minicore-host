@@ -85,32 +85,6 @@ fn corrupt_owned(journal: &SessionJournal, bytes: &[u8]) {
     file.seek(SeekFrom::Start(position)).unwrap();
 }
 
-#[cfg(windows)]
-#[test]
-fn windows_stamp_preserves_cursor_and_detects_equal_length_content_rewrite() {
-    let (_temp, session) = fixture();
-    let mut journal = session.open_journal().unwrap();
-    journal.accept(vec![entry("original")]).unwrap();
-    journal.persist_pending().unwrap();
-    let Backend::Persistent(backend) = &journal.backend else {
-        panic!("persistent fixture")
-    };
-    let mut file = &*backend.file;
-    file.seek(SeekFrom::Start(3)).unwrap();
-    let modified = file.metadata().unwrap().modified().unwrap();
-    let before = FileStamp::read(file, &backend.dir.path).unwrap();
-    assert_eq!(file.stream_position().unwrap(), 3);
-    let changed = String::from_utf8(read_owned(&journal))
-        .unwrap()
-        .replace("original", "modified");
-    corrupt_owned(&journal, changed.as_bytes());
-    file.set_modified(modified).unwrap();
-    let after = FileStamp::read(file, &backend.dir.path).unwrap();
-    assert_eq!(file.stream_position().unwrap(), 3);
-    assert_eq!(before.len, after.len);
-    assert!(before != after);
-}
-
 #[test]
 fn failed_zero_byte_write_reconciles_original_range_once() {
     let (_temp, session) = fixture();

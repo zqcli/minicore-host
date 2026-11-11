@@ -1,6 +1,6 @@
 //! The actual Agent stop traverses its existing child cancellation boundary.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;

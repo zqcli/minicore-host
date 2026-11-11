@@ -1,5 +1,6 @@
 //! Canonical context reads through all three adapters, with actual owner facts.
 mod common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_core::*;
@@ -104,7 +105,6 @@ async fn typed_context_reads_preserve_real_queue_history_and_bound_resources() {
     let reader = HostClient::in_process(host).unwrap();
     exercise(client, reader, resources).await;
 }
-#[cfg(unix)]
 #[tokio::test]
 async fn os_pipe_context_reads_preserve_same_owner_facts() {
     let (host, resources) = fixture();
@@ -121,7 +121,6 @@ async fn tls_wss_context_reads_preserve_same_owner_facts() {
     let reader = HostClient::in_process(host).unwrap();
     exercise(client, reader, resources).await;
 }
-#[cfg(unix)]
 #[tokio::test]
 async fn cold_persistent_context_stays_null_until_explicit_owner_load_over_stdio() {
     let directory = tempfile::tempdir().unwrap();

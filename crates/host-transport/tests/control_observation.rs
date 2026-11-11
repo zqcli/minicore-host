@@ -1,5 +1,6 @@
 mod common;
 mod observation_common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_core::*;

@@ -102,7 +102,7 @@ impl SessionJournal {
         }
     }
     pub(crate) fn persistent(owner: SessionStore, dir: Directory) -> Result<Self, StorageError> {
-        let file = dir.open_file("history.jsonl", true, false)?;
+        let file = dir.open_history(true)?;
         let mut file = lock_history(file, &dir.path)?;
         let before = FileStamp::read(&file, &dir.path)?;
         let mut bytes = Vec::new();
@@ -518,8 +518,6 @@ struct FileStamp {
     creation_time: u64,
     #[cfg(windows)]
     attributes: u32,
-    #[cfg(windows)]
-    content_hash: [u8; 32],
 }
 impl FileStamp {
     #[cfg(unix)]
@@ -538,62 +536,22 @@ impl FileStamp {
 
     #[cfg(windows)]
     fn read(file: &File, dir: &Path) -> Result<Self, StorageError> {
-        use std::os::windows::fs::{FileExt, MetadataExt};
-        let inspect = || {
-            file.metadata().map_err(|e| {
-                crate::error::io_error("inspect history range", dir.join("history.jsonl"), e)
-            })
-        };
-        let before = inspect()?;
+        use std::os::windows::fs::MetadataExt;
+        let metadata = file.metadata().map_err(|e| {
+            crate::error::io_error("inspect history range", dir.join("history.jsonl"), e)
+        })?;
         let (dev, ino) = crate::filesystem::identity(file)?;
-        // Stable Rust does not expose Windows ChangeTime. Compare actual bytes
-        // as well as identity/length/timestamps instead of silently omitting the
-        // Unix stamp's protection against an in-place rewrite of equal length.
-        // Windows seek_read changes the shared cursor, unlike Unix read_at.
-        // Restore it even when verification fails; the journal owns all I/O on
-        // this handle, so no other worker can race the temporary position.
-        let mut cursor = file;
-        let position = cursor.stream_position().map_err(|e| {
-            crate::error::io_error("capture history cursor", dir.join("history.jsonl"), e)
-        })?;
-        let hashed = (|| {
-            let mut hash = Sha256::new();
-            let mut offset = 0u64;
-            let mut buffer = [0u8; 8192];
-            while offset < before.len() {
-                let count = usize::try_from((before.len() - offset).min(buffer.len() as u64))
-                    .expect("bounded by buffer length");
-                let read = file.seek_read(&mut buffer[..count], offset).map_err(|e| {
-                    crate::error::io_error("verify history bytes", dir.join("history.jsonl"), e)
-                })?;
-                if read == 0 {
-                    return Err(StorageError::UncertainWrite);
-                }
-                hash.update(&buffer[..read]);
-                offset += read as u64;
-            }
-            Ok(hash.finalize().into())
-        })();
-        cursor.seek(SeekFrom::Start(position)).map_err(|e| {
-            crate::error::io_error("restore history cursor", dir.join("history.jsonl"), e)
-        })?;
-        let content_hash = hashed?;
-        let after = inspect()?;
-        if before.len() != after.len()
-            || before.last_write_time() != after.last_write_time()
-            || before.creation_time() != after.creation_time()
-            || before.file_attributes() != after.file_attributes()
-        {
-            return Err(StorageError::UncertainWrite);
-        }
+        // The owned history lease denies FILE_SHARE_WRITE before this stamp is
+        // read, excluding external write handles and writable mappings for its
+        // lifetime. Filename replacement remains possible and is checked by ID.
+        // Explicit uncertain-write reconciliation still hashes the old prefix.
         Ok(Self {
             dev,
             ino,
-            len: after.len(),
-            write_time: after.last_write_time(),
-            creation_time: after.creation_time(),
-            attributes: after.file_attributes(),
-            content_hash,
+            len: metadata.len(),
+            write_time: metadata.last_write_time(),
+            creation_time: metadata.creation_time(),
+            attributes: metadata.file_attributes(),
         })
     }
 }

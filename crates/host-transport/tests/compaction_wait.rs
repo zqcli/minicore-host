@@ -1,6 +1,7 @@
 //! Relays delay only genuine Host frames. No compaction state or event is
 //! manufactured, and HTTP/SSE utility work remains with the Session owner.
 mod compaction_common;
+mod os_pipe;
 mod wss_common;
 
 use compaction_common::*;

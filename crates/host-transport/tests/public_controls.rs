@@ -1,5 +1,6 @@
 //! Real owners and Runtime through typed, OS-pipe stdio and TLS WSS adapters.
 mod common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_protocol::*;
@@ -443,7 +444,6 @@ async fn typed_all_six_controls_use_real_owners() {
     let reader = HostClient::in_process(host).unwrap();
     exercise(client, reader).await;
 }
-#[cfg(unix)]
 #[tokio::test]
 async fn os_pipe_stdio_all_six_controls_use_same_owners() {
     let (host, _) = fixture();

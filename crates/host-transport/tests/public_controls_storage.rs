@@ -1,5 +1,6 @@
 //! Actual temporary storage and blocking-pool gates, not simulated save success.
 mod common;
+mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;

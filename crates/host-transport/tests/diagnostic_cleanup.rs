@@ -1,7 +1,7 @@
 //! Real Host/Runtime/HTTP with an explicitly injected cleanup-owner result.
 //! These faults are fixture cleanup failures, not disk or process-wait failures.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::{
     BoundResources, Host, OwnerFuture, PreparedTurnBinding, ResourceFuture, ResourceResolver,

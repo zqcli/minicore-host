@@ -423,9 +423,12 @@ fn mutate_sync(
         fs::create_dir_all(parent)?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         if matches!(before, FileSnapshot::Content(_)) {
+            #[cfg(not(windows))]
             temporary
                 .as_file()
                 .set_permissions(fs::metadata(&target)?.permissions())?;
+            #[cfg(windows)]
+            windows::preserve_permissions(&target, &temporary)?;
         }
         for chunk in bytes.chunks(64 * 1024) {
             check(context)?;

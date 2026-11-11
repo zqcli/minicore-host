@@ -140,18 +140,16 @@ pub async fn tls_server(host: Arc<Host>) -> Server {
 }
 
 /// Shared connection lifetimes for query parity across typed, OS pipes and WSS.
-#[cfg(unix)]
 pub struct Clients {
     pub clients: [HostClient; 3],
     pub tls: Server,
     pub(super) pipe: JoinHandle<std::io::Result<()>>,
 }
-#[cfg(unix)]
 impl Clients {
     pub async fn new(host: Arc<Host>, key: &str, options: CallOptions) -> Self {
         let local = HostClient::in_process(host.clone()).unwrap();
-        let (to_server, input) = tokio::net::unix::pipe::pipe().unwrap();
-        let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+        let (to_server, input) = crate::os_pipe::pipe().await.unwrap();
+        let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
         let pipe = tokio::spawn(minicore_host_transport::serve_stdio(
             host.clone(),
             input,

@@ -1,6 +1,6 @@
 //! Real Session metadata refusals retain their initiating operation across resume.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;

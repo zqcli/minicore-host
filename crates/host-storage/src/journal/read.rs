@@ -60,7 +60,7 @@ impl SessionStore {
     pub fn read_history(&self) -> Result<LoadedHistory, StorageError> {
         self.load()?;
         let dir = self.directory(false)?;
-        let file = dir.open_file("history.jsonl", false, false)?;
+        let file = dir.open_history(false)?;
         let mut file = match FileHandle::shared(file) {
             Ok(file) => file,
             Err(std::fs::TryLockError::WouldBlock) => return Err(StorageError::HistoryInUse),

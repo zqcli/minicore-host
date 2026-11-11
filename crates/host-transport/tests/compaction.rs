@@ -1,5 +1,6 @@
 //! Canonical methods use real owners and HTTP utility work on every transport.
 mod compaction_common;
+mod os_pipe;
 mod wss_common;
 
 use compaction_common::*;

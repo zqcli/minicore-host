@@ -1,5 +1,6 @@
 //! Deterministic owner-boundary races, using real Runtime and explicit gates.
 mod common;
+mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;

@@ -1,6 +1,7 @@
 //! Real Host/Runtime and OS pipes. Only the model event source is scripted.
 mod common;
 mod observation_common;
+mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;

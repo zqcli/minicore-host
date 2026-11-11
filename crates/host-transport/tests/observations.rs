@@ -1,6 +1,7 @@
 //! Actual Host/Runtime owners over typed calls, OS pipes and loopback TLS.
 mod common;
 mod observation_common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_core::*;

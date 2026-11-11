@@ -57,6 +57,10 @@ jobs:
         run: cargo test --workspace --all-targets --locked --no-fail-fast
       - name: Test documentation examples
         run: cargo test --workspace --doc --locked
+      - name: Test storage and Host as a standard Windows user
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\scripts\windows-user-tests.ps1
 
   package:
     name: Package (${{ matrix.target }})

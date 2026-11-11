@@ -7,7 +7,6 @@ use serde_json::Value;
 use std::{
     future::Future,
     io,
-    os::fd::AsFd,
     pin::Pin,
     task::{Context, Poll, ready},
     time::Duration,
@@ -61,11 +60,11 @@ async fn retained_query_cleanup_proves_both_pipe_close_orders() {
         // Settle the original Turn through its real owner. Only assert_retained
         // below creates a subscription on this new pipe connection.
         let (finished, _) = original_terminal(&session, &owner, &resources).await;
-        let (to_server, server_input) = tokio::net::unix::pipe::pipe().unwrap();
+        let (to_server, server_input) = crate::os_pipe::pipe().await.unwrap();
         // Keep request EOF under test control even if SDK close aborts its
         // writer. This duplicate never writes bytes or generates requests.
-        let request_lifetime = to_server.as_fd().try_clone_to_owned().unwrap();
-        let (output, from_server) = tokio::net::unix::pipe::pipe().unwrap();
+        let request_lifetime = crate::os_pipe::duplicate_writer(&to_server).unwrap();
+        let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
         let (writer, requests) = request_relay(to_server);
         let (entered, write_started) = oneshot::channel();
         let (release, gate) = oneshot::channel();

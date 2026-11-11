@@ -1,7 +1,7 @@
 //! Real Host/Runtime, typed operations, OS pipes and authenticated loopback WSS.
 //! Only the model event source and test TLS/access credentials are fixtures.
-#![cfg(unix)]
 mod common;
+mod os_pipe;
 mod wss_common;
 use common::*;
 use minicore_host_core::{Host, HostSettings};

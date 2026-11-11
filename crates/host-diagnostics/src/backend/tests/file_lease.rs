@@ -7,9 +7,9 @@ use std::{
     fs::OpenOptions,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
-    process::{Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     sync::mpsc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn options(path: &Path) -> Options {
@@ -108,6 +108,62 @@ fn held(path: &Path) {
     ));
 }
 
+fn wait_probe_exit(child: &mut Child) -> Result<ExitStatus, String> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Ok(None) => {
+                return Err(format!(
+                    "probe {} did not exit within five seconds",
+                    child.id()
+                ));
+            }
+            Err(error) => return Err(format!("probe {} wait failed: {error}", child.id())),
+        }
+    }
+}
+
+fn await_probe_ready(child: &mut Child) {
+    let stdout = child.stdout.take().unwrap();
+    let (send, receive) = mpsc::channel();
+    let reader = std::thread::spawn(move || {
+        let mut observed = Vec::new();
+        for line in BufReader::new(stdout).lines() {
+            match line {
+                Ok(line) => {
+                    // libtest can print its test-name prefix on this same line.
+                    let ready = line.ends_with("inherited descriptor ready");
+                    observed.push(line);
+                    if ready {
+                        let _ = send.send(Ok(observed));
+                        return;
+                    }
+                }
+                Err(error) => {
+                    let _ = send.send(Err(format!("stdout read failed: {error}; {observed:?}")));
+                    return;
+                }
+            }
+        }
+        let _ = send.send(Err(format!("stdout ended before readiness: {observed:?}")));
+    });
+    match receive.recv_timeout(Duration::from_secs(5)) {
+        Ok(Ok(_)) => reader.join().unwrap(),
+        readiness => {
+            let killed = child.kill();
+            let exited = wait_probe_exit(child);
+            if exited.is_ok() {
+                reader.join().unwrap();
+            }
+            panic!("probe readiness failed: {readiness:?}; kill={killed:?}; exit={exited:?}");
+        }
+    }
+}
+
 #[test]
 fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     const CHILD: &str = "MINICORE_INHERITED_DIAGNOSTIC_LEASE";
@@ -144,8 +200,7 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
         .stderr(Stdio::from(file.try_clone().unwrap()))
         .spawn()
         .unwrap();
-    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
-    while lines.next().unwrap().unwrap() != "inherited descriptor ready" {}
+    await_probe_ready(&mut child);
 
     // Exercise the same file acquisition and worker setup used by prepare.
     let (dispatch, guard) = prepare_file(options(&path), file).unwrap();
@@ -168,7 +223,13 @@ fn completed_writer_releases_lease_while_inherited_descriptor_is_still_open() {
     let child_was_alive = child.try_wait().unwrap().is_none();
     // Reap the child before asserting the regression so the red run is clean.
     child.stdin.take().unwrap().write_all(b"x").unwrap();
-    assert!(child.wait().unwrap().success());
+    let exited = wait_probe_exit(&mut child);
+    if exited.is_err() {
+        let killed = child.kill();
+        let cleanup = wait_probe_exit(&mut child);
+        panic!("probe exit failed: {exited:?}; kill={killed:?}; cleanup={cleanup:?}");
+    }
+    assert!(exited.unwrap().success());
     assert!(child_was_alive);
     assert_eq!(outcome, ShutdownOutcome::Flushed);
     let (_dispatch, next_guard) = reopened.unwrap();

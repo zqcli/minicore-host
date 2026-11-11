@@ -1,6 +1,6 @@
 //! Real owner acceptance and HTTP execution after an explicit fixture resource refusal.
-#![cfg(unix)]
 mod diagnostic_support;
+mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_core::{BoundResources, Host, MessageBinding, ResourceFuture, ResourceResolver};
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};

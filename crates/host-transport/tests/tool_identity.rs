@@ -1,6 +1,7 @@
 //! Real Host/Runtime, tools and journal with explicitly scripted model streams.
 mod common;
 mod observation_common;
+mod os_pipe;
 
 use common::*;
 use minicore_host_core::*;

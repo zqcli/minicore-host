@@ -1,8 +1,8 @@
 //! Independent SPEC contract probes. Real Host/Runtime owners; explicit fixture model.
 mod common;
-#[cfg(unix)]
 #[path = "query_contracts/drop_cleanup.rs"]
 mod drop_cleanup;
+mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
 use minicore_host_transport::*;
@@ -181,7 +181,6 @@ fn assert_receiver(value: &serde_json::Value, expected: &SessionIdentity) {
     assert_no_runtime_keys(value);
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn query_identity_and_values_match_over_real_pipes_for_readonly_and_replacement_operator() {
     let (host, resources) = fixture();
@@ -378,7 +377,6 @@ async fn query_identity_and_values_match_over_real_pipes_for_readonly_and_replac
     server.await.unwrap().unwrap();
 }
 
-#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_loops() {
     let (host, resources) = fixture();
