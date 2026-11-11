@@ -1,20 +1,45 @@
 # MiniCore Host
 
-## Current work: native multi-platform CI
+## Current checkpoint: native multi-platform CI (0.9.20)
 
-[Task 105](tasks/105-multiplatform-ci/TASK.md) implements the requested Host CI
-and distribution matrix against dev `6ea85fda737635e26b9d7cad17c3df1e54911bd9`.
-Runtime is compiled into the Host executable through its existing pinned Cargo
-dependency; Host/Runtime interfaces, version 0.9.20 and SPEC remain unchanged.
-The eighth candidate passes Linux quality/native and all native Clippy gates.
-Its remaining failures identify Windows Job completion and two test-observation
-or fixture-budget assumptions. The next candidate adds an actual Job completion
-monitor and preserves strict process-handle, history and diagnostic assertions.
-[Task 105](tasks/105-multiplatform-ci/TASK.md) records the fixed sources, independent
-native probes and the pending complete platform, standard-user, package and dev
-publication gates. Configured targets and API probes are not platform acceptance.
+[Task 105](tasks/105-multiplatform-ci/TASK.md) completes native Linux x64, macOS
+ARM64, macOS x64 and Windows x64 CI and gated release packaging against dev
+`6ea85fda737635e26b9d7cad17c3df1e54911bd9`. The verified code is
+[`f29d3c9c`](https://github.com/zqcli/minicore-host/commit/f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6),
+tree `a8d5817c9fef4e2802340b396588e481eea3ba41`.
+[Run 43068086506](https://github.com/zqcli/minicore-host/actions/runs/43068086506) passes all nine jobs:
+Linux quality, four native test jobs and four native release packages.
 
-## Current performance checkpoint
+| Native platform | Unique Rust cases | Doctests | Release package |
+| --- | ---: | ---: | --- |
+| Linux x64 | 967 | 4 | tar.gz, verified and uploaded |
+| macOS ARM64 | 960 | 4 | tar.gz, verified and uploaded |
+| macOS x64 | 960 | 4 | tar.gz, verified and uploaded |
+| Windows x64 | 948 | 4 | ZIP, verified and uploaded |
+
+Each native listing has 127 targets. Counts exclude nested subprocess output
+and are not summed across platforms. Linux's full gate also passes 28 Python
+checks, formatting, strict Clippy/rustdoc and whitespace. Windows additionally
+passes five existing storage/Host contracts under an actual ordinary user;
+its profile, restricted executable access and account cleanup are verified.
+
+Every package contains one Host executable, configuration and documentation.
+The actual staged binary runs successfully before archive readback verifies
+the exact file set, executable SHA-256 and Unix permissions. Runtime 0.10.0
+at `3aa47629929906832dcb309afb7d242c1ae3e53f` is compiled into Host 0.9.20 through
+the existing pinned Cargo dependency. SPEC, Host/Runtime request handoff and
+Turn/Step/compaction ownership remain unchanged.
+
+Independent final review found no remaining P1/P2 findings in this scope.
+The dev publication adds only documentation records after the tested source;
+code, dependency, workflow and script blobs remain identical. Its automatic
+dev CI is a separate run from the completed parent-source acceptance above.
+Exact jobs, artifact URLs and distinct binary/archive/artifact hashes are in
+[the validation record](tasks/105-multiplatform-ci/validation.json). See
+[the CI guide](docs/ci.md) for downloads, local NTFS requirements and optional
+Git Bash prerequisites. This task does not change versions or create a tag.
+
+## Included performance checkpoint
 
 [Task104](tasks/104-performance/TASK.md) implements eight selected optimizations
 against dev `4ee5e819`: compaction request sizing, protocol/provider/RPC encoding,
@@ -47,7 +72,7 @@ explicit owner authorization. Recomputing the recorded summaries requires the
 separately supplied full `evidence/` package; the public report and manifest alone
 do not supply those inputs.
 
-## Current checkpoint: 0.9.20
+## Organization checkpoint: 0.9.20
 
 [Task103](tasks/103-project-organization/TASK.md) implements the approved project
 organization review. Direct owners and public crate-root APIs are preserved;
@@ -151,7 +176,7 @@ not measurements of this simplification or evidence of a performance increase.
 | 5. Actual TUI | Intentionally unchanged this round | Explicitly deferred, not passed |
 | 6. Convergence | Scoped reviews, complete fixed gates, real performance evidence and incremental dev backups | External final acceptance and main decision; not automatically authorized by green CI |
 
-Local-use limits remain explicit: uncontrolled destruction is not normal stopped shutdown; unpublished-create save failure has no new recovery endpoint; workspace Git checks assume stable local configuration/attributes; Linux is the tested platform. No speculative defensive platform was added.
+Local-use limits remain explicit: uncontrolled destruction is not normal stopped shutdown; unpublished-create save failure has no new recovery endpoint; workspace Git checks assume stable local configuration/attributes. Task 105 verifies the four declared native runners; filesystem and local-tool requirements remain documented in [the CI guide](docs/ci.md). No speculative defensive platform was added.
 
 ## Historical review index
 

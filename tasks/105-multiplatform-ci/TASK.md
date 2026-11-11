@@ -14,7 +14,66 @@ Version remains 0.9.20; Runtime remains 0.10.0 at
 No changes to Runtime interfaces, Turn/Step ownership, compaction responsibilities
 or TUI are in scope. Existing historical evidence is preserved.
 
-## Work in progress
+## Accepted native checkpoint (2026-11-11)
+
+Verified source: `f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6`, tree
+`a8d5817c9fef4e2802340b396588e481eea3ba41`.
+[Run 43068086506](https://github.com/zqcli/minicore-host/actions/runs/43068086506) completed successfully at
+17:42:38 UTC: the full Linux quality gate, all four native platform jobs and
+all four release-package jobs passed.
+
+| Platform | Release target | Unique Rust cases | Doctests | Package |
+| --- | --- | ---: | ---: | --- |
+| Linux x64 | `x86_64-unknown-linux-gnu` | 967 | 4 | [minicore-host-0.9.20-x86_64-unknown-linux-gnu.tar.gz](https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13876809671) |
+| macOS ARM64 | `aarch64-apple-darwin` | 960 | 4 | [minicore-host-0.9.20-aarch64-apple-darwin.tar.gz](https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13878885250) |
+| macOS x64 | `x86_64-apple-darwin` | 960 | 4 | [minicore-host-0.9.20-x86_64-apple-darwin.tar.gz](https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13877936675) |
+| Windows x64 | `x86_64-pc-windows-msvc` | 948 | 4 | [minicore-host-0.9.20-x86_64-pc-windows-msvc.zip](https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13876988337) |
+
+Each platform's authoritative `cargo test --workspace --all-targets --locked --
+--list` contains 127 test targets. Counts use the actual target executable plus
+case name, not nested subprocess output or the sum across operating systems.
+All four native jobs pass strict Clippy, workspace tests and four doctests.
+Linux also passes the 28 Python checks, rustfmt, strict rustdoc and committed/
+working-tree whitespace checks through `./scripts/check.sh`.
+
+The Windows job additionally executes five existing contracts as a real
+non-administrator with its OS profile loaded and write access to the compiled
+executables denied. All five selections execute exactly one passing case,
+including real Host HTTP request/persistence and storage reopen/delete/identity
+checks. The helper reports `StandardUserExitCode=0` and
+`TemporaryAccountRemoved=true`. These re-executions do not add five unique cases.
+
+Each native release log compiles the unchanged Runtime 0.10.0 revision into
+Host 0.9.20. All four staged binaries pass actual `--help` with exit code zero,
+empty protocol stdout and usage on stderr. Archive readback verifies 18 files,
+one Host executable and its SHA-256 against that tested binary; Unix mode 0755
+and absence of other executable files or links are checked. The archive hashes
+and GitHub outer artifact ZIP hashes are different layers and are recorded
+separately in [validation.json](validation.json). All four uploads succeeded.
+
+Root integration review and an independently assigned final read-only review
+of this exact source found no remaining P1/P2 findings in the task scope.
+The review confirms the full packaging dependency gate, fixed Runtime library
+dependency, unchanged SPEC and request/ownership production paths, and absence
+of storage's development-only `test-support` feature from release builds.
+The final Windows formatter correction changes no process or test behavior.
+
+Publication targets `dev` by an ordinary, lease-protected fast-forward from
+`6ea85fda737635e26b9d7cad17c3df1e54911bd9`, preserving all topic ancestry.
+The commit containing these acceptance records is a documentation-only child
+of the verified source: production/test code, manifests, lockfile, workflow and
+scripts retain their verified blobs. Its normal automatic dev CI is a separate
+run; the completed result above specifically identifies the tested parent.
+No version change, tag, main update or Runtime interface change is part of this task.
+
+The declared runners establish this native CI checkpoint. Windows storage still
+requires local NTFS and the documented namespace permissions; the optional Bash
+tool needs installed Git Bash on Windows. System libraries remain OS prerequisites.
+No power-loss test, live external-provider trial or actual TUI acceptance is
+claimed. Earlier pending statements below describe their historical checkpoints,
+not outstanding blockers for this completed native run.
+
+## Implemented scope
 
 - Preserve the complete Linux quality gate and add native Linux x64, macOS ARM64,
   macOS x64 and Windows x64 Clippy/test/doc-test jobs.

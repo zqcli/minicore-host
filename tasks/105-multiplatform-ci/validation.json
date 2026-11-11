@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "task": "105-multiplatform-ci",
+  "recorded_at": "2026-11-11T17:45:47Z",
+  "repository": "https://github.com/zqcli/minicore-host",
+  "source": {
+    "baseline_dev": "6ea85fda737635e26b9d7cad17c3df1e54911bd9",
+    "verified_commit": "f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6",
+    "verified_tree": "a8d5817c9fef4e2802340b396588e481eea3ba41",
+    "host_version": "0.9.20",
+    "runtime": {
+      "version": "0.10.0",
+      "revision": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+      "integration": "Pinned Cargo library compiled into the Host executable"
+    },
+    "spec": {
+      "version": "4.93",
+      "sha256": "f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3",
+      "blob": "52260ca5996ce2606f34346937193f5a0ec989b7"
+    }
+  },
+  "workflow": {
+    "run_id": 43068086506,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43068086506",
+    "head_sha": "f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6",
+    "status": "completed",
+    "conclusion": "success",
+    "completed_at": "2026-11-11T17:42:38Z",
+    "successful_jobs": 9,
+    "toolchain": "1.90.0"
+  },
+  "quality": {
+    "job_id": 130688297472,
+    "command": "./scripts/check.sh",
+    "conclusion": "success",
+    "python_checks": 28,
+    "checks": [
+      "committed and working-tree whitespace",
+      "rustfmt",
+      "strict workspace/all-targets Clippy",
+      "workspace/all-targets tests",
+      "four doctests",
+      "strict rustdoc"
+    ]
+  },
+  "native_commands": [
+    "cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings",
+    "cargo test --workspace --all-targets --locked --no-fail-fast",
+    "cargo test --workspace --doc --locked",
+    "cargo test --workspace --all-targets --locked -- --list"
+  ],
+  "counting": {
+    "identity": "target executable path plus case name from each native --list",
+    "targets_per_platform": 127,
+    "exclude": [
+      "nested subprocess probe output",
+      "standard-user re-executions"
+    ],
+    "aggregate_across_platforms": false
+  },
+  "platforms": [
+    {
+      "name": "Linux x64",
+      "runner": "ubuntu-24.04",
+      "target": "x86_64-unknown-linux-gnu",
+      "native_job": 130688297974,
+      "package_job": 130694373211,
+      "cases": 967,
+      "doctests": 4,
+      "test_targets": 127,
+      "package": {
+        "filename": "minicore-host-0.9.20-x86_64-unknown-linux-gnu.tar.gz",
+        "archive_files": 18,
+        "host_sha256": "b5621d8a3695aa6951b2efe25c173b6573d687010e407e92287e455d83a00d54",
+        "archive_sha256": "109a26b5029a4e3697173525585abdc4280ddcb23dd9a37720dc923f50730c2e",
+        "artifact_id": 13876809671,
+        "artifact_name": "minicore-host-0.9.20-x86_64-unknown-linux-gnu",
+        "artifact_outer_zip_sha256": "b0af3ce80581bac4fdf0b84adb6274a44261ce6a586f8b0fb80e17bc1e709b29",
+        "artifact_outer_zip_bytes": 7887063,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13876809671",
+        "created_at": "2026-11-11T17:39:19Z",
+        "expires_at": "2027-02-09T17:25:49Z"
+      }
+    },
+    {
+      "name": "macOS ARM64",
+      "runner": "macos-15",
+      "target": "aarch64-apple-darwin",
+      "native_job": 130688297910,
+      "package_job": 130694373119,
+      "cases": 960,
+      "doctests": 4,
+      "test_targets": 127,
+      "package": {
+        "filename": "minicore-host-0.9.20-aarch64-apple-darwin.tar.gz",
+        "archive_files": 18,
+        "host_sha256": "bc874fbfd57766bbe2d924c822fad026e809110b8230a561a13c574b0171700d",
+        "archive_sha256": "6531f1aa7fdabcbc7f01d47b14a9b40be65232a4bca0cc865cba657f61588f66",
+        "artifact_id": 13878885250,
+        "artifact_name": "minicore-host-0.9.20-aarch64-apple-darwin",
+        "artifact_outer_zip_sha256": "6bc46e16ef2f7faf389426796c6482d38f552ecd0d2a72922370887943767d27",
+        "artifact_outer_zip_bytes": 7319914,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13878885250",
+        "created_at": "2026-11-11T17:40:41Z",
+        "expires_at": "2027-02-09T17:25:49Z"
+      }
+    },
+    {
+      "name": "macOS x64",
+      "runner": "macos-15-intel",
+      "target": "x86_64-apple-darwin",
+      "native_job": 130688298132,
+      "package_job": 130694373178,
+      "cases": 960,
+      "doctests": 4,
+      "test_targets": 127,
+      "package": {
+        "filename": "minicore-host-0.9.20-x86_64-apple-darwin.tar.gz",
+        "archive_files": 18,
+        "host_sha256": "7fc597983da60cb1c0933385d989d4c4df9b0d2950044cfe0433abd4ecbc9791",
+        "archive_sha256": "e4ed716bb95712c2f3cb61962b1f26e08468713486502c169263a7e31c447caf",
+        "artifact_id": 13877936675,
+        "artifact_name": "minicore-host-0.9.20-x86_64-apple-darwin",
+        "artifact_outer_zip_sha256": "4be464808da7b8f5731633f24f4def4a4c8909febee0a90bae86c561e7bb0859",
+        "artifact_outer_zip_bytes": 7627970,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13877936675",
+        "created_at": "2026-11-11T17:42:34Z",
+        "expires_at": "2027-02-09T17:25:49Z"
+      }
+    },
+    {
+      "name": "Windows x64",
+      "runner": "windows-2025",
+      "target": "x86_64-pc-windows-msvc",
+      "native_job": 130688298094,
+      "package_job": 130694373263,
+      "cases": 948,
+      "doctests": 4,
+      "test_targets": 127,
+      "package": {
+        "filename": "minicore-host-0.9.20-x86_64-pc-windows-msvc.zip",
+        "archive_files": 18,
+        "host_sha256": "2b4e72882564ccafa969de91c56edfb09211fc2c73c89a356e17b4d5d8c925cc",
+        "archive_sha256": "0d7ea1b806a1c94d067004d89ec5929bbf305fe6f298ba571ce12677fae6873f",
+        "artifact_id": 13876988337,
+        "artifact_name": "minicore-host-0.9.20-x86_64-pc-windows-msvc",
+        "artifact_outer_zip_sha256": "eecfa44044218f3aebd6e5434752ee6d9a4e940249a296f31b3f7b0b5419ad40",
+        "artifact_outer_zip_bytes": 7011143,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43068086506/artifacts/13876988337",
+        "created_at": "2026-11-11T17:40:27Z",
+        "expires_at": "2027-02-09T17:25:49Z"
+      }
+    }
+  ],
+  "windows_standard_user": {
+    "job_id": 130688298094,
+    "command": ".\\scripts\\windows-user-tests.ps1",
+    "is_administrator": false,
+    "profile_loaded": true,
+    "executable_write_access": "denied",
+    "passed_existing_cases": 5,
+    "additional_unique_cases": 0,
+    "exit_code": 0,
+    "temporary_account_removed": true,
+    "cases": [
+      "stable_identity_discovery_and_atomic_object_roundtrip",
+      "writes_confirm_exact_boundaries_and_reopen_native_content",
+      "close_is_stable_and_explicit_delete_never_recurses",
+      "actual_identity_is_saved_new_incarnation_is_generated_and_root_is_exclusive",
+      "stdio_message_executes_production_http_adapter_and_persists_real_output"
+    ]
+  },
+  "packaging": {
+    "build_command": "cargo build --package minicore-host --release --locked --target \"$TARGET\"",
+    "package_command": "python scripts/package-release.py \"$TARGET\"",
+    "requires": [
+      "quality",
+      "complete native platform matrix"
+    ],
+    "smoke": "Actual copied native executable --help from the stage directory; exit 0, empty stdout, usage on stderr",
+    "archive_verification": [
+      "exact staged file set without duplicates",
+      "one Host executable",
+      "archived Host SHA-256 equals smoke-tested release binary",
+      "Unix Host mode 0755 and no other executable files or links"
+    ],
+    "artifact_digest_note": "GitHub's outer artifact ZIP digest is distinct from the contained distribution archive SHA-256.",
+    "release_storage_test_support": false
+  },
+  "review": {
+    "source": "f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6",
+    "root_integration_review": "passed",
+    "independent_read_only_review": "passed",
+    "remaining_p1_p2": 0,
+    "requested_worker_model": "gpt-6-astra",
+    "requested_reasoning": "max",
+    "effective_runtime_attested": false
+  },
+  "publication": {
+    "target_branch": "dev",
+    "method": "history-preserving fast-forward with expected old SHA",
+    "expected_old_sha": "6ea85fda737635e26b9d7cad17c3df1e54911bd9",
+    "documentation_commit_parent": "f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6",
+    "documentation_only_paths": [
+      "README.md",
+      "PROJECT.md",
+      "docs/ci.md",
+      "tasks/105-multiplatform-ci/TASK.md",
+      "tasks/105-multiplatform-ci/validation.json"
+    ],
+    "automatic_dev_run_note": "The normal push-triggered dev run is separate from the completed acceptance run recorded here.",
+    "version_bump": false,
+    "tag_created": false,
+    "main_updated": false
+  },
+  "unchanged_boundaries": [
+    "Host/Runtime request handoff",
+    "Turn and Step ownership",
+    "compaction responsibilities",
+    "SPEC v4.93",
+    "Runtime revision",
+    "TUI"
+  ],
+  "limits": [
+    "Only the four declared native runner configurations are validated.",
+    "Windows durable storage requires local NTFS and documented namespace permissions.",
+    "The optional Windows Bash tool requires installed Git Bash; OS libraries remain external prerequisites.",
+    "Native filesystem checks are not power-loss testing.",
+    "CI uses real Host execution with loopback model fixtures; live external-provider and actual TUI acceptance are not claimed.",
+    "Final integrated validation ran in native GitHub CI because the local executor was unavailable."
+  ]
+}

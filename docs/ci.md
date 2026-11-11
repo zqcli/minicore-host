@@ -38,10 +38,12 @@ permissions are cleaned up even after failure.
 | `macos-15-intel` | `x86_64-apple-darwin` | `.tar.gz` |
 | `windows-2025` | `x86_64-pc-windows-msvc` | `.zip` |
 
-The task record distinguishes configured targets from actual passing runs and
-records platform prerequisites and outstanding blockers. See
-[Task 105](../tasks/105-multiplatform-ci/TASK.md) before interpreting a matrix as
-a supported release.
+All four native jobs and all four packages pass at source
+`f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6` in
+[run 43068086506](https://github.com/zqcli/minicore-host/actions/runs/43068086506).
+[Task 105](../tasks/105-multiplatform-ci/TASK.md) records exact test counts,
+standard-user execution, final review and artifact hashes. Platform support
+remains subject to the prerequisites below.
 
 ## Host and Runtime are one executable
 
