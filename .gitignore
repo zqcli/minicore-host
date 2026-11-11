@@ -1,5 +1,0 @@
-/target/
-/.cargo/config.local.toml
-*.log
-
-/.cargo/config.toml

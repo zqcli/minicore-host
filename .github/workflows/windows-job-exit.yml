@@ -1,0 +1,24 @@
+name: Windows Job exit investigation
+
+on:
+  push:
+    branches: ["ci/windows-job-exit-probe"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Check out the isolated probe
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Compare real Job accounting and retained process handles
+        shell: pwsh
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/job_exit_probe.py --rounds 20
