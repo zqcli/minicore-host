@@ -291,6 +291,71 @@ These results do not establish native Windows support.
 The next candidate must pass its own complete native matrix, including the five
 standard-user Windows cases, before packages or the final dev publication.
 
-Full final gates, independent final review, final source identities, native CI
-results and four-platform artifact verification are pending. A configured
-matrix, cross-check or standalone probe does not establish platform support.
+## Seventh native checkpoint
+
+Candidate `56a768c9175a6d7cfe7b5de986d9145049f5a727`, tree
+`1fdf9abf4190b42fed59dd4a9492221c5d187ffb`, exactly matches the reviewed local
+tree. [Native run 43055978426](https://github.com/zqcli/minicore-host/actions/runs/43055978426)
+passes Linux quality, Linux native and Intel macOS. Authoritative native listings
+contain 967 Linux cases and 960 Intel macOS cases in 127 targets each. The Intel
+run passes both the real surviving-descendant regression and the original
+owner-bound cancellation case. Apple Silicon was cancelled after remaining
+unassigned to a runner, with no executed steps; this is not an executed test
+failure or a passing platform result.
+
+Windows strict Clippy passes and the native all-target test step completes rather
+than hanging. The root-lease publication and WSS fixes remove the previous broad
+failure groups. Four failures remain: one stopped persistent Session history
+observation, two intermediate diagnostics-file reads, and a redirected native
+descendant whose retained process handle is not yet signaled when the tool
+reports cleanup. Standard-user tests and packages are consequently not run.
+
+The history fixture now uses the existing actual-byte reader. A persistent
+Session being Closed and its Agent being Stopped do not release its retained
+journal; explicit deletion or controlled Host shutdown owns that retirement.
+The test still verifies the original lifecycle, retained bytes and metadata.
+The two diagnostic fixtures share a transparent test subscriber with the cleanup
+fixture, observe actual emissions during the operation, and read the final real
+JSONL only after the production writer reports Flushed. They preserve the
+reentrant owner-query probes and strict final identity, ordering and privacy
+assertions. Independent review finds no blocker. Local Task 051 passes 10 cases;
+the three affected diagnostic targets pass, and transport all-targets strict
+Clippy and workspace formatting pass.
+
+The execution environment became unavailable before these five test files were
+committed. They were reconstructed from the immutable seventh source and the
+recorded exact diffs. Reconstructed blob hashes match the recorded diff prefixes;
+the two rustfmt transformations are reapplied explicitly. The next native run
+validates this checkpoint independently. No production change is included in
+this fixture-recovery checkpoint.
+
+## Native Job exit investigation
+
+The process-handle mismatch remains a release blocker. A successful kill call,
+pipe EOF or wrapper return is not substituted for the failing native assertion.
+The isolated [Windows Job probe](https://github.com/zqcli/minicore-host/tree/d92f0537fe363a9644ab7a98f2934924d54365e1),
+commit `d92f0537fe363a9644ab7a98f2934924d54365e1`, has script SHA-256
+`5d3fab937d96596533dca5f869e9235333c5ff7b62b0bbef1e31a1e0a17f7a37`.
+[Its native run](https://github.com/zqcli/minicore-host/actions/runs/43059602857)
+completes 120 rounds on Windows Server 2025 build 26100 with real Git Bash and
+native gated Python descendants. Every round first verifies exact Job membership
+and retains the actual root/leaf process handles.
+
+All 40 TerminateJobObject rounds observe ActiveProcesses zero and an empty Job
+PID list while the same retained leaf handle still reports WAIT_TIMEOUT; it is
+signaled later. Direct TerminateProcess and natural-exit controls, 40 rounds each,
+do not observe this window. Those negative controls are observations, not a proof
+that their accounting always implies process termination. The probe finally waits
+for real signals and closes all owned handles. It is investigation code on a
+separate branch, not a Host implementation or a platform acceptance gate.
+
+Integrated source review confirms the Session execution/input/compaction/prompt
+files, all compaction production sources and Runtime revision are unchanged.
+The storage test-support feature has only development-dependency consumers and
+is not enabled by the native release build. Independent workflow review confirms
+all four native gates, actual standard-user identity/execution/cleanup checks,
+and staged single-Host archive validation remain mandatory.
+
+Final native gates, source identities, four-platform artifacts and dev publication
+are pending. A configured matrix, cross-check or standalone probe does not
+establish platform support.

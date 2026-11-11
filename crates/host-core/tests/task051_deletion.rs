@@ -3,6 +3,7 @@
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_host_storage::*;
 use minicore_runtime::{
     ExecutionConfig, LoopOptions,
@@ -529,7 +530,9 @@ async fn ordinary_close_and_stop_keep_files_until_explicit_deletion() {
     )
     .unwrap();
     until(|| host.agent_info(&caller, &agent).unwrap().lifecycle == AgentLifecycle::Stopped).await;
-    let history = std::fs::read(path(dir.path(), &target).join("history.jsonl")).unwrap();
+    // Business close/stop leaves the persistent controller's journal lease alive.
+    // The stopped Agent is quiescent, so inspect the actual bytes without retiring it.
+    let history = read_history_bytes(path(dir.path(), &target).join("history.jsonl")).unwrap();
     assert!(
         String::from_utf8(history)
             .unwrap()

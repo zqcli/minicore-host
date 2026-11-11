@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 //! Production Host/resources/Runtime with a scripted loopback HTTP server.
-//! No model double, fabricated owner events, or observation listener is used.
+//! No model double or fabricated owner events are used. The test-only emission
+//! observer forwards to the real diagnostics subscriber; it does not confirm
+//! that the asynchronous writer has persisted a record.
 use minicore_host_core::{
     Host, HostConfig, MessageBinding, OpenAiModelSettings, TurnResultSnapshot,
 };
@@ -16,8 +18,14 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
-    sync::Semaphore,
+    sync::{Semaphore, watch},
     task::JoinHandle,
+};
+use tracing::{
+    Dispatch, Event, Metadata, Subscriber,
+    field::{Field, Visit},
+    span::{Attributes, Id, Record},
+    subscriber::Interest,
 };
 
 pub const MODEL: &str = "diagnostic/chat";
@@ -29,6 +37,100 @@ pub const FRAMEWORK: &str = "PRIVATE_DIAGNOSTIC_FRAMEWORK";
 pub const ERROR_BODY: &str = "PRIVATE_DIAGNOSTIC_UPSTREAM_ERROR";
 pub const PROVIDER_MODEL: &str = "PRIVATE_DIAGNOSTIC_PROVIDER_MODEL";
 pub const WAIT: Duration = Duration::from_secs(5);
+
+pub struct EmittedDiagnostics {
+    records: watch::Receiver<Vec<Value>>,
+}
+
+impl EmittedDiagnostics {
+    // Callers bound this wait at the exact boundary they are testing. These are
+    // actual EventPayloads (including their nested context), not formatted log
+    // rows. Final file assertions still require Guard::shutdown == Flushed.
+    pub async fn wait_for(&self, ready: impl Fn(&[Value]) -> bool) -> Vec<Value> {
+        let mut records = self.records.clone();
+        loop {
+            {
+                let snapshot = records.borrow_and_update();
+                if ready(&snapshot) {
+                    return snapshot.clone();
+                }
+            }
+            records
+                .changed()
+                .await
+                .expect("diagnostics subscriber is alive");
+        }
+    }
+}
+
+pub fn observe_diagnostics(inner: Dispatch) -> (Dispatch, EmittedDiagnostics) {
+    let (records, receiver) = watch::channel(Vec::new());
+    (
+        Dispatch::new(DiagnosticEmission { inner, records }),
+        EmittedDiagnostics { records: receiver },
+    )
+}
+
+struct DiagnosticEmission {
+    inner: Dispatch,
+    records: watch::Sender<Vec<Value>>,
+}
+
+#[derive(Default)]
+struct DiagnosticRecord(Option<Value>);
+
+impl Visit for DiagnosticRecord {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "record" {
+            self.0 = Some(serde_json::from_str(value).expect("typed diagnostic payload"));
+        }
+    }
+    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
+}
+
+impl Subscriber for DiagnosticEmission {
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        self.inner.register_callsite(metadata)
+    }
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        self.inner.enabled(metadata)
+    }
+    fn new_span(&self, attributes: &Attributes<'_>) -> Id {
+        self.inner.new_span(attributes)
+    }
+    fn record(&self, span: &Id, values: &Record<'_>) {
+        self.inner.record(span, values);
+    }
+    fn record_follows_from(&self, span: &Id, follows: &Id) {
+        self.inner.record_follows_from(span, follows);
+    }
+    fn event(&self, event: &Event<'_>) {
+        self.inner.event(event);
+        if event.metadata().target() == "minicore_diagnostics" {
+            let mut record = DiagnosticRecord::default();
+            event.record(&mut record);
+            if let Some(record) = record.0 {
+                // Notify only after the real subscriber has handled this event.
+                self.records.send_modify(|records| records.push(record));
+            }
+        }
+    }
+    fn enter(&self, span: &Id) {
+        self.inner.enter(span);
+    }
+    fn exit(&self, span: &Id) {
+        self.inner.exit(span);
+    }
+    fn clone_span(&self, span: &Id) -> Id {
+        self.inner.clone_span(span)
+    }
+    fn try_close(&self, span: Id) -> bool {
+        self.inner.try_close(span)
+    }
+    fn current_span(&self) -> tracing_core::span::Current {
+        self.inner.current_span()
+    }
+}
 
 pub fn options() -> CallOptions {
     CallOptions {

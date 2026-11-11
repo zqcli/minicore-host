@@ -139,27 +139,21 @@ async fn utility_started(http: &Http) {
         .forget();
 }
 
-async fn logged(path: &std::path::Path, event: &str, session: &SessionId) -> Vec<Value> {
-    tokio::time::timeout(WAIT, async {
-        loop {
-            // The asynchronous writer may be between writes. Only complete
-            // JSON lines are observation evidence, never business confirmation.
-            let rows: Vec<Value> = std::fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .filter_map(|line| serde_json::from_str(line).ok())
-                .collect();
-            if rows
-                .iter()
-                .any(|row| row["event"] == event && row["session_id"] == session.as_str())
-            {
-                return rows;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
+async fn emitted_for_session(
+    emitted: &EmittedDiagnostics,
+    event: &str,
+    session: &SessionId,
+) -> Vec<Value> {
+    tokio::time::timeout(
+        WAIT,
+        emitted.wait_for(|records| {
+            records.iter().any(|record| {
+                record["event"] == event && record["context"]["session_id"] == session.as_str()
+            })
+        }),
+    )
     .await
-    .unwrap()
+    .expect("compaction diagnostic did not reach the production subscriber")
 }
 
 async fn enable_automatic(session: &SessionClient) {
@@ -332,6 +326,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     logging.level = tracing::Level::TRACE;
     logging.output = Output::File(log.clone());
     let (inner, guard) = minicore_host_diagnostics::prepare(logging).unwrap();
+    let (inner, emitted) = observe_diagnostics(inner);
     let probe = Arc::new(Probe::default());
     tracing::subscriber::set_global_default(Reentry {
         inner,
@@ -396,20 +391,16 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         Some(FaultKind::SessionHistoryWriteFailed)
     );
     assert!(failed.data.active_turn_id.is_none());
-    let pending_logs = logged(
-        &log,
+    let pending_events = emitted_for_session(
+        &emitted,
         "session.history_write_failed",
         &session.target().session_id,
     )
     .await;
-    assert!(
-        operation_rows(
-            &pending_logs,
-            &accepted.operation_id,
-            "session.compaction_finished"
-        )
-        .is_empty()
-    );
+    assert!(!pending_events.iter().any(|record| {
+        record["event"] == "session.compaction_finished"
+            && record["context"]["operation_id"] == accepted.operation_id.as_str()
+    }));
     std::fs::remove_file(&history).unwrap();
     std::fs::rename(&original, &history).unwrap();
     session.resume(control(), options()).await.unwrap();
@@ -625,17 +616,17 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     })
     .await
     .unwrap();
-    let pending_logs = logged(
-        &log,
+    let pending_events = emitted_for_session(
+        &emitted,
         "session.history_write_failed",
         &session.target().session_id,
     )
     .await;
     assert!(
-        !pending_logs
+        !pending_events
             .iter()
-            .any(|row| row["event"] == "session.compaction_finished"
-                && row["turn_id"] == automatic_save_turn.as_str())
+            .any(|record| record["event"] == "session.compaction_finished"
+                && record["context"]["turn_id"] == automatic_save_turn.as_str())
     );
     std::fs::remove_file(&automatic_history).unwrap();
     std::fs::rename(&original, &automatic_history).unwrap();

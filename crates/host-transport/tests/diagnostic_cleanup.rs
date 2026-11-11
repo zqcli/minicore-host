@@ -26,87 +26,6 @@ use std::{
     },
     time::Duration,
 };
-use tokio::sync::Semaphore;
-use tracing::{
-    Dispatch, Event, Metadata, Subscriber,
-    field::{Field, Visit},
-    span::{Attributes, Id, Record},
-    subscriber::Interest,
-};
-
-// Forward every span/event to the real diagnostics subscriber. This test-only
-// barrier observes cleanup emission after the production subscriber has handled
-// it, without reading or unlocking a log file that its writer still owns.
-struct CleanupEmission {
-    inner: Dispatch,
-    emitted: Arc<Semaphore>,
-    scheduling_emitted: Arc<Semaphore>,
-}
-
-#[derive(Default)]
-struct CleanupRecord {
-    failed: bool,
-    blocked_scheduling: bool,
-}
-
-impl Visit for CleanupRecord {
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if field.name() == "record" {
-            let Ok(record) = serde_json::from_str::<Value>(value) else {
-                return;
-            };
-            self.failed = record["event"] == "turn.cleanup_failed";
-            self.blocked_scheduling = record["event"] == "session.scheduling_changed"
-                && record["attributes"]["reason"] == "cleanup_finished"
-                && record["attributes"]["blocked"] == true;
-        }
-    }
-    fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
-}
-
-impl Subscriber for CleanupEmission {
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.inner.register_callsite(metadata)
-    }
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        self.inner.enabled(metadata)
-    }
-    fn new_span(&self, attributes: &Attributes<'_>) -> Id {
-        self.inner.new_span(attributes)
-    }
-    fn record(&self, span: &Id, values: &Record<'_>) {
-        self.inner.record(span, values);
-    }
-    fn record_follows_from(&self, span: &Id, follows: &Id) {
-        self.inner.record_follows_from(span, follows);
-    }
-    fn event(&self, event: &Event<'_>) {
-        self.inner.event(event);
-        let mut record = CleanupRecord::default();
-        event.record(&mut record);
-        if record.failed {
-            self.emitted.add_permits(1);
-        }
-        if record.blocked_scheduling {
-            self.scheduling_emitted.add_permits(1);
-        }
-    }
-    fn enter(&self, span: &Id) {
-        self.inner.enter(span);
-    }
-    fn exit(&self, span: &Id) {
-        self.inner.exit(span);
-    }
-    fn clone_span(&self, span: &Id) -> Id {
-        self.inner.clone_span(span)
-    }
-    fn try_close(&self, span: Id) -> bool {
-        self.inner.try_close(span)
-    }
-    fn current_span(&self) -> tracing_core::span::Current {
-        self.inner.current_span()
-    }
-}
 
 const PRIVATE_CLEANUP: &str = "PRIVATE_INJECTED_CLEANUP_FAULT_BODY";
 struct FixtureCleanup {
@@ -172,14 +91,8 @@ async fn independent_cleanup_failures_do_not_replace_primary_or_falsely_finish_o
     logging.level = tracing::Level::TRACE;
     logging.output = Output::File(log.clone());
     let (dispatch, guard) = minicore_host_diagnostics::prepare(logging).unwrap();
-    let emitted = Arc::new(Semaphore::new(0));
-    let scheduling_emitted = Arc::new(Semaphore::new(0));
-    tracing::dispatcher::set_global_default(Dispatch::new(CleanupEmission {
-        inner: dispatch,
-        emitted: emitted.clone(),
-        scheduling_emitted: scheduling_emitted.clone(),
-    }))
-    .unwrap();
+    let (dispatch, emitted) = observe_diagnostics(dispatch);
+    tracing::dispatcher::set_global_default(dispatch).unwrap();
     let mut expected = Vec::new();
     for confirmed in [true, false] {
         let http = Http::start(vec![Reply::auth_failure()]).await;
@@ -273,14 +186,23 @@ async fn independent_cleanup_failures_do_not_replace_primary_or_falsely_finish_o
     // Publication alone does not prove emission. The unconfirmed owner emits
     // its blocked scheduling record after cleanup_failed. Wait for both actual
     // errors and that tail event before closing and draining the real writer.
-    let (errors, scheduling) = tokio::time::timeout(WAIT, async {
-        tokio::try_join!(emitted.acquire_many(2), scheduling_emitted.acquire())
-    })
+    tokio::time::timeout(
+        WAIT,
+        emitted.wait_for(|records| {
+            records
+                .iter()
+                .filter(|record| record["event"] == "turn.cleanup_failed")
+                .count()
+                == 2
+                && records.iter().any(|record| {
+                    record["event"] == "session.scheduling_changed"
+                        && record["attributes"]["reason"] == "cleanup_finished"
+                        && record["attributes"]["blocked"] == true
+                })
+        }),
+    )
     .await
-    .expect("cleanup diagnostics did not reach the production subscriber")
-    .unwrap();
-    errors.forget();
-    scheduling.forget();
+    .expect("cleanup diagnostics did not reach the production subscriber");
     assert_eq!(
         guard.shutdown(Duration::from_secs(2)),
         ShutdownOutcome::Flushed

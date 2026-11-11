@@ -11,12 +11,11 @@ use std::{path::Path, sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 
 fn records(path: &Path) -> Vec<Value> {
-    // The file writer can be between two writes. This observer reads only
-    // complete diagnostic lines; it does not decide any business state.
+    // Read the actual file only after the writer has shut down and flushed.
     std::fs::read_to_string(path)
         .unwrap()
         .lines()
-        .filter_map(|line| serde_json::from_str(line).ok())
+        .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
 fn matches(rows: &[Value], event: &str, turn: &TurnId) -> usize {
@@ -31,7 +30,9 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     let mut logging = Options::new("diagnostic-terminal");
     logging.level = tracing::Level::TRACE;
     logging.output = Output::File(log.clone());
-    let guard = minicore_host_diagnostics::install(logging).unwrap();
+    let (dispatch, guard) = minicore_host_diagnostics::prepare(logging).unwrap();
+    let (dispatch, emitted) = observe_diagnostics(dispatch);
+    tracing::dispatcher::set_global_default(dispatch).unwrap();
     let health = guard.health();
     let gate = Arc::new(Semaphore::new(0));
     let http = Http::start(vec![Reply {
@@ -90,15 +91,24 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
         3301
     );
     assert_eq!(health.snapshot().status, LoggingState::Ok);
-    tokio::time::timeout(Duration::from_secs(2), async {
-        while matches(&records(&log), "turn.failed", &turn) != 1 {
-            tokio::time::sleep(Duration::from_millis(1)).await;
-        }
-    })
+    let before = tokio::time::timeout(
+        Duration::from_secs(2),
+        emitted.wait_for(|records| {
+            records
+                .iter()
+                .filter(|record| {
+                    record["event"] == "turn.failed"
+                        && record["context"]["turn_id"] == turn.as_str()
+                })
+                .count()
+                == 1
+        }),
+    )
     .await
     .expect("primary owner ERROR must exist before repairing the original history save");
-    let before = records(&log);
-    assert_eq!(matches(&before, "turn.finished", &turn), 0);
+    assert!(!before.iter().any(|record| {
+        record["event"] == "turn.finished" && record["context"]["turn_id"] == turn.as_str()
+    }));
     // Restore exactly the original inode and use only the existing explicit
     // same-save continuation. No task is resent and no model is called again.
     std::fs::remove_file(&history).unwrap();

@@ -6,9 +6,12 @@
 and distribution matrix against dev `6ea85fda737635e26b9d7cad17c3df1e54911bd9`.
 Runtime is compiled into the Host executable through its existing pinned Cargo
 dependency; Host/Runtime interfaces, version 0.9.20 and SPEC remain unchanged.
-Platform adapters and native validation are in progress. The task records actual
-results separately from configured CI targets; no unverified platform support
-or successful publication is asserted here.
+Linux quality/native and Intel macOS pass the seventh candidate. Windows native
+execution exposed a real Job-accounting/process-exit mismatch that remains a
+release blocker; its independent native probe and the corrected file-observation
+fixtures are recorded in Task 105. Final Apple Silicon, Windows standard-user
+and package gates, followed by dev publication, remain pending. Configured
+targets and API probes are not treated as passing Host platform acceptance.
 
 ## Current performance checkpoint
 
