@@ -15,6 +15,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 
@@ -66,6 +67,10 @@ class ExtendedLimits(c.Structure):
     ]
 
 
+class CompletionAssociation(c.Structure):
+    _fields_ = [("CompletionKey", c.c_void_p), ("CompletionPort", w.HANDLE)]
+
+
 class Accounting(c.Structure):
     _fields_ = [
         ("TotalUserTime", c.c_int64), ("TotalKernelTime", c.c_int64),
@@ -109,6 +114,10 @@ class Win32:
             "WaitForSingleObject": ([w.HANDLE, w.DWORD], w.DWORD),
             "OpenProcess": ([w.DWORD, w.BOOL, w.DWORD], w.HANDLE),
             "IsProcessInJob": ([w.HANDLE, w.HANDLE, c.POINTER(w.BOOL)], w.BOOL),
+            "CreateIoCompletionPort": ([w.HANDLE, w.HANDLE, c.c_size_t, w.DWORD], w.HANDLE),
+            "GetQueuedCompletionStatus": ([w.HANDLE, c.POINTER(w.DWORD),
+                                           c.POINTER(c.c_size_t), c.POINTER(c.c_void_p),
+                                           w.DWORD], w.BOOL),
             "CloseHandle": ([w.HANDLE], w.BOOL),
         }
         for name, (arguments, result) in signatures.items():
@@ -162,6 +171,97 @@ class Win32:
                 "membership": membership, "wait_after": after}
 
 
+class CompletionLog:
+    """Observe notifications; no notification is accepted as exit evidence."""
+
+    def __init__(self, api, job, held):
+        self.api, self.job, self.held = api, job, held
+        self.events = []
+        self.error = None
+        self.started_ns = time.perf_counter_ns()
+        self.stop = threading.Event()
+        self.ready = threading.Event()
+        self.thread = None
+        self.port = api.checked(api.CreateIoCompletionPort(w.HANDLE(-1), None, 0, 1),
+                                "CreateIoCompletionPort")
+        try:
+            association = CompletionAssociation(job, self.port)
+            api.checked(api.SetInformationJobObject(job, 7, c.byref(association),
+                                                    c.sizeof(association)),
+                        "SetInformationJobObject(AssociateCompletionPort)")
+            self.thread = threading.Thread(target=self._collect, daemon=False)
+            self.thread.start()
+            if not self.ready.wait(5):
+                raise RuntimeError("completion collector did not start")
+        except BaseException:
+            self.close()
+            raise
+
+    def _collect(self):
+        self.ready.set()
+        try:
+            while not self.stop.is_set():
+                code, key, pid = w.DWORD(), c.c_size_t(), c.c_void_p()
+                if not self.api.GetQueuedCompletionStatus(
+                    self.port, c.byref(code), c.byref(key), c.byref(pid), 100
+                ):
+                    error = c.get_last_error()
+                    if error == 258 and pid.value is None:
+                        continue
+                    raise c.WinError(error, "GetQueuedCompletionStatus")
+                if key.value != self.job:
+                    raise RuntimeError("notification belongs to a different Job")
+                # The dictionary copy is made while holding Python's GIL; no
+                # native API call uses a handle after the collector is joined.
+                held = self.held.copy()
+                target = next(((role, handle) for role, (number, handle) in held.items()
+                               if number == pid.value), None)
+                if code.value == 4 and "leaf" in held:
+                    # ACTIVE_PROCESS_ZERO has no PID: observe the retained leaf
+                    # immediately, while keeping the packet PID itself null.
+                    target = ("leaf", held["leaf"][1])
+                # Check the exact reported process first, before any accounting
+                # or PID-list queries can consume its termination window.
+                target_wait = self.api.wait(target[1], 0) if target else None
+                self.events.append({
+                    "kind": {4: "ACTIVE_PROCESS_ZERO", 6: "NEW_PROCESS",
+                             7: "EXIT_PROCESS", 8: "ABNORMAL_EXIT_PROCESS"}.get(code.value, "OTHER"),
+                    "code": code.value, "pid": pid.value, "key_matches": True,
+                    "target": target[0] if target else None, "target_wait": target_wait,
+                    "at_us": (time.perf_counter_ns() - self.started_ns) / 1000,
+                    "snapshot": self.api.snapshot(self.job, held),
+                })
+        except BaseException as error:
+            self.error = repr(error)
+
+    def finish(self, leaf_pid):
+        # This bounded tail collects possibly delayed packets after actual
+        # process exit. Missing notifications are reported, never fabricated.
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            events = self.events[:]
+            if self.error or (
+                any(event["code"] in (7, 8) and event["pid"] == leaf_pid for event in events)
+                and any(event["code"] == 4 for event in events)
+            ):
+                break
+            time.sleep(0.005)
+        self.close()
+        if self.error:
+            raise RuntimeError(f"completion collector failed: {self.error}")
+        return self.events[:]
+
+    def close(self):
+        self.stop.set()
+        if self.thread is not None:
+            self.thread.join(2)
+            if self.thread.is_alive():
+                raise RuntimeError("completion collector did not terminate")
+        if self.port is not None:
+            self.api.checked(self.api.CloseHandle(self.port), "CloseHandle(completion port)")
+            self.port = None
+
+
 def bash_path():
     candidates = [shutil.which("bash.exe")]
     for name in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
@@ -187,11 +287,14 @@ def one_round(api, bash, mode, memory_mb):
     process = ProcessInfo()
     held = {}
     peers = {}
+    completions = None
     try:
         limits = ExtendedLimits()
         limits.BasicLimitInformation.LimitFlags = 0x2000  # KILL_ON_JOB_CLOSE, no breakaway.
         api.checked(api.SetInformationJobObject(job, 9, c.byref(limits), c.sizeof(limits)),
                     "SetInformationJobObject(ExtendedLimitInformation)")
+        # Associate and start the collector while the Job is still inactive.
+        completions = CompletionLog(api, job, held)
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             listener.listen(2)
@@ -238,8 +341,11 @@ def one_round(api, bash, mode, memory_mb):
             start = time.perf_counter_ns()
             if mode == "job":
                 api.checked(api.TerminateJobObject(job, 1), "TerminateJobObject")
-            elif mode == "process":
-                api.checked(api.TerminateProcess(held["leaf"][1], 1), "TerminateProcess")
+            elif mode in ("process", "process-abnormal"):
+                # An abnormal status code tests the notification classification;
+                # this is not an actual memory access violation in the child.
+                code = 0xC0000005 if mode == "process-abnormal" else 1
+                api.checked(api.TerminateProcess(held["leaf"][1], code), "TerminateProcess")
             else:
                 peers["leaf"].sendall(b"x")
             stop_return_us = (time.perf_counter_ns() - start) / 1000
@@ -254,11 +360,17 @@ def one_round(api, bash, mode, memory_mb):
                 time.sleep(0.001)
                 observation = api.snapshot(job, held)
             signaled_us = (time.perf_counter_ns() - start) / 1000
+            events = completions.finish(held["leaf"][0])
             return {"mode": mode, "memory_mb": memory_mb, "root_pid": held["root"][0],
                     "leaf_pid": held["leaf"][0], "before": before, "pre_stop": pre_stop,
                     "stop_return_us": stop_return_us, "post_stop": after,
                     "first_empty_unsignaled": first_empty_unsignaled,
-                    "signaled_us": signaled_us, "final": observation}
+                    "signaled_us": signaled_us, "final": observation,
+                    "notifications": events,
+                    "leaf_exit_notification_seen": any(
+                        event["code"] in (7, 8) and event["pid"] == held["leaf"][0]
+                        for event in events),
+                    "zero_notification_seen": any(event["code"] == 4 for event in events)}
     finally:
         # The probe never leaves a workload behind, including on failed assertions.
         api.checked(api.TerminateJobObject(job, 1), "cleanup TerminateJobObject")
@@ -274,6 +386,10 @@ def one_round(api, bash, mode, memory_mb):
                 if api.wait(handle, 10000) != 0:
                     raise RuntimeError("probe cleanup did not confirm a real process exit")
         finally:
+            # The reader may still inspect held handles on an earlier failure.
+            # Join it before closing those handles or the exact Job.
+            if completions is not None:
+                completions.close()
             for peer in peers.values():
                 peer.close()
             for handle in handles + [process.hThread, job]:
@@ -298,7 +414,7 @@ def main():
                       "bash": bash, "structures": {"startup": c.sizeof(Startup),
                       "limits": c.sizeof(ExtendedLimits), "accounting": c.sizeof(Accounting)}}), flush=True)
     counts = {}
-    for mode in ("job", "process", "natural"):
+    for mode in ("job", "process", "natural", "process-abnormal"):
         for memory_mb in (0, 64):
             found = 0
             for index in range(args.rounds):
