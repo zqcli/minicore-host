@@ -1,5 +1,6 @@
 //! Actual Host/Runtime, production provider, loopback HTTP/SSE and JSONL.
 //! Scripted HTTP responses are not a live model/TUI test or a Runtime double.
+use minicore_host_storage::testing::read_history_bytes;
 #[path = "../../host-provider/tests/support/mod.rs"]
 #[allow(dead_code)]
 mod support;
@@ -198,7 +199,7 @@ impl Rig {
             .join("history.jsonl")
     }
     fn bytes(&self) -> Vec<u8> {
-        std::fs::read(self.path()).unwrap()
+        read_history_bytes(self.path()).unwrap()
     }
     fn counts(&self) -> (usize, usize, usize) {
         (

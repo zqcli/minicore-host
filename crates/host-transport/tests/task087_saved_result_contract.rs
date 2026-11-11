@@ -1,5 +1,6 @@
 //! Real Host/Runtime, typed operations, OS pipes and authenticated loopback WSS.
 //! Only the model event source and test TLS/access credentials are fixtures.
+use minicore_host_storage::testing::read_history_bytes;
 mod common;
 mod os_pipe;
 mod wss_common;
@@ -96,7 +97,7 @@ async fn saved_result_and_wait_share_exact_contract_on_typed_stdio_and_wss() {
         .join("sessions")
         .join(target.session_id.as_str())
         .join("history.jsonl");
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = read_history_bytes(&path).unwrap();
     let mut expected = None;
     for loaded in [false, true] {
         if loaded {
@@ -179,7 +180,7 @@ async fn saved_result_and_wait_share_exact_contract_on_typed_stdio_and_wss() {
             ),
             before
         );
-        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(read_history_bytes(&path).unwrap(), bytes);
         assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
     }
     stdio.close();

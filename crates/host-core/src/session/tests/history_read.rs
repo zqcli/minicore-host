@@ -1,4 +1,5 @@
 use super::*;
+use minicore_host_storage::testing::read_history_bytes;
 
 async fn read(fixture: &Fixture) -> Vec<HistoryItemData> {
     fixture
@@ -88,7 +89,8 @@ async fn failed_partial_read_and_reconcile_keep_one_content_entry() {
         send(&fixture, "input");
         let original = blocked(&fixture).await;
         assert_eq!(original.persistence, PersistenceState::Failed);
-        let bytes = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+        let bytes =
+            read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
         let before = serde_json::to_value(read(&fixture).await).unwrap();
         assert_eq!(before.as_array().unwrap().len(), 2);
         assert_eq!(before[1]["kind"], "partial");
@@ -108,7 +110,7 @@ async fn failed_partial_read_and_reconcile_keep_one_content_entry() {
         assert_eq!(backend.appends.load(Ordering::SeqCst), 2);
         assert_eq!(backend.reconciles.load(Ordering::SeqCst), 0);
         assert_eq!(
-            std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+            read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
             bytes
         );
         fixture

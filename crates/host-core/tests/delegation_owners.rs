@@ -2,6 +2,7 @@
 use futures_util::{FutureExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
+use minicore_host_storage::testing::read_history_text;
 use minicore_runtime::{
     ExecutionConfig, LoopOptions,
     model::{
@@ -1444,7 +1445,7 @@ async fn persistent_partial_cancel_with_preserved_inbox_waits_for_actual_next_tu
         .join("sessions")
         .join(child.session_id.as_str())
         .join("history.jsonl");
-    let records: Vec<minicore_host_storage::HistoryRecord> = std::fs::read_to_string(path)
+    let records: Vec<minicore_host_storage::HistoryRecord> = read_history_text(path)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())

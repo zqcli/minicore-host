@@ -279,3 +279,14 @@ reopening; and explicit deletion boundaries. Unix subprocesses with a test-only
 file-size rlimit and symbolic `SIGXFSZ` handling produce real `EFBIG` errors for
 atomic object and partial JSONL writes. Separate, explicitly named test hooks inject failed sync/zero-write/partial
 write outcomes around real files to verify precise same-run reconciliation.
+
+The non-default `test-support` feature exposes these same append-failure seams
+to development dependencies. Its `testing` module keeps writes, accepted ranges,
+and reconciliation in the original `SessionJournal`; it does not export file
+handles or relax leases. A separate corruption fixture changes actual bytes
+through that owner without updating its stamp or confirmation. Byte-inspection
+helpers use ordinary reads on Unix and a real read-only mapping on Windows,
+where another handle cannot read through the writer's mandatory byte lock.
+Tests synchronize the observation point themselves; inspected bytes never imply
+that the original save was confirmed. Default production builds omit this module
+and the exposed failure seams.

@@ -2,6 +2,7 @@
 //! Only model events and the journal acknowledgement failure are test fixtures.
 use super::*;
 use crate::backend::{JournalHistory, TestAppendFault};
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use minicore_runtime::{
     model::{
@@ -526,7 +527,7 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
         .unwrap()
         .canonical_path()
         .join("history.jsonl");
-    let before = std::fs::read(&path).unwrap();
+    let before = read_history_bytes(&path).unwrap();
     assert!(!before.is_empty());
     fixture.session.resume(&caller).unwrap();
     until(&fixture, |state| state.completed.contains_key(&turn)).await;
@@ -548,7 +549,7 @@ async fn accepted_complete_history_stays_queryable_across_original_save_failure_
     assert_eq!(result.data.history.len(), 2);
     assert_eq!(result.data.history[1].response_index, Some(0));
     assert_public(&result);
-    let after = std::fs::read(&path).unwrap();
+    let after = read_history_bytes(&path).unwrap();
     assert!(after.starts_with(&before));
     assert_eq!(String::from_utf8(after).unwrap().lines().count(), 3);
 }

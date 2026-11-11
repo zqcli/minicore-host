@@ -4,6 +4,7 @@ use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_storage::*;
+use minicore_host_storage::testing::read_history_text;
 use minicore_runtime::{
     ExecutionConfig, HistoryItem, LoopOptions,
     model::{
@@ -232,7 +233,7 @@ async fn discovers_metadata_lazily_and_runs_persistent_history_through_runtime()
     let result = completed(&host, &caller, &target).await;
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
     assert_eq!(result.info.outcome, Some(TurnOutcome::Completed));
-    let history = std::fs::read_to_string(
+    let history = read_history_text(
         directory
             .path()
             .join("agents")

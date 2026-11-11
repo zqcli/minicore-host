@@ -2,6 +2,7 @@
 //! explicitly scripted fixture; only the separate HTTP tests use a provider.
 use super::*;
 use crate::backend::TestAppendFault;
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_runtime::{
     AssistantHistory, UserHistory, UserMessageKind,
     model::{AssistantPart, ModelMessage, Usage},
@@ -265,7 +266,7 @@ async fn compaction_repeated_durable_coverage_reloads_without_touching_raw_histo
     );
     seed(&fixture, false).await;
     let path = fixture.store.canonical_path().join("history.jsonl");
-    let original = std::fs::read(&path).unwrap();
+    let original = read_history_bytes(&path).unwrap();
     let raw = fixture
         .session
         .history(&fixture.connection.caller())
@@ -281,7 +282,7 @@ async fn compaction_repeated_durable_coverage_reloads_without_touching_raw_histo
             }
         }
     ));
-    assert!(std::fs::read(&path).unwrap().starts_with(&original));
+    assert!(read_history_bytes(&path).unwrap().starts_with(&original));
     assert_eq!(
         fixture
             .session
@@ -1168,7 +1169,7 @@ async fn compaction_partial_marker_failure_stays_blocked_and_force_does_not_rele
             .is_some_and(|work| work.fault.is_some())
     })
     .await;
-    let before = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+    let before = read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
     fixture.session.begin_host_shutdown_owned(true);
     fixture
         .session
@@ -1183,7 +1184,7 @@ async fn compaction_partial_marker_failure_stays_blocked_and_force_does_not_rele
     })
     .await;
     assert_eq!(
-        std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+        read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
         before
     );
     assert!(

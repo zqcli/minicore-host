@@ -77,7 +77,7 @@ pub struct SessionJournal {
     last_memory_range: SaveRange,
     pending: Option<Pending>,
     failed: bool,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     failure: Option<TestFailure>,
 }
 impl SessionJournal {
@@ -97,7 +97,7 @@ impl SessionJournal {
             last_memory_range: SaveRange::default(),
             pending: None,
             failed: false,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             failure: None,
         }
     }
@@ -146,12 +146,53 @@ impl SessionJournal {
             last_memory_range: SaveRange::default(),
             pending: None,
             failed: false,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             failure: None,
         })
     }
     pub fn positions(&self) -> SavePositions {
         self.positions
+    }
+    #[cfg(feature = "test-support")]
+    pub(crate) fn persist_pending_with_failure_for_test(
+        &mut self,
+        failure: crate::testing::AppendFailure,
+    ) -> Result<SaveConfirmation, StorageError> {
+        if !matches!(self.backend, Backend::Persistent(_)) {
+            return Err(StorageError::InvalidStorageMode);
+        }
+        if self.failed {
+            return Err(StorageError::ReconciliationRequired);
+        }
+        if self.pending.is_none() || self.failure.is_some() {
+            return Err(StorageError::InvalidObject {
+                reason: "append fault fixture requires one unfaulted pending range".into(),
+            });
+        }
+        self.failure = Some(match failure {
+            crate::testing::AppendFailure::BeforeWrite => TestFailure::WritePrefix(0),
+            crate::testing::AppendFailure::AfterPrefix(length) => TestFailure::WritePrefix(length),
+            crate::testing::AppendFailure::BeforeFileSync => TestFailure::FileSync,
+        });
+        self.persist_pending()
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn overwrite_owned_history_for_test(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        let Backend::Persistent(backend) = &mut self.backend else {
+            return Err(std::io::Error::other(
+                "corruption fixture requires a persistent owner",
+            ));
+        };
+        let position = backend.file.stream_position()?;
+        let result = (|| {
+            backend.file.seek(SeekFrom::Start(0))?;
+            backend.file.write_all(bytes)?;
+            backend.file.set_len(bytes.len() as u64)
+        })();
+        // Restoration is attempted even if the deliberate mutation fails. No
+        // journal state is advanced or reconstructed from the changed bytes.
+        let restored = backend.file.seek(SeekFrom::Start(position));
+        result.and(restored.map(|_| ()))
     }
     /// Borrow the full validated baseline loaded on open, not later appends.
     pub fn loaded_records(&self) -> &[HistoryRecord] {
@@ -291,7 +332,7 @@ impl SessionJournal {
                         e,
                     )
                 })?;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             if let Some(TestFailure::WritePrefix(count)) = self.failure {
                 self.failure = None;
                 backend
@@ -313,7 +354,7 @@ impl SessionJournal {
             backend.file.write_all(&pending.bytes).map_err(|e| {
                 crate::error::io_error("append history", backend.dir.path.join("history.jsonl"), e)
             })?;
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             if matches!(self.failure, Some(TestFailure::FileSync)) {
                 self.failure = None;
                 return Err(crate::error::io_error(
@@ -556,13 +597,16 @@ impl FileStamp {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Clone, Copy)]
 enum TestFailure {
     WritePrefix(usize),
     FileSync,
+    #[cfg(test)]
     DirectorySync,
+    #[cfg(test)]
     ReplaceFileAfterSync,
+    #[cfg(test)]
     ReplaceDirectoryAfterSync,
 }
 

@@ -81,8 +81,15 @@ pub(super) async fn confirmed_scope_gone(pid: u32, wrapper_waited: bool) -> io::
     {
         let _ = wrapper_waited;
         for _ in 0..10 {
-            if probe_group(pid)? {
-                return Ok(true);
+            match probe_group(pid) {
+                Ok(true) => return Ok(true),
+                Ok(false) => {}
+                // Darwin's killpg excludes zombie members, but the group can
+                // still exist until they are reaped. That interval yields
+                // EPERM. Keep observing; only a later ESRCH proves absence.
+                #[cfg(target_os = "macos")]
+                Err(error) if error.raw_os_error() == Some(nix::errno::Errno::EPERM as i32) => {}
+                Err(error) => return Err(error),
             }
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         }
@@ -204,4 +211,66 @@ fn capture_pipe(stream: &str) -> io::Result<PipeEnds> {
         server,
         client: Some(client),
     })
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::{confirmed_scope_gone, probe_group};
+    use nix::errno::Errno;
+    use std::{
+        os::unix::process::CommandExt,
+        process::{Child, Command, Stdio},
+        time::Duration,
+    };
+
+    struct UnreapedChild(Child);
+
+    impl Drop for UnreapedChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    #[tokio::test]
+    async fn darwin_group_permission_error_requires_actual_reaping_before_confirmation() {
+        // Keep an actual exited process unreaped: Darwin still has its process
+        // group but filters its sole zombie member when probing killpg(..., 0).
+        let mut child = UnreapedChild(
+            Command::new("/bin/bash")
+                .args(["--noprofile", "--norc", "-c", "exit 0"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .process_group(0)
+                .spawn()
+                .unwrap(),
+        );
+        let pid = child.0.id();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match probe_group(pid) {
+                    Err(error) if error.raw_os_error() == Some(Errno::EPERM as i32) => break,
+                    Ok(false) => tokio::time::sleep(Duration::from_millis(5)).await,
+                    result => panic!("unexpected unreaped process group state: {result:?}"),
+                }
+            }
+        })
+        .await
+        .expect("the real child did not reach Darwin's unreaped group state");
+
+        let error = confirmed_scope_gone(pid, true).await.unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(Errno::EPERM as i32));
+
+        let confirmation = confirmed_scope_gone(pid, true);
+        tokio::pin!(confirmation);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), &mut confirmation)
+                .await
+                .is_err(),
+            "an unreaped group must not be reported as absent"
+        );
+        assert!(child.0.wait().unwrap().success());
+        assert!(confirmation.await.unwrap());
+    }
 }

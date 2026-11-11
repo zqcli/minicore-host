@@ -390,10 +390,10 @@ fn write_fault(error: minicore_host_storage::StorageError) -> Fault {
     Fault::new(FaultKind::SessionHistoryWriteFailed, error.to_string())
 }
 
-// Explicit fault fixture: these tests use the real SessionJournal's validation,
-// accepted range, reconciliation, sync, and file identity checks. Only the write
-// interruption is injected by writing zero/a prefix/all original bytes without
-// sync and returning an error. This is not a live filesystem/provider failure.
+// Explicit fault fixture: the actual SessionJournal runs its existing append
+// path through its owned handle and fails at a named storage seam. Acceptance,
+// encoding, retained ranges, reconciliation, and locks stay in that owner. This
+// is not a live filesystem/provider failure.
 #[cfg(test)]
 #[derive(Clone, Copy)]
 pub(crate) enum TestAppendFault {
@@ -409,44 +409,32 @@ impl JournalHistory {
     pub(crate) fn inject_next_append_fault(&self, failure: TestAppendFault) {
         self.state.lock().unwrap().failure = Some(failure);
     }
+    pub(crate) fn overwrite_owned_history_for_test(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let mut state = self.state.lock().unwrap();
+        let journal = state
+            .journal
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("corruption fixture requires the live journal"))?;
+        minicore_host_storage::testing::overwrite_owned_history(journal, bytes)
+    }
 }
 #[cfg(test)]
 impl JournalState {
     fn inject_append_fault(
         &mut self,
     ) -> Option<Result<minicore_host_protocol::PersistenceState, Fault>> {
-        use std::io::Write;
+        use minicore_host_storage::testing::{AppendFailure, persist_pending_with_failure};
         let failure = self.failure.take()?;
-        let entries = match self.pending.as_ref().expect("fixture accepted records") {
-            PendingAppend::Unaccepted(entries) => entries.clone(),
-            _ => unreachable!("fixture runs before journal acceptance"),
-        };
         Some((|| {
-            let range = self.prepare_original()?;
-            let mut bytes = Vec::new();
-            for (index, entry) in entries.into_iter().enumerate() {
-                let record = minicore_host_storage::HistoryRecord::new(
-                    self.store()?.id().clone(),
-                    range.start + index as u64,
-                    entry,
-                );
-                bytes.extend(serde_json::to_vec(&record).unwrap());
-                bytes.push(b'\n');
-            }
-            let length = match failure {
-                TestAppendFault::NoWrite => 0,
-                TestAppendFault::FullWrite => bytes.len(),
-                TestAppendFault::Prefix(length) => length.min(bytes.len()),
+            self.prepare_original()?;
+            let failure = match failure {
+                TestAppendFault::NoWrite => AppendFailure::BeforeWrite,
+                TestAppendFault::FullWrite => AppendFailure::BeforeFileSync,
+                TestAppendFault::Prefix(length) => AppendFailure::AfterPrefix(length),
             };
-            let mut file = std::fs::OpenOptions::new()
-                .append(true)
-                .open(self.store()?.canonical_path().join("history.jsonl"))
-                .unwrap();
-            file.write_all(&bytes[..length]).unwrap();
-            Err(Fault::new(
-                FaultKind::SessionHistoryWriteFailed,
-                "injected interruption of the original history write before sync",
-            ))
+            persist_pending_with_failure(self.journal.as_mut().expect("owned journal"), failure)
+                .map(|confirmation| confirmation.persistence)
+                .map_err(write_fault)
         })())
     }
 }

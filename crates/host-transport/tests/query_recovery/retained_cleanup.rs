@@ -102,25 +102,28 @@ async fn retained_query_cleanup_proves_both_pipe_close_orders() {
             tokio::time::timeout(Duration::from_secs(5), reader_closed)
                 .await
                 .unwrap()
+                .unwrap()
                 .unwrap();
             release.send(()).unwrap();
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(5), server)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap_err()
-                    .kind(),
-                io::ErrorKind::BrokenPipe
-            );
+            let error = tokio::time::timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            crate::os_pipe::assert_reader_closed_error(&error);
             drop(request_lifetime);
             requests.await.unwrap().unwrap();
-            eprintln!("assert_retained cleanup: ended=false, response reader first => BrokenPipe");
+            eprintln!("assert_retained cleanup: ended=false, response reader first => {error}");
         } else {
             drop(request_lifetime);
             PipeServer { requests, server }
                 .close(&client, Some(Duration::from_secs(5)))
                 .await;
+            tokio::time::timeout(Duration::from_secs(5), reader_closed)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
             assert!(
                 release.send(()).is_err(),
                 "request EOF must retire the held writer"

@@ -71,18 +71,10 @@ fn read_owned(journal: &SessionJournal) -> Vec<u8> {
     bytes
 }
 
-fn corrupt_owned(journal: &SessionJournal, bytes: &[u8]) {
-    let Backend::Persistent(backend) = &journal.backend else {
-        panic!("persistent fixture")
-    };
+fn corrupt_owned(journal: &mut SessionJournal, bytes: &[u8]) {
     // This is an explicit corruption fixture. Windows cannot use a second
     // write handle through the mandatory lease, so mutate through its owner.
-    let mut file = &*backend.file;
-    let position = file.stream_position().unwrap();
-    file.seek(SeekFrom::Start(0)).unwrap();
-    file.write_all(bytes).unwrap();
-    file.set_len(bytes.len() as u64).unwrap();
-    file.seek(SeekFrom::Start(position)).unwrap();
+    journal.overwrite_owned_history_for_test(bytes).unwrap();
 }
 
 #[test]
@@ -177,7 +169,7 @@ fn reconciliation_rejects_changed_prefix_even_when_suffix_matches() {
     let original = String::from_utf8(read_owned(&journal)).unwrap();
     let changed = original.replace("original", "altered!");
     assert_eq!(changed.len(), original.len());
-    corrupt_owned(&journal, changed.as_bytes());
+    corrupt_owned(&mut journal, changed.as_bytes());
     assert!(matches!(
         journal.reconcile_pending(),
         Err(StorageError::UncertainWrite)

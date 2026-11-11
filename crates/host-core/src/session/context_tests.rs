@@ -3,6 +3,7 @@
 //! backend wraps the real journal, including its original-range reconciliation.
 use super::*;
 use crate::backend::{JournalHistory, TestAppendFault};
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use minicore_runtime::{
     model::{
@@ -284,7 +285,7 @@ async fn pending_and_failed_turn_saves_are_distinct_from_readable_reported_usage
         failed.data.history_save.fault.unwrap().kind(),
         Some(FaultKind::SessionHistoryWriteFailed)
     );
-    let bytes = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+    let bytes = read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
     assert!(
         !bytes.is_empty(),
         "readable bytes are not a synchronization confirmation"
@@ -311,7 +312,7 @@ async fn pending_and_failed_turn_saves_are_distinct_from_readable_reported_usage
     assert_eq!(fixture.backend.appends.load(Ordering::SeqCst), 1);
     assert_eq!(fixture.backend.reconciles.load(Ordering::SeqCst), 0);
     assert_eq!(
-        std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+        read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
         bytes
     );
     fixture

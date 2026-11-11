@@ -77,6 +77,35 @@ stdio/WSS access, tool selection and controlled shutdown.
 Tag pushes run the same gates and create workflow artifacts. This workflow does
 not create tags, publish a GitHub Release or bypass validation for a tag.
 
+## Platform prerequisites
+
+Unix storage requires real file/directory synchronization, atomic same-directory
+replacement and advisory file locks. The Windows adapter requires local NTFS and
+checks actual volume, file identity and permissions. The current user's existing
+OS Profile is its documented namespace boundary; data roots elsewhere require
+write/sync access to every ancestor. See the [storage guide](../crates/host-storage/README.md)
+for the precise ownership and durability assumptions.
+
+The Bash tool uses `/bin/bash` on Linux/macOS and an installed native Git Bash on
+Windows. Host binds Windows children to a Job Object before they run, and checks
+actual group/job completion during cleanup. Runtime itself is part of the Host
+executable; these operating-system and optional local-tool prerequisites remain
+external. Native CI verifies the declared runners, not every OS or filesystem.
+
+## Test-only history inspection and failure injection
+
+Windows history locks intentionally reject unrelated file reads and writes while
+the real journal owner remains active. Test fixtures that inspect bytes at an
+established business boundary use an actual read-only file mapping on Windows;
+this does not release the writer or manufacture data from in-memory records.
+Failure and corruption fixtures operate on the journal's existing owned handle,
+preserving its original accepted range, pending bytes and reconciliation path.
+
+These cross-crate fixtures are available through storage's non-default
+`test-support` feature, enabled only by development dependencies. Normal release
+build commands do not enable it. A mapped read is an observation of actual bytes,
+not an acknowledgement that those bytes have been synchronized successfully.
+
 ## Permissions and reproducibility
 
 Actions use verified commit pins; workflow permissions are `contents: read` and

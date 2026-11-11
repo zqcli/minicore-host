@@ -3,6 +3,7 @@
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
+use minicore_host_storage::testing::{read_history_bytes, read_history_text};
 use minicore_host_storage::{HistoryEntry, HistoryRecord};
 use minicore_runtime::{
     ExecutionConfig, LoopOptions,
@@ -189,7 +190,7 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
             .cloned()
     })
     .await;
-    assert!(std::fs::read(&saved_path).unwrap().is_empty());
+    assert!(read_history_bytes(&saved_path).unwrap().is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&saved_path, &path).unwrap();
@@ -231,7 +232,7 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
         1,
         "continuation must never rerun model"
     );
-    let records: Vec<HistoryRecord> = std::fs::read_to_string(&path)
+    let records: Vec<HistoryRecord> = read_history_text(&path)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -254,12 +255,12 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
             .count(),
         1
     );
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = read_history_bytes(&path).unwrap();
     host.resume(&caller, &target).unwrap();
     tokio::task::yield_now().await;
     assert_eq!(
         bytes,
-        std::fs::read(&path).unwrap(),
+        read_history_bytes(&path).unwrap(),
         "stale resume must not duplicate records"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -484,7 +485,7 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         1,
         "failed companion metadata must not resume queued business"
     );
-    let confirmed_history = std::fs::read(&history).unwrap();
+    let confirmed_history = read_history_bytes(&history).unwrap();
     std::fs::remove_dir(&metadata).unwrap();
     std::fs::rename(metadata.with_extension("original"), &metadata).unwrap();
     host.resume(&caller, &target).unwrap();
@@ -497,7 +498,7 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         host.session_info(&caller, &target).unwrap().config.role,
         role
     );
-    assert_eq!(std::fs::read(&history).unwrap(), confirmed_history);
+    assert_eq!(read_history_bytes(&history).unwrap(), confirmed_history);
     entered.acquire().await.unwrap().forget();
     let later = host
         .turns(&caller, &target)

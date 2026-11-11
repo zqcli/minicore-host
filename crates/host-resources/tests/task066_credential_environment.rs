@@ -1,6 +1,7 @@
 //! Synthetic environment in a subprocess, with real Host resources, Runtime,
 //! bash and loopback HTTP/SSE. No ambient credential values are read.
 
+use minicore_host_storage::testing::read_history_bytes;
 #[allow(dead_code)]
 #[path = "support/production.rs"]
 mod support;
@@ -260,7 +261,7 @@ async fn publication_scenario() {
         .join("sessions")
         .join(target.session_id.to_string())
         .join("history.jsonl");
-    let bytes = std::fs::read(&journal).unwrap();
+    let bytes = read_history_bytes(&journal).unwrap();
     let text = std::str::from_utf8(&bytes).unwrap();
     assert!(text.contains("ordinary bytes retained"));
     for name in NAMES {
@@ -305,5 +306,5 @@ async fn publication_scenario() {
                 if tool_call_id.0 == id && result.output == output
         )));
     }
-    assert_eq!(std::fs::read(journal).unwrap(), bytes);
+    assert_eq!(read_history_bytes(journal).unwrap(), bytes);
 }

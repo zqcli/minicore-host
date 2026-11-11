@@ -2,6 +2,7 @@ use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_resources::HostResourceBuilder;
+use minicore_host_storage::testing::{read_history_bytes, read_history_text};
 use minicore_runtime::HistoryItem;
 use serde_json::{Value, json};
 
@@ -100,7 +101,7 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
         }
     }
     let path = history_file(root.path());
-    let stored_before = std::fs::read(&path).unwrap();
+    let stored_before = read_history_bytes(&path).unwrap();
     let stored: Vec<Value> = std::str::from_utf8(&stored_before)
         .unwrap()
         .lines()
@@ -158,7 +159,7 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
         native_bytes
     );
     assert_eq!(
-        &std::fs::read(&path).unwrap()[..stored_before.len()],
+        &read_history_bytes(&path).unwrap()[..stored_before.len()],
         stored_before.as_slice()
     );
     restarted.finish(answer("restarted answer"));
@@ -419,7 +420,7 @@ async fn stored_partial_is_not_fabricated_into_later_complete_model_context() {
     );
     request.finish(answer("after partial reply"));
     settled(&host, &caller, &target, 2).await;
-    let stored: Vec<Value> = std::fs::read_to_string(history_file(root.path()))
+    let stored: Vec<Value> = read_history_text(history_file(root.path()))
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())

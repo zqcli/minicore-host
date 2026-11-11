@@ -53,11 +53,11 @@ pub async fn stdio(host: Arc<Host>, options: CallOptions) -> (HostClient, PipeSe
     (client, PipeServer { requests, server })
 }
 
-pub struct ReaderLifetime<R> {
-    pub reader: Option<R>,
-    pub dropped: Option<oneshot::Sender<()>>,
+pub struct ReaderLifetime {
+    pub reader: Option<crate::os_pipe::Receiver>,
+    pub dropped: Option<oneshot::Sender<io::Result<()>>>,
 }
-impl<R: AsyncRead + Unpin> AsyncRead for ReaderLifetime<R> {
+impl AsyncRead for ReaderLifetime {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -66,12 +66,12 @@ impl<R: AsyncRead + Unpin> AsyncRead for ReaderLifetime<R> {
         Pin::new(self.reader.as_mut().unwrap()).poll_read(cx, bytes)
     }
 }
-impl<R> Drop for ReaderLifetime<R> {
+impl Drop for ReaderLifetime {
     fn drop(&mut self) {
-        // The signal follows the actual OS endpoint drop, not just task abort.
-        self.reader.take();
+        let result = crate::os_pipe::close_reader(self.reader.take().unwrap());
         if let Some(dropped) = self.dropped.take() {
-            let _ = dropped.send(());
+            // Never turn a failed native close into a successful barrier.
+            let _ = dropped.send(result);
         }
     }
 }

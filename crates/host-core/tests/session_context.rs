@@ -3,6 +3,7 @@
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_storage::*;
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_runtime::{
     AssistantHistory, ExecutionConfig, HistoryItem, LoopId, LoopOptions, Text, UserHistory,
     UserInput, UserMessageKind,
@@ -636,7 +637,7 @@ async fn cold_history_is_unknown_until_explicit_load_and_retained_across_unload(
     let resources = Resources::new(ScriptedModel::new(4096, vec![], None));
     let (host, connection) = persistent(dir.path(), resources.clone()).await;
     let caller = connection.caller();
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = read_history_bytes(&path).unwrap();
     let state = serde_json::to_value(host.session_state(&caller, &target).unwrap()).unwrap();
     let cold = host.session_context(&caller, &target).await.unwrap();
     assert!(cold.data.history.is_none());
@@ -685,7 +686,7 @@ async fn cold_history_is_unknown_until_explicit_load_and_retained_across_unload(
             .unwrap(),
         old_load
     );
-    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(read_history_bytes(path).unwrap(), bytes);
     assert!(
         host.turns(&caller, &target).unwrap().is_empty(),
         "old Turns are not resurrected"
@@ -770,6 +771,9 @@ async fn failed_reload_retains_old_context_but_never_claims_it_is_valid_for_exec
     let caller = connection.caller();
     loaded(&host, &caller, &target).await;
     host.unload(&caller, &target).unwrap();
+    // Unload retains the original journal owner. Replace the filename instead
+    // of opening a second writer through its Windows no-write-sharing lease.
+    std::fs::rename(&path, path.with_extension("original")).unwrap();
     std::fs::write(&path, b"{corrupt replacement").unwrap();
     host.load_session(&caller, &target).unwrap();
     let failed = tokio::time::timeout(Duration::from_secs(5), async {

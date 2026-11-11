@@ -1,4 +1,5 @@
 use super::*;
+use minicore_host_storage::testing::{read_history_bytes, read_history_text};
 
 #[tokio::test]
 async fn resume_confirms_original_zero_or_full_write_without_second_model_or_tool() {
@@ -42,7 +43,8 @@ async fn resume_confirms_original_zero_or_full_write_without_second_model_or_too
             original.fault.is_none(),
             "history failure is not a fabricated model fault"
         );
-        let before = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+        let before =
+            read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
         assert_eq!(backend.appends.load(Ordering::SeqCst), 1);
         fixture
             .session
@@ -50,7 +52,8 @@ async fn resume_confirms_original_zero_or_full_write_without_second_model_or_too
             .unwrap();
         until(&fixture, |state| state.completed.len() == 1).await;
         assert_single_terminal(&fixture, TurnOutcome::Failed, 0);
-        let after = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+        let after =
+            read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
         assert!(after.starts_with(&before));
         assert_eq!(model.calls.load(Ordering::SeqCst), 1);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
@@ -62,7 +65,7 @@ async fn resume_confirms_original_zero_or_full_write_without_second_model_or_too
             .resume(&fixture.connection.caller())
             .unwrap();
         assert_eq!(
-            std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+            read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
             after
         );
     }
@@ -232,10 +235,15 @@ async fn partial_or_changed_original_bytes_remain_blocked_and_unchanged() {
         let original = blocked(&fixture).await;
         let path = fixture.store.canonical_path().join("history.jsonl");
         if change {
-            let bytes = std::fs::read_to_string(&path).unwrap();
-            std::fs::write(&path, bytes.replace("original input", "modified input")).unwrap();
+            let bytes = read_history_text(&path).unwrap();
+            backend
+                .inner
+                .overwrite_owned_history_for_test(
+                    bytes.replace("original input", "modified input").as_bytes(),
+                )
+                .unwrap();
         }
-        let before = std::fs::read(&path).unwrap();
+        let before = read_history_bytes(&path).unwrap();
         for attempt in 1..=2 {
             fixture
                 .session
@@ -246,7 +254,7 @@ async fn partial_or_changed_original_bytes_remain_blocked_and_unchanged() {
                     && backend.reconciles.load(Ordering::SeqCst) == attempt
             })
             .await;
-            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(read_history_bytes(&path).unwrap(), before);
             let state = fixture.session.state.lock().unwrap();
             let active = state.active.as_ref().unwrap();
             assert_eq!(active.info.id, original.id);

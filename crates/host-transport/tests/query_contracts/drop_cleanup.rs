@@ -131,25 +131,28 @@ async fn sdk_drop_cleanup_reply_proves_both_pipe_close_orders() {
             tokio::time::timeout(Duration::from_secs(3), reader_closed)
                 .await
                 .unwrap()
+                .unwrap()
                 .unwrap();
             release.send(()).unwrap();
-            assert_eq!(
-                tokio::time::timeout(Duration::from_secs(3), server)
-                    .await
-                    .unwrap()
-                    .unwrap()
-                    .unwrap_err()
-                    .kind(),
-                io::ErrorKind::BrokenPipe
-            );
+            let error = tokio::time::timeout(Duration::from_secs(3), server)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            crate::os_pipe::assert_reader_closed_error(&error);
             drop(request_lifetime);
             requests.await.unwrap().unwrap();
-            eprintln!("SDK drop cleanup: ended=false, response reader first => BrokenPipe");
+            eprintln!("SDK drop cleanup: ended=false, response reader first => {error}");
         } else {
             drop(request_lifetime);
             PipeServer { requests, server }
                 .close(&client, Some(Duration::from_secs(3)))
                 .await;
+            tokio::time::timeout(Duration::from_secs(3), reader_closed)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
             assert!(release.send(()).is_err(), "EOF must retire the held writer");
             eprintln!("SDK drop cleanup: ended=false, request EOF first => clean server join");
         }

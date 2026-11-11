@@ -1,5 +1,6 @@
 //! Named model, tool and journal fixtures for Session owner scenarios.
 use super::*;
+use minicore_host_storage::testing::read_history_text;
 
 pub(super) struct FixtureModel {
     pub(super) descriptor: ModelDescriptor,
@@ -192,7 +193,7 @@ pub(super) async fn until(fixture: &Fixture, predicate: impl Fn(&SessionState) -
     .unwrap();
 }
 pub(super) fn records(fixture: &Fixture) -> Vec<HistoryRecord> {
-    std::fs::read_to_string(fixture.store.canonical_path().join("history.jsonl"))
+    read_history_text(fixture.store.canonical_path().join("history.jsonl"))
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())

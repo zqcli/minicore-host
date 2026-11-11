@@ -1,6 +1,7 @@
 //! Real Host, Runtime, HTTP provider and append-only Store. Only the loopback
 //! responses and response gates are scripted; file replacement exercises the
 //! production Journal's original-inode check, not a simulated disk failure.
+use minicore_host_storage::testing::read_history_bytes;
 mod diagnostic_support;
 mod os_pipe;
 use diagnostic_support::*;
@@ -367,7 +368,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         .join(session.target().session_id.as_str())
         .join("history.jsonl");
     let original = history.with_extension("original");
-    let bytes = std::fs::read(&history).unwrap();
+    let bytes = read_history_bytes(&history).unwrap();
     std::fs::rename(&history, &original).unwrap();
     std::fs::write(&history, b"").unwrap();
     gate.add_permits(1);
@@ -430,7 +431,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         Receipt::Compact(accepted.clone())
     );
     assert_eq!(http.count(), 3);
-    let after = std::fs::read(&history).unwrap();
+    let after = read_history_bytes(&history).unwrap();
     assert!(after.starts_with(&bytes));
     assert_eq!(
         std::str::from_utf8(&after[bytes.len()..])

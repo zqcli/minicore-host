@@ -1,5 +1,6 @@
 //! Task 024: real Host storage/Runtime and production HTTP/SSE against loopback.
 //! Resource and tool fixtures are explicit; no live provider or TUI is claimed.
+use minicore_host_storage::testing::{read_history_bytes, read_history_text};
 #[path = "../../host-provider/tests/support/mod.rs"]
 #[allow(dead_code)]
 mod support;
@@ -550,7 +551,7 @@ fn send(host: &Host, caller: &CallerContext, target: &SessionRef) {
     .unwrap();
 }
 fn records(path: &Path) -> Vec<HistoryRecord> {
-    std::fs::read_to_string(path)
+    read_history_text(path)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
@@ -597,7 +598,7 @@ async fn persistent_case(missing: bool, complete: bool) {
     );
     entries.extend(partial_entries());
     let (target, file, native) = seed(directory.path(), entries);
-    let before = std::fs::read(&file).unwrap();
+    let before = read_history_bytes(&file).unwrap();
     let before = if missing && !complete {
         // A complete final JSON record needs no repair when its newline is absent.
         let bytes = before.strip_suffix(b"\n").unwrap().to_vec();
@@ -623,7 +624,7 @@ async fn persistent_case(missing: bool, complete: bool) {
         host.history(&caller, &target).unwrap().as_slice(),
         native.as_slice()
     );
-    assert_eq!(sha256(&std::fs::read(&file).unwrap()), before_hash);
+    assert_eq!(sha256(&read_history_bytes(&file).unwrap()), before_hash);
     assert_eq!(server.request_count(), 0);
     assert!(calls.lock().unwrap().is_empty());
     // No output/state/event subscription is opened by this test.
@@ -645,7 +646,7 @@ async fn persistent_case(missing: bool, complete: bool) {
     assert_eq!(turn.persistence, PersistenceState::Persisted);
     let history = host.history(&caller, &target).unwrap();
     assert_eq!(&history[..native.len()], native.as_slice());
-    let after = std::fs::read(&file).unwrap();
+    let after = read_history_bytes(&file).unwrap();
     assert_eq!(&after[..before.len()], before);
     assert_eq!(sha256(&after[..before.len()]), before_hash);
     assert_eq!(
@@ -720,7 +721,7 @@ async fn cancellation_after_old_history_projection_keeps_real_partial_and_origin
     let directory = tempfile::tempdir().unwrap();
     let entries = saved_exchange(LoopId::new().unwrap(), vec![call("old-missing", 0)], &[]);
     let (target, file, native) = seed(directory.path(), entries);
-    let before = std::fs::read(&file).unwrap();
+    let before = read_history_bytes(&file).unwrap();
     let (resources, calls) = resources(&server.endpoint);
     let host = Host::open_persistent(directory.path(), settings(), resources)
         .await
@@ -760,7 +761,7 @@ async fn cancellation_after_old_history_projection_keeps_real_partial_and_origin
         &host.history(&caller, &target).unwrap()[..native.len()],
         native.as_slice()
     );
-    let after = std::fs::read(&file).unwrap();
+    let after = read_history_bytes(&file).unwrap();
     assert_eq!(&after[..before.len()], before);
     assert_eq!(result.partials.len(), 1);
     assert_eq!(
@@ -810,7 +811,7 @@ async fn unsupported_replay_and_signed_reasoning_are_rejected_before_http_not_fl
             );
         }
         let (target, file, native) = seed(directory.path(), entries);
-        let before = std::fs::read(&file).unwrap();
+        let before = read_history_bytes(&file).unwrap();
         let model = descriptor();
         let projected = prepare_prompt_history(prompt_request(&native, &[], &model))
             .await
@@ -856,7 +857,7 @@ async fn unsupported_replay_and_signed_reasoning_are_rejected_before_http_not_fl
             &host.history(&caller, &target).unwrap()[..native.len()],
             native.as_slice()
         );
-        assert_eq!(&std::fs::read(&file).unwrap()[..before.len()], before);
+        assert_eq!(&read_history_bytes(&file).unwrap()[..before.len()], before);
         assert!(calls.lock().unwrap().is_empty());
         assert!(
             server.finish().await.is_empty(),

@@ -122,6 +122,43 @@ mode 0755, example configuration and documentation; `--help` succeeds on stderr
 with empty stdout. `ldd` reports only system libraries, no Runtime shared object.
 This local package is validation evidence, not a published final release.
 
+The third CI source is remote `b24b712ccf1d159d8f53c3b37720c96438595f99`,
+tree `93d44a68e1707302529eea95ddcc7df919eb9f5b`, identical to local `0983119c`.
+Its clean local `scripts/check.sh` passes; the authoritative `--list` contains
+965 Rust cases in 127 targets (the new Windows ACL target has no Linux cases),
+with 4 doctests and 28 Python checks. [Native validation](https://github.com/zqcli/minicore-host/actions/runs/43036690189)
+again passes both Linux gates. Windows Clippy exposes a fixture field used only
+by the Unix alias path; Windows now creates a real directory symlink too.
+Both macOS jobs retain one process-group cancellation failure: the actual child
+is waited and both streams reach EOF, but a transient Darwin group probe returns
+EPERM before the exited group is reaped. The adapter now continues its existing
+bounded observation window, accepting only actual ESRCH as proof of absence.
+A native regression preserves a real unreaped child to reject false completion.
+
+Independent review also identified Windows named-pipe cancellation lifetime:
+dropping a Tokio reader can precede actual IOCP handle release. The test fixture
+now uses a receiving server endpoint and successful native disconnect as its
+close barrier, propagating disconnect failure. It retains genuine OS pipes and
+duplicate handles for both teardown orders.
+
+Static review found historical tests reading or mutating history through a
+second handle while its writer remains live. Windows correctly prevents this.
+Storage's non-default `test-support` feature supplies explicit cross-crate
+fixtures: actual read-only mappings, existing-owner write interruption and
+existing-owner corruption. Only development dependencies enable the feature.
+Production locks, actual accepted/pending state, byte serialization and original
+range reconciliation are preserved; release builds do not enable these fixtures.
+
+The storage/core/resources/transport all-targets Linux test run passed after
+these fixture changes. This local run used `CARGO_INCREMENTAL=0`,
+`CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_TEST_DEBUG=0` and
+`CARGO_BUILD_JOBS=2` after reusable incremental cache exhausted the scratch disk.
+Repository profiles and source files were not removed. The execution environment
+then became unavailable before the latest changes were committed. The subsequent
+checkpoint is reconstructed from the published third source and reviewed edits,
+and must pass its own native CI; the earlier local result is not treated as proof
+of byte-for-byte identity with that reconstructed checkpoint.
+
 Full final gates, independent final review, final source identities, native CI
 results and four-platform artifact verification are pending. A configured
 matrix, cross-check or standalone probe does not establish platform support.

@@ -1,6 +1,7 @@
 //! Actual Session/Runtime and production journal. Async gates and terminal-only
 //! seed records below are explicit deterministic scheduling/storage fixtures.
 use super::*;
+use minicore_host_storage::testing::read_history_bytes;
 use tokio::sync::Semaphore;
 
 fn restored(
@@ -316,7 +317,7 @@ async fn saved_results_keep_public_response_indexes_across_real_internal_loops()
     assert_eq!(raw.partials[0].partial.request_index, 0);
     assert_eq!(live.data.partials[0].response_index, 2);
     let store = fixture.store.as_ref().unwrap();
-    let before = std::fs::read(store.canonical_path().join("history.jsonl")).unwrap();
+    let before = read_history_bytes(store.canonical_path().join("history.jsonl")).unwrap();
     // Create only a new metadata owner and read backend, not an old execution.
     let backend = Arc::new(JournalHistory::new(store.clone()));
     let (session, connection) = restored(&fixture, backend);
@@ -361,7 +362,7 @@ async fn saved_results_keep_public_response_indexes_across_real_internal_loops()
         assert!(fixture.started.try_recv().is_err());
         assert_public(&saved);
         assert_eq!(
-            std::fs::read(store.canonical_path().join("history.jsonl")).unwrap(),
+            read_history_bytes(store.canonical_path().join("history.jsonl")).unwrap(),
             before
         );
     }

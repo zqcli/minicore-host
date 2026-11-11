@@ -2,6 +2,7 @@
 //! No live provider or TUI validation is claimed.
 use super::*;
 use crate::JournalHistory;
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use minicore_runtime::{
     history::SummaryHistory,
@@ -333,7 +334,7 @@ async fn read_winner_serializes_load_without_blocking_other_session() {
             gate: load_gate.clone(),
         })
     });
-    let before = std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap();
+    let before = read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap();
     let read = spawn_read(&fixture, fixture.connection.caller());
     read_gate.reached().await;
     load(&fixture);
@@ -375,7 +376,7 @@ async fn read_winner_serializes_load_without_blocking_other_session() {
     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 0);
     drop(state);
     assert_eq!(
-        std::fs::read(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
+        read_history_bytes(fixture.store.canonical_path().join("history.jsonl")).unwrap(),
         before
     );
 }
@@ -933,7 +934,7 @@ async fn delayed_cold_read_preserves_newer_failed_original_save() {
     });
     let backend = backend.unwrap();
     let path = fixture.store.canonical_path().join("history.jsonl");
-    let bytes = std::fs::read(&path).unwrap();
+    let bytes = read_history_bytes(&path).unwrap();
     let read = spawn_read(&fixture, fixture.connection.caller());
     gate.reached().await;
     load(&fixture);
@@ -976,7 +977,7 @@ async fn delayed_cold_read_preserves_newer_failed_original_save() {
         );
         assert!(state.history_work.is_some());
     }
-    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    assert_eq!(read_history_bytes(&path).unwrap(), bytes);
     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
     // The read did not continue or replace the original append. Only this
     // explicit owner command may reconcile it, without another model call.

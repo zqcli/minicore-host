@@ -14,47 +14,9 @@ use std::{fs, process::Command};
 mod test_support;
 use tempfile::TempDir;
 
-#[cfg(unix)]
-fn read_history_bytes(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
-    fs::read(path)
-}
-
-#[cfg(windows)]
-fn read_history_bytes(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
-    use winsafe::{HFILE, co};
-    // A real read-only view can inspect bytes while LockFileEx protects the
-    // writer's range. This is a test fixture, not the production history-reader
-    // path, and never releases the writer or fabricates bytes from memory state.
-    let path = path
-        .as_ref()
-        .to_str()
-        .ok_or_else(|| std::io::Error::other("non-UTF-8 history fixture path"))?;
-    let error = |e: co::ERROR| std::io::Error::from_raw_os_error(e.raw() as i32);
-    let (file, _) = HFILE::CreateFile(
-        path,
-        co::GENERIC::READ,
-        Some(co::FILE_SHARE::READ | co::FILE_SHARE::WRITE | co::FILE_SHARE::DELETE),
-        None,
-        co::DISPOSITION::OPEN_EXISTING,
-        co::FILE_ATTRIBUTE::NORMAL,
-        None,
-        None,
-        None,
-    )
-    .map_err(error)?;
-    let length = usize::try_from(file.GetFileSizeEx().map_err(error)?)
-        .map_err(|_| std::io::Error::other("history fixture too large to map"))?;
-    if length == 0 {
-        return Ok(Vec::new());
-    }
-    let mapping = file
-        .CreateFileMapping(None, co::PAGE::READONLY, None, None, None)
-        .map_err(error)?;
-    let view = mapping
-        .MapViewOfFile(co::FILE_MAP::READ, 0, None)
-        .map_err(error)?;
-    Ok(view.as_slice(length).to_vec())
-}
+#[path = "../src/testing/read.rs"]
+mod history_fixture;
+use history_fixture::read_history_bytes;
 use test_support::{set_mode, symlink};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

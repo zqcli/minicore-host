@@ -16,6 +16,7 @@ minicore-runtime.workspace = true
 tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [dev-dependencies]
+minicore-host-storage = { workspace = true, features = ["test-support"] }
 serde_json.workspace = true
 tempfile.workspace = true
 

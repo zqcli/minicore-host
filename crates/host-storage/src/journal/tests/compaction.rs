@@ -174,7 +174,7 @@ fn compaction_reconcile_rejects_changed_source_prefix_without_repair() {
     let written = String::from_utf8(read_owned(&journal)).unwrap();
     let changed = written.replace("original", "modified");
     assert_eq!(changed.len(), written.len());
-    corrupt_owned(&journal, changed.as_bytes());
+    corrupt_owned(&mut journal, changed.as_bytes());
     assert!(matches!(
         journal.reconcile_pending(),
         Err(StorageError::UncertainWrite)

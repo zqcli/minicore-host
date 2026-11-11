@@ -2,6 +2,7 @@ use super::{base, support::*};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_resources::HostResourceBuilder;
+use minicore_host_storage::testing::read_history_bytes;
 use minicore_runtime::HistoryItem;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -123,7 +124,7 @@ async fn manual_utility_and_uncovered_inputs_keep_provenance_and_persistent_mark
     let raw_before = host.history(&caller, &target).unwrap();
     let native_bytes = serde_json::to_vec(&raw_before).unwrap();
     let path = history_file(root.path());
-    let stored_before = std::fs::read(&path).unwrap();
+    let stored_before = read_history_bytes(&path).unwrap();
     host.session_compact(
         &caller,
         &target,
@@ -158,7 +159,7 @@ async fn manual_utility_and_uncovered_inputs_keep_provenance_and_persistent_mark
         serde_json::to_vec(&host.history(&caller, &target).unwrap()).unwrap(),
         native_bytes
     );
-    let stored_after = std::fs::read(&path).unwrap();
+    let stored_after = read_history_bytes(&path).unwrap();
     assert_eq!(
         &stored_after[..stored_before.len()],
         stored_before.as_slice()
@@ -208,7 +209,7 @@ async fn manual_utility_and_uncovered_inputs_keep_provenance_and_persistent_mark
     assert!(!normal.body.to_string().contains(&peer_text));
     normal.finish(answer("after compaction reply"));
     settled(&host, &caller, &target, 4).await;
-    let final_prefix = std::fs::read(&path).unwrap();
+    let final_prefix = read_history_bytes(&path).unwrap();
     assert_eq!(&final_prefix[..stored_after.len()], stored_after.as_slice());
     stop(&host).await;
     drop(connection);
@@ -253,7 +254,7 @@ async fn manual_utility_and_uncovered_inputs_keep_provenance_and_persistent_mark
         "after marker reload",
     );
     assert_eq!(
-        &std::fs::read(&path).unwrap()[..final_prefix.len()],
+        &read_history_bytes(&path).unwrap()[..final_prefix.len()],
         final_prefix.as_slice()
     );
     normal.finish(answer("marker reloaded"));

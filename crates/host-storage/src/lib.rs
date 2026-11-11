@@ -23,6 +23,9 @@ mod journal;
 mod objects;
 mod records;
 mod strict_json;
+#[cfg(feature = "test-support")]
+#[doc(hidden)]
+pub mod testing;
 
 pub use compaction::*;
 pub use error::*;

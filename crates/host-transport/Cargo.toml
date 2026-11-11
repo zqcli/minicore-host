@@ -22,6 +22,7 @@ tokio-rustls = { workspace = true, features = ["ring", "tls12"] }
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
 
 [dev-dependencies]
+minicore-host-storage = { workspace = true, features = ["test-support"] }
 minicore-host-resources.workspace = true
 minicore-host-provider.workspace = true
 tempfile.workspace = true

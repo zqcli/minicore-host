@@ -336,7 +336,11 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
         alias
     };
     #[cfg(windows)]
-    let alias = original.path().join(".");
+    let alias = {
+        let alias = app.directory.path().join("workspace-alias");
+        std::os::windows::fs::symlink_dir(original.path(), &alias).unwrap();
+        alias
+    };
     let target = app.create(original.path(), &["edit", "read"]).await;
     let wrong = app.create(other.path(), &["read"]).await;
     app.process

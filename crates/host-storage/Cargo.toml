@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 description = "Owner-scoped durable storage for MiniCore Host"
 
+[features]
+test-support = []
+
 [dependencies]
 minicore-host-protocol = { path = "../host-protocol", version = "=0.9.20" }
 minicore-runtime.workspace = true
