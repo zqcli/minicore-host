@@ -60,4 +60,5 @@ tracing-core = { version = "=0.1.36", default-features = false }
 tracing-subscriber = { version = "=0.3.23", default-features = false }
 winapi-util = "=0.1.11"
 windows-permissions = "=0.2.4"
+windows-sys = { version = "=0.61.2", default-features = false }
 winsafe = { version = "=0.0.29", default-features = false }

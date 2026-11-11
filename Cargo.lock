@@ -870,6 +870,7 @@ dependencies = [
  "tokio-util",
  "winapi-util",
  "windows-permissions",
+ "windows-sys 0.61.2",
  "winsafe",
 ]
 

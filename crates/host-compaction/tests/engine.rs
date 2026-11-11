@@ -526,7 +526,13 @@ async fn summary_update_and_chunking_cover_each_source_once_without_old_quotas()
     )
     .unwrap()
     .unwrap();
-    let candidate = generate(&prepared, &model, context()).await.unwrap();
+    // This case checks full source coverage and the removed summary/step caps,
+    // not throughput. Keep one bounded deadline for all of its utility calls,
+    // with headroom for debug builds on shared CI runners. The timeout-specific
+    // test retains its separate 100 ms deadline.
+    let mut context = context();
+    context.deadline = Instant::now() + Duration::from_secs(60);
+    let candidate = generate(&prepared, &model, context).await.unwrap();
     assert!(candidate.summary.content.byte_len() > 65536);
     assert!(candidate.covered().end > 64);
     let calls = model.requests.lock().unwrap();

@@ -56,7 +56,14 @@ pub(super) fn wrap_scope(command: &mut CommandWrap) {
     #[cfg(unix)]
     command.wrap(process_wrap::tokio::ProcessGroup::leader());
     #[cfg(windows)]
-    command.wrap(process_wrap::tokio::JobObject);
+    {
+        // Keep the root suspended until our own Job completion port is bound
+        // and its monitor is ready. The wrapper preserves explicit suspension.
+        command.wrap(process_wrap::tokio::CreationFlags(
+            windows_sys::Win32::System::Threading::CREATE_SUSPENDED,
+        ));
+        command.wrap(process_wrap::tokio::JobObject);
+    }
 }
 
 pub(super) fn stop_scope(child: &mut Box<dyn ChildWrapper>, pid: u32) -> io::Result<()> {

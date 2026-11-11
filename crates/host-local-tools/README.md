@@ -78,11 +78,17 @@ the process to its job before it begins executing. The real
 process wrapper wait is always joined without dropping it mid-flight, while both
 pipes are drained. On Unix, a separate no-signal group probe must observe ESRCH
 before cleanup is confirmed; scope observation allows ten 20 ms intervals before
-reporting unconfirmed cleanup. On Windows, the uninterrupted wrapper wait must
-query the job and observe `ActiveProcesses == 0`; a completion-port notification
-only wakes that query. The wrapper is pinned to the upstream correction for
-earlier versions that mistook any job notification for completion. A successful kill request,
-direct-child exit, or pipe EOF alone is insufficient. Pipes
+reporting unconfirmed cleanup. On Windows, Host keeps the root suspended while binding a private completion
+port to the wrapper's actual Job and starting its owned monitor. Cleanup requires
+a received `ACTIVE_PROCESS_ZERO` packet for that Job, the monitor's real join,
+and the uninterrupted wrapper wait. A queried `ActiveProcesses == 0` can precede
+actual termination after a Job stop and is not sufficient. Missing notifications,
+native errors or expiry of the existing one-second cleanup observation leave
+cleanup unconfirmed. Monitor shutdown uses a separate control channel and never
+supplies a synthetic completion packet. Startup failure also stops and waits for
+the retained actual root process; thread handles are checked against that root
+before explicit resume. A successful kill request, direct-child exit, or pipe EOF
+alone is insufficient. Pipes
 are read to EOF, or explicitly marked incomplete if an escaped descendant holds
 them after one second of cleanup. Windows output uses owned asynchronous named
 pipe readers, so an incomplete drain cannot leave a detached blocking reader.

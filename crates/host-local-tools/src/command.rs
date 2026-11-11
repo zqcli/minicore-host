@@ -48,10 +48,14 @@ pub(crate) async fn run(
 
 #[cfg(any(unix, windows))]
 mod platform;
+#[cfg(windows)]
+mod windows_job;
 
 #[cfg(any(unix, windows))]
 mod native {
     use super::platform;
+    #[cfg(windows)]
+    use super::windows_job;
     use super::*;
     use crate::{
         CommandFileChanges, CommandResult, CommandStatus, CommandStream, LocalToolSink,
@@ -161,23 +165,35 @@ mod native {
             .current_dir(cwd)
             .stdin(Stdio::null());
         capture.configure(&mut command);
-        // Adapted from minicore-agent's command owner: the wrapper owns the
-        // real scope wait. KillOnDrop is a backstop, never completion evidence.
+        // Adapted from minicore-agent's command owner. KillOnDrop is a
+        // backstop, never completion evidence. Windows also owns the actual
+        // Job completion notification, beyond the wrapper's accounting wait.
         let mut command = CommandWrap::from(command);
         platform::wrap_scope(&mut command);
         command.wrap(KillOnDrop);
-        let mut native_started = false;
-        let mut child = match command.spawn_with(|command| {
-            let child = command.spawn()?;
-            native_started = true;
-            Ok(child)
-        }) {
-            Ok(child) => child,
+        #[cfg(unix)]
+        let mut child = {
+            let mut native_started = false;
+            match command.spawn_with(|command| {
+                let child = command.spawn()?;
+                native_started = true;
+                Ok(child)
+            }) {
+                Ok(child) => child,
+                Err(error) => {
+                    // Attachment can fail after the native child starts.
+                    // Kill-on-drop alone does not confirm joined cleanup.
+                    *cleanup_confirmed = !native_started;
+                    return business_error("process_start", error.to_string());
+                }
+            }
+        };
+        #[cfg(windows)]
+        let (mut child, job_completion) = match windows_job::spawn(&mut command).await {
+            Ok(spawned) => spawned,
             Err(error) => {
-                // Scope attachment can fail after the native child starts.
-                // The wrapper's kill-on-drop is a backstop, not joined cleanup.
-                *cleanup_confirmed = !native_started;
-                return business_error("process_start", error.to_string());
+                *cleanup_confirmed = error.cleanup_confirmed;
+                return business_error("process_start", error.error.to_string());
             }
         };
         *cleanup_confirmed = false;
@@ -263,10 +279,10 @@ mod native {
             }
             #[cfg(windows)]
             {
-                let reaped = child.wait().await;
-                // The pinned wrapper queries the job's actual ActiveProcesses
-                // count; notifications alone do not confirm an empty job.
-                let scope_gone: io::Result<bool> = Ok(reaped.is_ok());
+                let (reaped, scope_gone) = tokio::join!(
+                    child.wait(),
+                    job_completion.finish(cleanup_deadline.into_std()),
+                );
                 (
                     None::<io::Result<std::process::ExitStatus>>,
                     reaped,
@@ -293,7 +309,7 @@ mod native {
                 leader_exit.or_else(|| waited.and_then(Result::ok))
             }
         };
-        // Unix also probes the group; Windows wrapper wait observes the empty job.
+        // Unix also probes the group; Windows joins its actual Job completion monitor.
         // Neither a leader exit nor pipe EOF alone confirms the scope ended.
         let scope_gone = match scope_gone {
             Ok(true) => true,

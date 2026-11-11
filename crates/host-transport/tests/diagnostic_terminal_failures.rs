@@ -23,7 +23,7 @@ fn matches(rows: &[Value], event: &str, turn: &TurnId) -> usize {
         .filter(|row| row["event"] == event && row["turn_id"] == turn.as_str())
         .count()
 }
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[tokio::test(flavor = "current_thread")]
 async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_real_barriers() {
     let directory = tempfile::tempdir().unwrap();
     let log = directory.path().join("diagnostic.jsonl");
@@ -109,6 +109,23 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     assert!(!before.iter().any(|record| {
         record["event"] == "turn.finished" && record["context"]["turn_id"] == turn.as_str()
     }));
+    // On this single-thread executor, the last cleanup publication and the
+    // following driver_running=false publication have no await between them.
+    // These work flags alone would not prove driver settlement across threads.
+    let settled = tokio::time::timeout(WAIT, async {
+        loop {
+            let state = session.state(options()).await.unwrap();
+            let work = &state.data.owned_work;
+            if !state.data.saving && !work.model && !work.preparing && !work.tool_cleanup {
+                break state;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("original execution and save worker must return before explicit repair");
+    assert_eq!(settled.data.active_turn_id.as_ref(), Some(&turn));
+    assert!(settled.data.owned_work.history_save);
     // Restore exactly the original inode and use only the existing explicit
     // same-save continuation. No task is resent and no model is called again.
     std::fs::remove_file(&history).unwrap();

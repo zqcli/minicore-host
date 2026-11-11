@@ -6,12 +6,13 @@
 and distribution matrix against dev `6ea85fda737635e26b9d7cad17c3df1e54911bd9`.
 Runtime is compiled into the Host executable through its existing pinned Cargo
 dependency; Host/Runtime interfaces, version 0.9.20 and SPEC remain unchanged.
-Linux quality/native and Intel macOS pass the seventh candidate. Windows native
-execution exposed a real Job-accounting/process-exit mismatch that remains a
-release blocker; its independent native probe and the corrected file-observation
-fixtures are recorded in Task 105. Final Apple Silicon, Windows standard-user
-and package gates, followed by dev publication, remain pending. Configured
-targets and API probes are not treated as passing Host platform acceptance.
+The eighth candidate passes Linux quality/native and all native Clippy gates.
+Its remaining failures identify Windows Job completion and two test-observation
+or fixture-budget assumptions. The next candidate adds an actual Job completion
+monitor and preserves strict process-handle, history and diagnostic assertions.
+[Task 105](tasks/105-multiplatform-ci/TASK.md) records the fixed sources, independent
+native probes and the pending complete platform, standard-user, package and dev
+publication gates. Configured targets and API probes are not platform acceptance.
 
 ## Current performance checkpoint
 

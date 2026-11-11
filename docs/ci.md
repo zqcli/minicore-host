@@ -99,8 +99,10 @@ write/sync access to every ancestor. See the [storage guide](../crates/host-stor
 for the precise ownership and durability assumptions.
 
 The Bash tool uses `/bin/bash` on Linux/macOS and an installed native Git Bash on
-Windows. Host binds Windows children to a Job Object before they run, and checks
-actual group/job completion during cleanup. Runtime itself is part of the Host
+Windows. Host binds Windows children to a Job Object and readies its completion
+monitor before they run. Cleanup requires that exact Job's completion notification,
+the joined monitor and process wrapper, and completed pipe handling; a zero Job
+accounting count alone is not completion evidence. Runtime itself is part of the Host
 executable; these operating-system and optional local-tool prerequisites remain
 external. Native CI verifies the declared runners, not every OS or filesystem.
 

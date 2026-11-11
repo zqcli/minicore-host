@@ -359,3 +359,82 @@ and staged single-Host archive validation remain mandatory.
 Final native gates, source identities, four-platform artifacts and dev publication
 are pending. A configured matrix, cross-check or standalone probe does not
 establish platform support.
+
+## Eighth native checkpoint and completion barrier
+
+Candidate `c89580739a80ac66a7fee9db8dbd2ed5e70c877a`, tree
+`51777c9c0a9dbc0eabf3d60f60edf405c3699066`, contains only the five recovered
+test files and their records. [Run 43061957432](https://github.com/zqcli/minicore-host/actions/runs/43061957432)
+passes Linux quality/native and strict Clippy on all four platforms. Windows
+has only the retained descendant-handle cleanup failure; the history and
+diagnostic file-observation corrections pass. Apple Silicon exposes a diagnostic
+fixture issuing explicit resume before its original owner finished returning.
+Intel macOS has one large-history coverage fixture exceed its shared five-second
+generation budget; its other native tests pass. Standard-user execution and
+packages remain gated and were not run for this source.
+
+The terminal diagnostic fixture now uses one current-thread executor and waits
+for actual saving/model/preparation/tool-cleanup work to settle after the primary
+error emission. In this fixed path, the final cleanup publication and clearing
+the driver-running flag have no intervening await, so the observer cannot enter
+that synchronous tail. The same work flags alone would not prove this across
+threads. The original Turn and pending history save remain asserted, the original
+inode is restored, and exactly one explicit resume continues that same save.
+No production admission or ownership interface changes.
+
+The large-history coverage test keeps all 80 source entries, its 71,500-byte
+summary, and all coverage/order/tail/usage assertions. Only that non-performance
+fixture receives a 60-second total generation deadline as a bounded hang guard.
+The shared five-second context and dedicated 100-millisecond timeout-cancellation
+test are unchanged; neither production settings nor per-call retry behavior change.
+
+The second [Job exit probe](https://github.com/zqcli/minicore-host/tree/67a9a74fa4fdcef9a2232dac55bb809e70fe3994)
+runs [160 real rounds](https://github.com/zqcli/minicore-host/actions/runs/43062636552).
+All 40 Job-termination rounds again observe empty accounting before the held
+leaf handle is signaled, and none delivers a leaf EXIT packet. In the 120 direct
+termination/natural-exit/abnormal-status controls, the leaf EXIT packet itself is
+observed before that handle is signaled. The abnormal-status mode calls
+TerminateProcess with an exception status; it is not an actual access violation.
+In all 160 rounds, receipt of the real Job ACTIVE_PROCESS_ZERO packet finds that
+same held leaf handle signaled. Missing packets are recorded, never synthesized.
+
+A [nested-Job probe](https://github.com/zqcli/minicore-host/tree/eb1ec81248c42df90c7d51a40cfb9a9025ef710e)
+passes [20 native rounds](https://github.com/zqcli/minicore-host/actions/runs/43065942224),
+covering child natural/forced exit with and without its own completion port.
+While the real parent root remains gated and its Job remains active, the parent
+port receives no ZERO; the child's own ZERO retains its child's key. After the
+root is released, all parent ZERO packets have the parent's key and both held
+process handles are signaled. The first nested fixture omitted SET_QUOTA from
+its opened process rights and is not counted as evidence; the corrected source
+requests the documented assignment rights. These probes support the documented
+completion pattern on this runner, not a guarantee that every packet is delivered.
+
+The private Windows adapter now keeps the root explicitly suspended, validates
+its exact Job membership, associates a private completion port and starts an
+owned monitor before resuming verified native thread handles. The monitor only
+confirms a received ACTIVE_PROCESS_ZERO packet with the exact Job key and null
+payload. Missing notifications, native errors and the existing one-second cleanup
+observation deadline remain unconfirmed; a separate control channel ends the
+monitor without posting fake completion. The monitor is actually joined, while
+the existing uninterrupted process-wrapper wait and both pipe drains remain
+independent requirements. Startup failure uses the retained real root handle
+for stop and wait, including failure after native creation.
+
+The new native regressions cover a still-suspended root at monitor readiness,
+actual completion-port detachment without substituting the wrapper's zero
+accounting result, and real root reclamation after deliberately missing Job
+attachment. The existing same-handle descendant exit assertions are unchanged.
+All Win32 unsafe calls are confined to one private Windows module with explicit
+handle/pointer safety explanations; this crate otherwise denies unsafe code,
+and other crates' policies are unchanged. The exact already-locked windows-sys
+0.61.2 gains a direct Windows-only edge; no package version or Runtime pin changes.
+
+Root and independent review cover the terminal fixture and fixed Windows adapter,
+including a final startup-recovery correction: if TerminateProcess returns an
+error after an earlier Job stop, the same held root is actually waited for within
+the existing one-second observation window. Only a real signal confirms exit;
+timeout or wait failure retains the original stop error. Root review also confirms
+the large-history fixture-only budget change. These sources have not been run in
+the unavailable local executor. Their integrated formatting, compilation, native
+contracts, ordinary-user checks and package gates remain pending before platform
+acceptance or dev publication.
