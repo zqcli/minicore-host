@@ -464,6 +464,10 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
         std::fs::read_to_string(b.path().join("file")).unwrap(),
         "new bound workspace"
     );
+    let workspace_context = format!(
+        "Workspace directory: {}",
+        std::fs::canonicalize(a.path()).unwrap().display()
+    );
     for request in [&first_request, &second_request, &final_request] {
         assert_eq!(request["model"], "provider-A");
         assert_eq!(request["tools"].as_array().unwrap().len(), 2);
@@ -479,9 +483,7 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
                 .any(|message| message["content"] == "ROLE A")
         );
         assert!(messages.iter().any(|message| {
-            message["content"]
-                .as_str()
-                .is_some_and(|text| text.contains(a.path().to_str().unwrap()))
+            message["role"] == "system" && message["content"] == workspace_context
         }));
     }
     let history = host.history(&caller, &target).unwrap();

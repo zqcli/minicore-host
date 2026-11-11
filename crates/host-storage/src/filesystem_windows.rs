@@ -1,7 +1,8 @@
 //! Windows storage uses NTFS handles with real directory flushes. Directory
 //! handles deny delete sharing, so a checked component cannot be replaced while
-//! a descendant operation still owns it. The root additionally denies write
-//! sharing, making its handle the exclusive root lease without a lock sidecar.
+//! a descendant operation still owns it. The root requests delete access while
+//! denying delete sharing, making its handle the exclusive root lease without
+//! blocking the write access used by an atomic rename into that directory.
 
 use crate::{StorageError, error::io_error, file_handle::FileHandle};
 use metadata::MetadataGates;
@@ -24,6 +25,9 @@ const REPARSE_POINT: u32 = 0x0000_0400;
 const SHARE_READ: u32 = 1;
 const SHARE_WRITE: u32 = 2;
 const SHARE_DELETE: u32 = 4;
+const GENERIC_READ: u32 = 0x8000_0000;
+const GENERIC_WRITE: u32 = 0x4000_0000;
+const DELETE_ACCESS: u32 = 0x0001_0000;
 
 #[derive(Clone)]
 pub(crate) struct Directory {
@@ -56,19 +60,43 @@ impl Directory {
         })?;
         let profile_path = fs::canonicalize(profile_path)
             .map_err(|e| io_error("resolve current user profile", path, e))?;
-        let profile = open_directory(&profile_path, false, false)
-            .map_err(|e| io_error("pin current user profile", &profile_path, e))?;
+        // If the existing Profile itself is the requested root, its initial
+        // pin must already be the root lease. A separate no-delete pin would
+        // prevent that lease's DELETE access; releasing it first would leave
+        // an unguarded namespace window.
+        let profile_is_root = match fs::canonicalize(path) {
+            Ok(existing) => existing == profile_path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(io_error("resolve existing data root", path, error)),
+        };
+        let profile =
+            open_directory(&profile_path, profile_is_root, profile_is_root).map_err(|e| {
+                if profile_is_root && matches!(e.raw_os_error(), Some(32 | 33)) {
+                    StorageError::RootInUse
+                } else {
+                    io_error("pin current user profile", &profile_path, e)
+                }
+            })?;
         check_directory(&profile)?;
         fs::create_dir_all(path).map_err(|e| io_error("create data root", path, e))?;
         let canonical =
             fs::canonicalize(path).map_err(|e| io_error("resolve data root", path, e))?;
-        let file = open_directory(&canonical, true, true).map_err(|e| {
-            if matches!(e.raw_os_error(), Some(32 | 33)) {
-                StorageError::RootInUse
-            } else {
-                io_error("open and lease data root", &canonical, e)
-            }
-        })?;
+        if profile_is_root != (canonical == profile_path) {
+            return Err(StorageError::UncertainWrite);
+        }
+        let file = if profile_is_root {
+            profile
+                .try_clone()
+                .map_err(|e| io_error("retain profile root lease", &canonical, e))?
+        } else {
+            open_directory(&canonical, true, true).map_err(|e| {
+                if matches!(e.raw_os_error(), Some(32 | 33)) {
+                    StorageError::RootInUse
+                } else {
+                    io_error("open and lease data root", &canonical, e)
+                }
+            })?
+        };
         check_directory(&file)?;
         check_ntfs(&canonical, &file)?;
         let under_profile = canonical.starts_with(&profile_path);
@@ -296,7 +324,14 @@ impl Directory {
         if let Some(parent) = &self.parent {
             parent.verify_attached()?;
         }
-        let current = open_directory(&self.path, false, false)
+        // This short-lived reopen only compares identity. The retained root,
+        // child and ancestor guards still deny delete sharing. Sharing DELETE
+        // here is required to coexist with the root lease's DELETE access.
+        let current = OpenOptions::new()
+            .read(true)
+            .share_mode(SHARE_READ | SHARE_WRITE | SHARE_DELETE)
+            .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
+            .open(&self.path)
             .map_err(|e| io_error("verify directory identity", &self.path, e))?;
         check_directory(&current)?;
         if identity(&self.file)? != identity(&current)? {
@@ -322,16 +357,20 @@ impl Directory {
 }
 
 fn open_directory(path: &Path, write: bool, exclusive: bool) -> std::io::Result<File> {
-    OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .read(true)
         .write(write)
-        .share_mode(if exclusive {
-            SHARE_READ
-        } else {
-            SHARE_READ | SHARE_WRITE
-        })
-        .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
-        .open(path)
+        .share_mode(SHARE_READ | SHARE_WRITE)
+        .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT);
+    if exclusive {
+        // Denying WRITE would also reject the destination-directory open made
+        // internally by an absolute-path rename. A second root owner requests
+        // DELETE too, which this retained handle refuses to share. Ordinary
+        // metadata publication can still acquire FILE_ADD_FILE on the parent.
+        options.access_mode(GENERIC_READ | GENERIC_WRITE | DELETE_ACCESS);
+    }
+    options.open(path)
 }
 
 fn component(name: &str) -> Result<(), StorageError> {

@@ -2,7 +2,7 @@
 use crate::{
     ChangeKind, ChangeOrigin, ChangeRecord, ChangeRef, ChangeScope, ChangesCursor,
     ChangesListRequest, ChangesListResult, EditOutcome, FileSnapshot, Result, WorkspaceError,
-    workspace::{normalize, path_text},
+    workspace::{normalize, relative_path_text},
 };
 use minicore_host_protocol::{SessionId, ToolCallRef};
 use serde::{Deserialize, Serialize};
@@ -68,7 +68,7 @@ impl EditJournal {
     /// A failed capture is `Unknown`, not `Missing`; a successful Git command
     /// alone is never evidence of a tool edit.
     pub fn append(&mut self, mut record: EditRecord) -> Result<ChangeRef> {
-        record.path = path_text(&normalize(&record.path, false)?)?.to_owned();
+        record.path = relative_path_text(&normalize(&record.path, false)?)?;
         let reference = ChangeRef::Tool {
             session_id: self.session_id.clone(),
             index: self.records.len(),

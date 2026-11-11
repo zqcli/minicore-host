@@ -28,6 +28,19 @@ use std::{
 };
 use tokio::sync::{Semaphore, oneshot};
 
+#[test]
+fn owned_process_fixture_child() {
+    let Some(path) = std::env::var_os("MINICORE_TASK033_PROCESS_PATH") else {
+        return;
+    };
+    let mut token = String::new();
+    std::io::stdin().read_line(&mut token).unwrap();
+    let token = token
+        .strip_suffix('\n')
+        .expect("actual worker release token");
+    std::fs::write(path, token).unwrap();
+}
+
 struct Round {
     tool: bool,
     call_id: &'static str,
@@ -190,13 +203,9 @@ impl Tool for ProcessBundle {
                 path
             };
             // The tiny process cannot finish until its real worker writes stdin.
-            let mut child = Command::new("/bin/sh")
-                .args([
-                    "-c",
-                    "read token; printf '%s' \"$token\" > \"$1\"",
-                    "fixture",
-                ])
-                .arg(&path)
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "owned_process_fixture_child", "--nocapture"])
+                .env("MINICORE_TASK033_PROCESS_PATH", &path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())

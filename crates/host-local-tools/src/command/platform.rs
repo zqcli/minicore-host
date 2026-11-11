@@ -62,12 +62,8 @@ pub(super) fn wrap_scope(command: &mut CommandWrap) {
 pub(super) fn stop_scope(child: &mut Box<dyn ChildWrapper>, pid: u32) -> io::Result<()> {
     #[cfg(unix)]
     {
-        use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
         let _ = child;
-        match nix::sys::signal::killpg(Pid::from_raw(pid as i32), Signal::SIGKILL) {
-            Ok(()) | Err(Errno::ESRCH) => Ok(()),
-            Err(error) => Err(io::Error::from_raw_os_error(error as i32)),
-        }
+        stop_group(pid)
     }
     #[cfg(windows)]
     {
@@ -76,32 +72,37 @@ pub(super) fn stop_scope(child: &mut Box<dyn ChildWrapper>, pid: u32) -> io::Res
     }
 }
 
-pub(super) async fn confirmed_scope_gone(pid: u32, wrapper_waited: bool) -> io::Result<bool> {
-    #[cfg(unix)]
-    {
-        let _ = wrapper_waited;
-        for _ in 0..10 {
-            match probe_group(pid) {
-                Ok(true) => return Ok(true),
-                Ok(false) => {}
-                // Darwin's killpg excludes zombie members, but the group can
-                // still exist until they are reaped. That interval yields
-                // EPERM. Keep observing; only a later ESRCH proves absence.
-                #[cfg(target_os = "macos")]
-                Err(error) if error.raw_os_error() == Some(nix::errno::Errno::EPERM as i32) => {}
-                Err(error) => return Err(error),
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+#[cfg(unix)]
+fn stop_group(pid: u32) -> io::Result<()> {
+    use nix::{errno::Errno, sys::signal::Signal, unistd::Pid};
+    match nix::sys::signal::killpg(Pid::from_raw(pid as i32), Signal::SIGKILL) {
+        Ok(()) | Err(Errno::ESRCH) => Ok(()),
+        Err(error) => Err(io::Error::from_raw_os_error(error as i32)),
+    }
+}
+
+#[cfg(unix)]
+pub(super) async fn finish_scope(pid: u32) -> io::Result<bool> {
+    for _ in 0..10 {
+        let observation = match probe_group(pid) {
+            Ok(true) => return Ok(true),
+            // The leader has been reaped. Stop members that a fork may have
+            // added after the first group signal's member snapshot.
+            Ok(false) => stop_group(pid),
+            Err(error) => Err(error),
+        };
+        match observation {
+            Ok(()) => {}
+            // Darwin filters zombies when signalling a still-existing group.
+            // EPERM remains unconfirmed until an actual later ESRCH; a lasting
+            // permission failure is returned by the final probe below.
+            #[cfg(target_os = "macos")]
+            Err(error) if error.raw_os_error() == Some(nix::errno::Errno::EPERM as i32) => {}
+            Err(error) => return Err(error),
         }
-        probe_group(pid)
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    #[cfg(windows)]
-    {
-        let _ = pid;
-        // The pinned wrapper queries the job's actual ActiveProcesses count;
-        // notifications only wake that query and do not prove completion.
-        Ok(wrapper_waited)
-    }
+    probe_group(pid)
 }
 
 #[cfg(unix)]
@@ -213,9 +214,78 @@ fn capture_pipe(stream: &str) -> io::Result<PipeEnds> {
     })
 }
 
+#[cfg(all(test, unix))]
+mod scope_tests {
+    use super::{finish_scope, probe_group, stop_group};
+    use nix::{errno::Errno, sys::signal::kill, unistd::Pid};
+    use std::{process::Stdio, time::Duration};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+    struct GroupBackstop(u32);
+
+    impl Drop for GroupBackstop {
+        fn drop(&mut self) {
+            let _ = stop_group(self.0);
+        }
+    }
+
+    #[tokio::test]
+    async fn final_scope_cleanup_stops_live_members_after_the_leader_was_reaped() {
+        // A real exited leader leaves a live member holding both pipes. This
+        // exercises the final cleanup condition, without claiming to control
+        // the kernel's timing when an initial group signal races with fork.
+        let mut child = tokio::process::Command::new("/bin/bash")
+            .args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                "sleep 30 & printf '%s\\n' \"$!\"",
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let pid = child.id().unwrap();
+        let _backstop = GroupBackstop(pid);
+        let mut stdout = BufReader::new(child.stdout.take().unwrap());
+        let mut stderr = child.stderr.take().unwrap();
+        let mut line = String::new();
+        tokio::time::timeout(Duration::from_secs(5), stdout.read_line(&mut line))
+            .await
+            .expect("background member did not publish its actual PID")
+            .unwrap();
+        let member = Pid::from_raw(line.trim().parse().unwrap());
+        let leader = tokio::time::timeout(Duration::from_secs(5), child.wait())
+            .await
+            .expect("leader did not exit")
+            .unwrap();
+        assert!(leader.success());
+        assert_eq!(kill(member, None), Ok(()));
+        assert!(!probe_group(pid).unwrap());
+
+        let drain = async {
+            let mut out = Vec::new();
+            let mut err = Vec::new();
+            tokio::try_join!(stdout.read_to_end(&mut out), stderr.read_to_end(&mut err)).unwrap();
+            assert!(out.is_empty() && err.is_empty());
+        };
+        let (confirmed, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(finish_scope(pid), drain)
+        })
+        .await
+        .expect("final cleanup did not close the actual member's pipes");
+        assert!(confirmed.unwrap());
+        assert_eq!(kill(member, None), Err(Errno::ESRCH));
+        assert!(probe_group(pid).unwrap());
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{confirmed_scope_gone, probe_group};
+    use super::{finish_scope, probe_group};
     use nix::errno::Errno;
     use std::{
         os::unix::process::CommandExt,
@@ -259,10 +329,10 @@ mod tests {
         .await
         .expect("the real child did not reach Darwin's unreaped group state");
 
-        let error = confirmed_scope_gone(pid, true).await.unwrap_err();
+        let error = finish_scope(pid).await.unwrap_err();
         assert_eq!(error.raw_os_error(), Some(Errno::EPERM as i32));
 
-        let confirmation = confirmed_scope_gone(pid, true);
+        let confirmation = finish_scope(pid);
         tokio::pin!(confirmation);
         assert!(
             tokio::time::timeout(Duration::from_millis(40), &mut confirmation)

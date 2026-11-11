@@ -117,12 +117,25 @@ fn actual_file_permissions_and_links_are_checked_on_the_handle() {
 fn published_replacement_and_directory_flush_preserve_exact_identity() {
     let temp = tempfile::tempdir().unwrap();
     let root = Directory::root(&temp.path().join("host")).unwrap();
+    assert!(matches!(
+        Directory::root(&root.path),
+        Err(StorageError::RootInUse)
+    ));
     root.atomic_write("object.json", b"first").unwrap();
     let first = root.open_file("object.json", false, false).unwrap();
     root.atomic_write("object.json", b"second").unwrap();
+    assert!(matches!(
+        Directory::root(&root.path),
+        Err(StorageError::RootInUse)
+    ));
     assert!(matches!(
         root.verify_file_identity("object.json", &first),
         Err(StorageError::UncertainWrite)
     ));
     assert_eq!(root.read_metadata("object.json").unwrap(), b"second");
+    root.verify_attached().unwrap();
+    let path = root.path.clone();
+    drop(root);
+    let reopened = Directory::root(&path).unwrap();
+    assert_eq!(reopened.read_metadata("object.json").unwrap(), b"second");
 }

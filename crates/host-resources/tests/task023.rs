@@ -409,6 +409,10 @@ async fn old_turn_resources_after_reload(canonical: bool) {
     let second = server_a.request().await;
     settled(&host, &caller, &target, 1).await;
     assert_eq!(calls.load(Ordering::Acquire), 1);
+    let workspace_context = format!(
+        "Workspace directory: {}",
+        std::fs::canonicalize(directory.path()).unwrap().display()
+    );
     for body in [&first, &second] {
         assert_eq!(body["model"], "provider-A");
         assert_eq!(body["tools"].as_array().unwrap().len(), 1);
@@ -425,11 +429,11 @@ async fn old_turn_resources_after_reload(canonical: bool) {
             messages.iter().filter(|m| m["content"] == "ROLE A").count(),
             1
         );
-        assert!(messages.iter().any(|m| {
-            m["content"]
-                .as_str()
-                .is_some_and(|s| s.contains(directory.path().to_str().unwrap()))
-        }));
+        assert!(
+            messages
+                .iter()
+                .any(|m| { m["role"] == "system" && m["content"] == workspace_context })
+        );
     }
     assert!(
         second["messages"]

@@ -4,6 +4,11 @@ The [CI workflow](../.github/workflows/ci.yml) runs for branch pushes, `v*` tag
 pushes, pull requests and manual dispatch. It uses the repository's pinned
 Rust 1.90.0 toolchain and committed Cargo.lock throughout.
 
+CI disables incremental compilation and debug symbols for dev/test profiles to
+control disk and linker usage across all test targets on clean runners. It keeps
+their normal optimization level, debug assertions and overflow checks, and does
+not change the release profile or the repository's local build defaults.
+
 ## Required gates
 
 The Linux quality job runs the complete `scripts/check.sh`: historical and
@@ -56,7 +61,8 @@ Runtime process. Host/Runtime request and ownership interfaces are unchanged.
 ## Packages
 
 The packaging helper obtains Host's actual workspace version through Cargo
-metadata and executes the native release binary's `--help`. This must exit
+metadata and executes the copied native release binary's `--help` from the
+staged package directory. This must exit
 successfully, leave stdout empty and write usage to stderr, preserving stdout
 for protocol frames.
 

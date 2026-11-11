@@ -464,6 +464,27 @@ async fn windows_scope_peers(
 }
 
 #[cfg(windows)]
+fn windows_live_process_handles(
+    peers: &[(String, tokio::io::BufReader<tokio::net::TcpStream>)],
+) -> Vec<winsafe::guard::CloseHandleGuard<winsafe::HPROCESS>> {
+    peers
+        .iter()
+        .map(|(identity, _)| {
+            let pid = identity.split_whitespace().nth(1).unwrap().parse().unwrap();
+            let process =
+                winsafe::HPROCESS::OpenProcess(winsafe::co::PROCESS::SYNCHRONIZE, false, pid)
+                    .unwrap();
+            assert_eq!(
+                process.WaitForSingleObject(Some(0)).unwrap(),
+                winsafe::co::WAIT::TIMEOUT,
+                "native probe was already terminated: {identity}"
+            );
+            process
+        })
+        .collect()
+}
+
+#[cfg(windows)]
 #[tokio::test]
 async fn windows_job_wait_does_not_confuse_a_leader_exit_with_an_empty_job() {
     use process_wrap::tokio::{CommandWrap, JobObject, KillOnDrop};
@@ -486,6 +507,7 @@ async fn windows_job_wait_does_not_confuse_a_leader_exit_with_an_empty_job() {
     command.wrap(JobObject).wrap(KillOnDrop);
     let mut child = command.spawn().unwrap();
     let mut peers = windows_scope_peers(&listener).await;
+    let processes = windows_live_process_handles(&peers);
     peers
         .iter_mut()
         .find(|(id, _)| id.starts_with("root "))
@@ -526,7 +548,12 @@ async fn windows_job_wait_does_not_confuse_a_leader_exit_with_an_empty_job() {
             .unwrap(),
     };
     assert!(exit.success());
-    for (_, mut socket) in peers {
+    for ((identity, mut socket), process) in peers.into_iter().zip(processes) {
+        assert_eq!(
+            process.WaitForSingleObject(Some(0)).unwrap(),
+            winsafe::co::WAIT::OBJECT_0,
+            "job wait returned before the actual process ended: {identity}"
+        );
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(2), socket.read(&mut [0]))
                 .await
@@ -571,6 +598,7 @@ async fn windows_job_ends_native_descendants(cancel: bool) {
         .await
     });
     let mut peers = windows_scope_peers(&listener).await;
+    let processes = windows_live_process_handles(&peers);
     if cancel {
         cancellation.cancel();
     } else {
@@ -595,13 +623,26 @@ async fn windows_job_ends_native_descendants(cancel: bool) {
     assert!(command.process_waited && command.cleanup_confirmed);
     assert!(command.stdout.complete && command.stderr.complete);
     assert_eq!(command.signal, None);
-    for (identity, mut socket) in peers {
+    for ((identity, mut socket), process) in peers.into_iter().zip(processes) {
+        assert_eq!(
+            process.WaitForSingleObject(Some(0)).unwrap(),
+            winsafe::co::WAIT::OBJECT_0,
+            "confirmed cleanup left the actual process alive: {identity}"
+        );
         let mut byte = [0];
         let ended = tokio::time::timeout(Duration::from_secs(2), socket.read(&mut byte))
             .await
-            .unwrap()
             .unwrap();
-        assert_eq!(ended, 0, "confirmed cleanup left {identity} alive");
+        // TerminateJobObject can close Winsock connections with WSAECONNRESET
+        // instead of FIN. The held process handle above, not this socket state,
+        // is the independent evidence that the actual native process ended.
+        match ended {
+            Ok(0) => {}
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ConnectionReset
+                    && error.raw_os_error() == Some(10054) => {}
+            result => panic!("unexpected terminated probe connection for {identity}: {result:?}"),
+        }
     }
 }
 

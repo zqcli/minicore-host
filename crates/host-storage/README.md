@@ -27,8 +27,13 @@ second handle opened independently, including in the same process, is rejected.
 Child storage handles and Directory clones retain the same root guard. The
 Unix final owner explicitly unlocks before closing its descriptor, including
 initialization failures, so an unrelated forked child's inherited descriptor
-cannot prolong the lease. Windows opens the root without write or delete sharing;
-the owned, non-inheritable handle supplies the lease. A caller's departure or save confirmation does not
+cannot prolong the lease. Windows requests read, write and delete access on the
+root, but shares only read and write access. A second root owner cannot obtain
+the required delete access, and the directory cannot be renamed while owned.
+Allowing write sharing lets atomic child-file publication obtain the destination
+directory access required by Windows. Temporary identity checks share delete
+access; they do not replace the retained no-delete guards. The owned,
+non-inheritable handle supplies the lease. A caller's departure or save confirmation does not
 release live owner handles. Dropping the final handle is permitted only after
 the owner has joined all execution and necessary save work. Abnormal exit
 relies on the OS closing all copies of the locked description; leftover marker
@@ -57,7 +62,9 @@ content is written; existing ACLs are never silently changed.
 Windows treats the OS-established current-user Profile as an existing external
 namespace boundary. The known-folder API resolves it, and acquisition pins its
 already-existing directory before creating the data root. Environment variables
-do not establish this boundary. For roots under the Profile, every acquisition
+do not establish this boundary. If the Profile itself is the configured root,
+that initial pin acquires the root lease and is retained throughout acquisition.
+For roots under the Profile, every acquisition
 really synchronizes the Profile and each directory below it, including visible
 ancestors from an earlier failed creation. The existing namespace above the
 Profile is retained with read-only no-delete handles; it is an OS-managed

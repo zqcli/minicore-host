@@ -229,8 +229,10 @@ mod native {
             errors.push(format!("direct-child stop failed: {error}"));
             handling_failed = true;
         }
-        // Perform one full wrapper wait, never drop it partway through. Its
-        // direct-child wait and scope wait run alongside both drains.
+        // Perform one full wrapper wait, never drop it partway through. On Unix,
+        // first reap the leader, then stop any members forked after the initial
+        // group signal. The wrapper can reap adopted descendants while that
+        // final scope cleanup and both drains run concurrently.
         // No reader task is detached. An escaped descendant can hold a pipe;
         // that bounded observation ends incomplete, not with a fabricated EOF.
         let cleanup_deadline = tokio::time::Instant::now() + Duration::from_secs(1);
@@ -252,19 +254,48 @@ mod native {
                 }
             }
         };
-        let (reaped, ()) = tokio::join!(child.wait(), drains);
+        let wait_scope = async {
+            #[cfg(unix)]
+            {
+                let leader_waited = Some(child.inner_mut().wait().await);
+                let (reaped, scope_gone) = tokio::join!(child.wait(), platform::finish_scope(pid));
+                (leader_waited, reaped, scope_gone)
+            }
+            #[cfg(windows)]
+            {
+                let reaped = child.wait().await;
+                // The pinned wrapper queries the job's actual ActiveProcesses
+                // count; notifications alone do not confirm an empty job.
+                let scope_gone: io::Result<bool> = Ok(reaped.is_ok());
+                (
+                    None::<io::Result<std::process::ExitStatus>>,
+                    reaped,
+                    scope_gone,
+                )
+            }
+        };
+        let ((leader_waited, reaped, scope_gone), ()) = tokio::join!(wait_scope, drains);
+        let leader_exit = match leader_waited {
+            Some(Ok(exit)) => Some(exit),
+            Some(Err(error)) => {
+                errors.push(format!("direct-child wait failed: {error}"));
+                handling_failed = true;
+                None
+            }
+            None => None,
+        };
         let wrapper_waited = reaped.is_ok();
         let exit = match reaped {
             Ok(exit) => Some(exit),
             Err(error) => {
                 errors.push(format!("process-scope wait failed: {error}"));
                 handling_failed = true;
-                waited.and_then(Result::ok)
+                leader_exit.or_else(|| waited.and_then(Result::ok))
             }
         };
         // Unix also probes the group; Windows wrapper wait observes the empty job.
         // Neither a leader exit nor pipe EOF alone confirms the scope ended.
-        let scope_gone = match platform::confirmed_scope_gone(pid, wrapper_waited).await {
+        let scope_gone = match scope_gone {
             Ok(true) => true,
             Ok(false) => {
                 errors.push("process scope still exists after cleanup observation".to_owned());

@@ -202,6 +202,95 @@ default-metadata atomic replacement fails at the original business boundary.
 The accepted-work, dropped-waiter, receipt and diagnostic assertions are unchanged;
 no production dependency or implementation changed in this correction.
 
+The sixth candidate is `02b737ebe977d197caba6c00fd10bf4493ee9e2d`,
+tree `a225cdc751101afe9a46c9266b9c55d3d1f092d8`.
+[Its native run](https://github.com/zqcli/minicore-host/actions/runs/43044786811)
+passes the Linux quality and native gates and Apple Silicon macOS. Authoritative
+native listings contain 965 Linux and 958 Apple Silicon cases in 127 targets
+each. Windows passes strict Clippy and proceeds to native tests. Intel macOS
+exposes an actual cancellation race: the leader is waited, but its process group
+still exists and both output pipes remain incomplete. The Turn correctly stays
+in Finalizing with a cleanup fault. This is distinct from the already-covered
+Darwin zombie/EPERM observation; no timeout increase or false cleanup confirmation
+is accepted as its fix.
+
+The Intel test-profile build in that run takes 16 minutes 52 seconds. Along with
+the earlier exhausted local incremental cache, this motivates CI-only
+`CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_DEBUG=0` and
+`CARGO_PROFILE_TEST_DEBUG=0`. These reduce unused incremental/debug artifacts on
+clean runners without changing optimization levels, debug assertions, overflow
+checks, release profiles or local Cargo defaults. Their next native run remains
+required; no measured CI speedup is claimed in advance.
+
+The final packaging smoke executes the copied binary from the staged package
+directory before archiving, then verifies the archive's bytes against the
+original release binary. Independent review found no blocker in that change or
+the CI-only profile settings. Python syntax, workflow parsing and whitespace
+checks pass for those edits.
+
+## Follow-up to the sixth native run
+
+The Windows job passed strict Clippy, then exposed an actual root-lease sharing
+conflict: initial `host.json` publication failed with OS error 32 because the
+retained root handle denied the destination-directory write open used by an
+absolute-path rename. The root now requests READ, WRITE and DELETE access while
+sharing READ and WRITE only. The unshared DELETE request still excludes a second
+root owner and pins the directory; ordinary metadata publication can obtain its
+required parent write access. Identity-only reopens share DELETE and retain the
+original guard. When the existing Profile itself is the root, the first Profile
+open acquires this lease and its handle is cloned without a release/reopen gap.
+The native regression keeps one root lease across initial publication,
+replacement, identity checks and rejection of a competing root, then verifies
+reacquisition after the owner is dropped. Real history locks and directory
+synchronization are unchanged.
+
+The Intel cancellation fix waits for the real leader, then concurrently drains
+both streams, waits for the wrapper and confirms the process scope. During the
+existing bounded observation window, a still-live Unix group receives another
+SIGKILL; only actual ESRCH confirms its absence. The real leader's successful
+exit status is retained even if the wrapper wait fails. A regression creates a
+real surviving descendant after the leader has exited, then requires group
+absence and EOF on both pipes. It does not claim deterministic reproduction of
+the inferred kernel fork/signal snapshot race. The original completion criteria
+and deadlines remain intact.
+
+Windows process tests retain actual native process handles before cancellation
+and require those same handles to be signaled when Job cleanup returns. Forced
+Winsock teardown may produce exact WSAECONNRESET 10054 instead of EOF, but that
+socket observation is not the evidence of process termination. The normal-exit
+case still requires EOF. The Task 033 subprocess fixture now executes its own
+test binary through a real stdin release gate on every platform. Resource prompt
+fixtures compare complete prompts against actual canonical workspace paths.
+EditJournal now uses the existing slash-separated relative-path formatter; the
+original `nested/file` assertion is preserved and journal roundtrip coverage is
+extended to a nested path.
+
+The Windows job also exposed IPv6-to-IPv4 fallback against IPv4-only WSS fixture
+listeners. A timed-out client could leave the fixture waiting forever in accept;
+the job reached its 40-minute deadline before the standard-user step ran.
+Fixtures now connect to the actual IPv4 listener address with a matching IP SAN,
+retain certificate verification and original request budgets, and join both
+fixture sides with cancellation and an explicit fixture-lifetime bound.
+The diagnostic cleanup test observes real subscriber emissions and drains the
+real writer before reading its log, preserving its live file lock. Independent
+review additionally requires observing the final cleanup-blocked scheduling
+event before shutdown, because publication of cleanup state or the preceding
+error event alone does not prove that this trailing event has been emitted.
+The forwarding subscriber's tracing-core dependency is test-only, uses the
+already locked exact version with explicit std support, and adds no new package.
+
+The latest local Linux regression groups pass: local-tools library/process
+15 cases, owner-bound local tools 6 cases, and Task 033/resources 42 cases.
+The transport group passes 19 cases; after the final trailing-emission correction,
+that diagnostic case and all 5 edit-journal cases pass with `--locked` as well.
+Workspace-wide strict all-targets Clippy, rustfmt, helper syntax and whitespace
+checks pass. SPEC's full hash remains identical. Independent review finds no
+remaining P1/P2 issue in the root-lease change, native process-handle probes,
+WSS fixtures, test-only dependency edge, CI settings or staged smoke check.
+These results do not establish native Windows support.
+The next candidate must pass its own complete native matrix, including the five
+standard-user Windows cases, before packages or the final dev publication.
+
 Full final gates, independent final review, final source identities, native CI
 results and four-platform artifact verification are pending. A configured
 matrix, cross-check or standalone probe does not establish platform support.

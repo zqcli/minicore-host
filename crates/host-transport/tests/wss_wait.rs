@@ -57,30 +57,40 @@ async fn delayed_peer(host: Arc<Host>) -> (HostClient, DelayedPeer) {
     host.configure_network_access(Some(FIRST.into())).unwrap();
     let (server_tls, client_tls) = wss_common::certificates();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("wss://localhost:{}/", listener.local_addr().unwrap().port());
-    let connecting =
-        tokio::spawn(async move { HostClient::wss(&url, client_tls, FIRST, options(2_000)).await });
-    let (tcp, _) = listener.accept().await.unwrap();
-    let tls = TlsAcceptor::from(server_tls).accept(tcp).await.unwrap();
-    let config = WebSocketConfig::default()
-        .max_frame_size(None)
-        .max_message_size(None)
-        .max_write_buffer_size(usize::MAX);
-    let socket = accept_async_with_config(tls, Some(config)).await.unwrap();
-    // Handle creation follows actual authentication, not connection arrival.
-    let mut socket = socket;
-    let Message::Text(auth) = socket.next().await.unwrap().unwrap() else {
-        panic!("no initialization");
+    let url = format!("wss://{}/", listener.local_addr().unwrap());
+    let accepting = async {
+        let (tcp, _) = listener.accept().await.unwrap();
+        let tls = TlsAcceptor::from(server_tls).accept(tcp).await.unwrap();
+        let config = WebSocketConfig::default()
+            .max_frame_size(None)
+            .max_message_size(None)
+            .max_write_buffer_size(usize::MAX);
+        let mut socket = accept_async_with_config(tls, Some(config)).await.unwrap();
+        // Handle creation follows actual authentication, not connection arrival.
+        let Message::Text(auth) = socket.next().await.unwrap().unwrap() else {
+            panic!("no initialization");
+        };
+        let auth: Value = serde_json::from_str(&auth).unwrap();
+        assert_eq!(auth["method"], "initialize");
+        let handle = host
+            .connect_network(auth["params"]["access_key"].as_str().unwrap())
+            .unwrap();
+        let mut peer = DelayedPeer { socket, handle };
+        peer.response(json!({"jsonrpc":"2.0","id":auth["id"],"result":peer.handle.initial_info()}))
+            .await;
+        Ok::<_, CallError>(peer)
     };
-    let auth: Value = serde_json::from_str(&auth).unwrap();
-    assert_eq!(auth["method"], "initialize");
-    let handle = host
-        .connect_network(auth["params"]["access_key"].as_str().unwrap())
-        .unwrap();
-    let mut peer = DelayedPeer { socket, handle };
-    peer.response(json!({"jsonrpc":"2.0","id":auth["id"],"result":peer.handle.initial_info()}))
-        .await;
-    (connecting.await.unwrap().unwrap(), peer)
+    // A client initialization error must also end a pending accept. The outer
+    // fixture guard fails a stalled handshake without changing any call budget.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::try_join!(
+            HostClient::wss(&url, client_tls, FIRST, options(2_000)),
+            accepting
+        )
+    })
+    .await
+    .expect("delayed peer initialization stalled")
+    .expect("delayed peer client initialization failed")
 }
 
 #[tokio::test]
@@ -172,7 +182,7 @@ async fn initialization_budget_covers_tls_websocket_and_authenticated_response_o
     host.configure_network_access(Some(FIRST.into())).unwrap();
     let (server_tls, client_tls) = wss_common::certificates();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("wss://localhost:{}/", listener.local_addr().unwrap().port());
+    let url = format!("wss://{}/", listener.local_addr().unwrap());
     let started = tokio::time::Instant::now();
     let connecting = HostClient::wss(&url, client_tls, FIRST, options(200));
     tokio::pin!(connecting);

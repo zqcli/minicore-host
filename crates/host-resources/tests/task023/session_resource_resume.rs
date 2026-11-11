@@ -134,11 +134,17 @@ async fn corrected_workspace_continues(mode: StorageMode) {
         id
     );
     assert_single_input(&request, &id, "keep workspace input");
-    assert!(request["messages"].as_array().unwrap().iter().any(|m| {
-        m["content"]
-            .as_str()
-            .is_some_and(|text| text.contains(directory.path().to_str().unwrap()))
-    }));
+    let workspace_context = format!(
+        "Workspace directory: {}",
+        std::fs::canonicalize(directory.path()).unwrap().display()
+    );
+    assert!(
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| { m["role"] == "system" && m["content"] == workspace_context })
+    );
 }
 
 #[tokio::test]

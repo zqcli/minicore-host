@@ -393,10 +393,17 @@ async fn tls_verification_plaintext_rejection_and_protocol_errors_do_not_disable
             .with_root_certificates(tls::RootCertStore::empty())
             .with_no_client_auth(),
     );
-    assert!(matches!(
-        HostClient::wss(&server.url(), untrusted, FIRST, options(2_000)).await,
-        Err(CallError::Connection { .. })
-    ));
+    let rejection = HostClient::wss(&server.url(), untrusted, FIRST, options(2_000))
+        .await
+        .err()
+        .expect("a certificate without a trusted issuer must be rejected");
+    assert_eq!(
+        rejection,
+        CallError::Connection {
+            message: tls::Error::InvalidCertificate(tls::CertificateError::UnknownIssuer)
+                .to_string(),
+        }
+    );
     let plaintext = server.url().replacen("wss://", "ws://", 1);
     assert!(matches!(
         HostClient::wss(&plaintext, server.client_tls.clone(), FIRST, options(500)).await,

@@ -94,7 +94,7 @@ async fn wss(host: Arc<Host>, abandoned: bool) {
     let server = wss_common::Server::start(host).await;
     let (server_tls, client_tls) = wss_common::certificates();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let url = format!("wss://localhost:{}/", listener.local_addr().unwrap().port());
+    let url = format!("wss://{}/", listener.local_addr().unwrap());
     let (entered, response) = oneshot::channel();
     // This wire relay connects both real TLS/WebSocket ends. Only its final
     // write is gated; the production Host authenticates the unchanged request.

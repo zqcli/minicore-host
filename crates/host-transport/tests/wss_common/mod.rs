@@ -20,7 +20,8 @@ pub const FIRST: &str = "fixture-only-first-host-access-secret";
 pub const SECOND: &str = "fixture-only-second-host-access-secret";
 
 pub fn certificates() -> (Arc<tls::ServerConfig>, Arc<tls::ClientConfig>) {
-    let generated = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
+    let generated =
+        rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
     let cert = generated.cert.der().clone();
     let key = tls::pki_types::PrivatePkcs8KeyDer::from(generated.signing_key.serialize_der());
     let server = tls::ServerConfig::builder()
@@ -50,7 +51,9 @@ impl Server {
         tls_server(host).await
     }
     pub fn url(&self) -> String {
-        format!("wss://localhost:{}/", self.address.port())
+        // Connect to the actual IPv4 listener. A localhost IPv6 fallback must
+        // not consume the protocol deadline that a fixture is measuring.
+        format!("wss://{}/", self.address)
     }
     pub async fn client(&self, key: &str) -> Result<HostClient, CallError> {
         HostClient::wss(

@@ -101,15 +101,6 @@ def main():
     target_directory = Path(metadata["target_directory"])
     executable = "minicore-host.exe" if args.target.endswith("windows-msvc") else "minicore-host"
     binary = target_directory / args.target / "release" / executable
-    smoke = subprocess.run(
-        [str(binary), "--help"],
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if smoke.stdout or "Usage: minicore-host" not in smoke.stderr:
-        raise RuntimeError("release --help must succeed on stderr without protocol stdout")
     with binary.open("rb") as stream:
         binary_sha256 = sha256(stream)
 
@@ -137,6 +128,17 @@ def main():
                 )
             else:
                 shutil.copy2(source, destination)
+
+        smoke = subprocess.run(
+            [str(installed), "--help"],
+            cwd=stage,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if smoke.stdout or "Usage: minicore-host" not in smoke.stderr:
+            raise RuntimeError("release --help must succeed on stderr without protocol stdout")
 
         if executable.endswith(".exe"):
             archive = output / f"{name}.zip"

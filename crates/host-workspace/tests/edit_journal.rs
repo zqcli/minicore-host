@@ -31,15 +31,17 @@ fn request(reference: ChangeRef, bytes: usize) -> DiffRequest {
 async fn retained_tool_edits_use_real_snapshots_not_later_filesystem_or_git_state() {
     // This test deliberately observes a directory with no repository ancestors.
     let root = TempDir::new_in(std::env::temp_dir()).unwrap();
-    fs::write(root.path().join("file"), "before\n").unwrap();
+    let path = "nested/file";
+    fs::create_dir(root.path().join("nested")).unwrap();
+    fs::write(root.path().join(path), "before\n").unwrap();
     let ws = Workspace::open(root.path()).await.unwrap();
     let before = ws
-        .capture("file".into(), QueryContext::default())
+        .capture(path.into(), QueryContext::default())
         .await
         .unwrap();
-    fs::write(root.path().join("file"), "after\n").unwrap();
+    fs::write(root.path().join(path), "after\n").unwrap();
     let after = ws
-        .capture("file".into(), QueryContext::default())
+        .capture(path.into(), QueryContext::default())
         .await
         .unwrap();
     let session = SessionId::new().unwrap();
@@ -48,14 +50,15 @@ async fn retained_tool_edits_use_real_snapshots_not_later_filesystem_or_git_stat
     let reference = journal
         .append(EditRecord {
             tool_call: tool(&turn, "write_1"),
-            path: "file".into(),
+            path: "./nested/file".into(),
             before,
             after,
             outcome: EditOutcome::Applied,
         })
         .unwrap();
-    fs::write(root.path().join("file"), "unrelated later content\n").unwrap();
+    fs::write(root.path().join(path), "unrelated later content\n").unwrap();
     let record = journal.get(&reference).unwrap();
+    assert_eq!(record.path, path);
     let result = diff_edit(
         record,
         request(reference.clone(), 1000),
@@ -83,6 +86,7 @@ async fn retained_tool_edits_use_real_snapshots_not_later_filesystem_or_git_stat
         .unwrap()
         .records;
     assert_eq!(records[0].origin, ChangeOrigin::Tool);
+    assert_eq!(records[0].path, path);
     assert_eq!(records[0].edit_outcome, Some(EditOutcome::Applied));
     assert!(records[0].details_available);
     let bytes = serde_json::to_vec(journal.records()).unwrap();
