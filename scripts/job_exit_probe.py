@@ -397,12 +397,155 @@ def one_round(api, bash, mode, memory_mb):
                     api.checked(api.CloseHandle(handle), "CloseHandle")
 
 
+
+class NestedCompletionLog(CompletionLog):
+    """Keep raw completion keys to distinguish nested Job notification origins."""
+
+    def _collect(self):
+        self.ready.set()
+        try:
+            while not self.stop.is_set():
+                code, key, pid = w.DWORD(), c.c_size_t(), c.c_void_p()
+                if not self.api.GetQueuedCompletionStatus(
+                    self.port, c.byref(code), c.byref(key), c.byref(pid), 100
+                ):
+                    error = c.get_last_error()
+                    if error == 258 and pid.value is None:
+                        continue
+                    raise c.WinError(error, "GetQueuedCompletionStatus")
+                held = self.held.copy()
+                self.events.append({
+                    "kind": {4: "ACTIVE_PROCESS_ZERO", 6: "NEW_PROCESS",
+                             7: "EXIT_PROCESS", 8: "ABNORMAL_EXIT_PROCESS"}.get(code.value, "OTHER"),
+                    "code": code.value, "pid": pid.value, "key": key.value,
+                    "associated_job": self.job, "key_matches": key.value == self.job,
+                    "at_us": (time.perf_counter_ns() - self.started_ns) / 1000,
+                    "snapshot": self.api.snapshot(self.job, held),
+                })
+        except BaseException as error:
+            self.error = repr(error)
+
+
+def nested_round(api, bash, mode, child_has_port):
+    parent = api.checked(api.CreateJobObjectW(None, None), "CreateJobObjectW(parent)")
+    child_job = None
+    process, held, peers, collectors = ProcessInfo(), {}, {}, []
+    try:
+        child_job = api.checked(api.CreateJobObjectW(None, None), "CreateJobObjectW(child)")
+        for job in (parent, child_job):
+            limits = ExtendedLimits()
+            limits.BasicLimitInformation.LimitFlags = 0x2000
+            api.checked(api.SetInformationJobObject(job, 9, c.byref(limits), c.sizeof(limits)),
+                        "SetInformationJobObject(ExtendedLimitInformation)")
+        parent_log = NestedCompletionLog(api, parent, held)
+        collectors.append(parent_log)
+        child_log = NestedCompletionLog(api, child_job, held) if child_has_port else None
+        if child_log is not None:
+            collectors.append(child_log)
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(2)
+            listener.settimeout(20)
+            script = (f"{bash_quote(sys.executable)} {bash_quote(Path(__file__).resolve())} "
+                      f"--child root --port {listener.getsockname()[1]} --memory-mb 0 "
+                      ">/dev/null 2>&1; exit 0")
+            command = c.create_unicode_buffer(subprocess.list2cmdline(
+                [bash, "--noprofile", "--norc", "-c", script]))
+            startup = Startup()
+            startup.cb = c.sizeof(startup)
+            api.checked(api.CreateProcessW(bash, command, None, None, False, 4, None,
+                                          str(Path(__file__).resolve().parent),
+                                          c.byref(startup), c.byref(process)), "CreateProcessW")
+            api.checked(api.AssignProcessToJobObject(parent, process.hProcess),
+                        "AssignProcessToJobObject(parent)")
+            if api.ResumeThread(process.hThread) != 1:
+                raise RuntimeError("suspended Bash did not resume exactly once")
+            for _ in range(2):
+                peer, _ = listener.accept()
+                peer.settimeout(20)
+                identity = bytearray()
+                while not identity.endswith(b"\n"):
+                    value = peer.recv(1)
+                    if not value:
+                        raise RuntimeError("probe disconnected before identification")
+                    identity += value
+                role, pid = identity.decode("ascii").split()
+                if role not in ("root", "leaf") or role in peers:
+                    raise RuntimeError(f"unexpected identity: {identity!r}")
+                handle = api.checked(api.OpenProcess(0x100001 | 0x1000, False, int(pid)),
+                                     "OpenProcess")
+                held[role] = (int(pid), handle)
+                peers[role] = peer
+            api.checked(api.AssignProcessToJobObject(child_job, held["leaf"][1]),
+                        "AssignProcessToJobObject(nested child)")
+            before_parent = api.snapshot(parent, held)
+            before_child = api.snapshot(child_job, held)
+            assert all(before_parent["membership"].values()), before_parent
+            assert not before_child["membership"]["root"] and before_child["membership"]["leaf"], before_child
+            assert all(value == 258 for value in before_parent["wait_after"].values()), before_parent
+            if mode == "job":
+                api.checked(api.TerminateJobObject(child_job, 1), "TerminateJobObject(child)")
+            else:
+                peers["leaf"].sendall(b"x")
+            assert api.wait(held["leaf"][1], 10000) == 0, "nested leaf did not actually exit"
+            # The root remains behind its unchanged gate during this bounded
+            # observation. Missing packets are recorded, not supplied by a query.
+            time.sleep(0.25)
+            live_parent = api.snapshot(parent, held)
+            assert live_parent["wait_after"]["root"] == 258 and live_parent["active"] >= 1, live_parent
+            parent_before_root_exit = parent_log.events[:]
+            child_before_root_exit = child_log.events[:] if child_log else None
+            peers["root"].sendall(b"x")
+            assert api.wait(process.hProcess, 10000) == 0, "Bash did not finish after root release"
+            assert api.wait(held["root"][1], 10000) == 0, "root did not actually exit"
+            time.sleep(0.25)
+            for collector in collectors:
+                collector.close()
+                if collector.error:
+                    raise RuntimeError(collector.error)
+            return {
+                "mode": mode, "child_has_port": child_has_port,
+                "parent_job": parent, "child_job": child_job,
+                "before_parent": before_parent, "before_child": before_child,
+                "parent_with_root_live": live_parent,
+                "parent_before_root_exit": parent_before_root_exit,
+                "child_before_root_exit": child_before_root_exit,
+                "parent_notifications": parent_log.events,
+                "child_notifications": child_log.events if child_log else None,
+            }
+    finally:
+        # The two Jobs and every retained process handle remain valid until the
+        # collectors are joined, including after an assertion or native error.
+        for job in (child_job, parent):
+            if job:
+                api.checked(api.TerminateJobObject(job, 1), "cleanup TerminateJobObject")
+        handles = [handle for _, handle in held.values()]
+        if process.hProcess:
+            if api.wait(process.hProcess, 0) == 258:
+                if not api.TerminateProcess(process.hProcess, 1) and api.wait(process.hProcess, 0) != 0:
+                    raise c.WinError(c.get_last_error(), "cleanup TerminateProcess")
+            handles.append(process.hProcess)
+        try:
+            for handle in handles:
+                if api.wait(handle, 10000) != 0:
+                    raise RuntimeError("cleanup did not observe actual process exit")
+        finally:
+            for collector in collectors:
+                collector.close()
+            for peer in peers.values():
+                peer.close()
+            for handle in handles + [process.hThread, child_job, parent]:
+                if handle:
+                    api.checked(api.CloseHandle(handle), "CloseHandle")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child", choices=("root", "leaf"))
     parser.add_argument("--port", type=int)
     parser.add_argument("--memory-mb", type=int, default=0)
     parser.add_argument("--rounds", type=int, default=30)
+    parser.add_argument("--nested", action="store_true")
     args = parser.parse_args()
     if os.name != "nt":
         raise RuntimeError("this investigation requires native Windows")
@@ -413,6 +556,14 @@ def main():
     print(json.dumps({"platform": platform.platform(), "python": sys.version,
                       "bash": bash, "structures": {"startup": c.sizeof(Startup),
                       "limits": c.sizeof(ExtendedLimits), "accounting": c.sizeof(Accounting)}}), flush=True)
+    if args.nested:
+        for mode in ("job", "natural"):
+            for child_has_port in (False, True):
+                for index in range(args.rounds):
+                    result = nested_round(api, bash, mode, child_has_port)
+                    result["round"] = index
+                    print(json.dumps(result), flush=True)
+        return
     counts = {}
     for mode in ("job", "process", "natural", "process-abnormal"):
         for memory_mb in (0, 64):
