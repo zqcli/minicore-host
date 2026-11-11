@@ -31,9 +31,15 @@ the existing pinned Cargo dependency. SPEC, Host/Runtime request handoff and
 Turn/Step/compaction ownership remain unchanged.
 
 Independent final review found no remaining P1/P2 findings in this scope.
-The dev publication adds only documentation records after the tested source;
-code, dependency, workflow and script blobs remain identical. Its automatic
-dev CI is a separate run from the completed parent-source acceptance above.
+Published dev `282a678b0ab7ee94ba774451619f640a62d9a050` also passes all nine
+jobs in [run 43071596301](https://github.com/zqcli/minicore-host/actions/runs/43071596301),
+including four uploaded native packages. The owner's 2026-11-12 branch
+integration request joins the two completed Windows investigation histories
+into dev, retaining the verified implementation and recording the explicit
+resolution in Task 105. The main and multi-platform implementation branch tips
+were already ancestors of dev. The integration changes only these project/task
+records; production, tests, dependencies, workflows and scripts retain their
+verified blobs. The resulting merge commit has its own automatic CI run.
 Exact jobs, artifact URLs and distinct binary/archive/artifact hashes are in
 [the validation record](tasks/105-multiplatform-ci/validation.json). See
 [the CI guide](docs/ci.md) for downloads, local NTFS requirements and optional

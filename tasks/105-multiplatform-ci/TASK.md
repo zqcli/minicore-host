@@ -14,6 +14,54 @@ Version remains 0.9.20; Runtime remains 0.10.0 at
 No changes to Runtime interfaces, Turn/Step ownership, compaction responsibilities
 or TUI are in scope. Existing historical evidence is preserved.
 
+## Branch integration (2026-11-12, Asia/Shanghai)
+
+The owner requested checking every Host branch and merging them into `dev` once
+the multi-platform CI issue was resolved. The inspected destination was
+`282a678b0ab7ee94ba774451619f640a62d9a050`.
+[Its dev run 43071596301](https://github.com/zqcli/minicore-host/actions/runs/43071596301)
+completed successfully at 2026-11-12 02:12:02 Asia/Shanghai: Linux quality,
+all four native Clippy/test/doc-test jobs and all four package jobs passed.
+Four non-expired package artifacts belong to this exact source. Windows also
+passed the ordinary-user step; packages performed the native executable smoke
+check and archive readback. This confirms the published dev checkpoint in
+addition to the implementation-branch acceptance recorded below.
+
+| Inspected branch | Exact tip | Integration resolution |
+| --- | --- | --- |
+| `ci/multiplatform-host` | `f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6` | Already an ancestor of dev; all implementation commits included. |
+| `ci/windows-storage-probe` | `87b87201e2ba1f23cef233d71a59294dbcad539f` | Retain as a merge parent; keep the accepted dev files. |
+| `ci/windows-job-exit-probe` | `eb1ec81248c42df90c7d51a40cfb9a9025ef710e` | Retain as a merge parent; keep the accepted dev files. |
+| `main` | `b341b163e14543bfbe7f8d392ea243b4a123cdf7` | Already an ancestor of dev; its branch ref is unchanged. |
+
+The two probe branches are completed investigation histories, not additional
+Host implementations. The storage probe's Rust source is already present in
+dev with identical blob `f0617cee9cd048dd7429792c872d2371231e78b6`. Its branch-only
+workflow and initial user launcher are superseded by the accepted native CI
+and `scripts/windows-user-tests.ps1`; the current task record includes its
+experiments and outcomes. The Job probe deliberately has only three files and
+deletes the rest of the repository relative to its parent. Applying those
+experimental deletions would destroy the integrated Host. Its observations
+and the resulting production completion barrier are already recorded below.
+
+Use an explicit `ours` content resolution for both retired probe branches,
+while retaining their exact tips as merge parents. Their original source,
+including the standalone Job probe, remains reachable through dev history and
+the immutable links below. Keep the accepted dev production/test/configuration
+tree and update only `PROJECT.md` and this task record. No branch ref is deleted,
+no history is rewritten, and no version or Runtime pin changes.
+
+Local checks use `git merge-base --is-ancestor`, complete three-dot diffs,
+blob-identity comparison, `git diff --check` and
+`./scripts/check-whitespace.sh`. All branch tips must be ancestors of the
+resulting merge; its first-parent diff must contain only the two records above.
+An independent worker was requested with `gpt-6-astra` and `max` reasoning and
+found no blocking issue in the native CI or this selective merge resolution;
+these are requested settings, not an effective-runtime attestation.
+The existing full native run validates the retained implementation. The new
+merge's automatic CI is attached to that commit separately; its outcome is not
+represented by the earlier run's results.
+
 ## Accepted native checkpoint (2026-11-11)
 
 Verified source: `f29d3c9c7b7d2f10ed6bcc72a131ca3d85cd37a6`, tree
