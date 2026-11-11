@@ -427,6 +427,7 @@ class NestedCompletionLog(CompletionLog):
 
 
 def nested_round(api, bash, mode, child_has_port):
+    print(json.dumps({"nested_phase": "start", "mode": mode, "child_has_port": child_has_port}), flush=True)
     parent = api.checked(api.CreateJobObjectW(None, None), "CreateJobObjectW(parent)")
     child_job = None
     process, held, peers, collectors = ProcessInfo(), {}, {}, []
@@ -472,10 +473,11 @@ def nested_round(api, bash, mode, child_has_port):
                 role, pid = identity.decode("ascii").split()
                 if role not in ("root", "leaf") or role in peers:
                     raise RuntimeError(f"unexpected identity: {identity!r}")
-                handle = api.checked(api.OpenProcess(0x100001 | 0x1000, False, int(pid)),
-                                     "OpenProcess")
+                handle = api.checked(api.OpenProcess(0x100001 | 0x1000 | 0x100, False, int(pid)),
+                                     "OpenProcess(SYNCHRONIZE|TERMINATE|QUERY_LIMITED|SET_QUOTA)")
                 held[role] = (int(pid), handle)
                 peers[role] = peer
+            print(json.dumps({"nested_phase": "assign_child", "leaf": held["leaf"][0]}), flush=True)
             api.checked(api.AssignProcessToJobObject(child_job, held["leaf"][1]),
                         "AssignProcessToJobObject(nested child)")
             before_parent = api.snapshot(parent, held)
@@ -483,6 +485,7 @@ def nested_round(api, bash, mode, child_has_port):
             assert all(before_parent["membership"].values()), before_parent
             assert not before_child["membership"]["root"] and before_child["membership"]["leaf"], before_child
             assert all(value == 258 for value in before_parent["wait_after"].values()), before_parent
+            print(json.dumps({"nested_phase": "stop_child", "mode": mode}), flush=True)
             if mode == "job":
                 api.checked(api.TerminateJobObject(child_job, 1), "TerminateJobObject(child)")
             else:
@@ -495,6 +498,7 @@ def nested_round(api, bash, mode, child_has_port):
             assert live_parent["wait_after"]["root"] == 258 and live_parent["active"] >= 1, live_parent
             parent_before_root_exit = parent_log.events[:]
             child_before_root_exit = child_log.events[:] if child_log else None
+            print(json.dumps({"nested_phase": "release_root"}), flush=True)
             peers["root"].sendall(b"x")
             assert api.wait(process.hProcess, 10000) == 0, "Bash did not finish after root release"
             assert api.wait(held["root"][1], 10000) == 0, "root did not actually exit"
