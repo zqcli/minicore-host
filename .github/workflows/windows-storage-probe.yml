@@ -22,3 +22,6 @@ jobs:
         run: rustc +1.90.0 --edition=2024 crates/host-storage/tests/probes/windows_directory_sync.rs -o windows-directory-sync.exe
       - name: Observe native directory synchronization results
         run: .\windows-directory-sync.exe
+      - name: Observe the same probe as a standard local user
+        shell: pwsh
+        run: .\scripts\windows-storage-probe-user.ps1 -ProbePath .\windows-directory-sync.exe
