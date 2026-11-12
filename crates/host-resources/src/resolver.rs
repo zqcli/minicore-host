@@ -7,13 +7,13 @@ use minicore_host_core::{
     ResourceFuture, ResourceResolver, ToolOutputBinding,
 };
 use minicore_host_protocol::{Fault, FaultKind, ReasoningPreference, SessionConfig};
-use minicore_host_tools::{BoundLocalTools, CoreTurnPort, ToolRegistry};
-use minicore_host_workspace::Workspace;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{Model, ReasoningPreference as RuntimeReasoning},
     tools::ToolSet,
 };
+use minicore_host_tools::{BoundLocalTools, CoreTurnPort, ToolRegistry};
+use minicore_host_workspace::Workspace;
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 pub(super) struct ProductionResources {
@@ -73,7 +73,7 @@ impl ProductionResources {
         )
         .map_err(|error| session_invalid(error.to_string()))?;
         let settings = &config.execution;
-        let options = LoopOptions {
+        let options = ExecutionOptions {
             deadline: None,
             prompt_timeout: Duration::from_millis(settings.prompt_timeout_ms),
             model_timeout: Duration::from_millis(settings.model_timeout_ms),
@@ -81,7 +81,6 @@ impl ProductionResources {
             tool_timeout: Duration::from_millis(settings.tool_timeout_ms),
             model_retry_attempts: settings.model_retry_attempts,
             model_retry_base_delay: Duration::from_millis(settings.model_retry_base_delay_ms),
-            history: None,
         };
         options
             .validate()

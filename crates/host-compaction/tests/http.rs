@@ -3,7 +3,7 @@
 use minicore_host_compaction::{HistorySnapshot, generate, prepare};
 use minicore_host_protocol::CompactionSettings;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem, LoopId, UserHistory, UserInput, UserMessageKind,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelLimits, ModelMessage, ModelRequest,

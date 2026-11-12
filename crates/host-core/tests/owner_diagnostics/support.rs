@@ -3,8 +3,8 @@ use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_diagnostics::{Guard, Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -70,7 +70,7 @@ impl ResourceResolver for ResourcesFixture {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

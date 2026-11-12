@@ -1,11 +1,11 @@
 //! Frozen framework, Role and canonical Workspace context for model prompts.
 //! History preparation continues through core's existing provenance adapter.
-use minicore_host_workspace::Workspace;
-use minicore_runtime::{
+use minicore_host_runtime::{
     Text,
     model::ModelMessage,
     prompt::{PromptFuture, PromptProvider, PromptRequest},
 };
+use minicore_host_workspace::Workspace;
 use std::sync::Arc;
 
 /// Frozen model context. Workspace owns its canonical root and is never a

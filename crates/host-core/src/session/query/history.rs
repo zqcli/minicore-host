@@ -3,7 +3,7 @@ use crate::{HistoryItemData, SessionHistorySnapshot};
 
 impl HistoryItemData {
     pub(in crate::session) fn from_input(
-        user: &minicore_runtime::UserHistory,
+        user: &minicore_host_runtime::UserHistory,
         message_id: &MessageId,
         source: &MessageSource,
         mode: MessageMode,

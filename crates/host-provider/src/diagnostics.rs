@@ -2,7 +2,7 @@
 //! chain. The owning Session separately reports authoritative Runtime outcomes.
 use futures_util::Stream;
 use minicore_host_diagnostics::{Context, EventData, EventSpec, Scope};
-use minicore_runtime::model::{
+use minicore_host_runtime::model::{
     DeliveryState, ModelCallContext, ModelError, ModelErrorKind, ModelEvent, ModelStream,
     RetryHint, Usage,
 };
@@ -42,7 +42,7 @@ const FINISHED: EventSpec = EventSpec {
 };
 
 pub(super) struct Request {
-    loop_id: minicore_runtime::LoopId,
+    loop_id: minicore_host_runtime::LoopId,
     request_index: u32,
     started: Instant,
     status: Option<u16>,

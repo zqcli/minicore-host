@@ -1,8 +1,8 @@
 //! Immutable resource contracts supplied by the application and bound by a Session.
 use crate::{PreparedTurnBinding, ToolOutputBinding};
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{Model, ReasoningPreference},
     prompt::PromptProvider,
     tools::ToolSpec,
@@ -13,7 +13,7 @@ pub type ResourceFuture<'a> =
     Pin<Box<dyn Future<Output = Result<BoundResources, Fault>> + Send + 'a>>;
 
 /// The application composes resources. An immutable result is bound for the
-/// whole public Turn, including later internal loops. No default substitution.
+/// whole public Turn. No default substitution.
 pub trait ResourceResolver: Send + Sync + 'static {
     /// Pure structural/reference validation. Do not call a model, tool, network,
     /// or filesystem here; resource preparation belongs in `resolve`.
@@ -65,7 +65,7 @@ pub trait ResourceResolver: Send + Sync + 'static {
 #[derive(Clone)]
 pub struct BoundResources {
     pub execution: ExecutionConfig,
-    pub options: LoopOptions,
+    pub options: ExecutionOptions,
 }
 
 pub type CompactionResourceFuture =

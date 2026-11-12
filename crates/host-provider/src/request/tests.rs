@@ -1,5 +1,5 @@
 use super::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     model::{ModelLimits, ProviderReplay, ReasoningContent, ToolCall},
     tools::{ToolOutput, ToolResultOutcome, ToolSpec},

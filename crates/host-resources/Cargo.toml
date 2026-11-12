@@ -12,7 +12,7 @@ minicore-host-protocol.workspace = true
 minicore-host-provider.workspace = true
 minicore-host-tools.workspace = true
 minicore-host-workspace.workspace = true
-minicore-runtime.workspace = true
+minicore-host-runtime.workspace = true
 tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
 
 [dev-dependencies]

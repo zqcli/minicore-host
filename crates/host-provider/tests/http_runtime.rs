@@ -2,18 +2,20 @@ mod support;
 
 use futures_util::StreamExt;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_runtime::{
-    AgentLoop, CancelReason, ExecutionConfig, HistoryItem, LoopEvent, LoopId, LoopInputs,
-    LoopOptions, LoopOutcome, LoopReport, LoopRequest, UserInput,
+use minicore_host_runtime::{
+    DeadlineSource, ExecutionConfig, ExecutionOptions, InteractionId, LoopId, ToolResultHistory,
+    interaction::{InteractionAnswer, PendingInteraction},
     model::{
-        AssistantPart, DeliveryState, Model, ModelCallContext, ModelDescriptor, ModelError,
-        ModelErrorKind, ModelEvent, ModelFinishReason, ModelLimits, ModelMessage, ModelRequest,
+        AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelCallReport,
+        ModelDescriptor, ModelDriver, ModelDriverConfig, ModelError, ModelErrorKind, ModelEvent,
+        ModelFinishReason, ModelLimits, ModelMessage, ModelPartial, ModelRequest, ModelResponse,
         ModelStartFuture, ReasoningPreference, RetryHint,
     },
     prompt::DefaultPromptProvider,
     tools::{
-        Tool, ToolContext, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput, ToolSet,
-        ToolSpec,
+        Tool, ToolBatchContext, ToolBatchEvent, ToolBatchHost, ToolBatchStop, ToolContext,
+        ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput, ToolSet, ToolSpec,
+        run_tool_batch,
     },
 };
 use serde_json::{Value, json};
@@ -23,7 +25,7 @@ use std::{
     time::{Duration, Instant},
 };
 use support::{Fixture, Reply};
-use tokio::sync::{Notify, mpsc};
+use tokio::sync::{Notify, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 fn frame(delta: Value, finish: Option<&str>) -> String {
@@ -51,62 +53,84 @@ fn provider(endpoint: &str) -> Arc<OpenAiChatModel> {
         .unwrap(),
     )
 }
-struct NoInputs;
-impl LoopInputs for NoInputs {
-    fn take(&self) -> Vec<UserInput> {
-        Vec::new()
+fn call_options() -> ExecutionOptions {
+    ExecutionOptions {
+        model_retry_base_delay: Duration::from_millis(1),
+        model_timeout: Duration::from_secs(3),
+        ..ExecutionOptions::default()
     }
 }
-fn start(model: Arc<dyn Model>, tools: ToolSet) -> AgentLoop {
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_retry_base_delay = Duration::from_millis(1);
-    options.model_timeout = Duration::from_secs(3);
-    start_with_options(model, tools, options)
-}
-fn start_with_options(model: Arc<dyn Model>, tools: ToolSet, options: LoopOptions) -> AgentLoop {
-    let config = ExecutionConfig::new(
-        model,
+fn full_request(tools: &ToolSet) -> ModelRequest {
+    ModelRequest::new(
+        vec![
+            ModelMessage::system("Framework and role").unwrap(),
+            ModelMessage::user("fixture user request").unwrap(),
+        ],
+        tools.specs().to_vec(),
+        ModelLimits::default(),
         ReasoningPreference::Auto,
-        tools,
-        None,
-        Arc::new(DefaultPromptProvider::new(Some(
-            minicore_runtime::Text::new("Framework and role"),
-        ))),
-    )
-    .unwrap();
-    AgentLoop::start(
-        LoopRequest::new(
-            Arc::from([]),
-            UserInput::text("fixture user request").unwrap(),
-            config,
-        ),
-        options,
-        Arc::new(NoInputs),
     )
     .unwrap()
 }
-async fn finish(agent: AgentLoop) -> Arc<LoopReport> {
-    tokio::time::timeout(Duration::from_secs(5), agent.join())
+async fn call(model: Arc<dyn Model>, tools: ToolSet) -> ModelCallReport {
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        call_with_options(model, tools, call_options()),
+    )
+    .await
+    .unwrap()
+}
+async fn call_with_options(
+    model: Arc<dyn Model>,
+    tools: ToolSet,
+    options: ExecutionOptions,
+) -> ModelCallReport {
+    call_cancelable(model, tools, options, CancellationToken::new()).await
+}
+async fn call_cancelable(
+    model: Arc<dyn Model>,
+    tools: ToolSet,
+    options: ExecutionOptions,
+    cancellation: CancellationToken,
+) -> ModelCallReport {
+    let driver = ModelDriver::new(
+        model.as_ref(),
+        ModelDriverConfig::new(
+            options.model_timeout,
+            options.model_retry_attempts,
+            options.model_retry_base_delay,
+        ),
+    )
+    .unwrap();
+    let deadline = options
+        .deadline
+        .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(86_400));
+    driver
+        .call(
+            full_request(&tools),
+            ModelCallContext::new(LoopId::new().unwrap(), 0, cancellation, deadline.into_std()),
+            &mut |_| {},
+        )
+        .await
+}
+async fn join_call(task: tokio::task::JoinHandle<ModelCallReport>) -> ModelCallReport {
+    tokio::time::timeout(Duration::from_secs(5), task)
         .await
         .unwrap()
         .unwrap()
 }
-fn assistant(report: &LoopReport, index: usize) -> &minicore_runtime::AssistantHistory {
-    report
-        .appended
-        .iter()
-        .filter_map(|item| match item {
-            HistoryItem::Assistant(value) => Some(value),
-            _ => None,
-        })
-        .nth(index)
-        .unwrap()
+fn assistant(report: &ModelCallReport) -> &ModelResponse {
+    report.outcome.as_ref().unwrap()
 }
-fn failure(report: &LoopReport) -> &minicore_runtime::model::ModelError {
-    let LoopOutcome::Failed(failure) = &report.outcome else {
-        panic!("not failed: {:?}", report.outcome)
-    };
-    failure.model_error().unwrap()
+fn failure(report: &ModelCallReport) -> &ModelError {
+    report.outcome.as_ref().unwrap_err().error()
+}
+fn model_partial(report: &ModelCallReport) -> Option<&ModelPartial> {
+    report
+        .outcome
+        .as_ref()
+        .err()
+        .and_then(|failure| failure.partial.as_deref())
 }
 fn context(cancellation: CancellationToken) -> ModelCallContext {
     ModelCallContext::new(
@@ -140,27 +164,24 @@ async fn real_http_sse_streams_text_reasoning_usage_and_exact_request() {
         + &format!("data: {}\r\n\r\n", json!({"choices": [], "usage": usage}))
         + "data: [DONE]\r\n\r\n";
     let fixture = Fixture::start(vec![Reply::sse(body)]).await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    let answer = assistant(&report, 0);
-    assert_eq!(answer.finish_reason, ModelFinishReason::Stop);
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert!(report.outcome.is_ok());
+    let answer = assistant(&report);
+    assert_eq!(answer.finish_reason(), ModelFinishReason::Stop);
     assert!(
-        matches!(&answer.content[0], AssistantPart::Reasoning(value) if value.text() == Some("think 🐈"))
+        matches!(&answer.parts()[0], AssistantPart::Reasoning(value) if value.text() == Some("think 🐈"))
     );
     assert!(
-        matches!(&answer.content[1], AssistantPart::Text(value) if value.as_ref() == "hello 世界")
+        matches!(&answer.parts()[1], AssistantPart::Text(value) if value.as_ref() == "hello 世界")
     );
-    assert_eq!(answer.usage.input_tokens(), Some(10));
-    assert_eq!(answer.usage.output_tokens(), Some(6));
-    assert_eq!(answer.usage.reasoning_tokens(), Some(3));
-    assert_eq!(answer.usage.cache_read_tokens(), Some(2));
-    assert_eq!(answer.usage.provider_total_tokens(), Some(21));
-    assert_eq!(
-        answer.provider_replay.as_ref().unwrap().payload()["usage"],
-        usage
-    );
+    assert_eq!(answer.usage().unwrap().input_tokens(), Some(10));
+    assert_eq!(answer.usage().unwrap().output_tokens(), Some(6));
+    assert_eq!(answer.usage().unwrap().reasoning_tokens(), Some(3));
+    assert_eq!(answer.usage().unwrap().cache_read_tokens(), Some(2));
+    assert_eq!(answer.usage().unwrap().provider_total_tokens(), Some(21));
+    assert_eq!(answer.provider_replay().unwrap().payload()["usage"], usage);
     assert!(
-        !serde_json::to_string(&report.appended)
+        !serde_json::to_string(assistant(&report))
             .unwrap()
             .contains("fixture-not-a-real-key")
     );
@@ -210,8 +231,108 @@ impl Tool for Echo {
     }
 }
 
+struct NoInteractionFixture;
+impl ToolBatchHost for NoInteractionFixture {
+    fn observe(&self, _: ToolBatchEvent) {}
+    fn request_interaction(
+        &self,
+        _: PendingInteraction,
+        _: oneshot::Sender<InteractionAnswer>,
+    ) -> Result<(), ToolBatchStop> {
+        panic!("Echo fixture must not request interaction")
+    }
+    fn finish_interaction(&self, _: InteractionId) {
+        panic!("Echo fixture has no interaction to finish")
+    }
+}
+
+// A fixed two-request HTTP exchange, not a standalone scheduling loop.
+async fn tool_exchange(
+    model: Arc<dyn Model>,
+    tools: ToolSet,
+) -> (ModelResponse, Vec<ToolResultHistory>, ModelResponse) {
+    let options = call_options();
+    let driver = ModelDriver::new(
+        model.as_ref(),
+        ModelDriverConfig::new(
+            options.model_timeout,
+            options.model_retry_attempts,
+            options.model_retry_base_delay,
+        ),
+    )
+    .unwrap();
+    let initial = full_request(&tools);
+    let context = context(CancellationToken::new());
+    let first = driver
+        .call(initial.clone(), context.clone(), &mut |_| {})
+        .await
+        .outcome
+        .unwrap();
+    assert_eq!(first.finish_reason(), ModelFinishReason::ToolCalls);
+    let execution = ExecutionConfig::new(
+        model.clone(),
+        ReasoningPreference::Auto,
+        tools,
+        None,
+        Arc::new(DefaultPromptProvider::new(None)),
+    )
+    .unwrap();
+    let calls: Vec<_> = first
+        .parts()
+        .iter()
+        .filter_map(AssistantPart::as_tool_call)
+        .collect();
+    let batch = run_tool_batch(
+        &execution,
+        &calls,
+        ToolBatchContext {
+            loop_id: context.loop_id,
+            request_index: context.request_index,
+            cancellation: context.cancellation.clone(),
+            deadline: Some(context.deadline),
+            policy_timeout: Duration::from_secs(3),
+            tool_timeout: Duration::from_secs(3),
+        },
+        Arc::new(NoInteractionFixture),
+    )
+    .await;
+    assert!(batch.stop.is_none());
+    let mut messages = initial.messages().to_vec();
+    messages.push(
+        ModelMessage::assistant_with_provider_replay(
+            first.parts().to_vec(),
+            first.provider_replay().cloned(),
+        )
+        .unwrap(),
+    );
+    messages.extend(batch.results.iter().map(|result| {
+        ModelMessage::tool_with_outcome(
+            result.call_id.clone(),
+            result.output.clone(),
+            result.outcome,
+        )
+        .unwrap()
+    }));
+    let next = ModelRequest::new(
+        messages,
+        initial.tools().to_vec(),
+        ModelLimits::default(),
+        ReasoningPreference::Auto,
+    )
+    .unwrap();
+    let mut next_context = context;
+    next_context.request_index = 1;
+    let final_response = driver
+        .call(next, next_context, &mut |_| {})
+        .await
+        .outcome
+        .unwrap();
+    assert_eq!(final_response.finish_reason(), ModelFinishReason::Stop);
+    (first, batch.results, final_response)
+}
+
 #[tokio::test]
-async fn runtime_executes_parallel_tools_once_and_sends_original_ids_and_history() {
+async fn model_and_tool_primitives_preserve_original_ids_and_history() {
     let id1 = "call_provider_original_".to_owned() + &"x".repeat(90);
     let id2 = "call_OTHER";
     let first = frame(json!({"reasoning_content": "use tools"}), None)
@@ -244,15 +365,11 @@ async fn runtime_executes_parallel_tools_once_and_sends_original_ids_and_history
         .unwrap(),
         calls: calls.clone(),
     });
-    let report = finish(start(provider(&fixture.endpoint), builder.build().unwrap())).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert_eq!(report.requests, 2);
-    assert_eq!(report.tool_rounds, 1);
+    let (first, results, _) =
+        tool_exchange(provider(&fixture.endpoint), builder.build().unwrap()).await;
+    assert_eq!(first.finish_reason(), ModelFinishReason::ToolCalls);
+    assert_eq!(results.len(), 2);
     assert_eq!(calls.lock().unwrap().len(), 2);
-    assert_eq!(
-        assistant(&report, 0).finish_reason,
-        ModelFinishReason::ToolCalls
-    );
     let requests = fixture.finish().await;
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].body["tools"][0]["function"]["name"], "echo");
@@ -294,15 +411,10 @@ async fn malformed_or_truncated_stream_never_becomes_success_or_retries() {
     ];
     for body in cases {
         let fixture = Fixture::start(vec![Reply::sse(body)]).await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         let error = failure(&report);
         assert_eq!(*error.retry_hint(), RetryHint::Never);
-        assert!(
-            !report
-                .appended
-                .iter()
-                .any(|item| matches!(item, HistoryItem::Assistant(_)))
-        );
+        assert!(report.outcome.is_err());
         assert_eq!(fixture.finish().await.len(), 1);
     }
 }
@@ -359,9 +471,9 @@ async fn runtime_is_the_only_retry_owner_and_only_recognized_rejections_retry() 
             Reply::sse(final_text("retry result")),
         ])
         .await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         if expected == 2 {
-            assert_eq!(report.outcome, LoopOutcome::Completed);
+            assert!(report.outcome.is_ok());
         } else {
             let error = failure(&report);
             assert_eq!(error.kind(), kind);
@@ -415,9 +527,9 @@ async fn sse_error_retry_requires_no_prior_provider_choice_even_role_only() {
             Reply::sse(final_text("done")),
         ])
         .await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         if expected == 2 {
-            assert_eq!(report.outcome, LoopOutcome::Completed);
+            assert!(report.outcome.is_ok());
         } else {
             assert_eq!(failure(&report).delivery(), DeliveryState::Started);
         }
@@ -435,28 +547,39 @@ async fn cancellation_after_partial_output_closes_transport_and_has_no_assistant
         disconnected: disconnected.clone(),
     }])
     .await;
-    let mut agent = start(provider(&fixture.endpoint), ToolSet::default());
-    let handle = agent.handle();
-    let mut events = agent.take_events().unwrap();
+    let model = provider(&fixture.endpoint);
+    let cancellation = CancellationToken::new();
+    let token = cancellation.clone();
+    let (events, mut observed) = mpsc::unbounded_channel();
+    let task = tokio::spawn(async move {
+        let driver = ModelDriver::new(
+            model.as_ref(),
+            ModelDriverConfig::new(Duration::from_secs(3), 2, Duration::from_millis(1)),
+        )
+        .unwrap();
+        driver
+            .call(
+                full_request(&ToolSet::default()),
+                context(token),
+                &mut |event| {
+                    let _ = events.send(event);
+                },
+            )
+            .await
+    });
     tokio::time::timeout(Duration::from_secs(3), async {
-        while let Some(event) = events.recv().await {
-            if matches!(event.event, LoopEvent::OutputDelta { .. }) {
+        while let Some(event) = observed.recv().await {
+            if matches!(event, ModelCallEvent::TextDelta(_)) {
                 break;
             }
         }
     })
     .await
     .unwrap();
-    assert!(handle.cancel());
-    let report = finish(agent).await;
-    assert!(matches!(report.outcome, LoopOutcome::Cancelled(_)));
-    assert!(report.partial.as_ref().unwrap().content.iter().any(|part| matches!(part, AssistantPart::Text(value) if value.as_ref() == "partial before cancel")));
-    assert!(
-        !report
-            .appended
-            .iter()
-            .any(|item| matches!(item, HistoryItem::Assistant(_)))
-    );
+    cancellation.cancel();
+    let report = join_call(task).await;
+    assert_eq!(failure(&report).kind(), ModelErrorKind::Cancelled);
+    assert!(model_partial(&report).unwrap().content.iter().any(|part| matches!(part, AssistantPart::Text(value) if value.as_ref() == "partial before cancel")));
     tokio::time::timeout(Duration::from_secs(3), disconnected.notified())
         .await
         .unwrap();
@@ -525,14 +648,14 @@ async fn provider_finish_reasons_are_never_rewritten_to_stop() {
             frame(json!({"content":"actual output"}), Some(raw)) + "data: [DONE]\n\n",
         )])
         .await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
-        let answer = assistant(&report, 0);
-        assert_eq!(answer.finish_reason, expected);
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        let answer = assistant(&report);
+        assert_eq!(answer.finish_reason(), expected);
         assert_eq!(
-            answer.provider_replay.as_ref().unwrap().payload()["finish_reason"],
+            answer.provider_replay().unwrap().payload()["finish_reason"],
             raw
         );
-        assert!(matches!(report.outcome, LoopOutcome::Failed(_)));
+        assert!(report.outcome.is_ok());
         assert_eq!(fixture.finish().await.len(), 1);
     }
     let fixture = Fixture::start(vec![Reply::sse(
@@ -609,8 +732,8 @@ async fn redirects_are_not_followed_and_non_sse_success_is_not_completion() {
     ];
     for reply in replies {
         let fixture = Fixture::start(vec![reply]).await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
-        assert!(matches!(report.outcome, LoopOutcome::Failed(_)));
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        assert!(report.outcome.is_err());
         assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
         assert_eq!(fixture.finish().await.len(), 1);
     }
@@ -630,7 +753,7 @@ async fn long_retry_after_prevents_runtime_from_retrying_early() {
         Reply::sse(final_text("must not happen")),
     ])
     .await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
     let error = failure(&report);
     assert_eq!(error.kind(), ModelErrorKind::RateLimited);
     assert!(
@@ -642,12 +765,8 @@ async fn long_retry_after_prevents_runtime_from_retrying_early() {
 #[tokio::test]
 async fn missing_usage_is_unknown_and_inconsistent_usage_is_rejected() {
     let fixture = Fixture::start(vec![Reply::sse(final_text("no counts"))]).await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
-    let usage = assistant(&report, 0).usage;
-    assert_eq!(usage.input_tokens(), None);
-    assert_eq!(usage.output_tokens(), None);
-    assert_eq!(usage.reasoning_tokens(), None);
-    assert_eq!(usage.provider_total_tokens(), None);
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert!(assistant(&report).usage().is_none());
     fixture.finish().await;
     for usage in [
         json!({"prompt_tokens": 10,"completion_tokens": 2,"total_tokens": 99}),
@@ -659,7 +778,7 @@ async fn missing_usage_is_unknown_and_inconsistent_usage_is_rejected() {
             + &format!("data: {}\n\n", json!({"choices":[], "usage":usage}))
             + "data: [DONE]\n\n";
         let fixture = Fixture::start(vec![Reply::sse(body)]).await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         assert_eq!(
             failure(&report).kind(),
             ModelErrorKind::InvalidProviderResponse
@@ -685,13 +804,13 @@ async fn incomplete_tool_arguments_remain_partial_and_never_execute() {
         .unwrap(),
         calls: calls.clone(),
     });
-    let report = finish(start(provider(&fixture.endpoint), builder.build().unwrap())).await;
+    let report = call(provider(&fixture.endpoint), builder.build().unwrap()).await;
     assert_eq!(
         failure(&report).kind(),
         ModelErrorKind::InvalidProviderResponse
     );
     assert!(calls.lock().unwrap().is_empty());
-    let partial = report.partial.as_ref().unwrap();
+    let partial = model_partial(&report).unwrap();
     assert_eq!(partial.incomplete_tool_calls.len(), 1);
     assert_eq!(
         partial.incomplete_tool_calls[0].tool_call_id.as_str(),
@@ -728,12 +847,10 @@ async fn usage_reported_before_truncation_remains_authoritative_partial_usage() 
             json!({"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}})
         );
     let fixture = Fixture::start(vec![Reply::sse(body)]).await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
     assert_eq!(failure(&report).kind(), ModelErrorKind::IncompleteResponse);
     assert_eq!(
-        report
-            .partial
-            .as_ref()
+        model_partial(&report)
             .unwrap()
             .usage
             .unwrap()
@@ -754,17 +871,17 @@ async fn unicode_text_above_the_former_event_limit_is_preserved() {
         fragment: 0,
     }])
     .await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert!(report.outcome.is_ok());
     assert!(
-        matches!(&assistant(&report, 0).content[0], AssistantPart::Text(value) if value.as_ref() == text)
+        matches!(&assistant(&report).parts()[0], AssistantPart::Text(value) if value.as_ref() == text)
     );
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
 #[tokio::test]
 async fn unsupported_reasoning_history_is_rejected_before_network_io() {
-    use minicore_runtime::model::ReasoningContent;
+    use minicore_host_runtime::model::ReasoningContent;
     let fixture = Fixture::start(vec![Reply::sse(final_text("must not happen"))]).await;
     let model = provider(&fixture.endpoint);
     let request = ModelRequest::new(
@@ -799,7 +916,7 @@ async fn unsupported_reasoning_history_is_rejected_before_network_io() {
 }
 
 #[tokio::test]
-async fn runtime_preserves_complete_unknown_finish_but_reports_failure() {
+async fn model_driver_preserves_complete_unknown_finish_for_the_owner() {
     let fixture = Fixture::start(vec![Reply::sse(
         frame(
             json!({"content":"complete provider output"}),
@@ -807,18 +924,15 @@ async fn runtime_preserves_complete_unknown_finish_but_reports_failure() {
         ) + "data: [DONE]\n\n",
     )])
     .await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert!(report.outcome.is_ok());
+    let answer = assistant(&report);
+    assert_eq!(answer.finish_reason(), ModelFinishReason::Unknown);
     assert_eq!(
-        failure(&report).kind(),
-        ModelErrorKind::InvalidProviderResponse
-    );
-    let answer = assistant(&report, 0);
-    assert_eq!(answer.finish_reason, ModelFinishReason::Unknown);
-    assert_eq!(
-        answer.provider_replay.as_ref().unwrap().payload()["finish_reason"],
+        answer.provider_replay().unwrap().payload()["finish_reason"],
         "provider_future_reason"
     );
-    assert!(report.partial.is_none());
+    assert!(model_partial(&report).is_none());
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
@@ -827,10 +941,10 @@ async fn truncated_tool_headers_are_preserved_as_non_executable_partial_metadata
     let fixture = Fixture::start(vec![Reply::sse(
         frame(json!({"tool_calls":[{"index":0,"id":"provider_id_fragment","type":"function","function":{"name":"ec"}}]}), None)
     )]).await;
-    let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
     assert_eq!(failure(&report).kind(), ModelErrorKind::IncompleteResponse);
-    assert_eq!(report.tool_rounds, 0);
-    let partial = report.partial.as_ref().unwrap();
+    assert!(report.outcome.is_err());
+    let partial = model_partial(&report).unwrap();
     assert!(partial.content.is_empty());
     assert!(partial.incomplete_tool_calls.is_empty());
     let replay = partial.provider_replay.as_ref().unwrap();
@@ -863,16 +977,14 @@ async fn unknown_tool_finish_does_not_authorize_tool_execution() {
         .unwrap(),
         calls: calls.clone(),
     });
-    let report = finish(start(provider(&fixture.endpoint), builder.build().unwrap())).await;
+    let report = call(provider(&fixture.endpoint), builder.build().unwrap()).await;
     assert_eq!(
         failure(&report).kind(),
         ModelErrorKind::InvalidProviderResponse
     );
     assert!(calls.lock().unwrap().is_empty());
     assert_eq!(
-        report
-            .partial
-            .as_ref()
+        model_partial(&report)
             .unwrap()
             .provider_replay
             .as_ref()
@@ -896,17 +1008,14 @@ async fn sse_long_retry_after_prevents_runtime_from_retrying_early() {
         Reply::sse(final_text("must not happen")),
     ])
     .await;
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_retry_base_delay = Duration::from_millis(1);
     // A 60s delay fits this deadline but exceeds Runtime's 30s wait limit.
     // This must stop, not clamp the header or silently fall back to 1ms.
-    options.model_timeout = Duration::from_secs(120);
-    let report = finish(start_with_options(
-        provider(&fixture.endpoint),
-        ToolSet::default(),
-        options,
-    ))
-    .await;
+    let options = ExecutionOptions {
+        model_retry_base_delay: Duration::from_millis(1),
+        model_timeout: Duration::from_secs(120),
+        ..ExecutionOptions::default()
+    };
+    let report = call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
     let requests = fixture.finish().await;
     assert_eq!(
         requests.len(),
@@ -924,8 +1033,8 @@ async fn sse_long_retry_after_prevents_runtime_from_retrying_early() {
         matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(30))
     );
     assert!(error.diagnostic().message().as_ref().contains("HTTP 200"));
-    assert_eq!(report.requests, 1);
-    assert!(report.partial.is_none());
+    assert_eq!(report.attempts, 1);
+    assert!(model_partial(&report).is_none());
 }
 
 fn sse_rejection(headers: &str, error: Value, prefix: &str) -> Reply {
@@ -999,17 +1108,15 @@ async fn sse_retry_after_and_exponential_backoff_are_actual_request_lower_bounds
             Reply::sse(final_text("retried once")),
         ])
         .await;
-        let mut options = LoopOptions::default_checked().unwrap();
-        options.model_retry_base_delay = Duration::from_millis(base);
-        options.model_timeout = Duration::from_secs(3);
-        let report = finish(start_with_options(
-            provider(&fixture.endpoint),
-            ToolSet::default(),
-            options,
-        ))
-        .await;
-        assert_eq!(report.outcome, LoopOutcome::Completed);
-        assert_eq!(report.requests, 1, "retries are one logical model request");
+        let options = ExecutionOptions {
+            model_retry_base_delay: Duration::from_millis(base),
+            model_timeout: Duration::from_secs(3),
+            ..ExecutionOptions::default()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
+        assert!(report.outcome.is_ok());
+        assert_eq!(report.attempts, 2);
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), 2);
         let elapsed = requests[1]
@@ -1039,10 +1146,12 @@ async fn sse_invalid_or_absent_retry_after_keeps_runtime_backoff() {
         ])
         .await;
         let (model, mut observed) = observe_provider(&fixture.endpoint);
-        let mut options = LoopOptions::default_checked().unwrap();
-        options.model_retry_base_delay = Duration::from_millis(40);
-        options.model_timeout = Duration::from_secs(3);
-        let agent = start_with_options(model, ToolSet::default(), options);
+        let options = ExecutionOptions {
+            model_retry_base_delay: Duration::from_millis(40),
+            model_timeout: Duration::from_secs(3),
+            ..ExecutionOptions::default()
+        };
+        let task = tokio::spawn(call_with_options(model, ToolSet::default(), options));
         let error = rejection(&mut observed).await;
         assert_eq!(error.kind(), ModelErrorKind::RateLimited);
         assert_eq!(error.delivery(), DeliveryState::NotStarted);
@@ -1051,7 +1160,7 @@ async fn sse_invalid_or_absent_retry_after_keeps_runtime_backoff() {
             RetryHint::Retryable { retry_after: None }
         );
         assert!(error.diagnostic().message().as_ref().contains("HTTP 200"));
-        assert_eq!(finish(agent).await.outcome, LoopOutcome::Completed);
+        assert!(join_call(task).await.outcome.is_ok());
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), 2);
         assert!(
@@ -1093,7 +1202,7 @@ async fn sse_retry_after_does_not_authorize_unknown_or_permanent_rejections() {
             Reply::sse(final_text("must not happen")),
         ])
         .await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         let error = failure(&report);
         assert_eq!(error.kind(), kind);
         assert_eq!(error.delivery(), delivery);
@@ -1120,24 +1229,19 @@ async fn sse_retry_after_does_not_authorize_replay_after_role_or_text() {
             Reply::sse(final_text("must not happen")),
         ])
         .await;
-        let report = finish(start(provider(&fixture.endpoint), ToolSet::default())).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         let error = failure(&report);
         assert_eq!(error.kind(), ModelErrorKind::RateLimited);
         assert_eq!(error.delivery(), DeliveryState::Started);
         assert_eq!(*error.retry_hint(), RetryHint::Never);
         if let Some(text) = partial {
             assert!(
-                report.partial.as_ref().unwrap().content.iter().any(
+                model_partial(&report).unwrap().content.iter().any(
                     |part| matches!(part, AssistantPart::Text(value) if value.as_ref() == text)
                 )
             );
         }
-        assert!(
-            !report
-                .appended
-                .iter()
-                .any(|item| matches!(item, HistoryItem::Assistant(_)))
-        );
+        assert!(report.outcome.is_err());
         assert_eq!(fixture.finish().await.len(), 1);
     }
 }
@@ -1154,19 +1258,14 @@ async fn sse_retry_after_must_fit_the_original_model_or_turn_deadline() {
             Reply::sse(final_text("must not happen")),
         ])
         .await;
-        let mut options = LoopOptions::default_checked().unwrap();
-        options.model_retry_base_delay = Duration::from_millis(1);
-        if turn_deadline {
-            options.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(3));
-        } else {
-            options.model_timeout = Duration::from_secs(3);
-        }
-        let report = finish(start_with_options(
-            provider(&fixture.endpoint),
-            ToolSet::default(),
-            options,
-        ))
-        .await;
+        let options = ExecutionOptions {
+            model_retry_base_delay: Duration::from_millis(1),
+            model_timeout: Duration::from_secs(if turn_deadline { 600 } else { 3 }),
+            deadline: turn_deadline.then(|| tokio::time::Instant::now() + Duration::from_secs(3)),
+            ..ExecutionOptions::default()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
         let error = failure(&report);
         assert_eq!(error.kind(), ModelErrorKind::RateLimited);
         assert_eq!(error.delivery(), DeliveryState::NotStarted);
@@ -1189,10 +1288,18 @@ async fn cancellation_interrupts_real_sse_retry_wait_without_another_request() {
     ])
     .await;
     let (model, mut observed) = observe_provider(&fixture.endpoint);
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_timeout = Duration::from_secs(60);
-    options.model_retry_base_delay = Duration::from_millis(1);
-    let agent = start_with_options(model, ToolSet::default(), options);
+    let options = ExecutionOptions {
+        model_timeout: Duration::from_secs(60),
+        model_retry_base_delay: Duration::from_millis(1),
+        ..ExecutionOptions::default()
+    };
+    let cancellation = CancellationToken::new();
+    let task = tokio::spawn(call_cancelable(
+        model,
+        ToolSet::default(),
+        options,
+        cancellation.clone(),
+    ));
     let error = rejection(&mut observed).await;
     assert!(
         matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
@@ -1202,11 +1309,11 @@ async fn cancellation_interrupts_real_sse_retry_wait_without_another_request() {
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(1)).await;
     assert_eq!(fixture.request_count(), 1);
-    assert!(agent.handle().cancel());
-    assert_eq!(
-        finish(agent).await.outcome,
-        LoopOutcome::Cancelled(CancelReason::User)
-    );
+    cancellation.cancel();
+    let report = join_call(task).await;
+    assert!(cancellation.is_cancelled());
+    assert_eq!(failure(&report), &error);
+    assert_eq!(report.attempts, 1);
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
@@ -1222,10 +1329,12 @@ async fn model_timeout_during_real_sse_retry_wait_preserves_primary_rejection() 
     ])
     .await;
     let (model, mut observed) = observe_provider(&fixture.endpoint);
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_timeout = Duration::from_secs(20);
-    options.model_retry_base_delay = Duration::from_millis(1);
-    let agent = start_with_options(model, ToolSet::default(), options);
+    let options = ExecutionOptions {
+        model_timeout: Duration::from_secs(20),
+        model_retry_base_delay: Duration::from_millis(1),
+        ..ExecutionOptions::default()
+    };
+    let task = tokio::spawn(call_with_options(model, ToolSet::default(), options));
     let error = rejection(&mut observed).await;
     assert!(
         matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
@@ -1236,9 +1345,9 @@ async fn model_timeout_during_real_sse_retry_wait_preserves_primary_rejection() 
     // Cross both timers: the original deadline wins over a late retry wakeup.
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(30)).await;
-    let report = finish(agent).await;
+    let report = join_call(task).await;
     assert_eq!(failure(&report), &error);
-    assert!(report.history_failure.is_none());
+    assert_eq!(report.attempts, 1);
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
@@ -1254,11 +1363,13 @@ async fn turn_deadline_during_real_sse_retry_wait_cancels_without_another_reques
     ])
     .await;
     let (model, mut observed) = observe_provider(&fixture.endpoint);
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_timeout = Duration::from_secs(60);
-    options.deadline = Some(tokio::time::Instant::now() + Duration::from_secs(20));
-    options.model_retry_base_delay = Duration::from_millis(1);
-    let agent = start_with_options(model, ToolSet::default(), options);
+    let options = ExecutionOptions {
+        model_timeout: Duration::from_secs(60),
+        deadline: Some(tokio::time::Instant::now() + Duration::from_secs(20)),
+        model_retry_base_delay: Duration::from_millis(1),
+        ..ExecutionOptions::default()
+    };
+    let task = tokio::spawn(call_with_options(model, ToolSet::default(), options));
     let error = rejection(&mut observed).await;
     assert!(
         matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(3))
@@ -1266,10 +1377,11 @@ async fn turn_deadline_during_real_sse_retry_wait_cancels_without_another_reques
     assert_eq!(fixture.request_count(), 1);
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(30)).await;
-    assert_eq!(
-        finish(agent).await.outcome,
-        LoopOutcome::Cancelled(CancelReason::Deadline)
-    );
+    let report = join_call(task).await;
+    let failure = report.outcome.as_ref().unwrap_err();
+    assert_eq!(failure.error(), &error);
+    assert_eq!(failure.deadline_source(), Some(DeadlineSource::Turn));
+    assert_eq!(report.attempts, 1);
     assert_eq!(fixture.finish().await.len(), 1);
 }
 
@@ -1328,10 +1440,10 @@ async fn large_text_and_reasoning_deltas_reach_runtime_without_adapter_splitting
         std::slice::from_ref(&reasoning)
     );
 
-    let report = finish(start(model, ToolSet::default())).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert!(report.partial.is_none());
-    let content = &assistant(&report, 0).content;
+    let report = call(model, ToolSet::default()).await;
+    assert!(report.outcome.is_ok());
+    assert!(model_partial(&report).is_none());
+    let content = &assistant(&report).parts();
     assert_eq!(content.len(), 2);
     assert!(
         matches!(&content[0], AssistantPart::Reasoning(value) if value.text() == Some(reasoning.as_str()))
@@ -1363,14 +1475,8 @@ async fn large_tool_arguments_and_results_execute_once_and_replay_exactly() {
     ])
     .await;
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let report = finish(start(
-        provider(&fixture.endpoint),
-        echo_fixture(calls.clone()),
-    ))
-    .await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert_eq!(report.requests, 2);
-    assert_eq!(report.tool_rounds, 1);
+    let (_, results, _) =
+        tool_exchange(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
     let invocations = calls.lock().unwrap().clone();
     assert_eq!(invocations.len(), 1);
     assert_eq!(invocations[0].arguments["value"], value);
@@ -1380,14 +1486,6 @@ async fn large_tool_arguments_and_results_execute_once_and_replay_exactly() {
     );
     let expected_output = format!("echo:{}", json!(value));
     assert!(expected_output.len() > 262_144);
-    let results: Vec<_> = report
-        .appended
-        .iter()
-        .filter_map(|item| match item {
-            HistoryItem::ToolResult(result) => Some(result),
-            _ => None,
-        })
-        .collect();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].call_id.as_str(), "large-original-id");
     assert_eq!(results[0].output.content().as_str(), expected_output);
@@ -1424,24 +1522,15 @@ async fn invalid_large_or_deep_tool_arguments_remain_exact_nonexecutable_partial
             + "data: [DONE]\n\n";
         let fixture = Fixture::start(vec![payload_sse(body)]).await;
         let calls = Arc::new(Mutex::new(Vec::new()));
-        let report = finish(start(
-            provider(&fixture.endpoint),
-            echo_fixture(calls.clone()),
-        ))
-        .await;
+        let report = call(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
         assert_eq!(
             failure(&report).kind(),
             ModelErrorKind::InvalidProviderResponse
         );
         assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
         assert!(calls.lock().unwrap().is_empty());
-        assert!(
-            !report
-                .appended
-                .iter()
-                .any(|item| matches!(item, HistoryItem::Assistant(_) | HistoryItem::ToolResult(_)))
-        );
-        let partial = report.partial.as_ref().unwrap();
+        assert!(report.outcome.is_err());
+        let partial = model_partial(&report).unwrap();
         assert_eq!(partial.incomplete_tool_calls.len(), 1);
         assert_eq!(
             partial.incomplete_tool_calls[0].tool_call_id.as_str(),
@@ -1462,23 +1551,14 @@ async fn large_incomplete_tool_header_payload_keeps_raw_provider_fragments() {
     );
     let fixture = Fixture::start(vec![payload_sse(body)]).await;
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let report = finish(start(
-        provider(&fixture.endpoint),
-        echo_fixture(calls.clone()),
-    ))
-    .await;
+    let report = call(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
     assert_eq!(
         failure(&report).kind(),
         ModelErrorKind::InvalidProviderResponse
     );
     assert!(calls.lock().unwrap().is_empty());
-    assert!(
-        !report
-            .appended
-            .iter()
-            .any(|item| matches!(item, HistoryItem::Assistant(_) | HistoryItem::ToolResult(_)))
-    );
-    let partial = report.partial.as_ref().unwrap();
+    assert!(report.outcome.is_err());
+    let partial = model_partial(&report).unwrap();
     assert!(partial.content.is_empty());
     assert!(partial.incomplete_tool_calls.is_empty());
     let headers = &partial.provider_replay.as_ref().unwrap().payload()["incomplete_tool_headers"];
@@ -1502,12 +1582,7 @@ async fn tool_json_above_the_old_nesting_limit_retains_parser_stack_safety() {
     ])
     .await;
     let calls = Arc::new(Mutex::new(Vec::new()));
-    let report = finish(start(
-        provider(&fixture.endpoint),
-        echo_fixture(calls.clone()),
-    ))
-    .await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    let _ = tool_exchange(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
     assert_eq!(calls.lock().unwrap().len(), 1);
     let requests = fixture.finish().await;
     assert_eq!(requests.len(), 2);
@@ -1545,7 +1620,7 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
         ])
         .await;
         let (model, mut rejections) = observe_provider(&fixture.endpoint);
-        let report = finish(start(model, ToolSet::default())).await;
+        let report = call(model, ToolSet::default()).await;
         let error = rejection(&mut rejections).await;
         assert_eq!(error.kind(), expected_kind);
         assert!(
@@ -1556,7 +1631,7 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), attempts);
         if attempts == 2 {
-            assert_eq!(report.outcome, LoopOutcome::Completed);
+            assert!(report.outcome.is_ok());
             assert_eq!(error.delivery(), DeliveryState::NotStarted);
             assert!(matches!(error.retry_hint(), RetryHint::Retryable { .. }));
             assert!(
@@ -1598,15 +1673,13 @@ async fn large_http_errors_do_not_relax_retry_wait_limits_or_parse_invalid_json(
             Reply::sse(final_text("must not happen")),
         ])
         .await;
-        let mut options = LoopOptions::default_checked().unwrap();
-        options.model_timeout = Duration::from_secs(120);
-        options.model_retry_base_delay = Duration::from_millis(1);
-        let report = finish(start_with_options(
-            provider(&fixture.endpoint),
-            ToolSet::default(),
-            options,
-        ))
-        .await;
+        let options = ExecutionOptions {
+            model_timeout: Duration::from_secs(120),
+            model_retry_base_delay: Duration::from_millis(1),
+            ..ExecutionOptions::default()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
         let error = failure(&report);
         if valid {
             assert_eq!(error.kind(), ModelErrorKind::RateLimited);

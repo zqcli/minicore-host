@@ -3,9 +3,7 @@
 //! backend wraps the real journal, including its original-range reconciliation.
 use super::*;
 use crate::backend::{JournalHistory, TestAppendFault};
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
-use minicore_runtime::{
+use minicore_host_runtime::{
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelMessage,
         ModelRequest, ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -14,6 +12,8 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::testing::read_history_bytes;
+use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use std::{collections::BTreeSet, sync::atomic::AtomicUsize, time::Duration};
 use tokio::sync::Semaphore;
 
@@ -65,7 +65,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

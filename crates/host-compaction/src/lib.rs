@@ -16,7 +16,7 @@ pub use plan::{
 };
 pub use utility::{GenerationFailure, UtilityUsage, generate};
 
-use minicore_runtime::model::ModelError;
+use minicore_host_runtime::model::ModelError;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Error, PartialEq)]

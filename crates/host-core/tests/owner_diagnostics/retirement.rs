@@ -82,19 +82,20 @@ fn synchronous_memory_retirement_has_one_actual_close_chain_without_an_executor(
 }
 
 struct PendingModelFixture {
-    descriptor: minicore_runtime::model::ModelDescriptor,
+    descriptor: minicore_host_runtime::model::ModelDescriptor,
 }
-impl minicore_runtime::model::Model for PendingModelFixture {
-    fn descriptor(&self) -> &minicore_runtime::model::ModelDescriptor {
+impl minicore_host_runtime::model::Model for PendingModelFixture {
+    fn descriptor(&self) -> &minicore_host_runtime::model::ModelDescriptor {
         &self.descriptor
     }
     fn start<'a>(
         &'a self,
-        _: minicore_runtime::model::ModelRequest,
-        _: minicore_runtime::model::ModelCallContext,
-    ) -> minicore_runtime::model::ModelStartFuture<'a> {
+        _: minicore_host_runtime::model::ModelRequest,
+        _: minicore_host_runtime::model::ModelCallContext,
+    ) -> minicore_host_runtime::model::ModelStartFuture<'a> {
         Box::pin(async {
-            Ok(Box::pin(futures_util::stream::pending()) as minicore_runtime::model::ModelStream)
+            Ok(Box::pin(futures_util::stream::pending())
+                as minicore_host_runtime::model::ModelStream)
         })
     }
 }
@@ -106,8 +107,8 @@ impl ResourceResolver for PendingResourcesFixture {
     fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
         Box::pin(async move {
             self.validate(config)?;
-            use minicore_runtime::{
-                ExecutionConfig, LoopOptions,
+            use minicore_host_runtime::{
+                ExecutionConfig, ExecutionOptions,
                 model::{ModelDescriptor, ReasoningPreference},
                 prompt::DefaultPromptProvider,
                 tools::ToolSet,
@@ -130,7 +131,7 @@ impl ResourceResolver for PendingResourcesFixture {
                     std::sync::Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

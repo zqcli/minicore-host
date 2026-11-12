@@ -1,9 +1,8 @@
 # Host compaction engine
 
-The calculation layer for Host-owned compaction. Runtime is fixed at
-`3aa47629929906832dcb309afb7d242c1ae3e53f` (`0.10.0`); it supplies the actual
-Model port, request/response/history types and exchange validation, not a
-compactor. This crate has no Session locks, filesystem access, public Turn,
+The calculation layer for Host-owned compaction. The internal `host-runtime`
+workspace package supplies the shared model driver, native request/response/
+history types and exchange validation. This crate has no Session locks, filesystem access, public Turn,
 control/input queue, retry service or durable operation state.
 
 ## Owner contract
@@ -23,7 +22,8 @@ control/input queue, retry service or durable operation state.
    `None` means no eligible prefix. It neither changes history nor claims that
    context now fits the model.
 3. Await `generate` outside owner locks with the bound `Model` and a real Runtime
-   `ModelCallContext`. The supplied token and deadline reach each actual utility
+   `ModelCallContext`. The shared `ModelDriver` assembles each summary response
+   using one attempt, with no tools. The supplied token and deadline reach each actual utility
    call. Each call's child token is cancelled at EOF/error/cancel/drop before
    another chunk starts; the caller's token is not cancelled. A
    successful model response must finish with Stop and EOF and contain valid,
@@ -65,8 +65,9 @@ estimated request, but need not meet the soft target or fit the context window.
 Missing values and missing token categories remain unknown. Failed/cancelled
 calls retain usage already reported before the failure; `completed` only means
 that call ended with a validated Stop/EOF response. It does not mean complete
-billing data. No byte estimate becomes usage and no retry is added around the
-public Model port.
+billing data. No byte estimate becomes usage. Ordinary and summary calls share
+the same response validation, partial handling and cancellation implementation;
+summary calls explicitly use one attempt.
 
 ## Deliberate first-stage boundaries
 

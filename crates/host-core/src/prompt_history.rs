@@ -1,4 +1,4 @@
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem,
     model::{AssistantPart, ModelMessage, ToolCall},
     prompt::{DefaultPromptProvider, PreparedPrompt, PromptError, PromptProvider, PromptRequest},
@@ -6,8 +6,8 @@ use minicore_runtime::{
 use std::collections::BTreeSet;
 
 /// Prepare native history for one model request, without changing Session or
-/// persisted history. Only unclosed calls in the host's *base* history become
-/// ordinary historical text. The active loop's appended exchanges stay strict.
+/// persisted history. Only unclosed calls from earlier Turns become ordinary
+/// historical text. The current Turn's correlation ID keeps its exchanges strict.
 ///
 /// Complete exchanges use Runtime's default projection unchanged. A mixed
 /// response keeps its parts in order and its complete calls/results associated
@@ -21,16 +21,21 @@ use std::collections::BTreeSet;
 pub async fn prepare_prompt_history(
     request: PromptRequest<'_>,
 ) -> Result<PreparedPrompt, PromptError> {
-    let base = request.history.base();
+    let history = request.history;
+    let current = request.loop_id;
     let mut prompt = DefaultPromptProvider::new(None).prepare(request).await?;
-    for (position, item) in base.iter().enumerate() {
+    for (position, item) in history.iter().enumerate() {
         let HistoryItem::Assistant(assistant) = item else {
             continue;
         };
+        if assistant.loop_id == current {
+            continue;
+        }
         // An exchange ends at the next non-result message. Never match a later
         // Turn's reused provider ID, or close a call with another loop/request.
-        let completed: BTreeSet<_> = base[position + 1..]
+        let completed: BTreeSet<_> = history
             .iter()
+            .skip(position + 1)
             .map_while(|item| match item {
                 HistoryItem::ToolResult(result) => Some(result),
                 _ => None,

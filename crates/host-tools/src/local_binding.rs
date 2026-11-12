@@ -11,11 +11,11 @@ use minicore_host_local_tools::{
     RecordError,
 };
 use minicore_host_protocol::{Fault, FaultKind};
-use minicore_host_workspace::Workspace;
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     tools::{Tool, ToolContext, ToolError, ToolFuture, ToolInvocation, ToolSpec},
 };
+use minicore_host_workspace::Workspace;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},

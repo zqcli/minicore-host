@@ -5,11 +5,11 @@ use std::{
     sync::Arc,
 };
 
-use minicore_host_workspace::{EditOutcome, FileSnapshot, Workspace};
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     tools::{ToolContext, ToolError, ToolExecutionOutcome},
 };
+use minicore_host_workspace::{EditOutcome, FileSnapshot, Workspace};
 use serde::Deserialize;
 use serde_json::{Value, json};
 

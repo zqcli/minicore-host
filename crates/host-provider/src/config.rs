@@ -1,6 +1,6 @@
 use std::{fmt, net::IpAddr, time::Duration};
 
-use minicore_runtime::model::ModelDescriptor;
+use minicore_host_runtime::model::ModelDescriptor;
 use reqwest::{Url, header::HeaderValue};
 use thiserror::Error;
 
@@ -129,7 +129,7 @@ pub enum ProviderConfigError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use minicore_runtime::model::ReasoningPreference;
+    use minicore_host_runtime::model::ReasoningPreference;
     use std::collections::BTreeSet;
 
     fn config(endpoint: &str) -> OpenAiChatConfig {

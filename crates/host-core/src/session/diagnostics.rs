@@ -14,7 +14,7 @@ pub(super) use compaction::{
     compaction_started, compaction_utilities,
 };
 use minicore_host_diagnostics::{Context, EventData, Scope};
-pub(super) use runtime::{model_retry, models_reported};
+pub(super) use runtime::{model_reported, model_retry};
 pub(super) use scheduling::Schedule;
 use tracing::Level;
 
@@ -348,9 +348,9 @@ fn tool_context(source: &ToolCallIdentity) -> Context {
 pub(super) fn tool_finished(
     source: &ToolCallIdentity,
     state: &crate::observation::ToolCallStateData,
-    outcome: minicore_runtime::tools::ToolResultOutcome,
+    outcome: minicore_host_runtime::tools::ToolResultOutcome,
 ) -> Record {
-    use minicore_runtime::tools::ToolResultOutcome;
+    use minicore_host_runtime::tools::ToolResultOutcome;
     Record::new(
         event(
             Level::DEBUG,

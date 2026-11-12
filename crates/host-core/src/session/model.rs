@@ -1,6 +1,6 @@
 use super::*;
 use futures_util::StreamExt;
-use minicore_runtime::model::{
+use minicore_host_runtime::model::{
     Model, ModelCallContext, ModelDescriptor, ModelError, ModelErrorKind, ModelEvent, ModelRequest,
     ModelStartFuture, ModelStream,
 };
@@ -40,9 +40,8 @@ impl Model for TurnModel {
                             .contains_key(&ToolCallId(tool_call_id.as_str().to_owned()))
                     });
                     if duplicate {
-                        // Reject before Runtime assembly: callback-only refusal
-                        // leaves the invalid Assistant in the final report's
-                        // unseen suffix, and may also expose it as a partial.
+                        // Reject before assembly can accept the duplicate call
+                        // as complete history or expose it as a valid partial.
                         return Err(ModelError::started(
                             ModelErrorKind::InvalidProviderResponse,
                             DiagnosticSummary::new(

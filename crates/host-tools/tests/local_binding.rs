@@ -8,10 +8,8 @@ use minicore_host_local_tools::{
     local_tool_specs,
 };
 use minicore_host_protocol::*;
-use minicore_host_tools::*;
-use minicore_host_workspace::{FileSnapshot, Workspace};
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -19,6 +17,8 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::{ToolContext, ToolError, ToolInvocation, ToolSet},
 };
+use minicore_host_tools::*;
+use minicore_host_workspace::{FileSnapshot, Workspace};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -99,7 +99,7 @@ impl LocalToolInvocationSink for FixtureRecords {
 impl LocalToolSink for FixtureRecords {
     fn output(
         &self,
-        call: &minicore_runtime::ToolCallId,
+        call: &minicore_host_runtime::ToolCallId,
         channel: OutputChannel,
         offset: u64,
         bytes: &[u8],
@@ -127,7 +127,7 @@ impl LocalToolSink for FixtureRecords {
     }
     fn edit(
         &self,
-        call: &minicore_runtime::ToolCallId,
+        call: &minicore_host_runtime::ToolCallId,
         edit: CapturedEdit,
     ) -> Result<(), RecordError> {
         assert!(self.outputs.lock().unwrap().contains_key(call.as_str()));
@@ -139,7 +139,7 @@ impl LocalToolSink for FixtureRecords {
     }
     fn command(
         &self,
-        call: &minicore_runtime::ToolCallId,
+        call: &minicore_host_runtime::ToolCallId,
         result: &CommandResult,
     ) -> Result<(), RecordError> {
         assert!(self.outputs.lock().unwrap().contains_key(call.as_str()));
@@ -281,7 +281,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

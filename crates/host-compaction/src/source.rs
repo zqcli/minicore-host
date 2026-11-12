@@ -1,5 +1,5 @@
 use crate::CompactionError;
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem,
     model::{AssistantPart, ModelMessage},
 };

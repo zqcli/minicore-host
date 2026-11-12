@@ -1,12 +1,12 @@
-//! These tests use the real Host owners and AgentLoop. Only model responses are
+//! These tests use real Host/Session owners and internal execution primitives. Model responses are
 //! scripted fixtures; no external provider or TUI validation is implied.
 #[path = "../../../tests/support/input_context.rs"]
 mod input_context;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, HistoryItem, LoopOptions, Text,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions, HistoryItem, Text,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelMessage,
         ModelRequest, ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -101,7 +101,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(Some(prompt))),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

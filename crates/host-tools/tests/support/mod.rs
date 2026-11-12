@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 //! Explicit owner-port fixtures. These are NOT a real Host integration.
 use minicore_host_protocol::*;
+use minicore_host_runtime::tools::{Tool, ToolContext, ToolExecutionOutcome, ToolInvocation};
 use minicore_host_tools::*;
-use minicore_runtime::tools::{Tool, ToolContext, ToolExecutionOutcome, ToolInvocation};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,

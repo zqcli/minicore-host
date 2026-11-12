@@ -1,4 +1,4 @@
-use minicore_runtime::tools::ToolSpec;
+use minicore_host_runtime::tools::ToolSpec;
 use serde_json::{Map, Value, json};
 
 /// One declaration is reused for discovery and the selected Runtime ToolSet.

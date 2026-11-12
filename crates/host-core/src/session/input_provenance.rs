@@ -1,7 +1,7 @@
 //! Missing input facts, owned and indexed by the Session's native history.
 //! This is not an inbox or another transcript: it holds no text or authority.
 use super::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     model::ModelMessage,
     prompt::{PreparedPrompt, PromptError},
 };
@@ -70,36 +70,36 @@ impl InputProvenance {
         }
     }
 
-    /// Only an actually appended, still-unhanded UserHistory may consume this
-    /// FIFO metadata. Queued follow_up/steer entries are never inspected here.
-    pub(super) fn append_unhanded(
-        &mut self,
-        offset: usize,
-        items: &[HistoryItem],
-        active: Option<&ActiveTurn>,
-    ) -> Result<(), Fault> {
-        let mut pending = active.into_iter().flat_map(|turn| &turn.bound_pending);
-        for (position, item) in items.iter().enumerate() {
-            let HistoryItem::User(user) = item else {
-                continue;
-            };
-            let input = pending.next().ok_or_else(invalid_binding)?;
-            if active.and_then(|turn| turn.loop_id) != Some(user.loop_id)
-                || input.runtime != user.input
-            {
-                return Err(invalid_binding());
+    pub(super) fn entry(
+        &self,
+        position: usize,
+        turn_id: &TurnId,
+        item: &HistoryItem,
+    ) -> Result<HistoryEntry, Fault> {
+        match item {
+            HistoryItem::User(user) => {
+                let context = self.0.get(&position).ok_or_else(invalid_binding)?;
+                Ok(HistoryEntry::Input {
+                    turn_id: turn_id.clone(),
+                    message_id: context.message_id.clone(),
+                    source: context.source.clone(),
+                    mode: context.mode,
+                    in_reply_to: context.in_reply_to.clone(),
+                    user: user.clone(),
+                })
             }
-            self.0.insert(
-                offset + position,
-                InputContext {
-                    message_id: input.message.message_id.clone(),
-                    source: input.source.clone(),
-                    mode: input.message.mode,
-                    in_reply_to: input.message.in_reply_to.clone(),
-                },
-            );
+            HistoryItem::Assistant(value) => Ok(HistoryEntry::Runtime {
+                turn_id: turn_id.clone(),
+                response_index: value.request_index,
+                item: item.clone(),
+            }),
+            HistoryItem::ToolResult(value) => Ok(HistoryEntry::Runtime {
+                turn_id: turn_id.clone(),
+                response_index: value.request_index,
+                item: item.clone(),
+            }),
+            HistoryItem::Summary(_) => Err(invalid_binding()),
         }
-        Ok(())
     }
 
     /// Request-local rendering, after the bound provider has added its fixed
@@ -108,7 +108,7 @@ impl InputProvenance {
     /// never changes Role, instructions, runtime input or persisted bytes.
     pub(super) fn project(
         &self,
-        items: &[HistoryItem],
+        items: minicore_host_runtime::HistoryView<'_>,
         mut prompt: PreparedPrompt,
     ) -> Result<PreparedPrompt, PromptError> {
         let offset = prompt
@@ -117,7 +117,12 @@ impl InputProvenance {
             .checked_sub(items.len())
             .ok_or(PromptError::InvalidHistory)?;
         for (position, context) in &self.0 {
-            let Some(HistoryItem::User(user)) = items.get(*position) else {
+            let item = if *position < items.base().len() {
+                items.base().get(*position)
+            } else {
+                items.appended().get(*position - items.base().len())
+            };
+            let Some(HistoryItem::User(user)) = item else {
                 return Err(PromptError::InvalidHistory);
             };
             let message = &mut prompt.messages[offset + position];

@@ -7,7 +7,7 @@ use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
 use minicore_host_resources::{HostCredentials, HostResourceBuilder};
-use minicore_runtime::HistoryItem;
+use minicore_host_runtime::HistoryItem;
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::{

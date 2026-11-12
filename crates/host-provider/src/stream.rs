@@ -2,7 +2,7 @@ use std::{collections::VecDeque, pin::Pin};
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     model::{ModelError, ModelErrorKind, ModelEvent, ModelFinishReason, ProviderReplay, Usage},
     tools::ToolName,

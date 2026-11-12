@@ -9,7 +9,7 @@ description = "OpenAI-compatible HTTP/SSE Model adapter for MiniCore Host"
 [dependencies]
 minicore-host-diagnostics.workspace = true
 tracing = { workspace = true, features = ["std"] }
-minicore-runtime.workspace = true
+minicore-host-runtime.workspace = true
 bytes.workspace = true
 futures-util.workspace = true
 httpdate.workspace = true

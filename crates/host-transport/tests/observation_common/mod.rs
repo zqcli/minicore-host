@@ -1,10 +1,10 @@
 #![allow(dead_code)]
-//! Real owners and AgentLoop, with explicitly scripted/gated model and file tool.
+//! Real owners and internal execution primitives, with explicitly scripted/gated model and file tool.
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -54,7 +54,7 @@ impl Model for ScriptedModel {
 }
 pub struct Resources {
     pub model: Arc<dyn Model>,
-    pub tool: Option<Arc<dyn minicore_runtime::tools::Tool>>,
+    pub tool: Option<Arc<dyn minicore_host_runtime::tools::Tool>>,
 }
 impl ResourceResolver for Resources {
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
@@ -75,7 +75,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -101,7 +101,7 @@ impl ResourceResolver for Resources {
 }
 pub fn resources(
     rounds: usize,
-    tool: Option<Arc<dyn minicore_runtime::tools::Tool>>,
+    tool: Option<Arc<dyn minicore_host_runtime::tools::Tool>>,
 ) -> (
     Arc<dyn ResourceResolver>,
     Vec<Events>,
@@ -188,7 +188,7 @@ pub async fn turn_finished(
 
 pub fn setup(
     rounds: usize,
-    tool: Option<Arc<dyn minicore_runtime::tools::Tool>>,
+    tool: Option<Arc<dyn minicore_host_runtime::tools::Tool>>,
 ) -> (Arc<Host>, Vec<Events>, mpsc::UnboundedReceiver<()>) {
     let (resources, inputs, starts) = resources(rounds, tool);
     (Host::memory(resources).unwrap(), inputs, starts)

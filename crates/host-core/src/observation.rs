@@ -2,7 +2,7 @@
 use crate::control::{CallerContext, ConnectionRegistry};
 use crate::types::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{AssistantHistory, ToolResultHistory};
+use minicore_host_runtime::{AssistantHistory, ToolResultHistory};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, Weak};
@@ -61,7 +61,7 @@ pub struct ToolCallStateData {
     pub progress: Option<ToolProgressData>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub delegations: Vec<crate::DelegationAssociation>,
-    pub outcome: Option<minicore_runtime::tools::ToolResultOutcome>,
+    pub outcome: Option<minicore_host_runtime::tools::ToolResultOutcome>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolCallData {
@@ -72,9 +72,9 @@ pub struct ToolCallData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelResponseData {
-    pub content: Vec<minicore_runtime::model::AssistantPart>,
-    pub finish_reason: minicore_runtime::model::ModelFinishReason,
-    pub usage: minicore_runtime::model::Usage,
+    pub content: Vec<minicore_host_runtime::model::AssistantPart>,
+    pub finish_reason: minicore_host_runtime::model::ModelFinishReason,
+    pub usage: minicore_host_runtime::model::Usage,
 }
 impl From<&AssistantHistory> for ModelResponseData {
     fn from(value: &AssistantHistory) -> Self {
@@ -87,8 +87,8 @@ impl From<&AssistantHistory> for ModelResponseData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolResultData {
-    pub outcome: minicore_runtime::tools::ToolResultOutcome,
-    pub output: minicore_runtime::tools::ToolOutput,
+    pub outcome: minicore_host_runtime::tools::ToolResultOutcome,
+    pub output: minicore_host_runtime::tools::ToolOutput,
 }
 impl From<&ToolResultHistory> for ToolResultData {
     fn from(value: &ToolResultHistory) -> Self {
@@ -162,7 +162,7 @@ pub enum InteractionRequestData {
         risk: ApprovalRiskData,
     },
     ToolInput {
-        request: minicore_runtime::tools::ToolInputRequest,
+        request: minicore_host_runtime::tools::ToolInputRequest,
     },
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -174,22 +174,24 @@ pub struct PendingInteractionData {
 }
 impl PendingInteractionData {
     pub(crate) fn from_runtime(
-        value: &minicore_runtime::interaction::PendingInteraction,
+        value: &minicore_host_runtime::interaction::PendingInteraction,
         interaction_id: InteractionId,
     ) -> Self {
         let request = match &value.kind {
-            minicore_runtime::interaction::InteractionKind::ToolInput(request) => {
+            minicore_host_runtime::interaction::InteractionKind::ToolInput(request) => {
                 InteractionRequestData::ToolInput {
                     request: request.clone(),
                 }
             }
-            minicore_runtime::interaction::InteractionKind::Approval(request) => {
+            minicore_host_runtime::interaction::InteractionKind::Approval(request) => {
                 InteractionRequestData::Approval {
                     prompt: request.prompt.as_str().to_owned(),
                     risk: match request.risk {
-                        minicore_runtime::tools::ApprovalRisk::Low => ApprovalRiskData::Low,
-                        minicore_runtime::tools::ApprovalRisk::Medium => ApprovalRiskData::Medium,
-                        minicore_runtime::tools::ApprovalRisk::High => ApprovalRiskData::High,
+                        minicore_host_runtime::tools::ApprovalRisk::Low => ApprovalRiskData::Low,
+                        minicore_host_runtime::tools::ApprovalRisk::Medium => {
+                            ApprovalRiskData::Medium
+                        }
+                        minicore_host_runtime::tools::ApprovalRisk::High => ApprovalRiskData::High,
                     },
                 }
             }

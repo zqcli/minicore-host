@@ -3,16 +3,15 @@ use crate::{
     plan::{serialized_request_bytes, serialized_string_content_bytes},
     source::group_data,
 };
-use futures_util::StreamExt;
-use minicore_runtime::{
+use minicore_host_runtime::{
     SummaryHistory, Text,
     model::{
-        AssistantPart, Model, ModelCallContext, ModelEvent, ModelFinishReason, ModelMessage,
-        ModelRequest, ModelResponse, ProviderReplay, Usage,
+        AssistantPart, Model, ModelCallContext, ModelDriver, ModelDriverConfig, ModelErrorKind,
+        ModelFinishReason, ModelMessage, ModelRequest, Usage,
     },
 };
 use serde_json::{Value, json};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const SYSTEM: &str = "Summarize historical conversation data for continued work. \
 Preserve the user's goals, decisions, constraints, concrete facts, unresolved work, \
@@ -40,15 +39,7 @@ pub struct GenerationFailure {
     pub utility_usage: Vec<UtilityUsage>,
 }
 
-/// Run no-tools summary calls on the original bound model. There is no new
-/// public Turn, no tool execution, and no Host retry loop. Runtime's low-level
-/// ModelDriver is private; this utility uses the public Model port once per
-/// source chunk and preserves its actual errors. The caller supplies Runtime
-/// correlation and the operation's real cancellation/deadline.
-///
-/// Chunks contain whole historical exchanges. Context-derived chunk goals are
-/// soft: an oversized indivisible group is sent intact for the provider to
-/// accept or reject. No text, tool output or generated summary is byte-capped.
+/// Generate no-tools summaries through the shared model driver with one attempt per chunk.
 pub async fn generate(
     plan: &CompactionPlan,
     model: &dyn Model,
@@ -75,7 +66,15 @@ async fn generate_inner(
     usage: &mut Vec<UtilityUsage>,
 ) -> Result<CompactionCandidate, CompactionError> {
     check_active(&context)?;
-    if model.descriptor() != &plan.descriptor {
+    let driver = ModelDriver::new(
+        model,
+        ModelDriverConfig::new(
+            Duration::from_secs(24 * 60 * 60),
+            1,
+            Duration::from_millis(100),
+        ),
+    )?;
+    if driver.descriptor() != &plan.descriptor {
         return Err(CompactionError::ModelChanged);
     }
     let mut position = 0;
@@ -131,7 +130,7 @@ async fn generate_inner(
             completed: false,
         };
         let result = call_model(
-            model,
+            &driver,
             request,
             ModelCallContext::new(
                 context.loop_id,
@@ -143,18 +142,7 @@ async fn generate_inner(
         )
         .await;
         usage.push(observation);
-        let response = result?;
-        let content: String = response
-            .parts()
-            .iter()
-            .filter_map(|part| match part {
-                AssistantPart::Text(text) => Some(text.as_ref()),
-                _ => None,
-            })
-            .collect();
-        previous = Some(SummaryHistory {
-            content: Text::new(content),
-        });
+        previous = Some(SummaryHistory { content: result? });
         position = end;
     }
     check_active(&context)?;
@@ -225,94 +213,50 @@ fn check_active(context: &ModelCallContext) -> Result<(), CompactionError> {
 }
 
 async fn call_model(
-    model: &dyn Model,
+    driver: &ModelDriver<'_>,
     request: ModelRequest,
     context: ModelCallContext,
     observation: &mut UtilityUsage,
-) -> Result<ModelResponse, CompactionError> {
-    // Each actual call owns a separate child, cancelled on every exit,
-    // including successful EOF before another chunk starts. The parent token
-    // is never cancelled by this calculation.
-    let context = ModelCallContext {
-        cancellation: context.cancellation.child_token(),
-        ..context
-    };
-    let _cancel_on_drop = context.cancellation.clone().drop_guard();
+) -> Result<Text, CompactionError> {
     check_active(&context)?;
-    let deadline = tokio::time::Instant::from_std(context.deadline);
-    let mut stream = tokio::select! {
-        biased;
-        _ = context.cancellation.cancelled() => return Err(CompactionError::Cancelled),
-        result = tokio::time::timeout_at(deadline, model.start(request, context.clone())) => {
-            result.map_err(|_| CompactionError::Timeout)??
+    let report = driver.call(request, context, &mut |_| {}).await;
+    let response = match report.outcome {
+        Ok(response) => response,
+        Err(failure) => {
+            observation.usage = failure.usage;
+            return Err(match failure.error().kind() {
+                ModelErrorKind::Cancelled => CompactionError::Cancelled,
+                ModelErrorKind::Timeout => CompactionError::Timeout,
+                ModelErrorKind::UnexpectedToolCall => CompactionError::UnexpectedToolCall,
+                ModelErrorKind::InvalidProviderResponse | ModelErrorKind::IncompleteResponse => {
+                    CompactionError::InvalidResponse
+                }
+                _ => CompactionError::Model(failure.into_error()),
+            });
         }
     };
-    let mut text = String::new();
-    let mut finished = false;
-    let mut replay: Option<ProviderReplay> = None;
-    loop {
-        check_active(&context)?;
-        let event = tokio::select! {
-            biased;
-            _ = context.cancellation.cancelled() => return Err(CompactionError::Cancelled),
-            result = tokio::time::timeout_at(deadline, stream.next()) => {
-                result.map_err(|_| CompactionError::Timeout)?
-            }
-        };
-        let Some(event) = event else {
-            if !finished || text.trim().is_empty() {
-                return Err(CompactionError::InvalidResponse);
-            }
-            // Runtime's public response constructor owns raw model-text
-            // normalization, including CRLF split across delta boundaries.
-            let response = ModelResponse::new_with_provider_replay(
-                vec![AssistantPart::Text(text.into())],
-                ModelFinishReason::Stop,
-                observation.usage,
-                replay,
-            )
-            .map_err(|_| CompactionError::InvalidResponse)?;
-            let Some(AssistantPart::Text(text)) = response.parts().first() else {
-                return Err(CompactionError::InvalidResponse);
-            };
-            if text.trim().is_empty() {
-                return Err(CompactionError::InvalidResponse);
-            }
-            ModelMessage::system(text.to_string()).map_err(|_| CompactionError::InvalidResponse)?;
-            observation.completed = true;
-            return Ok(response);
-        };
-        let event = event?;
-        if finished {
-            return Err(CompactionError::InvalidResponse);
-        }
-        match event {
-            ModelEvent::TextDelta { delta } => text.push_str(delta.as_str()),
-            // Reasoning is not the final summary, nor is it billed from bytes.
-            ModelEvent::ReasoningDelta { .. } => {}
-            ModelEvent::ToolCallStart { .. }
-            | ModelEvent::ToolCallArgumentsDelta { .. }
-            | ModelEvent::ToolCallEnd { .. } => return Err(CompactionError::UnexpectedToolCall),
-            ModelEvent::Usage { usage } => {
-                if observation.usage.replace(usage).is_some() {
-                    // Duplicate reports are ambiguous, not an additive total.
-                    observation.usage = None;
-                    return Err(CompactionError::InvalidResponse);
-                }
-            }
-            ModelEvent::ProviderReplay { replay: value } => {
-                if replay.replace(value).is_some() {
-                    return Err(CompactionError::InvalidResponse);
-                }
-            }
-            ModelEvent::Finish { reason } => {
-                if reason != ModelFinishReason::Stop {
-                    return Err(CompactionError::InvalidResponse);
-                }
-                finished = true;
-            }
-        }
+    observation.usage = response.usage().copied();
+    if response.finish_reason() != ModelFinishReason::Stop {
+        return Err(CompactionError::InvalidResponse);
     }
+    let text: String = response
+        .parts()
+        .iter()
+        .filter_map(|part| match part {
+            AssistantPart::Text(text) => Some(text.as_ref()),
+            _ => None,
+        })
+        .collect();
+    if text.trim().is_empty() {
+        return Err(CompactionError::InvalidResponse);
+    }
+    let ModelMessage::System(text) =
+        ModelMessage::system(text).map_err(|_| CompactionError::InvalidResponse)?
+    else {
+        unreachable!("the system constructor returns a system message")
+    };
+    observation.completed = true;
+    Ok(Text::new(text.as_ref()))
 }
 
 #[cfg(test)]

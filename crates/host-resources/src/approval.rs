@@ -2,11 +2,11 @@
 //! f36a873, with Host's validated six-action agent tool in place of old names.
 //! There is no approval cache or second interaction owner.
 use minicore_host_protocol::ApprovalMode;
-use minicore_host_tools::AgentAction;
-use minicore_runtime::tools::{
+use minicore_host_runtime::tools::{
     ApprovalRequest, ApprovalRisk, ToolDecision, ToolPolicy, ToolPolicyError, ToolPolicyFuture,
     ToolPolicyRequest,
 };
+use minicore_host_tools::AgentAction;
 use std::time::Instant;
 
 const READ_ONLY_DENIAL: &str = "tool is not allowed in read-only mode";

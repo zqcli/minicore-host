@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     tools::{ToolContext, ToolError, ToolExecutionOutcome},
 };

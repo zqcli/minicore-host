@@ -1,5 +1,5 @@
 use super::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     Text, ToolCallId,
     history::SummaryHistory,
     model::{ModelPartial, ToolCall},

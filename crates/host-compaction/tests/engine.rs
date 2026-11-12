@@ -3,7 +3,7 @@
 use futures_util::StreamExt;
 use minicore_host_compaction::*;
 use minicore_host_protocol::CompactionSettings;
-use minicore_runtime::{
+use minicore_host_runtime::{
     AssistantHistory, HistoryItem, HistoryView, LoopId, SummaryHistory, Text, ToolCallId,
     ToolResultHistory, UserHistory, UserInput, UserMessageKind,
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
@@ -102,11 +102,11 @@ impl Model for ScriptedModel {
                             std::future::pending().await
                         }),
                     );
-                    return Ok(Box::pin(stream) as minicore_runtime::model::ModelStream);
+                    return Ok(Box::pin(stream) as minicore_host_runtime::model::ModelStream);
                 }
             };
             Ok(Box::pin(futures_util::stream::iter(events))
-                as minicore_runtime::model::ModelStream)
+                as minicore_host_runtime::model::ModelStream)
         })
     }
 }
@@ -765,16 +765,36 @@ async fn provider_failure_preserves_real_error_usage_and_never_retries() {
         .unwrap(),
     );
     let usage = Usage::new(12, 8, 0);
-    let model = ScriptedModel::new(
-        1000,
-        Script::Events(vec![Ok(ModelEvent::Usage { usage }), Err(actual.clone())]),
-    );
-    let error = generate(&plan(&model).await, &model, context())
-        .await
-        .unwrap_err();
-    assert_eq!(error.error, CompactionError::Model(actual));
-    assert_eq!(error.utility_usage[0].usage, Some(usage));
-    assert_eq!(model.requests.lock().unwrap().len(), 1);
+    for started in [false, true] {
+        let mut events = Vec::new();
+        if started {
+            events.push(Ok(ModelEvent::Usage { usage }));
+        }
+        events.push(Err(actual.clone()));
+        let model = ScriptedModel::new(1000, Script::Events(events));
+        let error = generate(&plan(&model).await, &model, context())
+            .await
+            .unwrap_err();
+        let expected = if started {
+            // A real stream event takes precedence over a provider's stale
+            // NotStarted hint, exactly as for an ordinary model request.
+            ModelError::started(
+                ModelErrorKind::RateLimited,
+                DiagnosticSummary::new(
+                    DiagnosticCode::ModelUnavailable,
+                    DiagnosticCategory::Model,
+                    Text::new("scripted rejected request"),
+                    false,
+                )
+                .unwrap(),
+            )
+        } else {
+            actual.clone()
+        };
+        assert_eq!(error.error, CompactionError::Model(expected));
+        assert_eq!(error.utility_usage[0].usage, started.then_some(usage));
+        assert_eq!(model.requests.lock().unwrap().len(), 1);
+    }
 }
 
 #[tokio::test]

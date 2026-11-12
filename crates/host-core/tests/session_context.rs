@@ -2,10 +2,8 @@
 //! are explicitly scripted fixtures, not live-provider or TUI validation.
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_host_storage::*;
-use minicore_runtime::{
-    AssistantHistory, ExecutionConfig, HistoryItem, LoopId, LoopOptions, Text, UserHistory,
+use minicore_host_runtime::{
+    AssistantHistory, ExecutionConfig, ExecutionOptions, HistoryItem, LoopId, Text, UserHistory,
     UserInput, UserMessageKind,
     model::{
         AssistantPart, Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason,
@@ -15,6 +13,8 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::testing::read_history_bytes;
+use minicore_host_storage::*;
 use std::{
     collections::{BTreeSet, VecDeque},
     path::{Path, PathBuf},
@@ -150,7 +150,7 @@ impl ResourceResolver for Resources {
                     )))),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -410,8 +410,8 @@ async fn gated_active_and_continuation_bindings_remain_frozen_across_config_and_
     let turn_id = original.turn_id.clone();
     assert_eq!(
         before.data.history.as_ref().unwrap().raw_items,
-        0,
-        "unhanded Runtime input is not accepted native history"
+        1,
+        "Session-authored input is readable before the model response"
     );
     assert_eq!(original.config_revision, 0);
     assert_eq!(original.model.context_window, 4096);
@@ -472,13 +472,13 @@ async fn gated_active_and_continuation_bindings_remain_frozen_across_config_and_
         assert_eq!(binding.config_revision, 0);
         assert_eq!(binding.model.context_window, 4096);
         assert_eq!(binding.compaction_settings.target_percent, 20);
-        assert_eq!(context.data.history.as_ref().unwrap().raw_items, 0);
+        assert_eq!(context.data.history.as_ref().unwrap().raw_items, 1);
     }
     assert_eq!(new_resources.resolves.load(Ordering::SeqCst), 0);
     first.add_permits(1);
     entered(&old_model.entered).await;
     let continuation = host.session_context(&caller, &target).await.unwrap();
-    assert_eq!(continuation.data.history.as_ref().unwrap().raw_items, 2);
+    assert_eq!(continuation.data.history.as_ref().unwrap().raw_items, 3);
     assert_eq!(continuation.data.active_turn.unwrap().turn_id, turn_id);
     second.add_permits(1);
     turn_finished(&host, &caller, &target, 1).await;
@@ -999,8 +999,8 @@ async fn automatic_compaction_context_is_owned_by_active_turn_and_query_never_la
         let snapshot = host.session_context(&caller, &target).await.unwrap();
         assert_eq!(
             snapshot.data.history.as_ref().unwrap().raw_items,
-            6,
-            "new input remains unhanded during preparation"
+            7,
+            "new input is accepted once and protected from compaction until saved"
         );
         assert!(snapshot.data.history.as_ref().unwrap().projection.is_none());
     }
@@ -1050,7 +1050,7 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
     )
     .unwrap();
     // The first request has no accepted prefix to compact. Its complete handoff
-    // becomes eligible at the next internal Loop in this same public Turn.
+    // becomes eligible at the next model request in this same public Turn.
     host.send(
         &caller,
         SendMessage::new(
@@ -1119,7 +1119,7 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
     let finished = host.session_context(&caller, &target).await.unwrap();
     let work = finished.data.compaction.as_ref().unwrap();
     assert_eq!(serde_json::to_value(&work.source).unwrap(), source);
-    assert_eq!(work.utility_usage.first().unwrap().request_index, 0);
+    assert_eq!(work.utility_usage.first().unwrap().request_index, 1);
     assert_eq!(host.turn_info(&caller, &target, &turn).unwrap().requests, 2);
     let history = host.history(&caller, &target).unwrap();
     let responses: Vec<_> = history
@@ -1130,9 +1130,9 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
         })
         .collect();
     assert_eq!(responses.len(), 2);
-    assert_ne!(responses[0].loop_id, responses[1].loop_id);
+    assert_eq!(responses[0].loop_id, responses[1].loop_id);
     assert_eq!(responses[0].request_index, 0);
-    assert_eq!(responses[1].request_index, 0);
+    assert_eq!(responses[1].request_index, 1);
 }
 
 async fn next_event(subscription: &mut EventSubscription) -> ObservationEvent {
@@ -1187,7 +1187,7 @@ async fn accepted_history_and_save_are_published_together(mode: StorageMode) {
         entered(&model.entered).await;
         let context = host.session_context(&caller, &target).await.unwrap();
         let history = context.data.history.as_ref().unwrap();
-        assert_eq!(history.raw_items, response_index * 2);
+        assert_eq!(history.raw_items, response_index * 2 + 1);
         assert_eq!(history.position, response_index * 2);
         assert!(!context.data.history_save.pending);
         let turn_id = &context.data.active_turn.as_ref().unwrap().turn_id;
@@ -1206,7 +1206,7 @@ async fn accepted_history_and_save_are_published_together(mode: StorageMode) {
                     .unwrap()
                     .persistence,
                 if mode == StorageMode::Persistent {
-                    PersistenceState::Persisted
+                    PersistenceState::Pending
                 } else {
                     PersistenceState::NotApplicable
                 }

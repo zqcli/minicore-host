@@ -324,7 +324,7 @@ impl SessionState {
                 raw.push(item);
             }
         }
-        self.history = raw;
+        self.history = Arc::new(raw);
         self.input_provenance = input_provenance;
         self.history_position = entries.len() as u64;
         self.projection = projection;

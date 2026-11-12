@@ -54,11 +54,12 @@ cargo build --package minicore-host --release --locked --target <target>
 ```
 
 Cargo compiles the Runtime library through Host's existing dependencies and
-links it into `minicore-host` (`minicore-host.exe` on Windows). Runtime remains
-version **0.10.0**, fixed to commit
-`3aa47629929906832dcb309afb7d242c1ae3e53f` in the workspace manifest and lockfile.
-The workflow does not check out a different Runtime branch or build a separate
-Runtime process. Host/Runtime request and ownership interfaces are unchanged.
+links it into `minicore-host` (`minicore-host.exe` on Windows). Runtime is now
+the internal `crates/host-runtime` package; all workspace packages use version
+**0.10.1**. Its source was imported from the previously pinned Runtime commit
+`3aa47629929906832dcb309afb7d242c1ae3e53f`, then refactored under SPEC 4.10.1.
+Session owns the complete Turn and calls model/tool primitives directly.
+CI builds that same workspace; no separate Runtime repository or process is needed.
 
 ## Packages
 

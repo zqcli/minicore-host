@@ -4,7 +4,7 @@ use super::*;
 use crate::{
     DelegationCompletion, DelegationRegistration, DelegationSink, OwnerFuture, ScopeHooks,
 };
-use minicore_runtime::{
+use minicore_host_runtime::{
     AssistantHistory, UserHistory, UserMessageKind,
     model::{AssistantPart, Usage},
 };

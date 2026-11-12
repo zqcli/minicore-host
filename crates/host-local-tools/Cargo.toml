@@ -8,7 +8,7 @@ description = "Workspace-bound local filesystem and process tools for MiniCore H
 
 [dependencies]
 minicore-host-workspace.workspace = true
-minicore-runtime.workspace = true
+minicore-host-runtime.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tokio = { workspace = true, default-features = true, features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }

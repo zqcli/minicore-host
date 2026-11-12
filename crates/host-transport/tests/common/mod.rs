@@ -4,9 +4,8 @@ pub mod pipes;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_transport::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -14,6 +13,7 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_transport::*;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -130,7 +130,7 @@ impl ResourceResolver for FixtureResources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

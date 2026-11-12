@@ -1,9 +1,10 @@
 use super::*;
 use crate::{ContextEstimate, HistorySnapshot};
-use minicore_runtime::{
+use minicore_host_runtime::{
     AssistantHistory, HistoryItem, LoopId, ToolResultHistory,
     model::{
-        ModelDescriptor, ModelLimits, ModelStartFuture, ModelStream, ReasoningPreference, ToolCall,
+        ModelDescriptor, ModelEvent, ModelLimits, ModelStartFuture, ModelStream,
+        ReasoningPreference, ToolCall,
     },
     tools::{ToolOutput, ToolResultOutcome},
 };
@@ -192,7 +193,9 @@ fn full_request_chunks(plan: &CompactionPlan, records: &[Value]) -> Vec<Vec<u8>>
 async fn chunk_boundaries_and_requests_match_full_estimation_including_oversized_groups() {
     let mut plan = plan(
         ReasoningPreference::High,
-        ModelLimits::new(Some(4096), Some(97)).unwrap(),
+        // Vary the actual descriptor below without declaring a larger fixed
+        // context limit, which the shared model driver correctly rejects.
+        ModelLimits::new(None, Some(97)).unwrap(),
     );
     let records = records(&plan);
     let boundary =

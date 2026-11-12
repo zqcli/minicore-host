@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Strict MiniCore Host v4.93 shared contracts"
+description = "Strict MiniCore Host v4.10.1 shared contracts"
 
 [dependencies]
 getrandom.workspace = true

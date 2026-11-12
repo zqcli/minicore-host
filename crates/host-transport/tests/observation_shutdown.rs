@@ -4,8 +4,8 @@ mod observation_common;
 mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
+use minicore_host_runtime::model::ModelEvent;
 use minicore_host_transport::*;
-use minicore_runtime::model::ModelEvent;
 use observation_common::*;
 use serde_json::{Value, json};
 use std::{

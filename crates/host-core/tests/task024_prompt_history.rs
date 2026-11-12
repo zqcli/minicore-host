@@ -8,9 +8,8 @@ mod support;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_host_storage::*;
-use minicore_runtime::{
-    ExecutionConfig, HistoryItem, LoopId, LoopOptions, Text, ToolCallId, UserInput,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions, HistoryItem, LoopId, Text, ToolCallId, UserInput,
     history::{
         AssistantHistory, HistoryView, SummaryHistory, ToolResultHistory, UserHistory,
         UserMessageKind,
@@ -26,6 +25,7 @@ use minicore_runtime::{
         ToolResultOutcome, ToolSet, ToolSpec,
     },
 };
+use minicore_host_storage::*;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
@@ -279,9 +279,9 @@ async fn current_loop_incomplete_exchange_is_not_reclassified_as_old_history() {
     let id = LoopId::new().unwrap();
     let appended = vec![user(id, "new"), assistant(id, vec![call("new-pending", 0)])];
     let model = descriptor();
-    let projected = prepare_prompt_history(prompt_request(&[], &appended, &model))
-        .await
-        .unwrap();
+    let mut request = prompt_request(&[], &appended, &model);
+    request.loop_id = id;
+    let projected = prepare_prompt_history(request).await.unwrap();
     assert_eq!(
         model_request(projected.messages).unwrap_err(),
         ModelValueError::IncompleteToolExchange
@@ -358,7 +358,7 @@ impl ResourceResolver for ResourcesFixture {
                     Arc::new(ProjectionPromptFixture),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

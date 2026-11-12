@@ -1,7 +1,7 @@
 # Host tools
 
 The statically compiled `agent` tool reuses Runtime `ToolSpec`, `Tool`, and
-`ToolSet`. Its model inputs expose only the six actions in SPEC v4.93 §7.
+`ToolSet`. Its model inputs expose only the six actions in SPEC v4.10.1 §7.
 Identity, operation/message ID generation, source capabilities, and configuration
 revision selection are backend responsibilities, never model-supplied authority.
 
@@ -18,7 +18,7 @@ adapter must receive necessary actual results before a memory child releases.
 with the selected `SessionConfig.tools`, then use the resulting real `ToolSet`
 in the returned `ExecutionConfig`. Binding is fallible before Session claims
 input. The capability remains inactive until the owner's matching claim and
-expires when that public Turn ends. All internal loops keep that frozen set.
+expires when that public Turn ends. Every step keeps that frozen set.
 The later `bind_tool_output` hook is only for infallible output wrapping.
 
 The production bridge forwards operations to core capabilities. It never

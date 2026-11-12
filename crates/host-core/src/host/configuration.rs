@@ -4,7 +4,7 @@ use crate::configuration::{
     HostConfigSnapshot, HostReloadResult, ModelDescription, PublishedConfiguration,
 };
 use crate::persistence::disk;
-use minicore_runtime::tools::ToolSpec;
+use minicore_host_runtime::tools::ToolSpec;
 use tokio::sync::oneshot;
 
 impl Host {

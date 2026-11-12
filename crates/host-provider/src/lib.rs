@@ -18,7 +18,7 @@ pub use config::{OpenAiChatConfig, ProviderConfigError, SecretApiKey};
 use std::{fmt, time::Instant};
 
 use futures_util::{StreamExt, stream as futures_stream};
-use minicore_runtime::model::{
+use minicore_host_runtime::model::{
     Model, ModelCallContext, ModelDescriptor, ModelError, ModelErrorKind, ModelRequest,
     ModelStartFuture, ModelStream,
 };

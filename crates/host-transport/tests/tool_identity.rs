@@ -6,8 +6,7 @@ mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_transport::{HostClient, SessionClient};
-use minicore_runtime::{
+use minicore_host_runtime::{
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelError, ModelErrorKind, ModelEvent,
@@ -17,6 +16,7 @@ use minicore_runtime::{
         Tool, ToolContext, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput, ToolSpec,
     },
 };
+use minicore_host_transport::{HostClient, SessionClient};
 use observation_common::*;
 use std::{
     sync::{
@@ -70,7 +70,7 @@ impl Model for RetryFixture {
                     DiagnosticSummary::new(
                         DiagnosticCode::ModelUnavailable,
                         DiagnosticCategory::Model,
-                        minicore_runtime::Text::new("scripted pre-delivery retry"),
+                        minicore_host_runtime::Text::new("scripted pre-delivery retry"),
                         true,
                     )
                     .unwrap(),
@@ -159,7 +159,7 @@ impl Fixture {
 }
 
 fn invocation(events: &Events, id: &str, text: &str) {
-    let id: minicore_runtime::ToolCallId = id.parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = id.parse().unwrap();
     events
         .send(ModelEvent::ToolCallStart {
             tool_call_id: id.clone(),

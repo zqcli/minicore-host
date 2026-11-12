@@ -1,0 +1,40 @@
+{
+  "scope": "correctness smoke only; timings deliberately omitted during concurrent builds",
+  "baseline_source": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+  "checks": [
+    {
+      "seed_turns": 0,
+      "same_turn_requests": 16,
+      "verified": true,
+      "full_dialogue_verified": true,
+      "user_provenance_verified": true,
+      "first_request_body_bytes": 361
+    },
+    {
+      "seed_turns": 64,
+      "same_turn_requests": 8,
+      "verified": true,
+      "full_dialogue_verified": true,
+      "user_provenance_verified": true,
+      "first_request_body_bytes": 276905
+    }
+  ],
+  "compaction_cases": [
+    {
+      "historical_groups": 256,
+      "body_bytes": 1024,
+      "covered_items": 247,
+      "utility_calls": 1,
+      "before_tokens": 73640,
+      "after_tokens": 2653
+    },
+    {
+      "historical_groups": 1024,
+      "body_bytes": 1024,
+      "covered_items": 987,
+      "utility_calls": 1,
+      "before_tokens": 294440,
+      "after_tokens": 10703
+    }
+  ]
+}

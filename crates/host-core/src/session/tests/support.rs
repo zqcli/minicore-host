@@ -62,7 +62,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -367,7 +367,7 @@ pub(super) fn assert_single_terminal(fixture: &Fixture, outcome: TurnOutcome, pa
 }
 
 pub(super) struct PartialUntilCancelled {
-    pub(super) descriptor: minicore_runtime::model::ModelDescriptor,
+    pub(super) descriptor: minicore_host_runtime::model::ModelDescriptor,
     pub(super) consumed_delta: Arc<Semaphore>,
 }
 impl Model for PartialUntilCancelled {
@@ -502,7 +502,7 @@ pub(super) struct CancelDropPanicModel {
 }
 pub(super) struct CancelDropPanicStream(Option<Arc<Semaphore>>);
 impl futures_util::Stream for CancelDropPanicStream {
-    type Item = Result<ModelEvent, minicore_runtime::model::ModelError>;
+    type Item = Result<ModelEvent, minicore_host_runtime::model::ModelError>;
     fn poll_next(
         mut self: Pin<&mut Self>,
         _: &mut std::task::Context<'_>,

@@ -2,12 +2,12 @@ use minicore_host_protocol::{
     AgentConfig, AgentId, HostId, MessageId, MessageMode, MessageSource, PersistenceState,
     SessionConfig, SessionId, StorageMode, TurnId, TurnOutcome,
 };
-use minicore_host_storage::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     LoopId, UserInput,
     history::{AssistantHistory, HistoryItem, UserHistory, UserMessageKind},
     model::{AssistantPart, ModelFinishReason, ReasoningPreference, Usage},
 };
+use minicore_host_storage::*;
 use serde::{Deserialize, Serialize};
 use std::{fs, process::Command};
 #[path = "../src/test_support.rs"]
@@ -610,7 +610,7 @@ fn root_and_object_initialization_failure_release_lock() {
 }
 
 fn tool_response(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
-    use minicore_runtime::{ToolCallId, model::ToolCall};
+    use minicore_host_runtime::{ToolCallId, model::ToolCall};
     let mut entry = response(turn_id, loop_id);
     if let HistoryEntry::Runtime {
         item: HistoryItem::Assistant(item),
@@ -631,7 +631,7 @@ fn tool_response(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
     entry
 }
 fn tool_result(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
-    use minicore_runtime::{
+    use minicore_host_runtime::{
         ToolCallId,
         history::ToolResultHistory,
         tools::{ToolOutput, ToolResultOutcome},
@@ -720,7 +720,7 @@ fn orphan_mismatched_duplicate_tool_results_and_response_gaps_are_invalid() {
 }
 #[test]
 fn partial_model_fragments_are_distinct_and_never_projected_as_complete_assistant() {
-    use minicore_runtime::{
+    use minicore_host_runtime::{
         ToolCallId,
         model::{IncompleteToolCall, ModelPartial},
     };
@@ -925,8 +925,8 @@ fn journal_write_failure_probe() {
     let mut journal = session.open_journal().unwrap();
     journal
         .accept(vec![HistoryEntry::Summary {
-            summary: minicore_runtime::history::SummaryHistory {
-                content: minicore_runtime::Text::new("large append".repeat(3000)),
+            summary: minicore_host_runtime::history::SummaryHistory {
+                content: minicore_host_runtime::Text::new("large append".repeat(3000)),
             },
         }])
         .unwrap();
@@ -1046,7 +1046,7 @@ fn child_listing_checks_direct_owner_records_before_enumeration() {
 
 #[test]
 fn a_terminal_partial_prevents_further_records_for_that_loop_without_mutating_accepted_state() {
-    use minicore_runtime::model::ModelPartial;
+    use minicore_host_runtime::model::ModelPartial;
     let f = Fixture::new();
     let turn = TurnId::new().unwrap();
     let loop_id = LoopId::new().unwrap();

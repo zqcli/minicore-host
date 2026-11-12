@@ -25,13 +25,23 @@ pub(super) struct HistorySaveWork {
     pub(super) fault: Option<Fault>,
 }
 impl SessionController {
-    pub(super) async fn reconcile_report(
-        self: &Arc<Self>,
+    /// Accept only this newly returned delta, then save the original unsaved
+    /// native range. Input records were authored directly at queue consumption.
+    pub(super) async fn save_history(
+        &self,
         turn_id: &TurnId,
-        report: &LoopReport,
+        items: &[HistoryItem],
     ) -> Result<(), Fault> {
-        let accepted = {
-            let state = self.state.lock().expect("Session mutex poisoned");
+        self.wait_compaction_boundary().await?;
+        let (binding, entries, diagnostics) = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            let active = state
+                .active
+                .as_ref()
+                .filter(|a| &a.info.id == turn_id)
+                .ok_or_else(stale_history)?;
+            let start = active.save_cursor;
+            let loop_id = active.loop_id;
             if let Some(work) = &state.history_work {
                 return Err(work.fault.clone().unwrap_or_else(|| {
                     Fault::new(
@@ -40,177 +50,97 @@ impl SessionController {
                     )
                 }));
             }
-            let active = state.active.as_ref().ok_or_else(stale_history)?;
-            if &active.info.id != turn_id
-                || active.loop_id != Some(report.loop_id)
-                || active.accepted > report.appended.len()
-            {
-                return Err(stale_history());
-            }
-            active.accepted
-        };
-        // history_failure records the original callback failure. It is not a
-        // second business result and cannot prevent an explicit original-range
-        // confirmation from settling the report already returned by that Loop.
-        if accepted < report.appended.len() {
-            self.accept_history(
-                turn_id,
-                report.loop_id,
-                accepted,
-                &report.appended[accepted..],
-            )
-            .await?;
-        }
-        let (binding, entries) = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let active = state.active.as_ref().ok_or_else(stale_history)?;
-            if &active.info.id != turn_id || active.loop_id != Some(report.loop_id) {
-                return Err(stale_history());
-            }
-            let Some(partial) = report.partial.as_ref().filter(|_| !active.partial_accepted) else {
+            if start == state.history.len() && items.is_empty() {
                 return Ok(());
-            };
-            let response_index = active.response_base + u64::from(partial.request_index);
-            let encoded_index = u32::try_from(response_index).map_err(|_| stale_history())?;
-            let entries = vec![HistoryEntry::Partial {
-                turn_id: turn_id.clone(),
-                loop_id: report.loop_id,
-                response_index: encoded_index,
-                partial: partial.clone(),
-            }];
-            let binding = Self::register_turn_save(
-                &mut state,
-                turn_id,
-                Boundary::Partial {
-                    loop_id: report.loop_id,
-                },
-                entries.len(),
-            )?;
-            let active = state.active.as_mut().expect("checked original Turn");
-            active.partials.push(PartialResult {
-                response_index,
-                partial: partial.clone(),
-            });
-            active.partial_accepted = true;
-            state
-                .readable_history
-                .as_mut()
-                .expect("history loaded before execution")
-                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
-            self.publish(&mut state);
-            (binding, entries)
-        };
-        self.persist_registered(binding, entries).await
-    }
-    pub(super) async fn accept_history(
-        &self,
-        turn_id: &TurnId,
-        loop_id: LoopId,
-        offset: usize,
-        items: &[HistoryItem],
-    ) -> Result<(), Fault> {
-        self.wait_compaction_boundary().await?;
-        let (binding, entries, diagnostics) = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let active = state.active.as_ref().ok_or_else(|| {
-                Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "history callback has no active Turn",
-                )
-            })?;
-            if &active.info.id != turn_id
-                || active.loop_id != Some(loop_id)
-                || active.accepted != offset
-            {
-                return Err(Fault::new(
-                    FaultKind::SessionInternalUnexpected,
-                    "history callback does not match its original execution range",
-                ));
             }
-            let mut entries = Vec::new();
-            let mut consumed = Vec::new();
-            let mut pending = active.bound_pending.iter();
+            let mut entries = state.history[start..]
+                .iter()
+                .enumerate()
+                .map(|(offset, item)| state.input_provenance.entry(start + offset, turn_id, item))
+                .collect::<Result<Vec<_>, _>>()?;
             for item in items {
-                match item {
-                    HistoryItem::User(user) => {
-                        let input = pending.next().ok_or_else(|| {
-                            Fault::new(
-                                FaultKind::SessionInternalUnexpected,
-                                "Runtime returned an unbound input",
-                            )
-                        })?;
-                        if input.runtime != user.input {
-                            return Err(Fault::new(
-                                FaultKind::SessionInternalUnexpected,
-                                "Runtime input order differs from bound messages",
-                            ));
-                        }
-                        consumed.push(input.message.message_id.clone());
-                        entries.push(HistoryEntry::Input {
-                            turn_id: turn_id.clone(),
-                            message_id: input.message.message_id.clone(),
-                            source: input.source.clone(),
-                            mode: input.message.mode,
-                            in_reply_to: input.message.in_reply_to.clone(),
-                            user: user.clone(),
-                        });
+                let index = match item {
+                    HistoryItem::Assistant(value) if value.loop_id == loop_id => {
+                        value.request_index
                     }
-                    _ => {
-                        let request_index = match item {
-                            HistoryItem::Assistant(value) => value.request_index,
-                            HistoryItem::ToolResult(value) => value.request_index,
-                            _ => 0,
-                        };
-                        let response_index =
-                            u32::try_from(active.response_base + u64::from(request_index))
-                                .map_err(|_| {
-                                    Fault::new(
-                                        FaultKind::SessionInternalUnexpected,
-                                        "response index exhausted",
-                                    )
-                                })?;
-                        entries.push(HistoryEntry::Runtime {
-                            turn_id: turn_id.clone(),
-                            response_index,
-                            item: item.clone(),
-                        });
+                    HistoryItem::ToolResult(value) if value.loop_id == loop_id => {
+                        value.request_index
                     }
-                }
+                    _ => return Err(stale_history()),
+                };
+                entries.push(HistoryEntry::Runtime {
+                    turn_id: turn_id.clone(),
+                    response_index: index,
+                    item: item.clone(),
+                });
             }
+            let end = state.history.len() + items.len();
             let binding = Self::register_turn_save(
                 &mut state,
                 turn_id,
-                Boundary::Complete {
-                    loop_id,
-                    end: offset + items.len(),
-                },
+                Boundary::Complete { loop_id, end },
                 entries.len(),
             )?;
-            // Accepted content, its cursor and its original save become visible
-            // together. None is rolled back on I/O failure; the final report
-            // supplements only the unseen suffix.
-            let active = state.active.as_mut().expect("checked original Turn");
-            active.bound_pending.drain(..consumed.len());
-            active.accepted += items.len();
-            active.consumed_inputs.extend(consumed.iter().cloned());
-            for message in consumed {
-                Self::record_delegated_input(&mut state, turn_id, &message);
-            }
-            let start = state.history.len();
-            for (offset, entry) in entries.iter().enumerate() {
-                state.input_provenance.record(start + offset, entry);
-            }
-            state.history.extend_from_slice(items);
+            Arc::make_mut(&mut state.history).extend_from_slice(items);
+            state.active.as_mut().expect("checked Turn").save_cursor = end;
+            // Inputs became readable at consumption; only the returned delta
+            // is newly readable here. Save confirmation remains independent.
             state
                 .readable_history
                 .as_mut()
-                .expect("history loaded before execution")
-                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
+                .expect("loaded history")
+                .extend(items.iter().map(HistoryItemData::from));
             let diagnostics = self.observe_history(&mut state, items);
             self.publish(&mut state);
             (binding, entries, diagnostics)
         };
         diagnostic::emit(diagnostics);
+        self.persist_registered(binding, entries).await
+    }
+
+    /// The one failed model call's real partial survives a prior save failure.
+    /// Resuming the original range reaches this method without rerunning work.
+    pub(super) async fn save_partial(&self, turn_id: &TurnId) -> Result<(), Fault> {
+        let (binding, entries) = {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            let active = state
+                .active
+                .as_ref()
+                .filter(|a| &a.info.id == turn_id)
+                .ok_or_else(stale_history)?;
+            let Some(partial) = active
+                .pending_partial
+                .as_ref()
+                .filter(|_| !active.partial_accepted)
+            else {
+                return Ok(());
+            };
+            let partial = partial.clone();
+            let loop_id = active.loop_id;
+            let response_index = u64::from(partial.request_index);
+            let entries = vec![HistoryEntry::Partial {
+                turn_id: turn_id.clone(),
+                loop_id,
+                response_index: partial.request_index,
+                partial: partial.clone(),
+            }];
+            let binding =
+                Self::register_turn_save(&mut state, turn_id, Boundary::Partial { loop_id }, 1)?;
+            let active = state.active.as_mut().expect("checked Turn");
+            active.partials.push(PartialResult {
+                response_index,
+                partial,
+            });
+            active.partial_accepted = true;
+            active.pending_partial = None;
+            state
+                .readable_history
+                .as_mut()
+                .expect("loaded history")
+                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
+            self.publish(&mut state);
+            (binding, entries)
+        };
         self.persist_registered(binding, entries).await
     }
     /// Called in the same short owner boundary that accepts these entries. The
@@ -538,7 +468,6 @@ impl SessionController {
                     id.clone(),
                     active.info.outcome.ok_or_else(stale_history)?,
                     active.info.fault.clone(),
-                    active.report.clone(),
                 ))
             })
             .transpose()?;
@@ -567,13 +496,8 @@ impl SessionController {
                 if owner.settle_save(&binding, result).is_err() {
                     return;
                 }
-                if let Some((turn_id, outcome, fault, report)) = terminal {
-                    if let Some(report) = report
-                        && owner.reconcile_report(&turn_id, &report).await.is_err()
-                    {
-                        return;
-                    }
-                    owner.finalize(&turn_id, outcome, fault).await;
+                if let Some((turn_id, outcome, fault)) = terminal {
+                    owner.finish_turn(&turn_id, outcome, fault).await;
                 }
                 let scheduling = {
                     let mut state = owner.state.lock().expect("Session mutex poisoned");
@@ -622,25 +546,11 @@ impl SessionController {
                         .as_ref()
                         .map(|fault| fault.message().to_owned())
                         .or_else(|| {
-                            active
-                                .report
-                                .as_ref()
-                                .and_then(|report| match &report.outcome {
-                                    LoopOutcome::Cancelled(reason) => {
-                                        Some(format!("Runtime cancellation: {reason:?}"))
-                                    }
-                                    LoopOutcome::Failed(failure)
-                                        if outcome == TurnOutcome::Failed =>
-                                    {
-                                        Some(failure.diagnostic.message().as_str().to_owned())
-                                    }
-                                    _ => None,
-                                })
-                        })
-                        .or_else(|| {
                             (outcome == TurnOutcome::Cancelled).then(|| {
-                                if stopping {
-                                    "Host shutdown".to_owned()
+                                if active.deadline_expired {
+                                    "Turn deadline expired".to_owned()
+                                } else if stopping {
+                                    "Host Shutdown".to_owned()
                                 } else {
                                     "user cancellation".to_owned()
                                 }
@@ -695,53 +605,6 @@ fn stale_history() -> Fault {
         FaultKind::SessionInternalUnexpected,
         "history work does not match its original Turn, Load, and execution range",
     )
-}
-
-pub(super) struct SessionHistory {
-    pub(super) session: Arc<SessionController>,
-    pub(super) turn_id: TurnId,
-}
-impl LoopHistory for SessionHistory {
-    fn append<'a>(
-        &'a self,
-        loop_id: LoopId,
-        offset: usize,
-        items: &'a [HistoryItem],
-    ) -> HistoryFuture<'a> {
-        Box::pin(async move {
-            let result = self
-                .session
-                .accept_history(&self.turn_id, loop_id, offset, items)
-                .await;
-            // Observe the Host's accepted force fence at the Runtime boundary,
-            // even if direct-owner traversal has not reached this Session yet.
-            // Save completion is never cancelled, but subsequent business is.
-            if !self.session.access.execution_allowed_owned() {
-                let handle = {
-                    let state = self.session.state.lock().expect("Session mutex poisoned");
-                    state
-                        .active
-                        .as_ref()
-                        .filter(|active| {
-                            active.info.id == self.turn_id && active.loop_id == Some(loop_id)
-                        })
-                        .and_then(|active| active.handle.clone())
-                };
-                if let Some(handle) = handle {
-                    handle.shutdown();
-                }
-            }
-            result.map_err(|_| {
-                DiagnosticSummary::new(
-                    DiagnosticCode::ContextFailed,
-                    DiagnosticCategory::Context,
-                    Text::new("Session could not confirm its history save boundary"),
-                    false,
-                )
-                .expect("static diagnostic")
-            })
-        })
-    }
 }
 
 #[cfg(test)]

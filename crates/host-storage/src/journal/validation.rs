@@ -4,7 +4,7 @@ use crate::{
     HistoryRecord, SCHEMA_VERSION, StorageError,
 };
 use minicore_host_protocol::{SessionId, TurnId, TurnOutcome};
-use minicore_runtime::{
+use minicore_host_runtime::{
     LoopId,
     history::HistoryItem,
     model::{AssistantPart, ModelResponse},

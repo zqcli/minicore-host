@@ -1,8 +1,8 @@
 //! Runtime tools plus explicit owner-port fixtures, not real Host integration.
 mod support;
 use minicore_host_protocol::*;
+use minicore_host_runtime::tools::{Tool, ToolError, ToolInvocation};
 use minicore_host_tools::*;
-use minicore_runtime::tools::{Tool, ToolError, ToolInvocation};
 use serde_json::json;
 use std::{
     sync::{Arc, atomic::Ordering},
@@ -146,7 +146,7 @@ async fn registry_freezes_exact_selected_specs_and_implementations() {
             .is_err()
     );
     let empty = registry.bind(&[], port.port()).unwrap();
-    assert!(!empty.contains(&"agent".parse().unwrap()));
+    assert!(empty.specs().is_empty());
     let selected = [ToolBinding {
         name: "agent".into(),
     }];

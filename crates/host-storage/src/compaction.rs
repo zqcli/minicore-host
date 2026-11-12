@@ -1,5 +1,5 @@
 use crate::{HistoryEntry, HistoryProblem};
-use minicore_runtime::{
+use minicore_host_runtime::{
     history::{HistoryItem, SummaryHistory},
     model::AssistantPart,
 };

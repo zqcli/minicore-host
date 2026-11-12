@@ -178,7 +178,7 @@ impl SessionController {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
                         active._activation.expire();
                         active.info.state = TurnState::Cancelling;
-                        handle = active.handle.clone();
+                        handle = Some(active.cancellation.clone());
                         CancelStatus::Claimed
                     } else {
                         CancelStatus::AlreadyEnding
@@ -281,7 +281,7 @@ impl SessionController {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
                         active._activation.expire();
                         active.info.state = TurnState::Cancelling;
-                        active.handle.clone()
+                        Some(active.cancellation.clone())
                     } else {
                         None
                     }

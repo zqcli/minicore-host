@@ -1,5 +1,5 @@
 //! Actual minicore-host binary -> stdio/WSS -> owners -> production HTTP adapter
-//! -> pinned Runtime -> ordinary tools. Only loopback model replies are scripted.
+//! -> internal Runtime -> ordinary tools. Only loopback model replies are scripted.
 mod support;
 mod tool_support;
 

@@ -54,9 +54,37 @@ before edits.
 
 - Confirmed remote dev still equals the source above; the working tree was clean.
 - Read current engineering instructions and the full SPEC Rules.
-- SPEC revision is in progress; implementation has not started.
-- This workspace initially has no Rust toolchain. Toolchain provisioning and
-  verification are in progress; no test pass is claimed yet.
+- SPEC 4.10.1 was committed first as `b490ed9`; SHA-256
+  `b1426061eb63478f392e8f5638792df1c7d8a1bad08d80c80f3203288816182b`.
+- Imported the exact pinned Runtime into `crates/host-runtime`, changed the
+  dependency to a workspace path, renamed Rust imports and advanced all 13
+  workspace packages to 0.10.1. Standalone API replacement follows this import.
+- Provisioned the pinned Rust 1.90.0 toolchain with rustfmt and Clippy. The exact
+  original Host baseline builds successfully in release mode in a separate
+  worktree/target directory.
+- Imported source/version/dependency changes were committed as `d482060`.
+  Every external locked dependency retains its previous version, source and
+  checksum; all 13 internal packages are local 0.10.1 packages.
+- Replaced the standalone loop with direct Session model/tool calls. Inputs
+  are authored once at binding, ordinary requests share the accepted native
+  history buffer, and original save ranges survive a failed save. Removed loop
+  controls, input/history callbacks, cumulative reports, mutable loop settings,
+  unused history-size accounting and duplicate compaction response assembly.
+- Ordinary and summary calls now share `ModelDriver`. Summary calls use one
+  attempt. Focused compaction tests pass, including usage/cancellation and actual
+  loopback HTTP/SSE. Existing local-tool and agent-tool tests pass after moving
+  mechanism tests to direct tool batches and retaining real Host owner tests.
+- Provider HTTP/runtime and diagnostic tests pass after migration to direct
+  model calls. Their explicit two-request tool exchanges remain actual HTTP
+  and tool execution, not a compatibility loop.
+- Independent source review identified and corrected separate compaction
+  deadlines, upstream error classification, genuine usage-only partials, and
+  old-history identification by its actual native Turn correlation rather
+  than a history slice boundary. The corresponding regression checks are being
+  integrated before the complete workspace gate.
+- Prepared reproducible release probes for same-Turn continuation and long
+  history, plus compaction calculation. Baseline correctness passes; timings
+  collected while builds run are explicitly excluded from performance evidence.
 
 ## Validation and publication
 

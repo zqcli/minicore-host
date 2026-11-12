@@ -3,10 +3,8 @@
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_host_storage::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -14,6 +12,8 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::testing::read_history_bytes;
+use minicore_host_storage::*;
 use std::{
     collections::BTreeSet,
     sync::{Arc, Mutex},
@@ -65,7 +65,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

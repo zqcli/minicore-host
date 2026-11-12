@@ -1,6 +1,6 @@
 use crate::*;
 use minicore_host_protocol::*;
-use minicore_runtime::tools::{
+use minicore_host_runtime::tools::{
     Tool, ToolContext, ToolError, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput,
     ToolSpec,
 };

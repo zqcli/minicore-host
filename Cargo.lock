@@ -788,7 +788,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "minicore-host"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "minicore-host-core",
  "minicore-host-diagnostics",
@@ -804,12 +804,12 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-compaction"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "minicore-host-protocol",
  "minicore-host-provider",
- "minicore-runtime",
+ "minicore-host-runtime",
  "serde_json",
  "thiserror",
  "tokio",
@@ -818,16 +818,16 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-core"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "minicore-host-compaction",
  "minicore-host-diagnostics",
  "minicore-host-protocol",
  "minicore-host-provider",
+ "minicore-host-runtime",
  "minicore-host-storage",
  "minicore-host-workspace",
- "minicore-runtime",
  "serde",
  "serde_json",
  "sha2",
@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-diagnostics"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "minicore-host-protocol",
  "serde",
@@ -855,12 +855,12 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-local-tools"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "minicore-host-provider",
+ "minicore-host-runtime",
  "minicore-host-workspace",
- "minicore-runtime",
  "nix 0.30.1",
  "process-wrap",
  "serde",
@@ -876,7 +876,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-protocol"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "getrandom 0.4.3",
  "serde",
@@ -886,13 +886,13 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-provider"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "bytes",
  "futures-util",
  "httpdate",
  "minicore-host-diagnostics",
- "minicore-runtime",
+ "minicore-host-runtime",
  "reqwest",
  "serde",
  "serde_json",
@@ -904,26 +904,39 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-resources"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "minicore-host-core",
  "minicore-host-protocol",
  "minicore-host-provider",
+ "minicore-host-runtime",
  "minicore-host-storage",
  "minicore-host-tools",
  "minicore-host-workspace",
- "minicore-runtime",
  "serde_json",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
+name = "minicore-host-runtime"
+version = "0.10.1"
+dependencies = [
+ "futures-util",
+ "getrandom 0.4.3",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "minicore-host-storage"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "minicore-host-protocol",
- "minicore-runtime",
+ "minicore-host-runtime",
  "rustix",
  "serde",
  "serde_json",
@@ -937,14 +950,14 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-tools"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "minicore-host-core",
  "minicore-host-local-tools",
  "minicore-host-protocol",
+ "minicore-host-runtime",
  "minicore-host-workspace",
- "minicore-runtime",
  "serde",
  "serde_json",
  "tokio",
@@ -953,7 +966,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-transport"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "futures-util",
  "minicore-host-core",
@@ -961,9 +974,9 @@ dependencies = [
  "minicore-host-protocol",
  "minicore-host-provider",
  "minicore-host-resources",
+ "minicore-host-runtime",
  "minicore-host-storage",
  "minicore-host-workspace",
- "minicore-runtime",
  "rcgen",
  "serde",
  "serde_json",
@@ -977,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-workspace"
-version = "0.9.20"
+version = "0.10.1"
 dependencies = [
  "ignore",
  "minicore-host-protocol",
@@ -987,20 +1000,6 @@ dependencies = [
  "sha2",
  "similar",
  "tempfile",
- "thiserror",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
-name = "minicore-runtime"
-version = "0.10.0"
-source = "git+https://github.com/zqcli/minicore-runtime?rev=3aa47629929906832dcb309afb7d242c1ae3e53f#3aa47629929906832dcb309afb7d242c1ae3e53f"
-dependencies = [
- "futures-util",
- "getrandom 0.4.3",
- "serde",
- "serde_json",
  "thiserror",
  "tokio",
  "tokio-util",

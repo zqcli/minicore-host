@@ -1,7 +1,7 @@
 mod support;
 use minicore_host_local_tools::*;
+use minicore_host_runtime::{ExecutionOptions, ToolCallId, tools::ToolError};
 use minicore_host_workspace::{EditOutcome, FileSnapshot, Workspace};
-use minicore_runtime::{LoopOptions, LoopOutcome, ToolCallId, tools::ToolError};
 use serde_json::json;
 use std::{fs, sync::Arc, time::Duration};
 use support::*;
@@ -10,7 +10,7 @@ use support::*;
 async fn real_runtime_reads_edits_and_writes_exact_captures_without_an_observer() {
     let (root, tools, records) = fixture().await;
     fs::write(root.path().join("unrelated"), "preexisting dirty data").unwrap();
-    let model = ScriptedModel::calls(vec![
+    let calls = vec![
         (
             "write-1",
             "write",
@@ -26,16 +26,11 @@ async fn real_runtime_reads_edits_and_writes_exact_captures_without_an_observer(
             "read",
             json!({"path":"new/deep.txt","offset":2,"limit":1}),
         ),
-    ]);
-    let runtime = start(
-        model.clone(),
-        &tools,
-        &["read", "edit", "write"],
-        LoopOptions::default_checked().unwrap(),
-    );
-    // No LoopEvent receiver or public observer is attached.
-    let report = finish(runtime, &tools).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    ];
+    // No public observer is attached to the actual ordered tool batch.
+    let report = run_calls(&tools, calls, ExecutionOptions::default()).await;
+    tools.finish().await;
+    assert_eq!(report.stop, None);
     let output = outputs(&report);
     assert_eq!(output[0]["status"], "applied");
     assert_eq!(output[1]["replacements"], 1);
@@ -56,7 +51,6 @@ async fn real_runtime_reads_edits_and_writes_exact_captures_without_an_observer(
     assert_eq!(edits[1].1.before, edits[0].1.after);
     assert_eq!(edits[1].1.outcome, EditOutcome::Applied);
     assert!(edits.iter().all(|(_, edit)| edit.path == "new/deep.txt"));
-    assert_eq!(model.requests.lock().unwrap()[0].tools().len(), 3);
 }
 
 #[tokio::test]
@@ -520,7 +514,7 @@ async fn rejected_before_worker_start_reports_actual_cleanup_without_waiting_for
             .tool("read")
             .unwrap()
             .execute(
-                minicore_runtime::tools::ToolInvocation::new(
+                minicore_host_runtime::tools::ToolInvocation::new(
                     id.parse().unwrap(),
                     "read".parse().unwrap(),
                     arguments,

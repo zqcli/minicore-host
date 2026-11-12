@@ -15,11 +15,11 @@ pub use scope::LocalToolCompletion;
 
 use std::{sync::Arc, time::Instant};
 
-use minicore_host_workspace::Workspace;
-use minicore_runtime::tools::{
+use minicore_host_runtime::tools::{
     Tool, ToolContext, ToolError, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput,
     ToolSpec,
 };
+use minicore_host_workspace::Workspace;
 use serde_json::{Value, json};
 
 /// One frozen workspace and narrow, already Turn-bound recording capability.

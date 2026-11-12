@@ -2,7 +2,7 @@
 //! usage or an assembled next request. Queries never prepare a model prompt.
 use crate::CompactionActivity;
 use minicore_host_protocol::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     SummaryHistory,
     model::{ModelDescriptor, Usage},
 };
@@ -30,8 +30,8 @@ pub struct SessionContextData {
     pub model: ModelRef,
     pub compaction_settings: CompactionSettings,
     pub active_turn: Option<ContextTurnBinding>,
-    /// Unbound queue entries only. Neither these nor bound-but-unhanded inputs
-    /// are counted as native history accepted from Runtime.
+    /// Unbound queue entries only. Bound input is authored by the Session as
+    /// readable native history; required save confirmation remains separate.
     pub queued_inputs: ContextQueuedInputs,
     /// None until this Session has actually accepted or loaded native history.
     /// A cold persistent Session is unknown, not an empty context. This query
@@ -64,7 +64,7 @@ pub struct ContextTurnBinding {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ContextBoundModel {
-    pub model: minicore_runtime::model::ModelRef,
+    pub model: minicore_host_runtime::model::ModelRef,
     /// The model descriptor's declared context window, not measured usage or a
     /// new admission limit. No output allowance or safety margin is invented.
     pub context_window: u64,
@@ -95,8 +95,8 @@ pub struct ContextHistory {
     /// Complete native items only. Excludes queued input, partial model output,
     /// finish records, and compaction markers.
     pub raw_items: u64,
-    /// Committed summary (if any) plus uncovered raw suffix. Excludes fixed
-    /// instructions, tool schemas and unhanded Runtime input.
+    /// Committed summary (if any) plus uncovered raw suffix, including bound
+    /// unsaved input. Excludes fixed instructions, tool schemas and queued input.
     pub effective_items: u64,
     pub projection: Option<ContextProjection>,
     /// Latest complete assistant record in raw history, if any. It is a past
@@ -118,7 +118,7 @@ pub struct ContextProjection {
 pub struct ContextResponseUsage {
     /// Zero-based item index in this Session's raw native history.
     pub raw_item_index: u64,
-    pub model: minicore_runtime::model::ModelRef,
+    pub model: minicore_host_runtime::model::ModelRef,
     pub covered_by_compaction: bool,
     /// Runtime preserves absent provider fields as None. No counters are
     /// inferred from text length, combined, or copied from utility calls.

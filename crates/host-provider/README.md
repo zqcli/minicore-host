@@ -65,12 +65,13 @@ failures retryable.
 
 ## Validation baseline
 
-The production manifest and the workspace's sole `Cargo.lock` pin published Runtime
-`3aa47629929906832dcb309afb7d242c1ae3e53f` (`0.10.0`). It provides authoritative history/partial
-reporting, retains complete Unknown responses before failing them, and reports
-actual per-request retry-wait elapsed time. The earlier
-isolated-crate checks used a local handoff patch; that is historical provenance,
-not a current build prerequisite. No local Runtime patch is required now.
+The production manifest uses the internal `host-runtime` workspace package.
+Its shared `ModelDriver` returns authoritative complete/partial responses and
+actual per-request retry-wait elapsed time. A complete Unknown response retains
+its original finish reason; the Session accepts that response before ending the
+Turn with the corresponding failure. Provider tests call the real driver and
+explicit tool batches, without a standalone AgentLoop lifecycle. Imported source
+and integrated validation are recorded in Task 106.
 
 Task 010's historical focused provider checkpoint passed 5 unit tests, 31 HTTP/SSE
 integration tests and 1 compiling doctest with its stated Runtime source. Its streamed

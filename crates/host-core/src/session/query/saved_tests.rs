@@ -32,7 +32,7 @@ fn seed(fixture: &Fixture) -> TurnId {
     journal
         .accept(vec![
             HistoryEntry::Summary {
-                summary: minicore_runtime::history::SummaryHistory {
+                summary: minicore_host_runtime::history::SummaryHistory {
                     content: Text::new("global summary is not owned by this Turn"),
                 },
             },
@@ -247,7 +247,7 @@ async fn saved_reader_cannot_return_content_after_owner_reclamation() {
 }
 
 #[tokio::test]
-async fn saved_results_keep_public_response_indexes_across_real_internal_loops() {
+async fn saved_results_keep_public_response_indexes_within_one_public_turn() {
     let mut fixture = fixture(3, true);
     let caller = fixture.connection.caller();
     send(&fixture, MessageMode::FollowUp);
@@ -281,7 +281,7 @@ async fn saved_results_keep_public_response_indexes_across_real_internal_loops()
     send(&fixture, MessageMode::Steer);
     fixture.events[1]
         .send(ModelEvent::ProviderReplay {
-            replay: minicore_runtime::model::ProviderReplay::new(
+            replay: minicore_host_runtime::model::ProviderReplay::new(
                 "fixture/v1",
                 serde_json::json!({"opaque":"complete empty response"}),
             )
@@ -313,8 +313,8 @@ async fn saved_results_keep_public_response_indexes_across_real_internal_loops()
         })
         .collect();
     assert_eq!(loops.len(), 2);
-    assert_ne!(loops[0], loops[1]);
-    assert_eq!(raw.partials[0].partial.request_index, 0);
+    assert_eq!(loops[0], loops[1]);
+    assert_eq!(raw.partials[0].partial.request_index, 2);
     assert_eq!(live.data.partials[0].response_index, 2);
     let store = fixture.store.as_ref().unwrap();
     let before = read_history_bytes(store.canonical_path().join("history.jsonl")).unwrap();

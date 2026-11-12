@@ -6,7 +6,7 @@ mod input_context;
 use gated_host::Fixture;
 use minicore_host_core::MessageBinding;
 use minicore_host_protocol::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem,
     model::{ModelEvent, ModelMessage},
 };

@@ -1,0 +1,159 @@
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use thiserror::Error;
+use tokio_util::sync::CancellationToken;
+
+use crate::history::{HistoryItem, HistoryView};
+use crate::ids::LoopId;
+use crate::model::{ModelDescriptor, ModelMessage, ReasoningPreference};
+use crate::tools::ToolSpec;
+use crate::value::Text;
+
+/// Domain error returned by a `PromptProvider` while preparing a request.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum PromptError {
+    #[error("prompt history cannot be projected for the requested model")]
+    InvalidHistory,
+    #[error("prompt preparation was cancelled")]
+    Cancelled,
+    #[error("prompt preparation produced no messages")]
+    EmptyPrompt,
+}
+
+/// Everything a `PromptProvider` may observe about one model request.
+///
+/// `deadline` uses Tokio clock semantics so providers can drive `sleep_until`
+/// directly without converting a wall-clock instant.
+#[derive(Debug)]
+pub struct PromptRequest<'a> {
+    pub loop_id: LoopId,
+    pub request_index: u32,
+    pub history: HistoryView<'a>,
+    pub model: &'a ModelDescriptor,
+    pub reasoning: ReasoningPreference,
+    pub tools: &'a [ToolSpec],
+    pub cancellation: CancellationToken,
+    pub deadline: tokio::time::Instant,
+}
+
+/// Final prompt output for a request.
+///
+/// Model, reasoning, and tools are taken from the active
+/// `ExecutionConfig` snapshot by the Session; a provider only produces messages.
+#[derive(Clone, Debug)]
+pub struct PreparedPrompt {
+    pub messages: Vec<ModelMessage>,
+}
+
+pub type PromptFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<PreparedPrompt, PromptError>> + Send + 'a>>;
+
+/// The Session's context projection boundary for one prepared request.
+///
+/// The host injects request context (instructions, memory, retrieved content,
+/// or an existing summary) through `prepare`. Session lifecycle, summary
+/// generation policy, and durable compaction remain host responsibilities;
+/// this interface does not schedule them.
+pub trait PromptProvider: Send + Sync + 'static {
+    fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a>;
+}
+
+impl<T: PromptProvider + ?Sized> PromptProvider for Arc<T> {
+    fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
+        (**self).prepare(request)
+    }
+}
+
+/// An order-preserving history projection with an optional leading system prompt.
+///
+/// The host is trusted for history semantics (no ledger revalidation here):
+/// per-message construction failures and structurally inconsistent history
+/// surface as `PromptError::InvalidHistory`. The Session rejects an empty
+/// provider output at the request boundary, and `ModelRequest` construction
+/// validates exchange-level tool-result consistency.
+///
+/// The fixed summary prefix and complete content are preserved without truncation.
+pub struct DefaultPromptProvider {
+    system_prompt: Option<Text>,
+}
+
+impl DefaultPromptProvider {
+    /// `Some` text is emitted first only when it is non-empty.
+    pub fn new(system_prompt: Option<Text>) -> Self {
+        Self { system_prompt }
+    }
+}
+
+impl std::fmt::Debug for DefaultPromptProvider {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DefaultPromptProvider")
+            .field(
+                "system_prompt_bytes",
+                &self.system_prompt.as_ref().map(Text::byte_len),
+            )
+            .finish()
+    }
+}
+
+impl PromptProvider for DefaultPromptProvider {
+    fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
+        if request.cancellation.is_cancelled() || request.deadline <= tokio::time::Instant::now() {
+            return Box::pin(async { Err(PromptError::Cancelled) });
+        }
+        let system = self.system_prompt.clone();
+        Box::pin(async move {
+            let mut messages =
+                Vec::with_capacity(request.history.len() + usize::from(system.is_some()));
+            if let Some(system) = system
+                && !system.is_empty()
+            {
+                messages.push(ModelMessage::System(system.shared()));
+            }
+            for item in request.history.iter() {
+                let message = match item {
+                    HistoryItem::User(user) => {
+                        let crate::execution::UserInput::Text(text) = &user.input;
+                        Ok(ModelMessage::User(text.shared()))
+                    }
+                    HistoryItem::Assistant(assistant) => assistant_message(assistant),
+                    HistoryItem::ToolResult(result) => ModelMessage::tool_with_outcome(
+                        result.call_id.clone(),
+                        result.output.clone(),
+                        result.outcome,
+                    ),
+                    HistoryItem::Summary(summary) => summary_message(summary),
+                }
+                .map_err(|_| PromptError::InvalidHistory)?;
+                messages.push(message);
+            }
+            if messages.is_empty() {
+                return Err(PromptError::EmptyPrompt);
+            }
+            Ok(PreparedPrompt { messages })
+        })
+    }
+}
+
+/// Assistant messages reuse typed parts and provider metadata verbatim. Empty
+/// parts require validated replay metadata; no display content is synthesized.
+fn assistant_message(
+    assistant: &crate::history::AssistantHistory,
+) -> Result<ModelMessage, crate::model::ModelValueError> {
+    ModelMessage::assistant_with_provider_replay(
+        assistant.content.clone(),
+        assistant.provider_replay.clone(),
+    )
+}
+
+/// Fixed leading text of a projected summary; always preserved verbatim.
+const SUMMARY_PREFIX: &str = "Conversation summary:\n";
+
+fn summary_message(
+    summary: &crate::history::SummaryHistory,
+) -> Result<ModelMessage, crate::model::ModelValueError> {
+    ModelMessage::system(format!("{SUMMARY_PREFIX}{}", summary.content.as_str()))
+}

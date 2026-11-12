@@ -1,26 +1,30 @@
 #![allow(dead_code)]
 //! Explicit scripted model and Turn-bound recording test fixtures. Runtime,
 //! filesystem operations, subprocesses, and HTTP transport remain real.
-use futures_util::stream;
 use minicore_host_local_tools::*;
-use minicore_host_workspace::Workspace;
-use minicore_runtime::{
-    AgentLoop, ExecutionConfig, HistoryItem, LoopInputs, LoopOptions, LoopReport, LoopRequest,
-    ToolCallId, UserInput,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions, InteractionId, LoopId, ToolCallId,
+    interaction::{InteractionAnswer, PendingInteraction},
     model::{
-        Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
-        ModelStartFuture, ModelStream, ReasoningPreference,
+        Model, ModelCallContext, ModelDescriptor, ModelRequest, ModelStartFuture,
+        ReasoningPreference, ToolCall,
     },
     prompt::DefaultPromptProvider,
-    tools::{ToolContext, ToolError, ToolExecutionOutcome, ToolInvocation, ToolSet},
+    tools::{
+        ToolBatchContext, ToolBatchEvent, ToolBatchHost, ToolBatchReport, ToolBatchStop,
+        ToolContext, ToolError, ToolExecutionOutcome, ToolInvocation, ToolPolicy, ToolSet,
+        run_tool_batch,
+    },
 };
+use minicore_host_workspace::Workspace;
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeSet, VecDeque},
+    collections::BTreeSet,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
+use tokio::sync::oneshot;
 
 pub type RecordedChunk = (String, OutputChannel, u64, Vec<u8>);
 
@@ -106,43 +110,9 @@ pub async fn invoke(tools: &LocalTools, name: &str, arguments: Value) -> Result<
     Ok(serde_json::from_str(output.content().as_str()).unwrap())
 }
 
-pub struct ScriptedModel {
+/// Only tool batches use this descriptor; no model call is part of these tests.
+struct UnusedModel {
     descriptor: ModelDescriptor,
-    rounds: Mutex<VecDeque<Vec<ModelEvent>>>,
-    pub requests: Mutex<Vec<ModelRequest>>,
-}
-impl ScriptedModel {
-    pub fn calls(calls: Vec<(&str, &str, Value)>) -> Arc<Self> {
-        let mut rounds: VecDeque<_> = calls
-            .into_iter()
-            .map(|(id, name, args)| {
-                vec![
-                    ModelEvent::ToolCallStart {
-                        tool_call_id: id.parse().unwrap(),
-                        tool_name: name.parse().unwrap(),
-                    },
-                    ModelEvent::tool_call_arguments_delta(id.parse().unwrap(), args.to_string()),
-                    ModelEvent::ToolCallEnd {
-                        tool_call_id: id.parse().unwrap(),
-                    },
-                    ModelEvent::Finish {
-                        reason: ModelFinishReason::ToolCalls,
-                    },
-                ]
-            })
-            .collect();
-        rounds.push_back(vec![
-            ModelEvent::text_delta("Scripted model complete"),
-            ModelEvent::Finish {
-                reason: ModelFinishReason::Stop,
-            },
-        ]);
-        Arc::new(Self {
-            descriptor: descriptor(),
-            rounds: Mutex::new(rounds),
-            requests: Mutex::new(Vec::new()),
-        })
-    }
 }
 pub fn descriptor() -> ModelDescriptor {
     ModelDescriptor::new(
@@ -153,78 +123,113 @@ pub fn descriptor() -> ModelDescriptor {
     )
     .unwrap()
 }
-impl Model for ScriptedModel {
+impl Model for UnusedModel {
     fn descriptor(&self) -> &ModelDescriptor {
         &self.descriptor
     }
-    fn start<'a>(&'a self, request: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
-        self.requests.lock().unwrap().push(request);
-        let events = self
-            .rounds
-            .lock()
-            .unwrap()
-            .pop_front()
-            .expect("explicit scripted model round");
-        Box::pin(
-            async move { Ok(Box::pin(stream::iter(events.into_iter().map(Ok))) as ModelStream) },
-        )
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        panic!("a tool batch must not call the model")
     }
 }
-struct NoInputs;
-impl LoopInputs for NoInputs {
-    fn take(&self) -> Vec<UserInput> {
-        Vec::new()
+pub struct NoInteractions;
+impl ToolBatchHost for NoInteractions {
+    fn observe(&self, _: ToolBatchEvent) {}
+    fn request_interaction(
+        &self,
+        _: PendingInteraction,
+        _: oneshot::Sender<InteractionAnswer>,
+    ) -> Result<(), ToolBatchStop> {
+        panic!("these selected tools do not request interaction")
+    }
+    fn finish_interaction(&self, _: InteractionId) {
+        panic!("no interaction was registered")
     }
 }
-pub fn start(
+pub fn execution(
     model: Arc<dyn Model>,
     tools: &LocalTools,
     selected: &[&str],
-    options: LoopOptions,
-) -> AgentLoop {
+    policy: Option<Arc<dyn ToolPolicy>>,
+) -> ExecutionConfig {
     let mut builder = ToolSet::builder();
     for name in selected {
         builder.register_arc(tools.tool(name).unwrap());
     }
-    let config = ExecutionConfig::new(
+    ExecutionConfig::new(
         model,
         ReasoningPreference::Auto,
         builder.build().unwrap(),
-        None,
+        policy,
         Arc::new(DefaultPromptProvider::new(None)),
-    )
-    .unwrap();
-    AgentLoop::start(
-        LoopRequest::new(
-            Arc::from([]),
-            UserInput::text("Run the explicit local-tool fixture").unwrap(),
-            config,
-        ),
-        options,
-        Arc::new(NoInputs),
     )
     .unwrap()
 }
-pub async fn finish(runtime: AgentLoop, tools: &LocalTools) -> Arc<LoopReport> {
-    let report = tokio::time::timeout(Duration::from_secs(15), runtime.join())
-        .await
-        .unwrap()
-        .unwrap();
-    tokio::time::timeout(Duration::from_secs(3), tools.finish())
-        .await
-        .unwrap();
-    report
+pub fn batch_context(options: &ExecutionOptions) -> ToolBatchContext {
+    ToolBatchContext {
+        loop_id: LoopId::new().unwrap(),
+        request_index: 0,
+        cancellation: Default::default(),
+        deadline: options.deadline.map(Into::into),
+        policy_timeout: options.policy_timeout,
+        tool_timeout: options.tool_timeout,
+    }
 }
-pub fn outputs(report: &LoopReport) -> Vec<Value> {
+pub fn tool_config(
+    tools: &LocalTools,
+    selected: &[&str],
+    policy: Option<Arc<dyn ToolPolicy>>,
+) -> ExecutionConfig {
+    execution(
+        Arc::new(UnusedModel {
+            descriptor: descriptor(),
+        }),
+        tools,
+        selected,
+        policy,
+    )
+}
+pub fn tool_call(id: &str, name: &str, arguments: Value) -> ToolCall {
+    ToolCall::new(id.parse().unwrap(), name.parse().unwrap(), arguments, 0).unwrap()
+}
+pub async fn run_calls(
+    tools: &LocalTools,
+    calls: Vec<(&str, &str, Value)>,
+    options: ExecutionOptions,
+) -> ToolBatchReport {
+    let selected: BTreeSet<_> = calls.iter().map(|(_, name, _)| *name).collect();
+    let config = tool_config(tools, &selected.into_iter().collect::<Vec<_>>(), None);
+    let calls: Vec<_> = calls
+        .into_iter()
+        .enumerate()
+        .map(|(index, (id, name, args))| {
+            ToolCall::new(
+                id.parse().unwrap(),
+                name.parse().unwrap(),
+                args,
+                index.try_into().unwrap(),
+            )
+            .unwrap()
+        })
+        .collect();
+    tokio::time::timeout(
+        Duration::from_secs(15),
+        run_tool_batch(
+            &config,
+            &calls.iter().collect::<Vec<_>>(),
+            batch_context(&options),
+            Arc::new(NoInteractions),
+        ),
+    )
+    .await
+    .unwrap()
+}
+pub fn outputs(report: &ToolBatchReport) -> Vec<Value> {
     report
-        .appended
+        .results
         .iter()
-        .filter_map(|item| match item {
-            HistoryItem::ToolResult(result) => Some(
-                serde_json::from_str(result.output.content().as_str())
-                    .unwrap_or(json!({"runtime":result.output.content().as_str()})),
-            ),
-            _ => None,
+        .map(|result| {
+            serde_json::from_str(result.output.content().as_str())
+                .unwrap_or(json!({"runtime":result.output.content().as_str()}))
         })
         .collect()
 }

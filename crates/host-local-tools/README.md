@@ -1,7 +1,7 @@
 # Standard local tools
 
 Workspace-bound `read`, `edit`, `write`, and native `bash` implementations of the
-real MiniCore Runtime 0.10.0 `Tool` interface. No UI or Host object is required.
+internal `host-runtime` `Tool` interface. No UI or Host object is required.
 The immutable Workspace, a narrow, trusted Turn-bound `LocalToolSink` and a
 name-only `CommandEnvironment` are constructor capabilities. Tool JSON contains
 business arguments only. Standalone callers explicitly choose their policy;
@@ -11,11 +11,11 @@ This crate provides execution and registration declarations. Production Host
 registry selection, Session persistence, public output/change projections, and
 finalization wiring live in the core/tools/resources integration, not this crate.
 
-The Turn owner must retain `LocalTools` and await `finish()` after Runtime ends,
-including cancellation and deadlines. Runtime 0.10.0 drops port futures when
-stopped; these tools retain actual workers and cleanup independently. `finish`
+The Session must retain `LocalTools` and await `finish()` before ending its Turn,
+including cancellation and deadlines. A tool batch can stop waiting on a port
+future; these tools retain actual workers and cleanup independently. `finish`
 closes admission and joins them. Dropping a finish waiter does not cancel cleanup.
-Do not declare the Turn finished merely because Runtime joined or kill was sent.
+Do not declare the Turn finished merely because a batch returned or kill was sent.
 Each completion separates its tool error from `cleanup_confirmed`: a record sink
 failure after actual child/worker join is confirmed cleanup with an internal
 error, while a worker panic, failed scope wait, unconfirmed process-scope end,

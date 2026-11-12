@@ -3,9 +3,8 @@
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_storage::{HistoryEntry, HistoryRecord};
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -13,6 +12,7 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::{HistoryEntry, HistoryRecord};
 use std::{
     collections::BTreeSet,
     sync::{
@@ -85,7 +85,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -793,7 +793,7 @@ async fn shutdown_force_saves_real_partial_and_releases_root_with_abandoned_wait
     assert!(!records.iter().any(|r| matches!(
         r.entry,
         HistoryEntry::Runtime {
-            item: minicore_runtime::HistoryItem::Assistant(_),
+            item: minicore_host_runtime::HistoryItem::Assistant(_),
             ..
         }
     )));
@@ -1031,7 +1031,7 @@ impl Model for ToolModelFixture {
     }
 }
 struct PendingTool {
-    spec: minicore_runtime::tools::ToolSpec,
+    spec: minicore_host_runtime::tools::ToolSpec,
     entered: Arc<Semaphore>,
     cancelled_drop: Arc<AtomicUsize>,
 }
@@ -1046,15 +1046,15 @@ impl Drop for CancellationDrop {
         }
     }
 }
-impl minicore_runtime::tools::Tool for PendingTool {
-    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+impl minicore_host_runtime::tools::Tool for PendingTool {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
         &self.spec
     }
     fn execute<'a>(
         &'a self,
-        _: minicore_runtime::tools::ToolInvocation,
-        context: minicore_runtime::tools::ToolContext,
-    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        _: minicore_host_runtime::tools::ToolInvocation,
+        context: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
         Box::pin(async move {
             let _guard = CancellationDrop {
                 cancellation: context.cancellation,
@@ -1086,7 +1086,7 @@ impl ResourceResolver for ToolResources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -1109,7 +1109,7 @@ async fn force_cancels_actual_runtime_tool_and_saves_result_before_root_release(
     });
     let mut tools = ToolSet::builder();
     tools.register(PendingTool {
-        spec: minicore_runtime::tools::ToolSpec::new(
+        spec: minicore_host_runtime::tools::ToolSpec::new(
             "audit_pending".parse().unwrap(),
             "Deterministic pending tool fixture",
             serde_json::json!({}),
@@ -1154,8 +1154,8 @@ async fn force_cancels_actual_runtime_tool_and_saves_result_before_root_release(
         .collect();
     assert_eq!(records.len(), 4);
     assert!(
-        matches!(&records[2].entry, HistoryEntry::Runtime { item: minicore_runtime::HistoryItem::ToolResult(tool), .. }
-        if tool.outcome == minicore_runtime::tools::ToolResultOutcome::Cancelled)
+        matches!(&records[2].entry, HistoryEntry::Runtime { item: minicore_host_runtime::HistoryItem::ToolResult(tool), .. }
+        if tool.outcome == minicore_host_runtime::tools::ToolResultOutcome::Cancelled)
     );
     assert!(matches!(
         &records[3].entry,

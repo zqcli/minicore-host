@@ -1,6 +1,6 @@
 # MiniCore Host workspace reads
 
-A small backend module for SPEC v4.93 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
+A small backend module for SPEC v4.10.1 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
 
 ## Owner integration
 

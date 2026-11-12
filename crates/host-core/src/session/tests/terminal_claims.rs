@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-async fn terminal_claim_failed_report_precedes_cancel_during_original_partial_save() {
+async fn terminal_claim_failure_precedes_cancel_during_original_partial_save() {
     let (fixture, entered, release) = terminal_claim_fixture(
         vec![ModelEvent::text_delta("actual failed stream partial")],
         false,
@@ -11,10 +11,7 @@ async fn terminal_claim_failed_report_precedes_cancel_during_original_partial_sa
     let before = {
         let state = fixture.session.state.lock().unwrap();
         let active = state.active.as_ref().unwrap();
-        assert!(matches!(
-            active.report.as_ref().unwrap().outcome,
-            LoopOutcome::Failed(_)
-        ));
+        assert_eq!(active.info.outcome, Some(TurnOutcome::Failed));
         active.info.clone()
     };
     let (cancel, _) = fixture
@@ -40,7 +37,7 @@ async fn terminal_claim_failed_report_precedes_cancel_during_original_partial_sa
 }
 
 #[tokio::test]
-async fn terminal_claim_cancel_precedes_later_runtime_history_failure() {
+async fn terminal_claim_cancel_precedes_later_history_failure() {
     let (fixture, entered, release) =
         terminal_claim_fixture(final_events("actual complete response"), true);
     send(&fixture, "cancel before the save fails");
@@ -49,8 +46,8 @@ async fn terminal_claim_cancel_precedes_later_runtime_history_failure() {
         let state = fixture.session.state.lock().unwrap();
         let active = state.active.as_ref().unwrap();
         assert!(
-            active.report.is_none(),
-            "Runtime still owns its history callback"
+            active.info.outcome.is_none(),
+            "save precedes a successful terminal claim"
         );
         active.info.id.clone()
     };
@@ -63,11 +60,9 @@ async fn terminal_claim_cancel_precedes_later_runtime_history_failure() {
     let original = blocked(&fixture).await;
     {
         let state = fixture.session.state.lock().unwrap();
-        let report = state.active.as_ref().unwrap().report.as_ref().unwrap();
-        assert!(
-            matches!(&report.outcome, LoopOutcome::Cancelled(_))
-                && report.history_failure.is_some()
-        );
+        let active = state.active.as_ref().unwrap();
+        assert_eq!(active.info.outcome, Some(TurnOutcome::Cancelled));
+        assert!(active.info.persistence_fault.is_some());
     }
     assert_eq!(original.outcome, Some(TurnOutcome::Cancelled));
     assert!(original.fault.is_none());

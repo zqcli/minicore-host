@@ -6,9 +6,8 @@ use minicore_host_core::{
     BoundResources, Host, PreparedTurnBinding, ResourceFuture, ResourceResolver,
 };
 use minicore_host_protocol::*;
-use minicore_host_tools::{AgentToolFactory, CoreTurnPort, ScopeManager, ToolRegistry};
-use minicore_runtime::{
-    ExecutionConfig, HistoryItem, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions, HistoryItem,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelMessage,
         ModelRequest, ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -16,6 +15,7 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_tools::{AgentToolFactory, CoreTurnPort, ScopeManager, ToolRegistry};
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -203,7 +203,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

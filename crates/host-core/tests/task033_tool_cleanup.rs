@@ -3,8 +3,8 @@
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -315,7 +315,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -903,7 +903,7 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
     );
     assert_ne!(observed.data.state.state, ToolCallState::Finished);
     assert!(host.history(&caller, &target).unwrap().iter().any(|item| {
-        matches!(item, minicore_runtime::HistoryItem::ToolResult(result) if result.call_id.as_str() == call.tool_call_id.0)
+        matches!(item, minicore_host_runtime::HistoryItem::ToolResult(result) if result.call_id.as_str() == call.tool_call_id.0)
     }));
     let text = "before 真实 child cleanup";
     let range = TextReadRequest {

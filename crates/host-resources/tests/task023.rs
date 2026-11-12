@@ -8,13 +8,13 @@ use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_provider::SecretApiKey;
 use minicore_host_resources::{HostCredentials, HostResourceBuilder};
-use minicore_host_tools::{ToolFactory, ToolRegistry, TurnPort};
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem,
     tools::{
         Tool, ToolContext, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput, ToolSpec,
     },
 };
+use minicore_host_tools::{ToolFactory, ToolRegistry, TurnPort};
 use serde_json::{Value, json};
 use std::{
     sync::{

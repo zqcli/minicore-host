@@ -10,8 +10,8 @@ use minicore_host_core::{
 };
 use minicore_host_protocol::{Fault, FaultKind};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
+use minicore_host_runtime::model::{Model, ModelDescriptor};
 use minicore_host_tools::{ScopeManager, ToolRegistry};
-use minicore_runtime::model::{Model, ModelDescriptor};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 /// The deployment's statically compiled registry. Keep one builder across

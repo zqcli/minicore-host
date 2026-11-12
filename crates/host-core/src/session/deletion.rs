@@ -96,10 +96,10 @@ impl SessionController {
             state
                 .active
                 .as_ref()
-                .and_then(|active| active.handle.clone())
+                .map(|active| active.cancellation.clone())
         };
         if let Some(handle) = handle {
-            handle.shutdown();
+            handle.cancel();
         }
         self.handoff_delegation_owned();
     }

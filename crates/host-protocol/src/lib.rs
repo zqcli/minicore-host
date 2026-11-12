@@ -1,4 +1,4 @@
-//! MiniCore Host v4.93 shared value contracts.
+//! MiniCore Host v4.10.1 shared value contracts.
 //!
 //! These types do not authorize callers, schedule work, or promise availability.
 //! Direct owners validate authorization and resource references at acceptance.

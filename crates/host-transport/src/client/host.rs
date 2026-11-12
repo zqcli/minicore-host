@@ -6,7 +6,7 @@ use minicore_host_core::{
     HostInfo, ModelDescription, SessionListPage, SessionListRequest, SessionSummary,
 };
 use minicore_host_protocol::*;
-use minicore_runtime::tools::ToolSpec;
+use minicore_host_runtime::tools::ToolSpec;
 
 /// Clones share one actual connection and its operation right. Creating a
 /// SessionClient only bundles an address; it neither registers nor retains a

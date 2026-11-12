@@ -2,12 +2,12 @@
 //! explicitly scripted fixture; only the separate HTTP tests use a provider.
 use super::*;
 use crate::backend::TestAppendFault;
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_runtime::{
+use minicore_host_runtime::{
     AssistantHistory, UserHistory, UserMessageKind,
     model::{AssistantPart, ModelMessage, Usage},
     prompt::{PromptFuture, PromptProvider, PromptRequest},
 };
+use minicore_host_storage::testing::read_history_bytes;
 use std::time::Duration;
 
 struct UtilityModel {
@@ -106,7 +106,7 @@ impl ResourceResolver for UtilityResources {
             .validate()
             .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))
     }
-    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
         Box::pin(async move {
             Ok(BoundResources {
                 execution: ExecutionConfig::new(
@@ -117,7 +117,11 @@ impl ResourceResolver for UtilityResources {
                     Arc::new(HistoryPrompt),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions {
+                    prompt_timeout: Duration::from_millis(config.execution.prompt_timeout_ms),
+                    model_timeout: Duration::from_millis(config.execution.model_timeout_ms),
+                    ..ExecutionOptions::default()
+                },
             })
         })
     }
@@ -354,7 +358,7 @@ async fn compaction_repeated_durable_coverage_reloads_without_touching_raw_histo
         .unwrap();
     until(&fixture, |state| state.history_loaded && !state.preparing).await;
     let state = fixture.session.state.lock().unwrap();
-    assert_eq!(state.history, raw);
+    assert_eq!(*state.history, raw);
     assert_eq!(
         state
             .projection
@@ -764,7 +768,7 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
         let (turn, original_fault, binding) = {
             let state = fixture.session.state.lock().unwrap();
             let active = state.active.as_ref().unwrap();
-            assert_eq!(active.info.state, TurnState::Running);
+            assert_eq!(active.info.state, TurnState::Finalizing);
             let CompactionState::Finished {
                 result: CompactionOutcome::Failed { fault },
             } = &state.last_compaction.as_ref().unwrap().state
@@ -772,16 +776,16 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
                 panic!("actual utility must have failed")
             };
             assert_eq!(fault.kind(), Some(FaultKind::SessionCompactionFailed));
-            let handoff = active
-                .compaction_failure
-                .as_ref()
-                .expect("original bound failure");
-            assert_eq!(&handoff.fault, fault);
-            assert!(!handoff.history);
+            assert_eq!(active.info.fault.as_ref(), Some(fault));
             (
                 active.info.id.clone(),
                 fault.clone(),
-                handoff.binding.clone(),
+                crate::session::compaction::CompactionBinding::Automatic {
+                    turn_id: active.info.id.clone(),
+                    load_id: active.info.load_id.clone(),
+                    loop_id: active.loop_id,
+                    request_index: u32::try_from(active.info.requests).unwrap(),
+                },
             )
         };
         let path = fixture.store.canonical_path().join("history.jsonl");
@@ -796,17 +800,13 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
                 .session
                 .cancel(&fixture.connection.caller(), Some(&turn), true, None)
                 .unwrap();
-            assert_eq!(cancel.status, CancelStatus::Claimed);
-            TurnOutcome::Cancelled
+            assert_eq!(cancel.status, CancelStatus::AlreadyEnding);
+            TurnOutcome::Failed
         } else {
             TurnOutcome::Failed
         };
-        let primary = (!cancel_first).then(|| original_fault.clone());
-        let cleanup = if cancel_first {
-            vec![original_fault.clone()]
-        } else {
-            Vec::new()
-        };
+        let primary = Some(original_fault.clone());
+        let cleanup = Vec::new();
         gate.add_permits(1);
         if fail_save {
             let pending = blocked(&fixture).await;
@@ -818,18 +818,10 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
                 Some(FaultKind::SessionHistoryWriteFailed)
             );
             {
-                // Pure identity probes use the actual held owner/report, with
-                // only one deliberately mismatched binding scalar per probe.
-                let state = fixture.session.state.lock().unwrap();
-                let active = state.active.as_ref().unwrap();
-                let report = active.report.as_ref().unwrap();
-                assert!(active.compaction_failure.is_none(), "handoff consumed once");
-                let exact = crate::session::compaction::CompactionFailure {
-                    binding: binding.clone(),
-                    fault: original_fault.clone(),
-                    history: false,
-                };
-                assert!(exact.matches(active, report));
+                // A stale automatic completion cannot alter the original
+                // Turn's failure, even when its history save remains pending.
+                let mut state = fixture.session.state.lock().unwrap();
+                let before = state.active.as_ref().unwrap().info.clone();
                 let mut mismatches = Vec::new();
                 for index in 0..4 {
                     let mut wrong = binding.clone();
@@ -856,18 +848,16 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
                     config_revision: 0,
                 });
                 for binding in mismatches {
-                    assert!(
-                        !crate::session::compaction::CompactionFailure {
-                            binding,
-                            fault: original_fault.clone(),
-                            history: false,
-                        }
-                        .matches(active, report)
+                    SessionController::claim_compaction_failure(
+                        &mut state,
+                        &binding,
+                        &original_fault,
+                        false,
                     );
+                    let active = state.active.as_ref().unwrap();
+                    assert_eq!(active.info.fault, before.fault);
+                    assert_eq!(active.info.cleanup_faults, before.cleanup_faults);
                 }
-                let mut other_loop = (**report).clone();
-                other_loop.loop_id = LoopId::new().unwrap();
-                assert!(!exact.matches(active, &other_loop));
             }
             std::fs::remove_file(&path).unwrap();
             std::fs::rename(&original, &path).unwrap();
@@ -935,13 +925,12 @@ async fn compaction_prompt_cancellation_fences_terminal_handoff_then_resumes_ori
         .unwrap()
         .unwrap()
         .forget();
-    assert_eq!(
-        fixture
-            .session
-            .history(&fixture.connection.caller())
-            .unwrap(),
-        raw
-    );
+    let accepted = fixture
+        .session
+        .history(&fixture.connection.caller())
+        .unwrap();
+    assert_eq!(&accepted[..raw.len()], &raw);
+    assert!(matches!(&accepted[raw.len()..], [HistoryItem::User(_)]));
     assert_eq!(
         fixture
             .session
@@ -951,8 +940,8 @@ async fn compaction_prompt_cancellation_fences_terminal_handoff_then_resumes_ori
             .active
             .as_ref()
             .unwrap()
-            .accepted,
-        0
+            .save_cursor,
+        raw.len()
     );
     backend.release.add_permits(1);
     until(&fixture, |state| {
@@ -968,7 +957,7 @@ async fn compaction_prompt_cancellation_fences_terminal_handoff_then_resumes_ori
             .session
             .history(&fixture.connection.caller())
             .unwrap(),
-        raw
+        accepted
     );
     fixture
         .session
@@ -1062,7 +1051,7 @@ impl Tool for VerboseTool {
     }
 }
 fn verbose_tool_response(index: usize) -> Vec<ModelEvent> {
-    let id: minicore_runtime::ToolCallId = format!("count-{index}").parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = format!("count-{index}").parse().unwrap();
     vec![
         ModelEvent::text_delta("tool decision context ".repeat(100)),
         ModelEvent::ToolCallStart {
@@ -1127,7 +1116,7 @@ async fn compaction_long_public_turn_covers_its_own_saved_tool_batches_without_r
     assert_eq!(result.info.tool_rounds, 3);
     assert_eq!(calls.load(Ordering::SeqCst), 3);
     assert_eq!(result.history.len(), 8);
-    assert_eq!(state.history, result.history);
+    assert_eq!(*state.history, result.history);
     assert!(
         state.projection.as_ref().unwrap().covered_items >= 3,
         "first same-Turn tool batch must be covered"
@@ -1256,7 +1245,7 @@ async fn compaction_memory_keeps_projection_through_unload_without_creating_file
         .unwrap();
     let state = session.state.lock().unwrap();
     assert_eq!(state.projection.as_ref(), Some(&projection));
-    assert_eq!(state.history, raw);
+    assert_eq!(*state.history, raw);
     assert!(state.paused);
     assert!(state.completed.is_empty());
     assert!(matches!(
@@ -1285,7 +1274,7 @@ async fn compaction_old_missing_result_remains_unknown_and_no_tool_is_replayed()
     } = &mut entries[1]
     {
         assistant.content.push(AssistantPart::ToolCall(
-            minicore_runtime::model::ToolCall::new(
+            minicore_host_runtime::model::ToolCall::new(
                 "old-missing".parse().unwrap(),
                 "historical_tool".parse().unwrap(),
                 serde_json::json!({"path":"original"}),
@@ -1475,7 +1464,7 @@ async fn compaction_automatic_old_missing_tail_keeps_unknown_exchange_usable() {
     } = &mut entries[7]
     {
         assistant.content.push(AssistantPart::ToolCall(
-            minicore_runtime::model::ToolCall::new(
+            minicore_host_runtime::model::ToolCall::new(
                 "old-tail-missing".parse().unwrap(),
                 "historical_tool".parse().unwrap(),
                 serde_json::json!({}),
@@ -1519,4 +1508,75 @@ async fn compaction_automatic_old_missing_tail_keeps_unknown_exchange_usable() {
             .unwrap()
             .contains("current history has no corresponding result record")
     );
+}
+
+#[tokio::test]
+async fn automatic_and_manual_summary_use_independent_budget_and_one_operation_deadline() {
+    for automatic in [false, true] {
+        let model = UtilityModel::new(vec![final_events("new ordinary response")], true);
+        let fixture = setup(
+            UtilityResources::new(model.clone(), ToolSet::default()),
+            |inner| inner,
+        );
+        seed(&fixture, automatic).await;
+        {
+            let mut state = fixture.session.state.lock().unwrap();
+            state.info.config.execution.prompt_timeout_ms = 50;
+            state.info.config.execution.model_timeout_ms = 2_000;
+        }
+        if automatic {
+            send(&fixture, "new input");
+        } else {
+            start(&fixture);
+        }
+        model.entered().await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        {
+            let state = fixture.session.state.lock().unwrap();
+            assert!(matches!(
+                state.compaction.as_ref().map(|work| &work.activity.state),
+                Some(CompactionState::Summarizing {})
+            ));
+            assert!(state.last_compaction.as_ref().is_none_or(|work| !matches!(
+                work.state,
+                CompactionState::Finished {
+                    result: CompactionOutcome::Failed { .. }
+                }
+            )));
+        }
+        model.utility_gate.as_ref().unwrap().add_permits(20);
+        if automatic {
+            until(&fixture, |state| state.completed.len() == 1).await;
+            assert_eq!(
+                fixture
+                    .session
+                    .state
+                    .lock()
+                    .unwrap()
+                    .completed
+                    .values()
+                    .next()
+                    .unwrap()
+                    .info
+                    .outcome,
+                Some(TurnOutcome::Completed)
+            );
+        } else {
+            assert!(matches!(
+                compacted(&fixture).await.state,
+                CompactionState::Finished {
+                    result: CompactionOutcome::Compacted { .. }
+                }
+            ));
+        }
+        assert_eq!(markers(&fixture), 1);
+        let requests = model.requests.lock().unwrap();
+        let deadlines = requests
+            .iter()
+            .filter(|(utility, _, _)| *utility)
+            .map(|(_, _, context)| context.deadline)
+            .collect::<Vec<_>>();
+        assert!(!deadlines.is_empty());
+        assert!(deadlines.iter().all(|deadline| deadline == &deadlines[0]));
+    }
 }

@@ -1,8 +1,8 @@
 # In-process owners
 
-`minicore-host-core` composes the real Host -> Agent -> SessionController ownership path with Runtime. Memory and persistent Sessions use the same queues, configuration binding, Runtime loop and result handling. A connection grants access; it never replaces the target's direct owner.
+`minicore-host-core` owns the Host -> Agent -> SessionController path. The existing Session task drives a whole Turn and calls the internal `host-runtime` model and tool primitives directly. Memory and persistent Sessions share the same queues, configuration binding and result handling. A connection grants access; it never replaces the target's direct owner.
 
-This crate implements the in-process business owners; transport servers and executable assembly live in `host-transport` and `host-app`. Runtime integration uses the published Git revision pinned by the workspace; no local dependency patch is needed. Implemented APIs do not by themselves establish live-provider or TUI acceptance.
+This crate implements the in-process business owners; transport servers and executable assembly live in `host-transport` and `host-app`. Runtime is a workspace package with no separate loop lifecycle or history/input callbacks. Implemented APIs do not by themselves establish live-provider or TUI acceptance.
 
 ## Source organization
 
@@ -10,8 +10,10 @@ This crate implements the in-process business owners; transport servers and exec
 `input`, `execution`, `history`, `loading`, and `close` modules implement the
 existing acceptance and handoff phases on that same owner. `query` reads actual
 retained/saved data; `observation` owns event and subscription adaptation.
-`session/compaction/prompt.rs` adapts Runtime prompt/history requests while the
-parent compaction module retains one manual/automatic commit path.
+`session/compaction/prompt.rs` prepares a request from the Session's shared
+history view while the parent compaction module retains one manual/automatic
+commit path. Ordinary steps borrow the same history storage rather than copy a
+second cumulative history; only actual compaction captures an engine snapshot.
 
 `backend.rs` defines the history port and implementations; `resources.rs` defines
 the execution/compaction resource ports. `turn_binding.rs` contains active-Turn
@@ -67,7 +69,7 @@ close receipt remains valid without keeping that memory Session alive.
 
 ## Save and reload boundaries
 
-Session history is written through real storage at Runtime's complete-response, tool-batch and Turn-ending boundaries. Actual partial output and the real outcome are preserved. Primary execution faults and independent persistence faults remain distinct; a completed execution with a failed save is not reported as durably finalized, rerun or appended a second time.
+Session history is written through real storage before tools run on a complete response, after each tool batch and at Turn ending. The Session binds each input with its identity once, retains the original unsaved range, and accepts authoritative complete or partial driver results directly. Primary execution faults and independent persistence faults remain distinct; a completed execution with a failed save is not reported as durably finalized, rerun or appended a second time.
 
 Explicit Session `resume` captures its own failed original history ranges and metadata candidate. It confirms those originals independently, never reruns a model/tool or reappends confirmed bytes, and cannot unblock queued execution while any captured required save still fails. A partial or changed original remains blocked rather than being repaired. Primary execution outcome remains unchanged.
 
@@ -111,7 +113,7 @@ manual operation only; a late cancellation cannot cancel a later compaction.
 The original receipt retains its formation-time facts. Session state exposes
 current activity; late cancellation reads the original retained outcome.
 
-Automatic compaction runs at real Runtime prompt boundaries with the public
+Automatic compaction runs before a Session model request with the public
 Turn's frozen model and settings. Only unhanded inputs and the final incomplete
 accepted exchange are protected; earlier saved batches from that same Turn can
 be covered. Utility usage is separate from normal response indexes and usage.
@@ -121,8 +123,8 @@ projects one summary plus uncovered raw history for the model, while original
 content and TurnResult slicing remain intact. Marker saves use the existing
 Session journal boundary. Cancel-before-commit performs no marker append;
 commit-before-cancel retains the necessary save and does not claim rollback.
-A dropped Runtime prompt waiter cannot discard that work or allow its terminal
-history callback to accept a competing batch. An explicit `session_resume`
+The Session retains accepted work through cancellation and required saves.
+An explicit `session_resume`
 continues only the original failed save and candidate without rerunning utility
 or tools. Force/close and resource retirement retain their real worker joins.
 
@@ -143,8 +145,8 @@ Dropping a handle or ending its connection never cancels Session work.
 byte ranges. `end` is fixed for one catch-up operation; `max_bytes` chooses a
 page, rounding forward only when needed to return one complete UTF-8 character.
 Streamed text, complete Runtime history, execution completion and persistence
-confirmation remain distinct facts. Model response indices continue through
-internal Loops within one public Turn. Tool identity includes the original Turn.
+confirmation remain distinct facts. The Session increments one response index
+throughout the public Turn. Tool identity includes the original Turn.
 
 Trusted resource assemblers can override `ResourceResolver::bind_tool_output`
 to wrap already-prepared tools with `ToolOutputBinding::wrap`. This is an
@@ -154,8 +156,8 @@ bound process-output capability. Clones become inactive when that call returns
 or is cancelled, and never hold a Session alive. Final ToolResult text is not
 re-emitted as invented process output.
 
-The local Runtime retry-state integration reads `LoopHandle::watch_state`
-directly. `TurnInfo` and `turn.state` share actual attempt counts, the original
+The Session receives model-call progress directly from the shared driver.
+`TurnInfo` and `turn.state` share actual attempt counts, the original
 response index, retry phase, structured Fault and source RFC3339 retry time.
 A waiting cancellation does not increment the actual-call count. Retry clearing
 is a normal state change, including for state-only subscribers.

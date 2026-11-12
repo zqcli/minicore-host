@@ -468,7 +468,7 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
         .history
         .iter()
         .filter_map(|item| {
-            if let minicore_runtime::HistoryItem::User(user) = item {
+            if let minicore_host_runtime::HistoryItem::User(user) = item {
                 Some(user.loop_id)
             } else {
                 None

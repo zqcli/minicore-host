@@ -2,9 +2,7 @@
 //! No live provider or TUI validation is claimed.
 use super::*;
 use crate::JournalHistory;
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
-use minicore_runtime::{
+use minicore_host_runtime::{
     history::SummaryHistory,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
@@ -13,6 +11,8 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::testing::read_history_bytes;
+use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use std::{collections::BTreeSet, sync::atomic::AtomicUsize, time::Duration};
 use tokio::sync::Semaphore;
 
@@ -52,7 +52,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -617,7 +617,7 @@ async fn cold_read_is_read_only_and_preserves_pause_and_queued_input() {
 
 #[tokio::test]
 async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent_records() {
-    use minicore_runtime::{
+    use minicore_host_runtime::{
         AssistantHistory, UserHistory, UserMessageKind,
         model::{AssistantPart, ModelPartial, Usage},
     };

@@ -5,26 +5,26 @@ mod wss_common;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::model::{ModelEvent, ModelFinishReason};
+use minicore_host_runtime::model::{ModelEvent, ModelFinishReason};
 use observation_common::*;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
 struct GatedFileTool {
-    spec: minicore_runtime::tools::ToolSpec,
+    spec: minicore_host_runtime::tools::ToolSpec,
     entered: mpsc::UnboundedSender<()>,
     gate: Arc<tokio::sync::Semaphore>,
     retained_sink: Arc<Mutex<Option<ToolOutputSink>>>,
 }
-impl minicore_runtime::tools::Tool for GatedFileTool {
-    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+impl minicore_host_runtime::tools::Tool for GatedFileTool {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
         &self.spec
     }
     fn execute<'a>(
         &'a self,
-        invocation: minicore_runtime::tools::ToolInvocation,
-        context: minicore_runtime::tools::ToolContext,
-    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        invocation: minicore_host_runtime::tools::ToolInvocation,
+        context: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
         Box::pin(async move {
             let content = tokio::fs::read_to_string(invocation.arguments["path"].as_str().unwrap())
                 .await
@@ -33,8 +33,8 @@ impl minicore_runtime::tools::Tool for GatedFileTool {
             assert!(sink.emit("stdout", &content));
             *self.retained_sink.lock().unwrap() = Some(sink);
             context.progress.emit(
-                minicore_runtime::tools::ToolProgress::new(
-                    Some(minicore_runtime::Text::new("file read")),
+                minicore_host_runtime::tools::ToolProgress::new(
+                    Some(minicore_host_runtime::Text::new("file read")),
                     Some(1),
                     Some(1),
                 )
@@ -42,14 +42,17 @@ impl minicore_runtime::tools::Tool for GatedFileTool {
             );
             self.entered.send(()).unwrap();
             self.gate.acquire().await.unwrap().forget();
-            Ok(minicore_runtime::tools::ToolExecutionOutcome::Completed(
-                minicore_runtime::tools::ToolOutput::new(format!("result: {content}")).unwrap(),
-            ))
+            Ok(
+                minicore_host_runtime::tools::ToolExecutionOutcome::Completed(
+                    minicore_host_runtime::tools::ToolOutput::new(format!("result: {content}"))
+                        .unwrap(),
+                ),
+            )
         })
     }
 }
 fn call_file(events: &Events, path: &std::path::Path) {
-    let id: minicore_runtime::ToolCallId = "repeated-call".parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = "repeated-call".parse().unwrap();
     events
         .send(ModelEvent::ToolCallStart {
             tool_call_id: id.clone(),
@@ -81,7 +84,7 @@ async fn real_file_tool_arguments_progress_output_and_result_cross_os_pipes_and_
         let gate = Arc::new(tokio::sync::Semaphore::new(0));
         let retained_sink = Arc::new(Mutex::new(None));
         let tool = Arc::new(GatedFileTool {
-            spec: minicore_runtime::tools::ToolSpec::new(
+            spec: minicore_host_runtime::tools::ToolSpec::new(
                 "read_fixture".parse().unwrap(),
                 "read a real fixture file",
                 serde_json::json!({"type":"object"}),

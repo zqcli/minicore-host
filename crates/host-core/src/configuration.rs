@@ -5,7 +5,7 @@
 use crate::{BoundResources, PreparedTurnBinding, ResourceFuture, ResourceResolver};
 use minicore_host_protocol::*;
 pub use minicore_host_protocol::{HostReloadResult, RestartField};
-use minicore_runtime::tools::ToolSpec;
+use minicore_host_runtime::tools::ToolSpec;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -426,9 +426,9 @@ impl ResourceResolver for ConfigurationOwner {
 
     fn bind_tool_output(
         &self,
-        execution: &minicore_runtime::ExecutionConfig,
+        execution: &minicore_host_runtime::ExecutionConfig,
         output: crate::ToolOutputBinding,
-    ) -> minicore_runtime::ExecutionConfig {
+    ) -> minicore_host_runtime::ExecutionConfig {
         // Per ResourceResolver's contract this hook attaches observation only;
         // it may not select or replace already prepared execution resources.
         match Self::resources(&self.snapshot()) {

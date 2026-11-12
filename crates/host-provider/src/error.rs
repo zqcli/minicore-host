@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant, SystemTime};
 
 use futures_util::StreamExt;
-use minicore_runtime::{
+use minicore_host_runtime::{
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
     model::{DeliveryState, ModelCallContext, ModelError, ModelErrorKind},
     value::Text,

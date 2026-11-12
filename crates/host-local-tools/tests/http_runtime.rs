@@ -1,8 +1,19 @@
 mod support;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_runtime::{LoopOptions, LoopOutcome};
+use minicore_host_runtime::{
+    ExecutionOptions,
+    model::{
+        AssistantPart, ModelCallContext, ModelDriver, ModelDriverConfig, ModelFinishReason,
+        ModelMessage,
+    },
+    tools::run_tool_batch,
+};
 use serde_json::{Value, json};
-use std::{fs, sync::Arc};
+use std::{
+    fs,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use support::*;
 use tokio::net::TcpListener;
 
@@ -23,7 +34,8 @@ fn tool(id: &str, name: &str, args: Value) -> String {
 mod http;
 
 /// Scripted loopback HTTP/SSE replies exercise the production provider and
-/// actual Runtime plus local tools. This is not a live model-provider claim.
+/// actual model/tool primitives. Full Turn ownership is covered by host-tools'
+/// local_binding tests. This is not a live model-provider claim.
 #[tokio::test]
 async fn production_http_provider_round_trip_executes_real_files_and_shell() {
     let (root, tools, records) = fixture().await;
@@ -63,17 +75,66 @@ async fn production_http_provider_round_trip_executes_real_files_and_shell() {
         )
         .unwrap(),
     );
-    let report = finish(
-        start(
-            model,
-            &tools,
-            &["write", "bash"],
-            LoopOptions::default_checked().unwrap(),
-        ),
-        &tools,
+    let config = execution(model, &tools, &["write", "bash"], None);
+    let options = ExecutionOptions::default();
+    let context = batch_context(&options);
+    let driver = ModelDriver::new(
+        config.model().as_ref(),
+        ModelDriverConfig::new(options.model_timeout, 1, options.model_retry_base_delay),
     )
-    .await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    .unwrap();
+    let mut messages = vec![ModelMessage::user("Run the explicit local-tool fixture").unwrap()];
+    // Three declared exchanges exercise protocol encoding and result replay.
+    for (index, expected) in [
+        ModelFinishReason::ToolCalls,
+        ModelFinishReason::ToolCalls,
+        ModelFinishReason::Stop,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let response = driver
+            .call(
+                config.request(messages.clone()).unwrap(),
+                ModelCallContext::new(
+                    context.loop_id,
+                    index as u32,
+                    context.cancellation.clone(),
+                    Instant::now() + Duration::from_secs(10),
+                ),
+                &mut |_| {},
+            )
+            .await
+            .outcome
+            .unwrap();
+        assert_eq!(response.finish_reason(), expected);
+        messages.push(
+            ModelMessage::assistant_with_provider_replay(
+                response.parts().to_vec(),
+                response.provider_replay().cloned(),
+            )
+            .unwrap(),
+        );
+        let calls: Vec<_> = response
+            .parts()
+            .iter()
+            .filter_map(|part| match part {
+                AssistantPart::ToolCall(call) => Some(call),
+                _ => None,
+            })
+            .collect();
+        if !calls.is_empty() {
+            let mut batch = context.clone();
+            batch.request_index = index as u32;
+            let report = run_tool_batch(&config, &calls, batch, Arc::new(NoInteractions)).await;
+            assert_eq!(report.stop, None);
+            messages.extend(report.results.into_iter().map(|result| {
+                ModelMessage::tool_with_outcome(result.call_id, result.output, result.outcome)
+                    .unwrap()
+            }));
+        }
+    }
+    tools.finish().await;
     assert_eq!(
         fs::read_to_string(root.path().join("from-http.txt")).unwrap(),
         "actual filesystem text"

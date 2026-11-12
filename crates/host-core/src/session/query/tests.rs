@@ -2,9 +2,7 @@
 //! Only model events and the journal acknowledgement failure are test fixtures.
 use super::*;
 use crate::backend::{JournalHistory, TestAppendFault};
-use minicore_host_storage::testing::read_history_bytes;
-use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
-use minicore_runtime::{
+use minicore_host_runtime::{
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -15,6 +13,8 @@ use minicore_runtime::{
         ToolSpec,
     },
 };
+use minicore_host_storage::testing::read_history_bytes;
+use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
 use std::{collections::BTreeSet, time::Duration};
 use tokio::sync::mpsc;
 
@@ -91,7 +91,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -258,8 +258,8 @@ fn assert_public(value: &impl serde::Serialize) {
 }
 
 #[tokio::test]
-async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and_next_loop_partial()
-{
+async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and_next_request_partial()
+ {
     let mut fixture = fixture(4, false);
     let caller = fixture.connection.caller();
     let original = fixture.session.info(&caller).unwrap().config;
@@ -317,7 +317,7 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
     send(&fixture, MessageMode::Steer);
     fixture.events[1]
         .send(ModelEvent::ProviderReplay {
-            replay: minicore_runtime::model::ProviderReplay::new(
+            replay: minicore_host_runtime::model::ProviderReplay::new(
                 "fixture/v1",
                 serde_json::json!({"opaque":"empty complete response"}),
             )
@@ -350,7 +350,7 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
         })
         .collect();
     assert_eq!(users.len(), 2);
-    assert_ne!(users[0], users[1]);
+    assert_eq!(users[0], users[1]);
     let raw_assistants: Vec<_> = raw
         .history
         .iter()
@@ -363,7 +363,7 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
         })
         .collect();
     assert_eq!(raw_assistants, [0, 1]);
-    assert_eq!(raw.partials[0].partial.request_index, 0);
+    assert_eq!(raw.partials[0].partial.request_index, 2);
     let result = fixture
         .session
         .turn_result_snapshot(&caller, &first)

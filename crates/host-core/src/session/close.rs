@@ -3,7 +3,7 @@ use super::collaboration::DelegationSlot;
 use super::*;
 
 impl SessionController {
-    pub(super) fn apply_close_locked(&self, state: &mut SessionState) -> Option<LoopHandle> {
+    pub(super) fn apply_close_locked(&self, state: &mut SessionState) -> Option<CancellationToken> {
         if state.lifecycle == SessionLifecycle::Closed {
             None
         } else {
@@ -13,12 +13,12 @@ impl SessionController {
             state.lifecycle = SessionLifecycle::Closing;
             Self::cancel_compaction_locked(state);
             clear_inbox(state);
-            let handle = state.active.as_mut().and_then(|active| {
+            let handle = state.active.as_mut().map(|active| {
                 if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
                     active._activation.expire();
                     active.info.state = TurnState::Cancelling;
                 }
-                active.handle.clone()
+                active.cancellation.clone()
             });
             Self::finish_memory_close(state);
             self.publish(state);
@@ -28,7 +28,7 @@ impl SessionController {
     pub(super) fn close_owned(
         &self,
         operation: OperationId,
-    ) -> Result<(SessionCloseReceipt, Option<LoopHandle>, Vec<Record>), Fault> {
+    ) -> Result<(SessionCloseReceipt, Option<CancellationToken>, Vec<Record>), Fault> {
         self.start_scope_cleanup_owned();
         let mut state = self.state.lock().expect("Session mutex poisoned");
         Self::available(&state)?;
@@ -124,7 +124,7 @@ impl SessionController {
     ) -> Result<(SessionCloseReceipt, Vec<Record>), Fault> {
         let (receipt, handle, records) = self.close_owned(operation)?;
         if let Some(handle) = handle {
-            handle.shutdown();
+            handle.cancel();
         }
         Ok((receipt, records))
     }

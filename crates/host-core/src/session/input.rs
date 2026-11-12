@@ -234,70 +234,50 @@ pub(super) fn take_batch(
     batch
 }
 
-pub(super) struct SessionInputs {
-    pub(super) session: Arc<SessionController>,
-    pub(super) turn_id: TurnId,
-    pub(super) initial: Mutex<VecDeque<QueuedInput>>,
-}
-impl LoopInputs for SessionInputs {
-    fn take(&self) -> Vec<UserInput> {
-        let mut state = self.session.state.lock().expect("Session mutex poisoned");
-        if state.host_stopping || !self.session.access.execution_allowed_owned() {
-            let mut claimed = false;
-            let handle = state
-                .active
-                .as_mut()
-                .filter(|active| active.info.id == self.turn_id)
-                .and_then(|active| {
-                    if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
-                        claimed = true;
-                        active._activation.expire();
-                        active.info.state = TurnState::Cancelling;
-                    }
-                    active.handle.clone()
-                });
-            let record =
-                self.session
-                    .cancel_claim_record(&state, claimed, "host_force", None, false);
-            drop(state);
-            diagnostic::emit(record);
-            if let Some(handle) = handle {
-                handle.shutdown();
-            }
-            return Vec::new();
+impl SessionController {
+    /// The Session authors the native input and provenance together. There is
+    /// no later payload matching or second delivery from an execution report.
+    pub(super) fn accept_bound_inputs(&self, state: &mut SessionState, batch: Vec<QueuedInput>) {
+        let active = state.active.as_ref().expect("owned Turn");
+        let turn_id = active.info.id.clone();
+        let loop_id = active.loop_id;
+        let first = state.history.len() == active.start_history;
+        if !batch.is_empty() && state.info.mode == StorageMode::Persistent {
+            state.active.as_mut().expect("owned Turn").info.persistence = PersistenceState::Pending;
         }
-        // Already bound remainder is handoff storage, not a third inbox. Pause
-        // never withdraws it. Force does not consume even a bound remainder.
-        let mut values = self
-            .initial
-            .lock()
-            .expect("bound input mutex poisoned")
-            .drain(..)
-            .map(|input| input.runtime)
-            .collect::<Vec<_>>();
-        let mut records = Vec::new();
-        if self.session.schedulable(&state)
-            && state.active.as_ref().is_some_and(|active| {
-                active.info.id == self.turn_id && active.info.state == TurnState::Running
-            })
-        {
-            let batch = take_batch(&mut state, false, &self.turn_id);
-            records = self.session.observe_bound(&state, &batch);
-            values.extend(batch.iter().map(|input| input.runtime.clone()));
+        for (index, input) in batch.into_iter().enumerate() {
+            let message_id = input.message.message_id.clone();
+            let user = minicore_host_runtime::UserHistory {
+                loop_id,
+                kind: if first && index == 0 {
+                    minicore_host_runtime::UserMessageKind::Prompt
+                } else {
+                    minicore_host_runtime::UserMessageKind::Steering
+                },
+                input: input.runtime,
+            };
+            let entry = HistoryEntry::Input {
+                turn_id: turn_id.clone(),
+                message_id: message_id.clone(),
+                source: input.source,
+                mode: input.message.mode,
+                in_reply_to: input.message.in_reply_to,
+                user: user.clone(),
+            };
+            state.input_provenance.record(state.history.len(), &entry);
+            Arc::make_mut(&mut state.history).push(HistoryItem::User(user));
+            state
+                .readable_history
+                .as_mut()
+                .expect("loaded history")
+                .extend(HistoryItemData::from_entry(&entry));
             state
                 .active
                 .as_mut()
-                .expect("checked active Turn")
-                .bound_pending
-                .extend(batch);
-            self.session.publish(&mut state);
+                .expect("owned Turn")
+                .consumed_inputs
+                .push(message_id.clone());
+            Self::record_delegated_input(state, &turn_id, &message_id);
         }
-        let records = records
-            .into_iter()
-            .map(|record| record.published(state.controller_revision, state.runner_revision))
-            .collect::<Vec<_>>();
-        drop(state);
-        diagnostic::emit(records);
-        values
     }
 }

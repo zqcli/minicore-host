@@ -2,8 +2,8 @@
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelRequest, ModelStartFuture,
         ModelStream, ReasoningPreference,
@@ -63,7 +63,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -331,7 +331,7 @@ fn complete(call: &ModelCall, text: &str) {
     call.events.send(ModelEvent::text_delta(text)).unwrap();
     call.events
         .send(ModelEvent::Finish {
-            reason: minicore_runtime::model::ModelFinishReason::Stop,
+            reason: minicore_host_runtime::model::ModelFinishReason::Stop,
         })
         .unwrap();
 }
@@ -397,13 +397,13 @@ async fn appended_steer_precedes_first_follow_up(remove_first: bool) {
         .history
         .iter()
         .filter_map(|item| {
-            if let minicore_runtime::HistoryItem::Assistant(response) = item {
+            if let minicore_host_runtime::HistoryItem::Assistant(response) = item {
                 Some(
                     response
                         .content
                         .iter()
                         .filter_map(|part| {
-                            if let minicore_runtime::model::AssistantPart::Text(text) = part {
+                            if let minicore_host_runtime::model::AssistantPart::Text(text) = part {
                                 Some(text.as_ref())
                             } else {
                                 None

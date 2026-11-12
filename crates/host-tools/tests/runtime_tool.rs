@@ -1,24 +1,30 @@
-//! Real Runtime AgentLoop, explicitly scripted model and owner-port fixtures.
+//! Actual model/tool primitives with explicitly scripted model and owner-port fixtures.
 mod support;
 use futures_util::stream;
 use minicore_host_protocol::ToolBinding;
-use minicore_host_tools::*;
-use minicore_runtime::{
-    AgentLoop, ExecutionConfig, HistoryItem, LoopInputs, LoopOptions, LoopOutcome, LoopRequest,
-    UserInput,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions, InteractionAnswer, InteractionId, LoopId,
+    PendingInteraction,
     model::{
-        Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelMessage,
-        ModelRequest, ModelStartFuture, ModelStream, ReasoningPreference,
+        AssistantPart, Model, ModelCallContext, ModelDescriptor, ModelDriver, ModelDriverConfig,
+        ModelEvent, ModelFinishReason, ModelMessage, ModelRequest, ModelStartFuture, ModelStream,
+        ReasoningPreference,
     },
     prompt::DefaultPromptProvider,
-    tools::ToolResultOutcome,
+    tools::{
+        ToolBatchContext, ToolBatchEvent, ToolBatchHost, ToolBatchStop, ToolResultOutcome,
+        run_tool_batch,
+    },
 };
+use minicore_host_tools::*;
 use serde_json::json;
 use std::{
     collections::{BTreeSet, VecDeque},
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 use support::*;
+use tokio::sync::oneshot;
 
 struct FixtureModel {
     descriptor: ModelDescriptor,
@@ -42,10 +48,18 @@ impl Model for FixtureModel {
         )
     }
 }
-struct NoInputs;
-impl LoopInputs for NoInputs {
-    fn take(&self) -> Vec<UserInput> {
-        Vec::new()
+struct NoInteractions;
+impl ToolBatchHost for NoInteractions {
+    fn observe(&self, _: ToolBatchEvent) {}
+    fn request_interaction(
+        &self,
+        _: PendingInteraction,
+        _: oneshot::Sender<InteractionAnswer>,
+    ) -> Result<(), ToolBatchStop> {
+        panic!("agent acceptance requires no interaction")
+    }
+    fn finish_interaction(&self, _: InteractionId) {
+        panic!("no interaction was registered")
     }
 }
 #[tokio::test]
@@ -107,28 +121,53 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
         Arc::new(DefaultPromptProvider::new(None)),
     )
     .unwrap();
-    let mut runtime = AgentLoop::start(
-        LoopRequest::new(
-            Arc::from([]),
-            UserInput::text("delegate work").unwrap(),
-            config,
-        ),
-        LoopOptions::default_checked().unwrap(),
-        Arc::new(NoInputs),
+    let options = ExecutionOptions::default();
+    let context = ModelCallContext::new(
+        LoopId::new().unwrap(),
+        0,
+        Default::default(),
+        Instant::now() + Duration::from_secs(5),
+    );
+    let driver = ModelDriver::new(
+        model.as_ref(),
+        ModelDriverConfig::new(options.model_timeout, 1, options.model_retry_base_delay),
     )
     .unwrap();
-    let _events = runtime.take_events().unwrap();
-    let report = runtime.join().await.unwrap();
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert_eq!((report.requests, report.tool_rounds), (2, 1));
-    let results = report
-        .appended
+    let mut messages = vec![ModelMessage::user("delegate work").unwrap()];
+    let response = driver
+        .call(
+            config.request(messages.clone()).unwrap(),
+            context.clone(),
+            &mut |_| {},
+        )
+        .await
+        .outcome
+        .unwrap();
+    assert_eq!(response.finish_reason(), ModelFinishReason::ToolCalls);
+    let calls = response
+        .parts()
         .iter()
-        .filter_map(|item| match item {
-            HistoryItem::ToolResult(result) => Some(result),
+        .filter_map(|part| match part {
+            AssistantPart::ToolCall(call) => Some(call),
             _ => None,
         })
         .collect::<Vec<_>>();
+    let report = run_tool_batch(
+        &config,
+        &calls,
+        ToolBatchContext {
+            loop_id: context.loop_id,
+            request_index: 0,
+            cancellation: context.cancellation.clone(),
+            deadline: Some(context.deadline),
+            policy_timeout: options.policy_timeout,
+            tool_timeout: options.tool_timeout,
+        },
+        Arc::new(NoInteractions),
+    )
+    .await;
+    assert_eq!(report.stop, None);
+    let results = report.results;
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].call_id.as_str(), "provider-call-42");
     assert_eq!(results[0].outcome, ToolResultOutcome::Success);
@@ -153,7 +192,30 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
         relation.registration.origin.turn_id,
         port.source.turn.turn_id
     );
+    messages.push(
+        ModelMessage::assistant_with_provider_replay(
+            response.parts().to_vec(),
+            response.provider_replay().cloned(),
+        )
+        .unwrap(),
+    );
+    messages.extend(results.into_iter().map(|result| {
+        ModelMessage::tool_with_outcome(result.call_id, result.output, result.outcome).unwrap()
+    }));
+    let mut second_context = context;
+    second_context.request_index = 1;
+    let second = driver
+        .call(
+            config.request(messages).unwrap(),
+            second_context,
+            &mut |_| {},
+        )
+        .await
+        .outcome
+        .unwrap();
+    assert_eq!(second.finish_reason(), ModelFinishReason::Stop);
     let requests = model.requests.lock().unwrap();
+    assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].tools().len(), 1);
     assert_eq!(requests[0].tools()[0], agent_tool_spec());
     assert!(requests[1].messages().iter().any(|message|matches!(message,ModelMessage::Tool {tool_call_id,..} if tool_call_id.as_str()=="provider-call-42")));

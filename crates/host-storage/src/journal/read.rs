@@ -9,7 +9,7 @@ use crate::{
     strict_json,
 };
 use minicore_host_protocol::SessionId;
-use minicore_runtime::history::HistoryItem;
+use minicore_host_runtime::history::HistoryItem;
 use std::io::Read;
 
 #[derive(Clone, Debug, PartialEq)]

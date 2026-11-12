@@ -1,11 +1,11 @@
 #![cfg(any(unix, windows))]
 mod support;
 use minicore_host_local_tools::*;
-use minicore_host_workspace::Workspace;
-use minicore_runtime::{
-    LoopOptions, LoopOutcome, ToolCallId,
-    tools::{ToolError, ToolInvocation},
+use minicore_host_runtime::{
+    ExecutionOptions, ToolCallId,
+    tools::{ToolBatchStop, ToolError, ToolInvocation, run_tool_batch},
 };
+use minicore_host_workspace::Workspace;
 #[cfg(unix)]
 use nix::{
     errno::Errno,
@@ -56,22 +56,14 @@ fn gone(pid: u32) {
 #[tokio::test]
 async fn runtime_nonzero_exit_preserves_complete_stdout_stderr_and_side_effects_once() {
     let (root, tools, records) = fixture().await;
-    let model = ScriptedModel::calls(vec![(
+    let calls = vec![(
         "shell-42",
         "bash",
         json!({"command":"printf once >> effects; printf '真实 stdout'; printf 'real stderr' >&2; exit 7"}),
-    )]);
-    let report = finish(
-        start(
-            model,
-            &tools,
-            &["bash"],
-            LoopOptions::default_checked().unwrap(),
-        ),
-        &tools,
-    )
-    .await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    )];
+    let report = run_calls(&tools, calls, ExecutionOptions::default()).await;
+    tools.finish().await;
+    assert_eq!(report.stop, None);
     let output = outputs(&report);
     assert_eq!(output[0]["status"], "exited");
     assert_eq!(output[0]["exit_code"], 7);
@@ -155,21 +147,22 @@ async fn bound_workspace_and_relative_cwd_never_change_process_cwd() {
 #[tokio::test]
 async fn runtime_cancel_drops_port_but_finish_waits_for_real_pid_and_cleanup() {
     let (root, tools, records) = fixture().await;
-    let model = ScriptedModel::calls(vec![(
+    let call = tool_call(
         "cancel-shell",
         "bash",
         json!({"command":"echo $$ > leader.pid; printf once >> effects; printf started; exec sleep 30"}),
-    )]);
-    let runtime = start(
-        model,
-        &tools,
-        &["bash"],
-        LoopOptions::default_checked().unwrap(),
     );
+    let config = tool_config(&tools, &["bash"], None);
+    let context = batch_context(&ExecutionOptions::default());
+    let cancellation = context.cancellation.clone();
+    let batch = tokio::spawn(async move {
+        run_tool_batch(&config, &[&call], context, Arc::new(NoInteractions)).await
+    });
     wait_file(&root.path().join("effects")).await;
     let started = Instant::now();
-    assert!(runtime.handle().cancel());
-    let _report = runtime.join().await.unwrap();
+    cancellation.cancel();
+    let report = batch.await.unwrap();
+    assert_eq!(report.stop, Some(ToolBatchStop::Cancelled));
     let done = tokio::time::timeout(Duration::from_secs(10), tools.finish())
         .await
         .unwrap();
@@ -189,16 +182,19 @@ async fn runtime_cancel_drops_port_but_finish_waits_for_real_pid_and_cleanup() {
 #[tokio::test]
 async fn runtime_deadline_joins_subprocess_and_never_repeats_side_effects() {
     let (root, tools, records) = fixture().await;
-    let model = ScriptedModel::calls(vec![(
+    let calls = vec![(
         "timeout-shell",
         "bash",
         json!({"command":"printf once >> effects; exec sleep 30"}),
-    )]);
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.tool_timeout = Duration::from_millis(if cfg!(windows) { 1_000 } else { 100 });
+    )];
+    let options = ExecutionOptions {
+        tool_timeout: Duration::from_millis(if cfg!(windows) { 1_000 } else { 100 }),
+        ..ExecutionOptions::default()
+    };
     let started = Instant::now();
-    let report = finish(start(model, &tools, &["bash"], options), &tools).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    let report = run_calls(&tools, calls, options).await;
+    tools.finish().await;
+    assert_eq!(report.stop, None);
     assert!(started.elapsed() < Duration::from_secs(10));
     let commands = records.commands.lock().unwrap();
     assert_eq!(commands.len(), 1);

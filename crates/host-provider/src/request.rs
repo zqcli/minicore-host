@@ -1,4 +1,4 @@
-use minicore_runtime::model::{
+use minicore_host_runtime::model::{
     AssistantPart, ModelDescriptor, ModelError, ModelErrorKind, ModelMessage, ModelRequest,
     ReasoningPreference,
 };

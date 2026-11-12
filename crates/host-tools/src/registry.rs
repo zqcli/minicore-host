@@ -1,7 +1,7 @@
 use crate::{AgentTool, BoundLocalTools, ScopeManager, TurnPort, agent_tool_spec};
 use minicore_host_local_tools::local_tool_specs;
 use minicore_host_protocol::{Fault, FaultKind, ToolBinding};
-use minicore_runtime::tools::{Tool, ToolSet, ToolSpec};
+use minicore_host_runtime::tools::{Tool, ToolSet, ToolSpec};
 use std::{collections::BTreeMap, sync::Arc};
 
 /// Static deployment registration; binding supplies only the selected Turn's

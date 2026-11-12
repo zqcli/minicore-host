@@ -1,6 +1,4 @@
-//! Exact waiting-point answers. A private fence protects only the short gap
-//! between owner acceptance and the Runtime control result; no owner lock is
-//! held across the Runtime call or a wait.
+//! Exact waiting points and answers owned by this Session.
 use super::*;
 use crate::{ActivityEvent, InteractionResolution, InteractionResolvedData, ObservationEvent};
 use serde::{Deserialize, Serialize};
@@ -18,12 +16,12 @@ pub enum InteractionAnswerData {
         decision: ApprovalAnswer,
     },
     ToolInput {
-        answer: minicore_runtime::tools::ToolInputAnswer,
+        answer: minicore_host_runtime::tools::ToolInputAnswer,
     },
 }
 impl InteractionAnswerData {
-    fn into_runtime(self) -> minicore_runtime::interaction::InteractionAnswer {
-        use minicore_runtime::{interaction::InteractionAnswer, tools::ApprovalDecision};
+    fn into_runtime(self) -> minicore_host_runtime::interaction::InteractionAnswer {
+        use minicore_host_runtime::{interaction::InteractionAnswer, tools::ApprovalDecision};
         match self {
             Self::Approval { decision } => InteractionAnswer::Approval(match decision {
                 ApprovalAnswer::AllowOnce => ApprovalDecision::AllowOnce,
@@ -33,13 +31,109 @@ impl InteractionAnswerData {
         }
     }
 }
+pub(super) struct PendingAnswer {
+    request: minicore_host_runtime::interaction::PendingInteraction,
+    reply: tokio::sync::oneshot::Sender<minicore_host_runtime::interaction::InteractionAnswer>,
+    pub(super) data: crate::PendingInteractionData,
+}
+pub(super) struct SessionToolHost {
+    pub(super) session: Arc<SessionController>,
+    pub(super) turn_id: TurnId,
+}
+impl minicore_host_runtime::tools::ToolBatchHost for SessionToolHost {
+    fn observe(&self, event: minicore_host_runtime::tools::ToolBatchEvent) {
+        self.session.observe_tool_event(&self.turn_id, event);
+    }
+    fn request_interaction(
+        &self,
+        pending: minicore_host_runtime::interaction::PendingInteraction,
+        reply: tokio::sync::oneshot::Sender<minicore_host_runtime::interaction::InteractionAnswer>,
+    ) -> Result<(), minicore_host_runtime::tools::ToolBatchStop> {
+        use minicore_host_runtime::tools::ToolBatchStop;
+        let mut state = self.session.state.lock().expect("Session mutex poisoned");
+        if state.host_stopping || !self.session.access.execution_allowed_owned() {
+            return Err(ToolBatchStop::Cancelled);
+        }
+        let active = state
+            .active
+            .as_ref()
+            .filter(|a| {
+                a.info.id == self.turn_id
+                    && a.info.state == TurnState::Running
+                    && !a.cancellation.is_cancelled()
+            })
+            .ok_or(ToolBatchStop::Cancelled)?;
+        let source = self.session.turn_identity(&active.info);
+        if active.pending_interaction.is_some() {
+            return Err(ToolBatchStop::Internal(
+                DiagnosticSummary::new(
+                    DiagnosticCode::InteractionNotFound,
+                    DiagnosticCategory::Internal,
+                    Text::new("Turn already has a pending interaction"),
+                    false,
+                )
+                .expect("static diagnostic"),
+            ));
+        }
+        let record = state
+            .output
+            .entry(self.turn_id.clone())
+            .or_default()
+            .interaction(&pending);
+        let data = record.data.clone();
+        let active = state.active.as_mut().expect("checked Turn");
+        active.pending_interaction = Some(PendingAnswer {
+            request: pending,
+            reply,
+            data: data.clone(),
+        });
+        active.info.phase = Some(TurnPhase::WaitingForInput);
+        self.session
+            .access
+            .observation
+            .publish(ObservationEvent::Activity(
+                ActivityEvent::InteractionRequested {
+                    source: ToolCallIdentity {
+                        turn: source,
+                        tool_call_id: data.tool_call_id,
+                    },
+                    interaction_id: data.interaction_id,
+                    data: data.request,
+                },
+            ));
+        self.session.publish(&mut state);
+        Ok(())
+    }
+    fn finish_interaction(&self, id: minicore_host_runtime::InteractionId) {
+        let mut state = self.session.state.lock().expect("Session mutex poisoned");
+        if state
+            .active
+            .as_ref()
+            .is_none_or(|active| active.info.id != self.turn_id)
+        {
+            return;
+        }
+        let active = state.active.as_mut().expect("checked Turn");
+        if active
+            .pending_interaction
+            .as_ref()
+            .is_some_and(|pending| pending.request.interaction_id == id)
+        {
+            active.pending_interaction = None;
+        }
+        if active.info.state == TurnState::Running {
+            active.info.phase = Some(TurnPhase::Tools);
+        }
+        self.session.publish(&mut state);
+    }
+}
 impl SessionController {
     pub(crate) fn answer_interaction(
         &self,
         caller: &CallerContext,
         request: InteractionAnswerRequest<InteractionAnswerData>,
     ) -> Result<InteractionAnswerReceipt, Fault> {
-        let (handle, runtime_id, source, completed) = self.access.accept(caller, || {
+        self.access.accept(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::available(&state)?;
             let active = state
@@ -58,58 +152,41 @@ impl SessionController {
                     "interaction belongs to another Load",
                 ));
             }
-            if active.info.state != TurnState::Running {
+            if active.info.state != TurnState::Running
+                || active.cancellation.is_cancelled()
+                || state.host_stopping
+                || !self.access.execution_allowed_owned()
+            {
                 return Err(not_pending());
             }
-            let handle = active.handle.clone().ok_or_else(not_pending)?;
-            let source = TurnIdentity {
-                session: self.identity(),
-                turn_id: active.info.id.clone(),
-                load_id: Some(active.info.load_id.clone()),
-            };
-            let (runtime_id, record) = state
+            let source = self.turn_identity(&active.info);
+            let pending = active
+                .pending_interaction
+                .as_ref()
+                .filter(|pending| pending.data.interaction_id == request.interaction_id)
+                .ok_or_else(not_pending)?;
+            let answer = request.answer.into_runtime();
+            pending.request.validate_answer(&answer).map_err(|_| {
+                Fault::new(
+                    FaultKind::SessionInteractionAnswerInvalid,
+                    "answer does not match the original pending request",
+                )
+            })?;
+            // Validation, consumption and answer-vs-cancel share one short
+            // owner boundary. A oneshot send never awaits the tool primitive.
+            let pending = state
+                .active
+                .as_mut()
+                .expect("checked Turn")
+                .pending_interaction
+                .take()
+                .expect("checked slot");
+            pending.reply.send(answer).map_err(|_| not_pending())?;
+            let record = state
                 .output
                 .get_mut(&request.turn_id)
-                .and_then(|output| {
-                    output
-                        .interactions
-                        .iter_mut()
-                        .find(|(_, record)| record.data.interaction_id == request.interaction_id)
-                })
-                .ok_or_else(not_pending)?;
-            if record.resolved || record.answering.is_some() {
-                return Err(not_pending());
-            }
-            let (completed, fence) = watch::channel(false);
-            record.answering = Some(fence);
-            Ok((handle, *runtime_id, source, completed))
-        })?;
-        // This exact Runtime slot decides answer-vs-cancel. A later connection
-        // revocation does not undo the owner-accepted attempt or rebind it.
-        let result = handle
-            .answer(runtime_id, request.answer.into_runtime())
-            .map_err(|error| {
-                use minicore_runtime::AnswerError;
-                match error {
-                    AnswerError::InteractionNotFound | AnswerError::NotActive => not_pending(),
-                    AnswerError::WrongInteraction => Fault::new(
-                        FaultKind::SessionInteractionAnswerInvalid,
-                        "answer does not match the original pending request",
-                    ),
-                    _ => Fault::new(
-                        FaultKind::SessionInternalUnexpected,
-                        "Runtime returned an unrecognized interaction error",
-                    ),
-                }
-            });
-        let mut state = self.state.lock().expect("Session mutex poisoned");
-        let record = state
-            .output
-            .get_mut(&request.turn_id)
-            .and_then(|output| output.interactions.get_mut(&runtime_id))
-            .expect("original interaction retained until answer fence completes");
-        record.answering = None;
-        if result.is_ok() && !record.resolved {
+                .and_then(|output| output.interactions.get_mut(&pending.request.interaction_id))
+                .expect("display record created with pending slot");
             record.resolved = true;
             self.access.observation.publish(ObservationEvent::Activity(
                 ActivityEvent::InteractionResolved {
@@ -123,17 +200,6 @@ impl SessionController {
                     },
                 },
             ));
-        }
-        let result = result.map(|()| {
-            if let Some(active) = state.active.as_mut()
-                && active.info.id == request.turn_id
-                && active
-                    .pending_interaction
-                    .as_ref()
-                    .is_some_and(|pending| pending.interaction_id == request.interaction_id)
-            {
-                active.pending_interaction = None;
-            }
             let receipt = InteractionAnswerReceipt {
                 kind: InteractionAnswerKind::InteractionAnswer,
                 host_id: source.session.host_id,
@@ -150,27 +216,8 @@ impl SessionController {
             };
             Self::retain_control(&mut state, Receipt::InteractionAnswer(receipt.clone()));
             self.publish(&mut state);
-            receipt
-        });
-        completed.send_replace(true);
-        result
-    }
-    /// Finalizing is already claimed before this call, so no new answers can
-    /// enter. Only these exact in-flight decisions must settle before reclamation.
-    pub(super) async fn finish_pending_answers(&self, turn: &TurnId) {
-        let pending = {
-            let state = self.state.lock().expect("Session mutex poisoned");
-            state
-                .output
-                .get(turn)
-                .into_iter()
-                .flat_map(|output| output.interactions.values())
-                .filter_map(|record| record.answering.clone())
-                .collect::<Vec<_>>()
-        };
-        for mut completed in pending {
-            let _ = completed.wait_for(|done| *done).await;
-        }
+            Ok(receipt)
+        })
     }
 }
 fn not_pending() -> Fault {

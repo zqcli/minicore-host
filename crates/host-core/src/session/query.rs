@@ -183,7 +183,9 @@ impl SessionController {
                     "history has not yet been loaded and validated",
                 ));
             }
-            Ok(state.history.clone())
+            let history = Arc::clone(&state.history);
+            drop(state);
+            Ok(history.as_ref().clone())
         })
     }
 

@@ -21,7 +21,7 @@ fn idle_closed_memory_reclaims_bodies_and_root_without_a_runtime() {
         }),
         Arc::new(MemoryHistory),
         vec![HistoryItem::Summary(
-            minicore_runtime::history::SummaryHistory {
+            minicore_host_runtime::history::SummaryHistory {
                 content: Text::new("provided memory fixture context"),
             },
         )],

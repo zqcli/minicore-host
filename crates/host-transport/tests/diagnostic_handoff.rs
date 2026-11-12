@@ -11,9 +11,8 @@ use minicore_host_core::{
 use minicore_host_diagnostics::{Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_host_transport::HostClient;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{Model, ModelDescriptor, ReasoningPreference as RuntimeReasoning},
     prompt::DefaultPromptProvider,
     tools::{
@@ -21,6 +20,7 @@ use minicore_runtime::{
         ToolSpec,
     },
 };
+use minicore_host_transport::HostClient;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
@@ -168,7 +168,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

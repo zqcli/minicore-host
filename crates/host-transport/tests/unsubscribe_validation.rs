@@ -4,7 +4,7 @@ mod observation_common;
 mod os_pipe;
 use common::*;
 use minicore_host_protocol::*;
-use minicore_runtime::model::ModelEvent;
+use minicore_host_runtime::model::ModelEvent;
 use observation_common::*;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

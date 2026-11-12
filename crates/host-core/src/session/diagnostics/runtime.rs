@@ -1,12 +1,11 @@
 //! Actual Runtime retry boundaries and returned request facts only.
 use super::*;
-use minicore_runtime::model::{ModelFinishReason, ModelRetryProgress, RetryHint, Usage};
+use minicore_host_runtime::model::{ModelFinishReason, ModelRetryProgress, RetryHint, Usage};
 
 pub(in crate::session) fn model_retry(
     source: &TurnIdentity,
     loop_id: LoopId,
     request_index: u32,
-    base: u64,
     retry: &ModelRetryProgress,
 ) -> Record {
     let mut data = EventData::default()
@@ -16,9 +15,7 @@ pub(in crate::session) fn model_retry(
         .attribute("request_index", u64::from(request_index))
         .attribute("attempt", u64::from(retry.attempt))
         .attribute("max_attempts", u64::from(retry.max_attempts));
-    if let Some(index) = base.checked_add(u64::from(request_index)) {
-        data = data.attribute("response_index", index);
-    }
+    data = data.attribute("response_index", u64::from(request_index));
     if let RetryHint::Retryable {
         retry_after: Some(delay),
     } = retry.error.retry_hint()
@@ -83,100 +80,79 @@ fn usage(mut data: EventData, usage: Option<Usage>) -> EventData {
     data
 }
 
-/// Called once for the actual joined report, before any subsequent save wait.
-/// No bodies are copied or formatted, and no observer timestamp becomes a
-/// driver duration. Completed response usage and actual attempts share the
-/// report's own request index; absent partial usage remains absent.
-pub(in crate::session) fn models_reported(
+/// The direct model-call return supplies actual attempts and usage. Public
+/// output events never substitute for a response or partial.
+pub(in crate::session) fn model_reported(
     source: &TurnIdentity,
-    base: u64,
-    report: &LoopReport,
+    loop_id: LoopId,
+    request_index: u32,
+    report: &minicore_host_runtime::model::ModelCallReport,
 ) -> Vec<Record> {
-    let responses: BTreeMap<_, _> = report
-        .appended
-        .iter()
-        .filter_map(|item| match item {
-            HistoryItem::Assistant(response) => Some((response.request_index as usize, response)),
-            _ => None,
-        })
-        .collect();
-    let mut records = Vec::new();
-    for (index, &attempts) in report.model_attempts.iter().enumerate() {
-        if attempts == 0 {
-            continue;
-        } // No actual model start occurred.
-        let response = responses.get(&index).copied();
-        let observed_usage = response.map(|response| response.usage).or_else(|| {
-            report
-                .partial
-                .as_ref()
-                .filter(|partial| partial.request_index as usize == index)
-                .and_then(|partial| partial.usage)
-        });
-        let data = || {
-            let mut data = EventData::default()
-                .context(turn_context(source))
-                .attribute("loop_id", report.loop_id.to_string())
-                .attribute("request_index", index as u64)
-                .attribute("attempt", u64::from(attempts))
-                .attribute(
-                    "outcome",
-                    if response.is_some() {
-                        "complete_response"
-                    } else {
-                        "no_complete_response"
-                    },
-                );
-            if let Some(index) = base.checked_add(index as u64) {
-                data = data.attribute("response_index", index);
-            }
-            if let Some(response) = response {
-                data = data.attribute(
-                    "finish_reason",
-                    match response.finish_reason {
-                        ModelFinishReason::Stop => "stop",
-                        ModelFinishReason::ToolCalls => "tool_calls",
-                        ModelFinishReason::Length => "length",
-                        ModelFinishReason::ContentFiltered => "content_filtered",
-                        ModelFinishReason::Refused => "refused",
-                        ModelFinishReason::Unknown => "unknown",
-                    },
-                );
-            }
-            usage(data, observed_usage)
-        };
+    if report.attempts == 0 {
+        return Vec::new();
+    }
+    let response = report.outcome.as_ref().ok();
+    let observed_usage = match &report.outcome {
+        Ok(response) => response.usage().copied(),
+        Err(failure) => failure.usage,
+    };
+    let data = || {
+        let mut data = EventData::default()
+            .context(turn_context(source))
+            .attribute("loop_id", loop_id.to_string())
+            .attribute("request_index", u64::from(request_index))
+            .attribute("response_index", u64::from(request_index))
+            .attribute("attempt", u64::from(report.attempts))
+            .attribute(
+                "outcome",
+                if response.is_some() {
+                    "complete_response"
+                } else {
+                    "no_complete_response"
+                },
+            );
+        if let Some(response) = response {
+            data = data.attribute(
+                "finish_reason",
+                match response.finish_reason() {
+                    ModelFinishReason::Stop => "stop",
+                    ModelFinishReason::ToolCalls => "tool_calls",
+                    ModelFinishReason::Length => "length",
+                    ModelFinishReason::ContentFiltered => "content_filtered",
+                    ModelFinishReason::Refused => "refused",
+                    ModelFinishReason::Unknown => "unknown",
+                },
+            );
+        }
+        usage(data, observed_usage)
+    };
+    let mut records = vec![Record::new(
+        event(
+            Level::DEBUG,
+            Scope::Runtime,
+            "session.runtime",
+            "model.finished",
+            "Runtime returned the original model request's attempt and response facts",
+            MODEL_ATTRIBUTES,
+        ),
+        data(),
+    )];
+    if response.is_some() && report.attempts > 1 {
+        let mut recovered = data();
+        if let Ok(milliseconds) = u64::try_from(report.retry_wait_elapsed.as_millis()) {
+            recovered = recovered.attribute("wait_duration_ms", milliseconds);
+        }
         records.push(Record::new(
             event(
-                Level::DEBUG,
+                Level::INFO,
                 Scope::Runtime,
                 "session.runtime",
-                "model.finished",
-                "Runtime returned the original model request's attempt and response facts",
+                "model.recovered",
+                "Runtime produced a complete response after actual retries",
                 MODEL_ATTRIBUTES,
             ),
-            data(),
+            recovered,
         ));
-        if response.is_some() && attempts > 1 {
-            // Source-measured retry waits share the report's original request
-            // index. Planned deadlines and Host observation times are not used.
-            let mut recovered = data();
-            if let Some(elapsed) = report.model_retry_wait_elapsed.get(index)
-                && let Ok(milliseconds) = u64::try_from(elapsed.as_millis())
-            {
-                recovered = recovered.attribute("wait_duration_ms", milliseconds);
-            }
-            records.push(Record::new(
-                event(
-                    Level::INFO,
-                    Scope::Runtime,
-                    "session.runtime",
-                    "model.recovered",
-                    "Runtime produced a complete response after actual retries",
-                    MODEL_ATTRIBUTES,
-                ),
-                recovered,
-            ));
-        }
     }
     records
 }

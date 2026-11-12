@@ -5,11 +5,11 @@ mod os_pipe;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_transport::*;
-use minicore_runtime::model::{
+use minicore_host_runtime::model::{
     Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelRequest, ModelStartFuture,
 };
-use minicore_runtime::tools::{Tool, ToolContext, ToolFuture, ToolInvocation, ToolSpec};
+use minicore_host_runtime::tools::{Tool, ToolContext, ToolFuture, ToolInvocation, ToolSpec};
+use minicore_host_transport::*;
 use observation_common::*;
 use serde_json::Value;
 use std::{
@@ -184,7 +184,7 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
                 "{\"unfinished\":",
             ))
             .unwrap();
-        let usage = minicore_runtime::model::Usage::new(5, 7, 2);
+        let usage = minicore_host_runtime::model::Usage::new(5, 7, 2);
         events[0].send(ModelEvent::Usage { usage }).unwrap();
         events[0].send(ModelEvent::text_delta(PARTIAL)).unwrap();
         // A direct range read confirms assembly; no external observer is alive.

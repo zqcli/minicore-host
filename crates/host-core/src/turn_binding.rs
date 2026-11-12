@@ -181,7 +181,7 @@ impl TurnCapability {
     pub fn history(
         &self,
         target: &SessionRef,
-    ) -> Result<Vec<minicore_runtime::HistoryItem>, Fault> {
+    ) -> Result<Vec<minicore_host_runtime::HistoryItem>, Fault> {
         self.host()?.history(&self.caller()?, target)
     }
     pub fn turn_info(&self, target: &SessionRef, id: &TurnId) -> Result<TurnInfo, Fault> {

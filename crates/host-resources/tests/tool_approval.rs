@@ -7,14 +7,14 @@ mod support;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_resources::HostResourceBuilder;
-use minicore_host_tools::{ToolFactory, ToolRegistry, TurnPort};
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem,
     tools::{
         Tool, ToolContext, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput,
         ToolResultOutcome, ToolSpec,
     },
 };
+use minicore_host_tools::{ToolFactory, ToolRegistry, TurnPort};
 use serde_json::json;
 use std::{
     sync::{

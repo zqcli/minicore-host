@@ -8,16 +8,15 @@ description = "Model-backed historical compaction primitives for MiniCore Host"
 
 [dependencies]
 minicore-host-protocol.workspace = true
-minicore-runtime.workspace = true
+minicore-host-runtime.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, default-features = true, features = ["macros", "time"] }
-tokio-util = { workspace = true, default-features = true, features = ["rt"] }
-futures-util.workspace = true
 
 [dev-dependencies]
+futures-util.workspace = true
 minicore-host-provider.workspace = true
-tokio = { workspace = true, default-features = true, features = ["net", "io-util", "rt-multi-thread", "sync", "test-util"] }
+tokio = { workspace = true, default-features = true, features = ["macros", "time", "net", "io-util", "rt-multi-thread", "sync", "test-util"] }
+tokio-util = { workspace = true, default-features = true, features = ["rt"] }
 
 [lints.rust]
 unsafe_code = "forbid"

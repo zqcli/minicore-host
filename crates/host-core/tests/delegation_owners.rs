@@ -2,9 +2,8 @@
 use futures_util::{FutureExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_storage::testing::read_history_text;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference,
@@ -12,6 +11,7 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_storage::testing::read_history_text;
 use std::{
     collections::{BTreeSet, VecDeque},
     sync::{
@@ -108,7 +108,7 @@ impl ResourceResolver for Resources {
             {
                 let plan = self.plan.as_ref().expect("registered fixture tool");
                 tools.register_arc(Arc::new(FileDelegatingTool {
-                    spec: minicore_runtime::tools::ToolSpec::new(
+                    spec: minicore_host_runtime::tools::ToolSpec::new(
                         "delegate_fixture".parse().unwrap(),
                         "Delegate a real file task",
                         serde_json::json!({"type":"object"}),
@@ -127,7 +127,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -540,19 +540,19 @@ struct FileDelegationPlan {
     sink: mpsc::UnboundedSender<DelegationCompletion>,
 }
 struct FileDelegatingTool {
-    spec: minicore_runtime::tools::ToolSpec,
+    spec: minicore_host_runtime::tools::ToolSpec,
     cap: TurnCapability,
     plan: Arc<FileDelegationPlan>,
 }
-impl minicore_runtime::tools::Tool for FileDelegatingTool {
-    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+impl minicore_host_runtime::tools::Tool for FileDelegatingTool {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
         &self.spec
     }
     fn execute<'a>(
         &'a self,
-        call: minicore_runtime::tools::ToolInvocation,
-        _: minicore_runtime::tools::ToolContext,
-    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        call: minicore_host_runtime::tools::ToolInvocation,
+        _: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
         Box::pin(async move {
             let text = tokio::fs::read_to_string(&self.plan.path).await.unwrap();
             self.cap.prepare_scope(hooks()).unwrap();
@@ -590,9 +590,12 @@ impl minicore_runtime::tools::Tool for FileDelegatingTool {
             self.cap.record_delegation(&relation.origin, &relation);
             self.plan.accepted.send((permit, relation)).unwrap();
             self.plan.tool_gate.acquire().await.unwrap().forget();
-            Ok(minicore_runtime::tools::ToolExecutionOutcome::Completed(
-                minicore_runtime::tools::ToolOutput::new("actual startup receipt").unwrap(),
-            ))
+            Ok(
+                minicore_host_runtime::tools::ToolExecutionOutcome::Completed(
+                    minicore_host_runtime::tools::ToolOutput::new("actual startup receipt")
+                        .unwrap(),
+                ),
+            )
         })
     }
 }
@@ -632,7 +635,7 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
     send(&f, &parent);
     let parent_binding = recv(&mut f.bindings).await;
     recv(&mut f.starts).await;
-    let id: minicore_runtime::ToolCallId = "reused-provider-id".parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = "reused-provider-id".parse().unwrap();
     f.events[0]
         .send(ModelEvent::ToolCallStart {
             tool_call_id: id.clone(),

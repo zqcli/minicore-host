@@ -5,15 +5,13 @@ mod support;
 use futures_util::StreamExt;
 use minicore_host_diagnostics::{Context, LoggingState, Options, Output, ShutdownOutcome};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_runtime::{
-    AgentLoop, ExecutionConfig, HistoryItem, LoopId, LoopInputs, LoopOptions, LoopOutcome,
-    LoopReport, LoopRequest, UserInput,
+use minicore_host_runtime::{
+    LoopId,
     model::{
-        DeliveryState, Model, ModelCallContext, ModelDescriptor, ModelErrorKind, ModelEvent,
-        ModelLimits, ModelMessage, ModelRequest, ReasoningPreference,
+        DeliveryState, Model, ModelCallContext, ModelCallReport, ModelDescriptor, ModelDriver,
+        ModelDriverConfig, ModelErrorKind, ModelEvent, ModelLimits, ModelMessage, ModelRequest,
+        ReasoningPreference,
     },
-    prompt::DefaultPromptProvider,
-    tools::ToolSet,
 };
 use serde_json::{Value, json};
 use std::{
@@ -30,12 +28,6 @@ struct LogFile(PathBuf);
 impl Drop for LogFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
-    }
-}
-struct NoInputs;
-impl LoopInputs for NoInputs {
-    fn take(&self) -> Vec<UserInput> {
-        Vec::new()
     }
 }
 fn provider(endpoint: &str) -> Arc<OpenAiChatModel> {
@@ -76,34 +68,31 @@ fn response(usage: bool) -> String {
     }
     body + "data: [DONE]\n\n"
 }
-async fn run(model: Arc<dyn Model>) -> Arc<LoopReport> {
-    let config = ExecutionConfig::new(
-        model,
+async fn run(model: Arc<dyn Model>) -> (LoopId, ModelCallReport) {
+    let driver = ModelDriver::new(
+        model.as_ref(),
+        ModelDriverConfig::new(Duration::from_secs(3), 2, Duration::from_millis(1)),
+    )
+    .unwrap();
+    let request = ModelRequest::new(
+        vec![
+            ModelMessage::system("PRIVATE_ROLE").unwrap(),
+            ModelMessage::user("PRIVATE_USER_INPUT").unwrap(),
+        ],
+        vec![],
+        ModelLimits::default(),
         ReasoningPreference::Auto,
-        ToolSet::default(),
-        None,
-        Arc::new(DefaultPromptProvider::new(Some(
-            minicore_runtime::Text::new("PRIVATE_ROLE"),
-        ))),
     )
     .unwrap();
-    let mut options = LoopOptions::default_checked().unwrap();
-    options.model_retry_base_delay = Duration::from_millis(1);
-    options.model_timeout = Duration::from_secs(3);
-    let owner = AgentLoop::start(
-        LoopRequest::new(
-            Arc::from([]),
-            UserInput::text("PRIVATE_USER_INPUT").unwrap(),
-            config,
-        ),
-        options,
-        Arc::new(NoInputs),
+    let context = context(0, CancellationToken::new());
+    let id = context.loop_id;
+    let report = tokio::time::timeout(
+        Duration::from_secs(5),
+        driver.call(request, context, &mut |_| {}),
     )
+    .await
     .unwrap();
-    tokio::time::timeout(Duration::from_secs(5), owner.join())
-        .await
-        .unwrap()
-        .unwrap()
+    (id, report)
 }
 fn context(index: u32, cancellation: CancellationToken) -> ModelCallContext {
     ModelCallContext::new(
@@ -135,8 +124,8 @@ fn finished(rows: &[Value], id: LoopId) -> Vec<&Value> {
 async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_lifecycle() {
     // No subscriber: actual work still completes.
     let disabled = Fixture::start(vec![Reply::sse(response(false))]).await;
-    let disabled_report = run(provider(&disabled.endpoint)).await;
-    assert_eq!(disabled_report.outcome, LoopOutcome::Completed);
+    let (disabled_id, disabled_report) = run(provider(&disabled.endpoint)).await;
+    assert!(disabled_report.outcome.is_ok());
     assert_eq!(disabled.finish().await.len(), 1);
 
     let log = LogFile(std::env::temp_dir().join(format!(
@@ -164,20 +153,12 @@ async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_life
     let unpolled_id = unpolled.loop_id;
     drop(model.start(request(), unpolled));
     assert_eq!(retry.request_count(), 0);
-    let report = run(model).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
-    assert_eq!(report.requests, 1);
-    assert_eq!(report.model_attempts.as_ref(), &[2]);
-    let answer = report
-        .appended
-        .iter()
-        .find_map(|item| match item {
-            HistoryItem::Assistant(answer) => Some(answer),
-            _ => None,
-        })
-        .unwrap();
-    assert_eq!(answer.usage.input_tokens(), Some(10));
-    assert_eq!(answer.usage.output_tokens(), Some(6));
+    let (request_id, report) = run(model).await;
+    assert!(report.outcome.is_ok());
+    assert_eq!(report.attempts, 2);
+    let answer = report.outcome.as_ref().unwrap();
+    assert_eq!(answer.usage().unwrap().input_tokens(), Some(10));
+    assert_eq!(answer.usage().unwrap().output_tokens(), Some(6));
     assert_eq!(retry.finish().await.len(), 2);
 
     let rejected = Fixture::start(vec![Reply::error(
@@ -308,15 +289,12 @@ async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_life
             assert!(row.get(field).is_none(), "invented source {field}");
         }
         assert_ne!(row["attributes"]["loop_id"], unpolled_id.to_string());
-        assert_ne!(
-            row["attributes"]["loop_id"],
-            disabled_report.loop_id.to_string()
-        );
+        assert_ne!(row["attributes"]["loop_id"], disabled_id.to_string());
         if row["event"] == "model.transport_finished" {
             assert!(row["attributes"]["duration_ms"].as_u64().is_some());
         }
     }
-    let attempts = finished(&rows, report.loop_id);
+    let attempts = finished(&rows, request_id);
     assert_eq!(attempts.len(), 2);
     assert_eq!(attempts[0]["attributes"]["upstream_status"], 429);
     assert_eq!(attempts[0]["attributes"]["error_kind"], "rate_limited");
@@ -358,10 +336,7 @@ async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_life
 
     // Closed output cannot fail or resubmit a subsequent actual Runtime call.
     let after = Fixture::start(vec![Reply::sse(response(false))]).await;
-    assert_eq!(
-        run(provider(&after.endpoint)).await.outcome,
-        LoopOutcome::Completed
-    );
+    assert!(run(provider(&after.endpoint)).await.1.outcome.is_ok());
     assert_eq!(after.finish().await.len(), 1);
     assert_eq!(health.snapshot().status, LoggingState::Degraded);
     assert!(health.snapshot().dropped_records.unwrap() > 0);

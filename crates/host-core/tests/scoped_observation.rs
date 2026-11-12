@@ -1,9 +1,9 @@
-//! Real owners and AgentLoop, with explicitly scripted/gated model and file tool.
+//! Real Session owners and internal model/tool primitives, with scripted/gated fixtures.
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -53,7 +53,7 @@ impl Model for ScriptedModel {
 }
 struct Resources {
     model: Arc<dyn Model>,
-    tool: Option<Arc<dyn minicore_runtime::tools::Tool>>,
+    tool: Option<Arc<dyn minicore_host_runtime::tools::Tool>>,
 }
 impl ResourceResolver for Resources {
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
@@ -74,7 +74,7 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }
@@ -100,7 +100,7 @@ impl ResourceResolver for Resources {
 }
 fn setup(
     rounds: usize,
-    tool: Option<Arc<dyn minicore_runtime::tools::Tool>>,
+    tool: Option<Arc<dyn minicore_host_runtime::tools::Tool>>,
 ) -> (
     Arc<Host>,
     ConnectionHandle,
@@ -465,20 +465,20 @@ async fn response_indices_continue_across_internal_loops_in_one_turn() {
 }
 
 struct GatedFileTool {
-    spec: minicore_runtime::tools::ToolSpec,
+    spec: minicore_host_runtime::tools::ToolSpec,
     entered: mpsc::UnboundedSender<()>,
     gate: Arc<tokio::sync::Semaphore>,
     retained_sink: Arc<Mutex<Option<ToolOutputSink>>>,
 }
-impl minicore_runtime::tools::Tool for GatedFileTool {
-    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+impl minicore_host_runtime::tools::Tool for GatedFileTool {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
         &self.spec
     }
     fn execute<'a>(
         &'a self,
-        invocation: minicore_runtime::tools::ToolInvocation,
-        context: minicore_runtime::tools::ToolContext,
-    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        invocation: minicore_host_runtime::tools::ToolInvocation,
+        context: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
         Box::pin(async move {
             let content = tokio::fs::read_to_string(invocation.arguments["path"].as_str().unwrap())
                 .await
@@ -487,8 +487,8 @@ impl minicore_runtime::tools::Tool for GatedFileTool {
             assert!(sink.emit("stdout", &content));
             *self.retained_sink.lock().unwrap() = Some(sink);
             context.progress.emit(
-                minicore_runtime::tools::ToolProgress::new(
-                    Some(minicore_runtime::Text::new("file read")),
+                minicore_host_runtime::tools::ToolProgress::new(
+                    Some(minicore_host_runtime::Text::new("file read")),
                     Some(1),
                     Some(1),
                 )
@@ -496,14 +496,17 @@ impl minicore_runtime::tools::Tool for GatedFileTool {
             );
             self.entered.send(()).unwrap();
             self.gate.acquire().await.unwrap().forget();
-            Ok(minicore_runtime::tools::ToolExecutionOutcome::Completed(
-                minicore_runtime::tools::ToolOutput::new(format!("result: {content}")).unwrap(),
-            ))
+            Ok(
+                minicore_host_runtime::tools::ToolExecutionOutcome::Completed(
+                    minicore_host_runtime::tools::ToolOutput::new(format!("result: {content}"))
+                        .unwrap(),
+                ),
+            )
         })
     }
 }
 fn call_file(events: &Events, path: &std::path::Path) {
-    let id: minicore_runtime::ToolCallId = "repeated-call".parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = "repeated-call".parse().unwrap();
     events
         .send(ModelEvent::ToolCallStart {
             tool_call_id: id.clone(),
@@ -534,7 +537,7 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
     let gate = Arc::new(tokio::sync::Semaphore::new(0));
     let retained_sink = Arc::new(Mutex::new(None));
     let tool = Arc::new(GatedFileTool {
-        spec: minicore_runtime::tools::ToolSpec::new(
+        spec: minicore_host_runtime::tools::ToolSpec::new(
             "read_fixture".parse().unwrap(),
             "read a real fixture file",
             serde_json::json!({"type":"object"}),
@@ -737,7 +740,7 @@ async fn retained_subscription_does_not_retain_reclaimed_source() {
 }
 
 #[tokio::test]
-async fn completion_can_precede_tail_events_without_losing_original_source_bytes() {
+async fn finished_snapshot_and_delayed_output_reader_keep_original_source_bytes() {
     let (host, connection, events, _starts) = setup(1, None);
     let caller = connection.caller();
     let target = agent(&host, &caller).await;
@@ -749,15 +752,19 @@ async fn completion_can_precede_tail_events_without_losing_original_source_bytes
     );
     complete(&events[0], "early complete🙂");
     send(&host, &caller, &target, MessageMode::FollowUp);
+    // A slow subscriber can read its queued deltas after the authoritative
+    // Turn snapshot has finished. Delivery does not own completion.
+    let mut states = host.session_states(&caller, &target).unwrap();
+    while states.snapshot().unwrap().data.last_result.is_none() {
+        states.changed().await.unwrap();
+    }
+    let (tail, delta) = delta(&mut sub).await;
     let (finished, positions) = match next(&mut sub).await {
         ObservationEvent::Activity(ActivityEvent::ModelFinished { source, data }) => {
             (source, data.output_positions)
         }
-        other => {
-            panic!("complete history handoff must precede the single-thread event drain: {other:?}")
-        }
+        other => panic!("expected the actual complete response: {other:?}"),
     };
-    let (tail, delta) = delta(&mut sub).await;
     assert_eq!(tail, finished);
     assert_eq!(delta.text, "early complete🙂");
     assert_eq!(
@@ -795,13 +802,13 @@ impl Model for RetryModel {
         self.starts.send(attempt).unwrap();
         Box::pin(async move {
             if attempt == 1 {
-                return Err(minicore_runtime::model::ModelError::not_started(
-                    minicore_runtime::model::ModelErrorKind::ProviderUnavailable,
+                return Err(minicore_host_runtime::model::ModelError::not_started(
+                    minicore_host_runtime::model::ModelErrorKind::ProviderUnavailable,
                     None,
-                    minicore_runtime::error::DiagnosticSummary::new(
-                        minicore_runtime::error::DiagnosticCode::ModelUnavailable,
-                        minicore_runtime::error::DiagnosticCategory::Model,
-                        minicore_runtime::Text::new("retry fixture"),
+                    minicore_host_runtime::error::DiagnosticSummary::new(
+                        minicore_host_runtime::error::DiagnosticCode::ModelUnavailable,
+                        minicore_host_runtime::error::DiagnosticCategory::Model,
+                        minicore_host_runtime::Text::new("retry fixture"),
                         true,
                     )
                     .unwrap(),
@@ -827,9 +834,11 @@ impl ResourceResolver for RetryResources {
     }
     fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
         Box::pin(async move {
-            let mut options = LoopOptions::default_checked().unwrap();
-            options.model_retry_attempts = 3;
-            options.model_retry_base_delay = self.delay;
+            let options = ExecutionOptions {
+                model_retry_attempts: 3,
+                model_retry_base_delay: self.delay,
+                ..ExecutionOptions::default()
+            };
             Ok(BoundResources {
                 execution: ExecutionConfig::new(
                     self.model.clone(),
@@ -983,33 +992,35 @@ async fn retry_requesting_and_clear_use_original_response_and_actual_attempts() 
 }
 
 struct RequestInputTool {
-    spec: minicore_runtime::tools::ToolSpec,
+    spec: minicore_host_runtime::tools::ToolSpec,
 }
-impl minicore_runtime::tools::Tool for RequestInputTool {
-    fn spec(&self) -> &minicore_runtime::tools::ToolSpec {
+impl minicore_host_runtime::tools::Tool for RequestInputTool {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
         &self.spec
     }
     fn execute<'a>(
         &'a self,
-        _: minicore_runtime::tools::ToolInvocation,
-        _: minicore_runtime::tools::ToolContext,
-    ) -> minicore_runtime::tools::ToolFuture<'a> {
+        _: minicore_host_runtime::tools::ToolInvocation,
+        _: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
         Box::pin(async {
-            Ok(minicore_runtime::tools::ToolExecutionOutcome::RequestInput(
-                minicore_runtime::tools::ToolInputRequest::new(
-                    "choose",
-                    vec![minicore_runtime::Text::new("one")],
-                    minicore_runtime::tools::ToolInputAnswerKind::SingleChoice,
-                )
-                .unwrap(),
-            ))
+            Ok(
+                minicore_host_runtime::tools::ToolExecutionOutcome::RequestInput(
+                    minicore_host_runtime::tools::ToolInputRequest::new(
+                        "choose",
+                        vec![minicore_host_runtime::Text::new("one")],
+                        minicore_host_runtime::tools::ToolInputAnswerKind::SingleChoice,
+                    )
+                    .unwrap(),
+                ),
+            )
         })
     }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn interaction_observation_uses_actual_request_and_cancel_settlement() {
     let tool = Arc::new(RequestInputTool {
-        spec: minicore_runtime::tools::ToolSpec::new(
+        spec: minicore_host_runtime::tools::ToolSpec::new(
             "read_fixture".parse().unwrap(),
             "ask fixture",
             serde_json::json!({"type":"object"}),
@@ -1169,7 +1180,7 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
         .await
         .unwrap();
     assert!(
-        matches!(&second.data.items[0],HistoryItemData::Assistant {response} if matches!(&response.content[0],minicore_runtime::model::AssistantPart::Text(text) if text.as_ref()=="saved真实正文"))
+        matches!(&second.data.items[0],HistoryItemData::Assistant {response} if matches!(&response.content[0],minicore_host_runtime::model::AssistantPart::Text(text) if text.as_ref()=="saved真实正文"))
     );
     assert!(second.data.next_cursor.is_none());
     let mut host_states = subscribe(

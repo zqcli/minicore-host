@@ -2,7 +2,7 @@ use minicore_host_protocol::{
     AgentConfig, AgentId, ConfigRevision, HostId, MessageId, MessageMode, MessageSource,
     SessionConfig, SessionId, SessionRef, StorageMode, TurnId, TurnOutcome,
 };
-use minicore_runtime::{
+use minicore_host_runtime::{
     LoopId,
     history::{HistoryItem, SummaryHistory, UserHistory},
     model::ModelPartial,

@@ -2,9 +2,8 @@
 //! gated test double; inspection uses the production direct owner methods.
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_tools::{CoreTurnPort, InspectAction, TurnPort};
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{
         Model, ModelCallContext, ModelDescriptor, ModelEvent, ModelFinishReason, ModelRequest,
         ModelStartFuture, ModelStream, ReasoningPreference as RuntimeReasoning,
@@ -12,6 +11,7 @@ use minicore_runtime::{
     prompt::DefaultPromptProvider,
     tools::ToolSet,
 };
+use minicore_host_tools::{CoreTurnPort, InspectAction, TurnPort};
 use std::{collections::BTreeSet, sync::Arc, time::Duration};
 use tokio::sync::{Semaphore, mpsc};
 
@@ -56,7 +56,7 @@ impl ResourceResolver for CaptureBinding {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

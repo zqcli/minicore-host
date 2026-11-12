@@ -32,9 +32,8 @@ pub use tool_cleanup::TurnToolCleanup;
 mod retirement;
 pub(crate) use retirement::SessionShutdownStatus;
 mod persistent;
-use minicore_runtime::{
-    AgentLoop, ExecutionConfig, HistoryFuture, HistoryItem, LoopHandle, LoopHistory, LoopId,
-    LoopInputs, LoopOutcome, LoopReport, LoopRequest, Text, UserInput,
+use minicore_host_runtime::{
+    ExecutionConfig, HistoryItem, LoopId, Text, UserInput,
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
 };
 use std::collections::{BTreeMap, VecDeque};
@@ -50,14 +49,15 @@ use tracing::Instrument;
 
 use crate::backend::HistoryBackend;
 use crate::resources::{BoundResources, ResourceResolver};
-use execution::{runtime_fault, runtime_model_fault};
+use execution::runtime_model_fault;
 use input::{QueuedInput, clear_inbox, mark_message, take_batch};
 pub use observation::SessionSubscription;
+use tokio_util::sync::CancellationToken;
 
 #[cfg(test)]
 use crate::{HistoryReadFuture, LoadFuture, MemoryHistory, ResourceFuture, SaveFuture};
 #[cfg(test)]
-use minicore_runtime::LoopOptions;
+use minicore_host_runtime::ExecutionOptions;
 #[cfg(test)]
 use std::pin::Pin;
 
@@ -67,21 +67,20 @@ struct ActiveTurn {
     tool_cleanup: tool_cleanup::ToolCleanupWork,
     context_binding: crate::context::BoundContextConfiguration,
     info: TurnInfo,
-    loop_id: Option<LoopId>,
-    handle: Option<LoopHandle>,
-    accepted: usize,
+    loop_id: LoopId,
+    cancellation: CancellationToken,
     consumed_inputs: Vec<MessageId>,
     bound_inputs: Vec<MessageId>,
-    response_base: u64,
-    bound_pending: VecDeque<QueuedInput>,
     start_history: usize,
-    raw_base_len: usize,
+    // Native position already handed to the original save owner, not a
+    // durability claim. An unconfirmed range remains in HistorySaveWork.
+    save_cursor: usize,
     partials: Vec<PartialResult>,
-    report: Option<Arc<LoopReport>>,
-    compaction_failure: Option<compaction::CompactionFailure>,
+    pending_partial: Option<minicore_host_runtime::model::ModelPartial>,
+    deadline_expired: bool,
     partial_accepted: bool,
     terminal_accepted: bool,
-    pending_interaction: Option<crate::PendingInteractionData>,
+    pending_interaction: Option<interaction::PendingAnswer>,
 }
 impl ActiveTurn {
     fn claim_terminal(&mut self, outcome: TurnOutcome, fault: Option<Fault>) -> bool {
@@ -96,57 +95,10 @@ impl ActiveTurn {
             }
         }
         self._activation.expire();
+        self.cancellation.cancel();
         self.info.state = TurnState::Finalizing;
-        self.handle = None;
+        self.info.phase = Some(TurnPhase::Finalizing);
         newly_claimed
-    }
-    fn claim_report(&mut self, report: &LoopReport) -> (bool, bool) {
-        let original = self
-            .compaction_failure
-            .take()
-            .filter(|failure| failure.matches(self, report));
-        let prompt_failed = matches!(
-            &report.outcome,
-            LoopOutcome::Failed(failure)
-                if failure.kind == minicore_runtime::LoopFailureKind::Prompt
-        );
-        let (outcome, mut fault) = match &report.outcome {
-            LoopOutcome::Completed => (TurnOutcome::Completed, None),
-            LoopOutcome::Cancelled(_) => (TurnOutcome::Cancelled, None),
-            LoopOutcome::Failed(failure) => (
-                TurnOutcome::Failed,
-                (failure.kind != minicore_runtime::LoopFailureKind::History)
-                    .then(|| runtime_fault(failure)),
-            ),
-            _ => (
-                TurnOutcome::Failed,
-                Some(Fault::new(
-                    FaultKind::TurnInternalUnexpected,
-                    "unknown Runtime outcome",
-                )),
-            ),
-        };
-        let forwarded_primary = original.is_some() && prompt_failed;
-        if let Some(original) = original {
-            // A wrapped Prompt error is not a second business failure. The
-            // actual automatic owner retains the original typed Fault; its
-            // history save fault already lives in persistence_fault.
-            if prompt_failed {
-                fault = None;
-            }
-            if !original.history {
-                if self.info.outcome.is_some()
-                    || self.info.state == TurnState::Cancelling
-                    || outcome == TurnOutcome::Cancelled
-                    || !prompt_failed
-                {
-                    self.info.cleanup_faults.push(original.fault);
-                } else {
-                    fault = Some(original.fault);
-                }
-            }
-        }
-        (self.claim_terminal(outcome, fault), forwarded_primary)
     }
 }
 /// A held result keeps its original native slice position in the Session's
@@ -185,7 +137,7 @@ struct SessionState {
     completed: BTreeMap<TurnId, RetainedTurnResult>,
     controls: BTreeMap<OperationId, Vec<Receipt>>,
     completion_order: Vec<TurnId>,
-    history: Vec<HistoryItem>,
+    history: Arc<Vec<HistoryItem>>,
     input_provenance: input_provenance::InputProvenance,
     history_position: u64,
     projection: Option<minicore_host_storage::CompactionProjection>,
@@ -296,7 +248,7 @@ impl SessionController {
             completion_order: Vec::new(),
             edits_complete: history.is_empty(),
             history_position: history.len() as u64,
-            history,
+            history: Arc::new(history),
             input_provenance: Default::default(),
             projection: None,
             compaction: None,

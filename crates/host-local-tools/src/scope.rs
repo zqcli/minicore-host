@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     tools::{ToolError, ToolExecutionOutcome},
 };

@@ -1,6 +1,6 @@
 use crate::{CompactionError, source::exchange_ranges};
 use minicore_host_protocol::CompactionSettings;
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryItem, SummaryHistory,
     model::{ModelDescriptor, ModelMessage, ModelRequest},
 };

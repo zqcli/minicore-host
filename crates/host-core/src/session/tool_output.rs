@@ -1,7 +1,7 @@
 //! Optional process-text capability bound by the Session, never by tool-supplied IDs.
 use super::*;
 use crate::observation::*;
-use minicore_runtime::tools::{Tool, ToolContext, ToolFuture, ToolInvocation, ToolSpec};
+use minicore_host_runtime::tools::{Tool, ToolContext, ToolFuture, ToolInvocation, ToolSpec};
 
 tokio::task_local! { static CURRENT_OUTPUT: ToolOutputSink; }
 

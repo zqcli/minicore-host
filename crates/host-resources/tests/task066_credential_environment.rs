@@ -9,7 +9,7 @@ mod support;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_resources::HostResourceBuilder;
-use minicore_runtime::HistoryItem;
+use minicore_host_runtime::HistoryItem;
 use serde_json::{Value, json};
 use std::{process::Command, sync::Arc, time::Duration};
 use support::*;

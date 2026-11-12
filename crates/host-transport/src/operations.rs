@@ -7,11 +7,11 @@ use minicore_host_core::{
     TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
+use minicore_host_runtime::tools::ToolSpec;
 use minicore_host_workspace::{
     ChangesListRequest, ChangesListResult, DiffRequest, DiffResult, FilesRequest, FilesResult,
     QueryContext, ReadRequest, ReadResult, SearchRequest, SearchResult, StatusResult,
 };
-use minicore_runtime::tools::ToolSpec;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 use std::{future::Future, sync::Arc};

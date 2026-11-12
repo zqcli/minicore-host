@@ -13,7 +13,7 @@ minicore-host-compaction.workspace = true
 minicore-host-protocol.workspace = true
 minicore-host-storage.workspace = true
 minicore-host-workspace.workspace = true
-minicore-runtime.workspace = true
+minicore-host-runtime.workspace = true
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 thiserror.workspace = true

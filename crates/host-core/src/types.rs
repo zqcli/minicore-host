@@ -1,5 +1,5 @@
 use minicore_host_protocol::*;
-use minicore_runtime::{HistoryItem, model::ModelPartial};
+use minicore_host_runtime::{HistoryItem, model::ModelPartial};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -235,9 +235,9 @@ pub enum HistoryItemData {
 /// Like complete response reads, this excludes internal request/replay metadata.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelPartialData {
-    pub content: Vec<minicore_runtime::model::AssistantPart>,
-    pub incomplete_tool_calls: Vec<minicore_runtime::model::IncompleteToolCall>,
-    pub usage: Option<minicore_runtime::model::Usage>,
+    pub content: Vec<minicore_host_runtime::model::AssistantPart>,
+    pub incomplete_tool_calls: Vec<minicore_host_runtime::model::IncompleteToolCall>,
+    pub usage: Option<minicore_host_runtime::model::Usage>,
 }
 impl From<&ModelPartial> for ModelPartialData {
     fn from(value: &ModelPartial) -> Self {
@@ -283,7 +283,7 @@ pub struct SessionHistorySnapshot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompactionUsage {
     pub request_index: u32,
-    pub usage: Option<minicore_runtime::model::Usage>,
+    pub usage: Option<minicore_host_runtime::model::Usage>,
     pub completed: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

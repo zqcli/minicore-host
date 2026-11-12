@@ -2,8 +2,8 @@ use super::support::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
 use minicore_host_resources::HostResourceBuilder;
+use minicore_host_runtime::HistoryItem;
 use minicore_host_storage::testing::{read_history_bytes, read_history_text};
-use minicore_runtime::HistoryItem;
 use serde_json::{Value, json};
 
 #[tokio::test]
@@ -263,7 +263,10 @@ async fn same_turn_internal_loops_keep_reply_and_steer_order_without_consuming_f
         .collect();
     assert_eq!(inputs.len(), 3);
     assert_ne!(inputs[0].loop_id, inputs[1].loop_id);
-    assert_eq!(inputs[1].kind, minicore_runtime::UserMessageKind::Prompt);
+    assert_eq!(
+        inputs[1].kind,
+        minicore_host_runtime::UserMessageKind::Prompt
+    );
     assert_eq!(steer_record.input.mode, MessageMode::Steer);
     stop(&host).await;
 }

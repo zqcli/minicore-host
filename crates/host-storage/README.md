@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **1** and history schema **2**, implementing the persistence boundaries of SPEC v4.93.
+Object schema **1** and history schema **2**, implementing the persistence boundaries of SPEC v4.10.1.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.

@@ -10,8 +10,8 @@ use minicore_host_core::{
 };
 use minicore_host_protocol::*;
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-use minicore_runtime::{
-    ExecutionConfig, LoopOptions,
+use minicore_host_runtime::{
+    ExecutionConfig, ExecutionOptions,
     model::{Model, ModelDescriptor, ReasoningPreference as RuntimeReasoning},
     prompt::DefaultPromptProvider,
     tools::{
@@ -87,7 +87,7 @@ impl ResourceResolver for ConfiguredResources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: LoopOptions::default_checked().unwrap(),
+                options: ExecutionOptions::default(),
             })
         })
     }

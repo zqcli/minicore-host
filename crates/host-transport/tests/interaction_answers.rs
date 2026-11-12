@@ -6,11 +6,11 @@ mod wss_common;
 use common::*;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
-use minicore_host_transport::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     model::{ModelEvent, ModelFinishReason},
     tools::*,
 };
+use minicore_host_transport::*;
 use observation_common::*;
 use std::{sync::Arc, time::Duration};
 
@@ -27,8 +27,8 @@ impl Tool for InputTool {
                 ToolInputRequest::new(
                     "choose actual input",
                     vec![
-                        minicore_runtime::Text::new("one"),
-                        minicore_runtime::Text::new("two"),
+                        minicore_host_runtime::Text::new("one"),
+                        minicore_host_runtime::Text::new("two"),
                     ],
                     ToolInputAnswerKind::SingleChoice,
                 )
@@ -48,7 +48,7 @@ fn tool() -> Arc<dyn Tool> {
     })
 }
 fn call(events: &Events) {
-    let id: minicore_runtime::ToolCallId = "same-call-id".parse().unwrap();
+    let id: minicore_host_runtime::ToolCallId = "same-call-id".parse().unwrap();
     events
         .send(ModelEvent::ToolCallStart {
             tool_call_id: id.clone(),
@@ -479,7 +479,7 @@ impl ResourceResolver for ApprovalResources {
                 .unwrap(),
                 calls: self.calls.clone(),
             });
-            bound.execution = minicore_runtime::ExecutionConfig::new(
+            bound.execution = minicore_host_runtime::ExecutionConfig::new(
                 bound.execution.model().clone(),
                 bound.execution.reasoning(),
                 tools.build().unwrap(),

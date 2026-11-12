@@ -62,7 +62,7 @@ pub struct DispatchContext {
     deadline: Option<Instant>,
 }
 impl DispatchContext {
-    pub fn new(origin: ToolCallRef, context: &minicore_runtime::tools::ToolContext) -> Self {
+    pub fn new(origin: ToolCallRef, context: &minicore_host_runtime::tools::ToolContext) -> Self {
         Self {
             origin,
             cancellation: Some(context.cancellation.clone()),
@@ -614,7 +614,7 @@ fn notification_text(
     registration: &DelegationRegistration,
     completion: &DelegationCompletion,
 ) -> Result<String, Fault> {
-    use minicore_runtime::{HistoryItem, model::AssistantPart};
+    use minicore_host_runtime::{HistoryItem, model::AssistantPart};
     // Transfer only the actual last response's public text and marked partial
     // text, not the child's history, reasoning, tool trace, or replay metadata.
     let results = completion

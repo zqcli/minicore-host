@@ -1,6 +1,4 @@
 //! Public Turn scheduling and Runtime orchestration owned by this Session.
-use super::history::SessionHistory;
-use super::input::SessionInputs;
 use super::*;
 
 impl SessionController {
@@ -187,11 +185,6 @@ impl SessionController {
                             "resource preparation panicked; accepted inputs remain queued",
                         ))
                     });
-            let resources = resources.and_then(|mut resources| {
-                resources.execution =
-                    self.bind_compaction_prompt(&turn_id, &preparation.0, &resources.execution)?;
-                Ok(resources)
-            });
             let resources = match resources {
                 Ok(resources) => resources,
                 Err(fault) => {
@@ -226,9 +219,19 @@ impl SessionController {
             };
             let context_binding = crate::context::BoundContextConfiguration::new(
                 &preparation.0,
-                resources.execution.model().descriptor(),
+                resources.execution.descriptor(),
             );
             let load_id = match LoadId::new() {
+                Ok(id) => id,
+                Err(error) => {
+                    self.preparation_failed(Fault::new(
+                        FaultKind::SessionInternalUnexpected,
+                        error.to_string(),
+                    ));
+                    return;
+                }
+            };
+            let loop_id = match LoopId::new() {
                 Ok(id) => id,
                 Err(error) => {
                     self.preparation_failed(Fault::new(
@@ -280,21 +283,18 @@ impl SessionController {
                         persistence_fault: None,
                         cleanup_faults: Vec::new(),
                     },
-                    loop_id: None,
-                    handle: None,
-                    accepted: 0,
+                    loop_id,
+                    cancellation: CancellationToken::new(),
                     consumed_inputs: Vec::new(),
                     bound_inputs: batch
                         .iter()
                         .map(|input| input.message.message_id.clone())
                         .collect(),
-                    response_base: 0,
-                    bound_pending: VecDeque::new(),
                     start_history,
-                    raw_base_len: start_history,
+                    save_cursor: start_history,
                     partials: Vec::new(),
-                    report: None,
-                    compaction_failure: None,
+                    pending_partial: None,
+                    deadline_expired: false,
                     partial_accepted: false,
                     terminal_accepted: false,
                     pending_interaction: None,
@@ -357,300 +357,443 @@ impl SessionController {
     pub(super) async fn run_turn(
         self: &Arc<Self>,
         turn_id: TurnId,
-        mut batch: Vec<QueuedInput>,
+        batch: Vec<QueuedInput>,
         resources: BoundResources,
     ) {
-        let resolver = match self.resources_owned() {
-            Ok(resolver) => resolver,
-            Err(fault) => {
-                self.finalize(&turn_id, TurnOutcome::Failed, Some(fault))
-                    .await;
-                return;
+        {
+            let mut state = self.state.lock().expect("Session mutex poisoned");
+            self.accept_bound_inputs(&mut state, batch);
+            let active = state.active.as_mut().expect("bound Turn");
+            if active.info.state == TurnState::Starting {
+                active.info.state = TurnState::Running;
             }
+            self.publish(&mut state);
+        }
+        let result = AssertUnwindSafe(self.run_steps(&turn_id, resources))
+            .catch_unwind()
+            .await;
+        let (outcome, fault) = result.unwrap_or_else(|_| {
+            (
+                TurnOutcome::Failed,
+                Some(Fault::new(
+                    FaultKind::TurnInternalUnexpected,
+                    "Turn execution panicked",
+                )),
+            )
+        });
+        self.finish_turn(&turn_id, outcome, fault).await;
+    }
+
+    async fn run_steps(
+        self: &Arc<Self>,
+        turn_id: &TurnId,
+        resources: BoundResources,
+    ) -> (TurnOutcome, Option<Fault>) {
+        use minicore_host_runtime::model::{
+            AssistantPart, ModelCallContext, ModelDriver, ModelDriverConfig, ModelFinishReason,
         };
-        let execution = resolver.bind_tool_output(
-            &resources.execution,
-            ToolOutputBinding::new(self, turn_id.clone()),
-        );
-        let execution = match self.bind_turn_model(&turn_id, &execution) {
+        use minicore_host_runtime::tools::{ToolBatchContext, ToolBatchStop, run_tool_batch};
+        let execution = match self.resources_owned().and_then(|resolver| {
+            let execution = resolver.bind_tool_output(
+                &resources.execution,
+                ToolOutputBinding::new(self, turn_id.clone()),
+            );
+            self.bind_turn_model(turn_id, &execution)
+        }) {
             Ok(execution) => execution,
-            Err(fault) => {
-                self.finalize(&turn_id, TurnOutcome::Failed, Some(fault))
-                    .await;
-                return;
-            }
+            Err(fault) => return (TurnOutcome::Failed, Some(fault)),
+        };
+        if let Err(error) = resources.options.validate() {
+            return (
+                TurnOutcome::Failed,
+                Some(Fault::new(
+                    FaultKind::TurnInternalUnexpected,
+                    error.to_string(),
+                )),
+            );
+        }
+        let options = &resources.options;
+        let driver = match ModelDriver::new(
+            execution.model().as_ref(),
+            ModelDriverConfig::new(
+                options.model_timeout,
+                options.model_retry_attempts,
+                options.model_retry_base_delay,
+            ),
+        ) {
+            Ok(driver) => driver,
+            Err(error) => return (TurnOutcome::Failed, Some(runtime_model_fault(&error))),
+        };
+        let (loop_id, cancellation) = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let active = state.active.as_ref().expect("owned Turn");
+            (active.loop_id, active.cancellation.clone())
         };
         loop {
-            let started = {
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                let Some(active) = state
-                    .active
-                    .as_ref()
-                    .filter(|active| active.info.id == turn_id)
-                else {
-                    return;
-                };
-                if active.info.state == TurnState::Cancelling
-                    || state.host_stopping
-                    || !self.access.execution_allowed_owned()
-                {
-                    None
-                } else {
-                    let history: Arc<[HistoryItem]> = state.history.clone().into();
-                    let first = batch.remove(0);
-                    let inputs = Arc::new(SessionInputs {
-                        session: Arc::clone(self),
-                        turn_id: turn_id.clone(),
-                        initial: Mutex::new(batch.iter().cloned().collect()),
-                    });
-                    let callback = Arc::new(SessionHistory {
-                        session: Arc::clone(self),
-                        turn_id: turn_id.clone(),
-                    });
-                    let mut options = resources.options.clone();
-                    options.history = Some(callback);
-                    let raw_base_len = state.history.len();
-                    let active = state.active.as_mut().expect("checked active Turn");
-                    active.raw_base_len = raw_base_len;
-                    active.report = None;
-                    active.partial_accepted = false;
-                    active.bound_pending.push_back(first.clone());
-                    active.bound_pending.extend(batch.drain(..));
-                    active.accepted = 0;
-                    let started = AgentLoop::start(
-                        LoopRequest::new(history, first.runtime, execution.clone()),
+            // Rebuilding this same request for newly accepted steering does
+            // not reset its preparation deadline or its response index.
+            let mut prompt_deadline = options
+                .deadline
+                .unwrap_or_else(|| tokio::time::Instant::now() + options.prompt_timeout)
+                .min(tokio::time::Instant::now() + options.prompt_timeout);
+            let request_index = {
+                let state = self.state.lock().expect("Session mutex poisoned");
+                match u32::try_from(state.active.as_ref().expect("owned Turn").info.requests) {
+                    Ok(index) => index,
+                    Err(_) => {
+                        return (
+                            TurnOutcome::Failed,
+                            Some(Fault::new(
+                                FaultKind::TurnInternalUnexpected,
+                                "response index exhausted",
+                            )),
+                        );
+                    }
+                }
+            };
+            let request = loop {
+                if self.turn_stopped(turn_id, options.deadline) {
+                    return (TurnOutcome::Cancelled, None);
+                }
+                self.consume_steering(turn_id);
+                let prepared = self
+                    .prepare_request(
+                        turn_id,
+                        request_index,
+                        &execution,
+                        &cancellation,
+                        &mut prompt_deadline,
                         options,
-                        inputs,
-                    );
-                    match &started {
-                        Ok(owner) => {
-                            active.loop_id = Some(owner.id());
-                            active.handle = Some(owner.handle());
-                            active.info.state = TurnState::Running;
-                            state.runner_revision = state
-                                .runner_revision
-                                .checked_add(1)
-                                .expect("runner revision exhausted");
-                        }
-                        Err(_) => {
-                            active._activation.expire();
-                            active.info.state = TurnState::Finalizing;
-                        }
-                    }
-                    self.publish(&mut state);
-                    Some(started)
-                }
-            };
-            let Some(started) = started else {
-                self.finalize(&turn_id, TurnOutcome::Cancelled, None).await;
-                return;
-            };
-            let report = match started {
-                Ok(mut owner) => {
-                    let mut events = owner
-                        .take_events()
-                        .expect("Session owns the Runtime event receiver");
-                    let loop_id = owner.id();
-                    let mut runtime_state = owner.handle().watch_state();
-                    let joined = owner.join();
-                    tokio::pin!(joined);
-                    let joined = loop {
-                        tokio::select! {
-                            result = &mut joined => {
-                                while let Some(envelope) = events.recv().await {
-                                    self.observe_runtime(&turn_id, loop_id, envelope.event);
-                                }
-                                self.observe_runtime_state(&turn_id, loop_id, runtime_state.borrow_and_update().clone());
-                                break result;
-                            }
-                            Some(envelope) = events.recv() => self.observe_runtime(&turn_id, loop_id, envelope.event),
-                            Ok(()) = runtime_state.changed() => self.observe_runtime_state(&turn_id, loop_id, runtime_state.borrow_and_update().clone()),
-                        }
-                    };
-                    match joined {
-                        Ok(report) => report,
-                        Err(error) => {
-                            self.finalize(
-                                &turn_id,
-                                TurnOutcome::Failed,
-                                Some(Fault::new(
-                                    FaultKind::TurnInternalUnexpected,
-                                    error.to_string(),
-                                )),
-                            )
-                            .await;
-                            return;
-                        }
-                    }
-                }
-                Err(error) => {
-                    self.finalize(
-                        &turn_id,
-                        TurnOutcome::Failed,
-                        Some(Fault::new(
-                            FaultKind::TurnInternalUnexpected,
-                            error.to_string(),
-                        )),
                     )
                     .await;
-                    return;
+                if self.turn_stopped(turn_id, options.deadline) {
+                    return (TurnOutcome::Cancelled, None);
                 }
-            };
-            let (record, scheduling, source, response_base) = {
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                let previous = diagnostics::Schedule::capture(&state);
-                let active = state.active.as_mut().expect("owned active Turn");
-                let source = self.turn_identity(&active.info);
-                let response_base = active.response_base;
-                active.info.requests += u64::from(report.requests);
-                active.info.tool_rounds += report.tool_rounds;
-                for (index, attempts) in report.model_attempts.iter().enumerate() {
-                    let index = active.response_base as usize + index;
-                    active
-                        .info
-                        .model_attempts
-                        .resize(active.info.model_attempts.len().max(index + 1), 0);
-                    active.info.model_attempts[index] = *attempts;
-                }
-                active.info.model_retry = None;
-                active.report = Some(Arc::clone(&report));
-                active.handle = None;
-                // Failed/cancelled execution cannot become cancellable again
-                // while this owner saves its returned report or partial.
-                let record = if report.outcome != LoopOutcome::Completed {
-                    let (newly_claimed, forwarded) = active.claim_report(&report);
-                    if active.info.outcome == Some(TurnOutcome::Failed) {
-                        state.failure_paused = true;
+                let request = match prepared {
+                    Ok(request) => request,
+                    Err(fault) => {
+                        return (
+                            TurnOutcome::Failed,
+                            (fault.kind() != Some(FaultKind::SessionHistoryWriteFailed))
+                                .then_some(fault),
+                        );
                     }
-                    self.publish(&mut state);
-                    self.terminal_claim_record(&state, newly_claimed && !forwarded)
-                } else {
-                    None
                 };
-                let scheduling = self.scheduling_record(&state, previous, "execution_failed", None);
-                (record, scheduling, source, response_base)
+                if self.consume_steering(turn_id) {
+                    continue;
+                }
+                // Admission after all asynchronous preparation shares the same
+                // lock as cancellation and input claims. Later input belongs
+                // to the next permitted boundary.
+                if !self.begin_model_request(turn_id, request_index, options.deadline) {
+                    if self.turn_stopped(turn_id, options.deadline) {
+                        return (TurnOutcome::Cancelled, None);
+                    }
+                    continue;
+                }
+                break request;
             };
-            diagnostic::emit(record);
-            diagnostic::emit(scheduling);
-            diagnostic::emit(diagnostics::models_reported(
+            let context = ModelCallContext::new(
+                loop_id,
+                request_index,
+                cancellation.clone(),
+                options
+                    .deadline
+                    .unwrap_or_else(|| {
+                        tokio::time::Instant::now() + std::time::Duration::from_secs(24 * 60 * 60)
+                    })
+                    .into_std(),
+            );
+            let report = driver
+                .call(request, context, &mut |event| {
+                    self.observe_model_call(turn_id, request_index, event)
+                })
+                .await;
+            let source = {
+                let mut state = self.state.lock().expect("Session mutex poisoned");
+                let active = state.active.as_mut().expect("owned Turn");
+                active
+                    .info
+                    .model_attempts
+                    .resize(request_index as usize + 1, 0);
+                active.info.model_attempts[request_index as usize] = report.attempts;
+                active.info.model_retry = None;
+                let source = self.turn_identity(&active.info);
+                self.publish(&mut state);
+                source
+            };
+            diagnostic::emit(diagnostics::model_reported(
                 &source,
-                response_base,
+                loop_id,
+                request_index,
                 &report,
             ));
-            if let Err(fault) = self.reconcile_report(&turn_id, &report).await {
-                // Ownership of all accepted records remains with this Session.
-                // A failed save blocks new work; no reappend or automatic retry.
-                let (record, scheduling) = {
-                    let mut state = self.state.lock().expect("Session mutex poisoned");
-                    let previous = diagnostics::Schedule::capture(&state);
-                    state.block_reason = Some(fault.clone());
-                    let mut claim = (false, false);
-                    if let Some(active) = state.active.as_mut() {
-                        active.info.persistence = PersistenceState::Failed;
-                        active.info.persistence_fault = Some(fault);
-                        claim = active.claim_report(&report);
-                        if active.info.outcome == Some(TurnOutcome::Failed) {
-                            state.failure_paused = true;
-                        }
+            let response = match report.outcome {
+                Ok(response) => response,
+                Err(mut failure) => {
+                    let deadline = options.deadline.is_some()
+                        && failure.deadline_source()
+                            == Some(minicore_host_runtime::DeadlineSource::Turn);
+                    let stopped = self.turn_stopped(turn_id, options.deadline) || deadline;
+                    {
+                        let mut state = self.state.lock().expect("Session mutex poisoned");
+                        let active = state.active.as_mut().expect("owned Turn");
+                        active.pending_partial = failure.partial.take().map(|value| *value);
+                        active.deadline_expired |= deadline;
                     }
-                    self.publish(&mut state);
-                    (
-                        self.terminal_claim_record(&state, claim.0 && !claim.1),
-                        self.scheduling_record(&state, previous, "execution_failed", None),
-                    )
-                };
-                diagnostic::emit(record);
-                diagnostic::emit(scheduling);
-                self.finish_tool_cleanup(&turn_id).await;
-                return;
-            }
-            let (next, records) = {
-                let mut state = self.state.lock().expect("Session mutex poisoned");
-                let schedulable = self.schedulable(&state);
-                let active = state.active.as_mut().expect("owned active Turn");
-                active.handle = None;
-                active.response_base += u64::from(report.requests);
-                let continue_same = report.outcome == LoopOutcome::Completed
-                    && active.info.state != TurnState::Cancelling
-                    && schedulable
-                    && !state.next_step.is_empty();
-                if continue_same {
-                    let next = take_batch(&mut state, false, &turn_id);
-                    let records = self.observe_bound(&state, &next);
-                    self.publish(&mut state);
-                    let records = records
-                        .into_iter()
-                        .map(|record| {
-                            record.published(state.controller_revision, state.runner_revision)
-                        })
-                        .collect::<Vec<_>>();
-                    (Some(next), records)
-                } else {
-                    let active = state.active.as_mut().expect("owned active Turn");
-                    let (newly_claimed, forwarded) = active.claim_report(&report);
-                    self.publish(&mut state);
-                    (
-                        None,
-                        self.terminal_claim_record(&state, newly_claimed && !forwarded)
-                            .into_iter()
-                            .collect(),
-                    )
+                    return if stopped {
+                        (TurnOutcome::Cancelled, None)
+                    } else {
+                        (
+                            TurnOutcome::Failed,
+                            Some(runtime_model_fault(failure.error())),
+                        )
+                    };
                 }
             };
-            diagnostic::emit(records);
-            if let Some(next) = next {
-                batch = next;
-                continue;
+            let calls = response
+                .parts()
+                .iter()
+                .filter_map(AssistantPart::as_tool_call)
+                .collect::<Vec<_>>();
+            let finish = calls.is_empty().then(|| match response.finish_reason() {
+                ModelFinishReason::Stop => (TurnOutcome::Completed, None),
+                ModelFinishReason::Unknown | ModelFinishReason::ToolCalls => {
+                    let error = minicore_host_runtime::model::ModelError::started(
+                        minicore_host_runtime::model::ModelErrorKind::InvalidProviderResponse,
+                        DiagnosticSummary::new(
+                            DiagnosticCode::ModelMalformedResponse,
+                            DiagnosticCategory::Model,
+                            Text::new("model returned an invalid response"),
+                            false,
+                        )
+                        .expect("static diagnostic"),
+                    );
+                    (TurnOutcome::Failed, Some(runtime_model_fault(&error)))
+                }
+                reason => (
+                    TurnOutcome::Failed,
+                    Some(Fault::new(
+                        FaultKind::TurnInternalUnexpected,
+                        match reason {
+                            ModelFinishReason::Length => {
+                                "model output exceeded the configured limit"
+                            }
+                            ModelFinishReason::Refused => "model refused to answer",
+                            ModelFinishReason::ContentFiltered => {
+                                "model response was content filtered"
+                            }
+                            _ => unreachable!(),
+                        },
+                    )),
+                ),
+            });
+            if let Some((TurnOutcome::Failed, fault)) = &finish {
+                self.claim_turn(turn_id, TurnOutcome::Failed, fault.clone());
             }
-            let (outcome, fault) = {
-                let state = self.state.lock().expect("Session mutex poisoned");
-                let active = state.active.as_ref().expect("owned active Turn");
-                (
-                    active.info.outcome.expect("terminal claim"),
-                    active.info.fault.clone(),
-                )
-            };
-            self.finalize(&turn_id, outcome, fault).await;
-            return;
+            let item = HistoryItem::Assistant(minicore_host_runtime::AssistantHistory {
+                loop_id,
+                request_index,
+                model: execution.descriptor().model_ref.clone(),
+                reasoning: execution.reasoning(),
+                content: response.parts().to_vec(),
+                provider_replay: response.provider_replay().cloned(),
+                finish_reason: response.finish_reason(),
+                usage: response.usage().copied().unwrap_or_default(),
+            });
+            if self.save_history(turn_id, &[item]).await.is_err() {
+                return finish.unwrap_or((TurnOutcome::Failed, None));
+            }
+            if let Some((outcome, fault)) = finish {
+                if outcome == TurnOutcome::Failed {
+                    return (outcome, fault);
+                }
+                let (continued, records) = {
+                    let mut state = self.state.lock().expect("Session mutex poisoned");
+                    if self.stop_turn_locked(&mut state, turn_id, options.deadline) {
+                        (false, Vec::new())
+                    } else if self.schedulable(&state) && !state.next_step.is_empty() {
+                        let batch = take_batch(&mut state, false, turn_id);
+                        let records = self.observe_bound(&state, &batch);
+                        self.accept_bound_inputs(&mut state, batch);
+                        self.publish(&mut state);
+                        (true, records)
+                    } else {
+                        state
+                            .active
+                            .as_mut()
+                            .expect("owned Turn")
+                            .claim_terminal(TurnOutcome::Completed, None);
+                        self.publish(&mut state);
+                        (false, Vec::new())
+                    }
+                };
+                diagnostic::emit(records);
+                if continued {
+                    continue;
+                }
+                return (TurnOutcome::Completed, None);
+            }
+            if self.turn_stopped(turn_id, options.deadline) {
+                // The batch still authors cancellation results for these
+                // accepted calls. The primitive cannot start cancelled work.
+                cancellation.cancel();
+            }
+            {
+                let mut state = self.state.lock().expect("Session mutex poisoned");
+                let active = state.active.as_mut().expect("owned Turn");
+                active.info.tool_rounds += 1;
+                active.info.phase = Some(TurnPhase::Tools);
+                self.publish(&mut state);
+            }
+            let batch = run_tool_batch(
+                &execution,
+                &calls,
+                ToolBatchContext {
+                    loop_id,
+                    request_index,
+                    cancellation: cancellation.clone(),
+                    deadline: options.deadline.map(|deadline| deadline.into_std()),
+                    policy_timeout: options.policy_timeout,
+                    tool_timeout: options.tool_timeout,
+                },
+                Arc::new(super::interaction::SessionToolHost {
+                    session: Arc::clone(self),
+                    turn_id: turn_id.clone(),
+                }),
+            )
+            .await;
+            let stop = batch.stop.map(|stop| match stop {
+                ToolBatchStop::Cancelled => (TurnOutcome::Cancelled, None),
+                ToolBatchStop::Deadline => {
+                    self.state
+                        .lock()
+                        .expect("Session mutex poisoned")
+                        .active
+                        .as_mut()
+                        .expect("owned Turn")
+                        .deadline_expired = true;
+                    (TurnOutcome::Cancelled, None)
+                }
+                ToolBatchStop::Policy(diagnostic)
+                | ToolBatchStop::Interaction(diagnostic)
+                | ToolBatchStop::Internal(diagnostic) => (
+                    TurnOutcome::Failed,
+                    Some(Fault::new(
+                        FaultKind::TurnInternalUnexpected,
+                        diagnostic.message().as_str(),
+                    )),
+                ),
+            });
+            if let Some((outcome, fault)) = &stop {
+                self.claim_turn(turn_id, *outcome, fault.clone());
+            }
+            let results = batch
+                .results
+                .into_iter()
+                .map(HistoryItem::ToolResult)
+                .collect::<Vec<_>>();
+            if self.save_history(turn_id, &results).await.is_err() {
+                return stop.unwrap_or((TurnOutcome::Failed, None));
+            }
+            if let Some(stop) = stop {
+                return stop;
+            }
         }
     }
-    pub(super) async fn finalize(
+
+    pub(super) fn stop_turn_locked(
+        &self,
+        state: &mut SessionState,
+        turn_id: &TurnId,
+        deadline: Option<tokio::time::Instant>,
+    ) -> bool {
+        let force = state.host_stopping || !self.access.execution_allowed_owned();
+        let Some(active) = state
+            .active
+            .as_mut()
+            .filter(|active| &active.info.id == turn_id)
+        else {
+            return true;
+        };
+        let expired = deadline.is_some_and(|deadline| deadline <= tokio::time::Instant::now());
+        if force
+            || expired
+            || active.cancellation.is_cancelled()
+            || active.info.state == TurnState::Cancelling
+        {
+            if active.info.outcome.is_none() {
+                active.info.state = TurnState::Cancelling;
+                active._activation.expire();
+            }
+            active.deadline_expired |= expired;
+            active.cancellation.cancel();
+            true
+        } else {
+            active.info.outcome.is_some()
+        }
+    }
+    fn turn_stopped(&self, turn_id: &TurnId, deadline: Option<tokio::time::Instant>) -> bool {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        let stopped = self.stop_turn_locked(&mut state, turn_id, deadline);
+        if stopped {
+            self.publish(&mut state);
+        }
+        stopped
+    }
+    fn consume_steering(&self, turn_id: &TurnId) -> bool {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        if !self.schedulable(&state)
+            || state
+                .active
+                .as_ref()
+                .is_none_or(|a| &a.info.id != turn_id || a.info.state != TurnState::Running)
+            || state.next_step.is_empty()
+        {
+            return false;
+        }
+        let batch = take_batch(&mut state, false, turn_id);
+        let records = self.observe_bound(&state, &batch);
+        self.accept_bound_inputs(&mut state, batch);
+        self.publish(&mut state);
+        drop(state);
+        diagnostic::emit(records);
+        true
+    }
+    pub(super) fn claim_turn(&self, turn_id: &TurnId, outcome: TurnOutcome, fault: Option<Fault>) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        let previous = diagnostics::Schedule::capture(&state);
+        let Some(active) = state.active.as_mut().filter(|a| &a.info.id == turn_id) else {
+            return;
+        };
+        let newly_claimed = active.claim_terminal(outcome, fault);
+        if active.info.outcome == Some(TurnOutcome::Failed) {
+            state.failure_paused = true;
+        }
+        self.publish(&mut state);
+        let record = self.terminal_claim_record(&state, newly_claimed);
+        let scheduling = self.scheduling_record(&state, previous, "finalizing", None);
+        drop(state);
+        diagnostic::emit(record);
+        diagnostic::emit(scheduling);
+    }
+    pub(super) async fn finish_turn(
         &self,
         turn_id: &TurnId,
         outcome: TurnOutcome,
         fault: Option<Fault>,
     ) {
-        let (record, scheduling) = {
-            let mut state = self.state.lock().expect("Session mutex poisoned");
-            let previous = diagnostics::Schedule::capture(&state);
-            let Some(active) = state
-                .active
-                .as_mut()
-                .filter(|active| &active.info.id == turn_id)
-            else {
-                return;
-            };
-            let newly_claimed = active.claim_terminal(outcome, fault);
-            if active.info.outcome == Some(TurnOutcome::Failed) {
-                state.failure_paused = true;
-            }
-            self.publish(&mut state);
-            (
-                self.terminal_claim_record(&state, newly_claimed),
-                self.scheduling_record(&state, previous, "finalizing", None),
-            )
-        };
-        diagnostic::emit(record);
-        diagnostic::emit(scheduling);
-        // Runtime may have dropped a tool future on cancellation. Actual tool
-        // workers must still be joined, even if an original history save failed.
-        if !self.finish_tool_cleanup(turn_id).await {
+        self.claim_turn(turn_id, outcome, fault);
+        let saved = self.save_history(turn_id, &[]).await.is_ok()
+            && self.save_partial(turn_id).await.is_ok();
+        // Saving never withdraws the original worker cleanup responsibility.
+        let cleaned = self.finish_tool_cleanup(turn_id).await;
+        if !saved || !cleaned {
             return;
         }
         if !self.save_terminal(turn_id).await {
             return;
         }
-        self.finish_pending_answers(turn_id).await;
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.history_work.is_some()
             || state.active.as_ref().is_none_or(|active| {
@@ -672,7 +815,7 @@ impl SessionController {
             history: state.history[active.start_history..].to_vec(),
             partials: active.partials,
         };
-        self.observe_finished(&mut state, &result.info, active.report.as_deref());
+        self.observe_finished(&mut state, &result.info, active.deadline_expired);
         let record = diagnostics::turn_finished(
             &self.turn_identity(&result.info),
             &result.info,
@@ -708,19 +851,8 @@ impl SessionController {
     }
 }
 
-pub(super) fn runtime_fault(failure: &minicore_runtime::LoopFailure) -> Fault {
-    failure
-        .model_error()
-        .map(runtime_model_fault)
-        .unwrap_or_else(|| {
-            Fault::new(
-                FaultKind::TurnInternalUnexpected,
-                failure.diagnostic.message().as_str(),
-            )
-        })
-}
-pub(super) fn runtime_model_fault(error: &minicore_runtime::model::ModelError) -> Fault {
-    use minicore_runtime::model::ModelErrorKind;
+pub(super) fn runtime_model_fault(error: &minicore_host_runtime::model::ModelError) -> Fault {
+    use minicore_host_runtime::model::ModelErrorKind;
     let kind = match error.kind() {
         ModelErrorKind::RateLimited => FaultKind::TurnModelUpstreamRateLimited,
         ModelErrorKind::ProviderUnavailable => FaultKind::TurnModelUpstreamOverloaded,
@@ -735,7 +867,7 @@ pub(super) fn runtime_model_fault(error: &minicore_runtime::model::ModelError) -
     };
     let mut fault = Fault::new(kind, error.diagnostic().message().as_str());
     if kind.allows_retry_after_ms()
-        && let minicore_runtime::model::RetryHint::Retryable {
+        && let minicore_host_runtime::model::RetryHint::Retryable {
             retry_after: Some(duration),
         } = error.retry_hint()
         && let Ok(milliseconds) = u64::try_from(duration.as_millis())

@@ -1,49 +1,33 @@
 mod support;
-use minicore_runtime::{
-    AgentLoop, ExecutionConfig, LoopInputs, LoopOptions, LoopOutcome, LoopRequest, UserInput,
-    model::ReasoningPreference,
-    prompt::DefaultPromptProvider,
-    tools::{ToolDecision, ToolPolicy, ToolPolicyFuture, ToolPolicyRequest, ToolSet},
+use minicore_host_runtime::{
+    ExecutionOptions,
+    tools::{
+        ToolDecision, ToolPolicy, ToolPolicyFuture, ToolPolicyRequest, ToolResultOutcome,
+        run_tool_batch,
+    },
 };
 use serde_json::json;
 use std::{fs, sync::Arc};
 use support::*;
 
 #[tokio::test]
-async fn binding_survives_internal_runtime_loop_continuation_until_public_turn_finish() {
+async fn binding_survives_successive_tool_batches_until_public_turn_finish() {
     let (root, tools, records) = fixture().await;
-    let first = ScriptedModel::calls(vec![(
-        "first-loop",
+    let first = vec![(
+        "first-batch",
         "write",
         json!({"path":"file","content":"first"}),
-    )]);
-    let report = start(
-        first,
-        &tools,
-        &["write"],
-        LoopOptions::default_checked().unwrap(),
-    )
-    .join()
-    .await
-    .unwrap();
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    )];
+    let report = run_calls(&tools, first, ExecutionOptions::default()).await;
+    assert_eq!(report.stop, None);
     // Public Turn is not finalizing: do not call LocalTools::finish here.
-    let second = ScriptedModel::calls(vec![(
-        "second-loop",
+    let second = vec![(
+        "second-batch",
         "edit",
         json!({"path":"file","old_text":"first","new_text":"continued"}),
-    )]);
-    let report = finish(
-        start(
-            second,
-            &tools,
-            &["edit"],
-            LoopOptions::default_checked().unwrap(),
-        ),
-        &tools,
-    )
-    .await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    )];
+    let report = run_calls(&tools, second, ExecutionOptions::default()).await;
+    assert_eq!(report.stop, None);
     assert_eq!(
         fs::read_to_string(root.path().join("file")).unwrap(),
         "continued"
@@ -58,42 +42,24 @@ impl ToolPolicy for Deny {
         Box::pin(async { ToolDecision::deny("explicit Runtime policy fixture") })
     }
 }
-struct NoInputs;
-impl LoopInputs for NoInputs {
-    fn take(&self) -> Vec<UserInput> {
-        Vec::new()
-    }
-}
 #[tokio::test]
 async fn real_runtime_policy_denial_prevents_all_file_side_effects() {
     let (root, tools, records) = fixture().await;
-    let model = ScriptedModel::calls(vec![(
+    let call = tool_call(
         "denied",
         "write",
         json!({"path":"not-written","content":"denied"}),
-    )]);
-    let mut builder = ToolSet::builder();
-    builder.register_arc(tools.tool("write").unwrap());
-    let config = ExecutionConfig::new(
-        model,
-        ReasoningPreference::Auto,
-        builder.build().unwrap(),
-        Some(Arc::new(Deny)),
-        Arc::new(DefaultPromptProvider::new(None)),
+    );
+    let config = tool_config(&tools, &["write"], Some(Arc::new(Deny)));
+    let report = run_tool_batch(
+        &config,
+        &[&call],
+        batch_context(&ExecutionOptions::default()),
+        Arc::new(NoInteractions),
     )
-    .unwrap();
-    let runtime = AgentLoop::start(
-        LoopRequest::new(
-            Arc::from([]),
-            UserInput::text("explicit denied fixture").unwrap(),
-            config,
-        ),
-        LoopOptions::default_checked().unwrap(),
-        Arc::new(NoInputs),
-    )
-    .unwrap();
-    let report = finish(runtime, &tools).await;
-    assert_eq!(report.outcome, LoopOutcome::Completed);
+    .await;
+    assert_eq!(report.stop, None);
+    assert_eq!(report.results[0].outcome, ToolResultOutcome::Denied);
     assert!(!root.path().join("not-written").exists());
     assert!(records.edits.lock().unwrap().is_empty());
     assert!(tools.finish().await.is_empty());
@@ -108,7 +74,7 @@ async fn concurrent_same_binding_edits_capture_each_actual_preceding_write() {
         let tool = tools.tool("edit").unwrap();
         calls.push(tokio::spawn(async move {
             tool.execute(
-                minicore_runtime::tools::ToolInvocation::new(
+                minicore_host_runtime::tools::ToolInvocation::new(
                     format!("parallel-{index}").parse().unwrap(),
                     "edit".parse().unwrap(),
                     json!({"path":"file","old_text":"root","new_text":"rootX"}),

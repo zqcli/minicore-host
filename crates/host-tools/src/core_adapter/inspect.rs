@@ -5,7 +5,7 @@ use super::encoded;
 use crate::ToolSource;
 use minicore_host_core as core;
 use minicore_host_protocol::*;
-use minicore_runtime::tools::{ToolOutput, ToolResultOutcome};
+use minicore_host_runtime::tools::{ToolOutput, ToolResultOutcome};
 use serde::Serialize;
 use serde_json::{Value, json};
 

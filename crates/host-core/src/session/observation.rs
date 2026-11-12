@@ -2,26 +2,28 @@ use super::*;
 use crate::diagnostics::{self as diagnostic, Record};
 use crate::observation::*;
 use minicore_host_diagnostics::{EventData, Scope};
-use minicore_runtime::{LoopEvent, OutputChannel, model::AssistantPart};
+use minicore_host_runtime::{
+    model::{AssistantPart, ModelCallEvent},
+    tools::ToolBatchEvent,
+};
 use tracing::Level;
 
 #[derive(Default)]
 pub(super) struct TurnObservation {
     // Retained with the original Turn, never projected from a later Runner.
     terminal_state: Option<TurnStateData>,
-    pub(super) interactions: BTreeMap<minicore_runtime::InteractionId, InteractionRecord>,
+    pub(super) interactions: BTreeMap<minicore_host_runtime::InteractionId, InteractionRecord>,
     pub(super) models: BTreeMap<u64, BTreeMap<String, Body>>,
     pub(super) tools: BTreeMap<ToolCallId, ToolRecord>,
 }
 pub(super) struct InteractionRecord {
     pub(super) data: PendingInteractionData,
     pub(super) resolved: bool,
-    pub(super) answering: Option<watch::Receiver<bool>>,
 }
 impl TurnObservation {
-    fn interaction(
+    pub(super) fn interaction(
         &mut self,
-        pending: &minicore_runtime::interaction::PendingInteraction,
+        pending: &minicore_host_runtime::interaction::PendingInteraction,
     ) -> &mut InteractionRecord {
         self.interactions
             .entry(pending.interaction_id)
@@ -31,7 +33,6 @@ impl TurnObservation {
                     InteractionId::new().expect("Host interaction identity generation"),
                 ),
                 resolved: false,
-                answering: None,
             })
     }
 }
@@ -201,13 +202,12 @@ impl SessionController {
         let mut diagnostics = Vec::new();
         let active = state.active.as_ref().expect("accepted active Turn");
         let source = self.turn_identity(&active.info);
-        let base = active.response_base;
         let revision = state.runner_revision;
         let observation = state.output.entry(active.info.id.clone()).or_default();
         for item in items {
             match item {
                 HistoryItem::Assistant(result) => {
-                    let response_index = base + u64::from(result.request_index);
+                    let response_index = u64::from(result.request_index);
                     let channels = observation.models.entry(response_index).or_default();
                     let mut text = String::new();
                     let mut reasoning = String::new();
@@ -352,138 +352,114 @@ impl SessionController {
         diagnostics
     }
 
-    pub(super) fn observe_runtime_state(
+    pub(super) fn begin_model_request(
         &self,
         turn_id: &TurnId,
-        loop_id: LoopId,
-        runtime: minicore_runtime::LoopState,
-    ) {
+        request_index: u32,
+        deadline: Option<tokio::time::Instant>,
+    ) -> bool {
         let mut state = self.state.lock().expect("Session mutex poisoned");
-        if state.active.as_ref().is_none_or(|a| {
-            &a.info.id != turn_id || a.loop_id != Some(loop_id) || runtime.loop_id != loop_id
-        }) {
-            return;
+        if self.stop_turn_locked(&mut state, turn_id, deadline) {
+            self.publish(&mut state);
+            return false;
         }
-        let pending = runtime.pending_interaction.as_ref().and_then(|pending| {
-            let record = state
-                .output
-                .entry(turn_id.clone())
-                .or_default()
-                .interaction(pending);
-            (!record.resolved).then(|| record.data.clone())
-        });
-        let active = state.active.as_mut().expect("checked original Turn");
-        let response_index = active.response_base + u64::from(runtime.request_index);
-        active.pending_interaction = pending;
-        active.info.phase = match runtime.status {
-            minicore_runtime::LoopStatus::RunningModel => Some(TurnPhase::Model),
-            minicore_runtime::LoopStatus::RunningTools => Some(TurnPhase::Tools),
-            minicore_runtime::LoopStatus::WaitingForInput => Some(TurnPhase::WaitingForInput),
-            minicore_runtime::LoopStatus::Finishing => Some(TurnPhase::Finalizing),
-            _ => None,
-        };
-        active.info.model_retry = runtime.model_retry.map(|retry| ModelRetryProgress {
-            response_index,
-            attempt: retry.attempt,
-            max_attempts: retry.max_attempts,
-            fault: runtime_model_fault(&retry.error),
-            phase: match retry.phase {
-                minicore_runtime::ModelRetryPhase::Waiting { retry_at, .. } => {
-                    ModelRetryPhase::Waiting {
-                        retry_at: retry_at.into(),
-                    }
-                }
-                minicore_runtime::ModelRetryPhase::Requesting => ModelRetryPhase::Requesting,
-            },
-        });
-        if runtime.model_attempts > 0 {
-            let index = response_index as usize;
-            active
-                .info
-                .model_attempts
-                .resize(active.info.model_attempts.len().max(index + 1), 0);
-            active.info.model_attempts[index] = runtime.model_attempts;
+        // The final input check and request admission are one atomic boundary.
+        if self.schedulable(&state) && !state.next_step.is_empty() {
+            return false;
         }
+        let active = state.active.as_mut().expect("owned Turn");
+        active.info.requests += 1;
+        active.info.phase = Some(TurnPhase::Model);
+        active.info.model_retry = None;
+        let loop_id = active.loop_id;
+        let source = self.turn_identity(&active.info);
+        let channels = state
+            .output
+            .entry(turn_id.clone())
+            .or_default()
+            .models
+            .entry(u64::from(request_index))
+            .or_default();
+        channels.entry("text".into()).or_default();
+        channels.entry("reasoning".into()).or_default();
         self.publish(&mut state);
+        drop(state);
+        Record::new(
+            diagnostic::event(
+                Level::DEBUG,
+                Scope::Runtime,
+                "session.runtime",
+                "model.started",
+                "Session issued a model request",
+                &["response_index", "loop_id", "request_index"],
+            ),
+            EventData::default()
+                .context(diagnostic::turn_context(&source))
+                .attribute("response_index", u64::from(request_index))
+                .attribute("loop_id", loop_id.to_string())
+                .attribute("request_index", u64::from(request_index)),
+        )
+        .emit();
+        true
     }
-    pub(super) fn observe_runtime(&self, turn_id: &TurnId, loop_id: LoopId, event: LoopEvent) {
+    pub(super) fn observe_model_call(
+        &self,
+        turn_id: &TurnId,
+        request_index: u32,
+        event: ModelCallEvent,
+    ) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         let Some(active) = state
             .active
-            .as_ref()
-            .filter(|active| &active.info.id == turn_id && active.loop_id == Some(loop_id))
+            .as_mut()
+            .filter(|active| &active.info.id == turn_id)
         else {
             return;
         };
         let source = self.turn_identity(&active.info);
-        let base = active.response_base;
-        // RequestStarted is an actual Runtime fact consumed by this direct
-        // owner, not an observer callback or a reconstructed provider request.
-        let diagnostic = match &event {
-            LoopEvent::RequestStarted {
-                loop_id: actual,
-                request_index,
-                ..
-            } if *actual == loop_id => Some(Record::new(
-                diagnostic::event(
-                    Level::DEBUG,
-                    Scope::Runtime,
-                    "session.runtime",
-                    "model.started",
-                    "Runtime started a model request",
-                    &["response_index", "loop_id", "request_index"],
-                ),
-                EventData::default()
-                    .context(diagnostic::turn_context(&source))
-                    .attribute("response_index", base + u64::from(*request_index))
-                    .attribute("loop_id", actual.to_string())
-                    .attribute("request_index", u64::from(*request_index)),
-            )),
-            LoopEvent::StateChanged { state: runtime } if runtime.loop_id == loop_id => runtime
-                .model_retry
-                .as_ref()
-                .filter(|retry| {
-                    matches!(
-                        retry.phase,
-                        minicore_runtime::ModelRetryPhase::Waiting { .. }
-                    )
-                })
-                .map(|retry| {
-                    diagnostics::model_retry(&source, loop_id, runtime.request_index, base, retry)
-                }),
-            _ => None,
-        };
-        state.runner_revision = state
-            .runner_revision
-            .checked_add(1)
-            .expect("runner revision exhausted");
-        let revision = state.runner_revision;
-        let output = state.output.entry(turn_id.clone()).or_default();
+        let loop_id = active.loop_id;
+        let response_index = u64::from(request_index);
+        let mut diagnostic = None;
         match event {
-            LoopEvent::RequestStarted {
-                loop_id: actual,
-                request_index,
-                ..
-            } if actual == loop_id => {
-                let channels = output
-                    .models
-                    .entry(base + u64::from(request_index))
-                    .or_default();
-                channels.entry("text".into()).or_default();
-                channels.entry("reasoning".into()).or_default();
+            ModelCallEvent::AttemptStarted(attempt) => {
+                active
+                    .info
+                    .model_attempts
+                    .resize(request_index as usize + 1, 0);
+                active.info.model_attempts[request_index as usize] = attempt;
+                if let Some(retry) = &mut active.info.model_retry {
+                    retry.phase = ModelRetryPhase::Requesting;
+                }
+                self.publish(&mut state);
             }
-            LoopEvent::OutputDelta {
-                loop_id: actual,
-                request_index,
-                channel,
-                delta,
-            } if actual == loop_id => {
-                let response_index = base + u64::from(request_index);
-                let channel = match channel {
-                    OutputChannel::Text => "text",
-                    OutputChannel::Reasoning => "reasoning",
+            ModelCallEvent::RetryWaiting(retry) => {
+                diagnostic = Some(diagnostics::model_retry(
+                    &source,
+                    loop_id,
+                    request_index,
+                    &retry,
+                ));
+                active.info.model_retry = Some(ModelRetryProgress {
+                    response_index,
+                    attempt: retry.attempt,
+                    max_attempts: retry.max_attempts,
+                    fault: runtime_model_fault(&retry.error),
+                    phase: ModelRetryPhase::Waiting {
+                        retry_at: retry.retry_at.into(),
+                    },
+                });
+                self.publish(&mut state);
+            }
+            ModelCallEvent::TextDelta(_) | ModelCallEvent::ReasoningDelta(_) => {
+                let (channel, delta) = match event {
+                    ModelCallEvent::TextDelta(delta) => ("text", delta),
+                    ModelCallEvent::ReasoningDelta(delta) => ("reasoning", delta),
+                    _ => unreachable!(),
                 };
-                let body = output
+                let body = state
+                    .output
+                    .entry(turn_id.clone())
+                    .or_default()
                     .models
                     .entry(response_index)
                     .or_default()
@@ -506,20 +482,35 @@ impl SessionController {
                     },
                 ));
             }
-            LoopEvent::ToolStarted {
-                loop_id: actual,
-                call_id,
-                ..
-            } if actual == loop_id => {
-                if let Some(tool) = output
-                    .tools
-                    .get_mut(&ToolCallId(call_id.as_str().to_owned()))
-                {
+        }
+        drop(state);
+        diagnostic::emit(diagnostic);
+    }
+    pub(super) fn observe_tool_event(&self, turn_id: &TurnId, event: ToolBatchEvent) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        let Some(active) = state
+            .active
+            .as_ref()
+            .filter(|active| &active.info.id == turn_id)
+        else {
+            return;
+        };
+        let source = self.turn_identity(&active.info);
+        state.runner_revision = state
+            .runner_revision
+            .checked_add(1)
+            .expect("runner revision exhausted");
+        let revision = state.runner_revision;
+        let output = state.output.entry(turn_id.clone()).or_default();
+        match event {
+            ToolBatchEvent::Started { call_id, .. } => {
+                let id = ToolCallId(call_id.as_str().to_owned());
+                if let Some(tool) = output.tools.get_mut(&id) {
                     self.access.observation.publish(ObservationEvent::Activity(
                         ActivityEvent::ToolStarted {
                             source: ToolCallIdentity {
                                 turn: source.clone(),
-                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                                tool_call_id: id.clone(),
                             },
                             data: ToolInvocationData {
                                 name: tool.data.state.name.clone(),
@@ -536,7 +527,7 @@ impl SessionController {
                         StateEvent::Toolcall {
                             source: ToolCallIdentity {
                                 turn: source,
-                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                                tool_call_id: id,
                             },
                             data: tool.data.state.clone(),
                         },
@@ -544,15 +535,9 @@ impl SessionController {
                     self.publish(&mut state);
                 }
             }
-            LoopEvent::ToolProgress {
-                loop_id: actual,
-                call_id,
-                progress,
-                ..
-            } if actual == loop_id => {
-                if let Some(tool) = output
-                    .tools
-                    .get_mut(&ToolCallId(call_id.as_str().to_owned()))
+            ToolBatchEvent::Progress { call_id, progress } => {
+                let id = ToolCallId(call_id.as_str().to_owned());
+                if let Some(tool) = output.tools.get_mut(&id)
                     && tool.data.state.state != ToolCallState::Finished
                 {
                     tool.data.state.progress = Some(ToolProgressData {
@@ -565,66 +550,23 @@ impl SessionController {
                         StateEvent::Toolcall {
                             source: ToolCallIdentity {
                                 turn: source,
-                                tool_call_id: ToolCallId(call_id.as_str().to_owned()),
+                                tool_call_id: id,
                             },
                             data: tool.data.state.clone(),
                         },
                     ));
                 }
             }
-            LoopEvent::InteractionRequested {
-                loop_id: actual,
-                interaction,
-            } if actual == loop_id => {
-                let pending = output.interaction(&interaction).data.clone();
-                self.access.observation.publish(ObservationEvent::Activity(
-                    ActivityEvent::InteractionRequested {
-                        source: ToolCallIdentity {
-                            turn: source,
-                            tool_call_id: pending.tool_call_id,
-                        },
-                        interaction_id: pending.interaction_id,
-                        data: pending.request,
-                    },
-                ));
-            }
-            LoopEvent::InteractionResolved {
-                loop_id: actual,
-                interaction_id,
-            } if actual == loop_id => {
-                if let Some(record) = output.interactions.get_mut(&interaction_id)
-                    && !record.resolved
-                {
-                    record.resolved = true;
-                    let tool_call_id = record.data.tool_call_id.clone();
-                    let interaction_id = record.data.interaction_id.clone();
-                    self.access.observation.publish(ObservationEvent::Activity(
-                        ActivityEvent::InteractionResolved {
-                            source: ToolCallIdentity {
-                                turn: source,
-                                tool_call_id,
-                            },
-                            interaction_id,
-                            data: InteractionResolvedData {
-                                resolution: InteractionResolution::Answered,
-                            },
-                        },
-                    ));
-                }
-            }
-            // ToolFinished is deliberately not used to synthesize a ToolResult.
-            _ => {}
+            // The returned ToolResult, plus actual worker cleanup, determines
+            // public finished. A progress event never settles the invocation.
+            ToolBatchEvent::Finished { .. } => {}
         }
-        drop(state);
-        // Called only by the owned Runtime receiver outside admission scopes.
-        // Both Session state and observation publication locks have ended.
-        diagnostic::emit(diagnostic);
     }
     pub(super) fn observe_finished(
         &self,
         state: &mut SessionState,
         info: &TurnInfo,
-        report: Option<&LoopReport>,
+        deadline_expired: bool,
     ) {
         // Finished is a new state transition, not another view of Finalizing.
         state.runner_revision = state
@@ -633,12 +575,7 @@ impl SessionController {
             .expect("runner revision exhausted");
         let revision = state.runner_revision;
         if let Some(resolution) = match info.outcome {
-            Some(TurnOutcome::Cancelled)
-                if report.is_some_and(|report| {
-                    report.outcome
-                        == LoopOutcome::Cancelled(minicore_runtime::CancelReason::Deadline)
-                }) =>
-            {
+            Some(TurnOutcome::Cancelled) if deadline_expired => {
                 Some(InteractionResolution::Expired)
             }
             Some(TurnOutcome::Cancelled) => Some(InteractionResolution::Cancelled),
@@ -850,7 +787,12 @@ impl SessionController {
                 pending_interactions: state
                     .active
                     .as_ref()
-                    .and_then(|active| active.pending_interaction.clone())
+                    .and_then(|active| {
+                        active
+                            .pending_interaction
+                            .as_ref()
+                            .map(|pending| pending.data.clone())
+                    })
                     .into_iter()
                     .collect(),
                 next_step: state.next_step.iter().map(QueuedInput::summary).collect(),

@@ -1,6 +1,6 @@
 use super::*;
 use minicore_host_protocol::{AgentId, HostId, OperationId, SessionId, TurnId};
-use minicore_runtime::{
+use minicore_host_runtime::{
     ToolCallId,
     tools::{ToolInvocation, ToolSpec},
 };

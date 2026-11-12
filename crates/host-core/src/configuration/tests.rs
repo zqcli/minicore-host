@@ -208,7 +208,7 @@ async fn actual_host_record_failure_keeps_live_configuration_and_key_and_blocks_
 
 struct GatedPreparationResources {
     gate: Arc<SaveGate>,
-    execution: minicore_runtime::ExecutionConfig,
+    execution: minicore_host_runtime::ExecutionConfig,
 }
 impl ResourceResolver for GatedPreparationResources {
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
@@ -220,7 +220,7 @@ impl ResourceResolver for GatedPreparationResources {
             self.gate.release.acquire().await.unwrap().forget();
             Ok(BoundResources {
                 execution: self.execution.clone(),
-                options: minicore_runtime::LoopOptions::default_checked().unwrap(),
+                options: minicore_host_runtime::ExecutionOptions::default(),
             })
         })
     }
@@ -228,7 +228,7 @@ impl ResourceResolver for GatedPreparationResources {
 #[tokio::test]
 async fn turn_preparation_from_an_old_host_revision_never_consumes_the_input() {
     use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
-    use minicore_runtime::{
+    use minicore_host_runtime::{
         ExecutionConfig,
         model::{ModelDescriptor, ReasoningPreference as RuntimeReasoning},
         prompt::DefaultPromptProvider,

@@ -1,4 +1,4 @@
-use minicore_runtime::tools::ToolSpec;
+use minicore_host_runtime::tools::ToolSpec;
 use serde_json::{Value, json};
 
 /// The declaration used both by registration and by each bound implementation.

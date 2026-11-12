@@ -1,7 +1,7 @@
 use super::*;
 use crate::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData, SessionRecord};
 use minicore_host_protocol::{AgentConfig, AgentId, HostId, SessionConfig, StorageMode};
-use minicore_runtime::{Text, history::SummaryHistory};
+use minicore_host_runtime::{Text, history::SummaryHistory};
 
 fn fixture() -> (tempfile::TempDir, SessionStore) {
     let temp = tempfile::tempdir().unwrap();

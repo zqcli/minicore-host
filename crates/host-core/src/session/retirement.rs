@@ -51,12 +51,12 @@ impl SessionController {
             }
             let handle = if state.host_stopping {
                 clear_inbox(&mut state);
-                state.active.as_mut().and_then(|active| {
+                state.active.as_mut().map(|active| {
                     if matches!(active.info.state, TurnState::Starting | TurnState::Running) {
                         active._activation.expire();
                         active.info.state = TurnState::Cancelling;
                     }
-                    active.handle.clone()
+                    active.cancellation.clone()
                 })
             } else {
                 None
@@ -69,7 +69,7 @@ impl SessionController {
         // Runtime shutdown cancels business work and still joins through the
         // original owner. It never aborts the history callback or driver future.
         if let Some(handle) = handle {
-            handle.shutdown();
+            handle.cancel();
         }
         self.handoff_delegation_owned();
     }

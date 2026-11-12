@@ -1,128 +1,165 @@
-//! Runtime prompt preparation over the Session's accepted history and projection.
+//! Session request preparation over a shared accepted history view.
 use super::*;
-use minicore_runtime::{
+use minicore_host_runtime::{
     HistoryView,
     model::{ModelLimits, ModelRequest},
-    prompt::{PreparedPrompt, PromptError, PromptFuture, PromptProvider, PromptRequest},
+    prompt::{PreparedPrompt, PromptError, PromptRequest},
 };
 
-/// Base/appended retain the actual internal Loop distinction. Only the
-/// unhanded suffix is protected; earlier batches of this same Turn are eligible.
+/// Sharing the native buffer avoids copying full history bodies. Input metadata
+/// is copied for this view; only actual compaction flattens the selected native
+/// context, outside the owner lock.
 pub(super) struct RequestHistory {
+    raw: Arc<Vec<HistoryItem>>,
+    summary: Option<HistoryItem>,
     input_provenance: input_provenance::InputProvenance,
-    pub(super) source: HistorySnapshot,
-    base_len: usize,
+    revision: u64,
+    covered: usize,
     preserve_from: usize,
     pub(super) previous_coverage: u64,
 }
 impl RequestHistory {
-    pub(super) fn new(
-        state: &SessionState,
-        raw_base: usize,
-        unhanded: &[HistoryItem],
-    ) -> Result<Self, Fault> {
+    pub(super) fn new(state: &SessionState) -> Result<Self, Fault> {
         let covered = state
             .projection
             .as_ref()
             .map_or(0, |value| value.covered_items);
         let covered_index = usize::try_from(covered).map_err(|_| stale())?;
-        if raw_base > state.history.len() || covered_index > state.history.len() {
+        if covered_index > state.history.len() {
             return Err(stale());
         }
-        let mut items = state
+        let summary = state
             .projection
             .as_ref()
-            .map(|value| vec![HistoryItem::Summary(value.summary.clone())])
-            .unwrap_or_default();
+            .map(|value| HistoryItem::Summary(value.summary.clone()));
+        let prefix = usize::from(summary.is_some());
         let mut input_provenance = input_provenance::InputProvenance::default();
-        if covered_index < raw_base {
-            input_provenance.append_range(
-                &state.input_provenance,
-                covered_index..raw_base,
-                items.len(),
-            );
-            items.extend_from_slice(&state.history[covered_index..raw_base]);
-        }
-        let base_len = items.len();
         input_provenance.append_range(
             &state.input_provenance,
-            raw_base.max(covered_index)..state.history.len(),
-            items.len(),
+            covered_index..state.history.len(),
+            prefix,
         );
-        items.extend_from_slice(&state.history[raw_base.max(covered_index)..]);
-        let mut preserve_from = items.len();
-        // A genuinely incomplete *accepted* tail is not a closed exchange for
-        // the durable marker. Fresh, still-unhanded input cannot close it in
-        // the journal. Keep that one group intact until a later accepted item
-        // establishes its end, just as the storage coverage validator requires.
-        if let Some(start) = incomplete_tail(&state.history) {
-            preserve_from = usize::from(state.projection.is_some()) + start - covered_index;
+        let mut preserve = state
+            .active
+            .as_ref()
+            .map_or(state.history.len(), |active| active.save_cursor);
+        if let Some(start) = incomplete_tail(&state.history[..preserve]) {
+            preserve = preserve.min(start);
         }
-        input_provenance.append_unhanded(items.len(), unhanded, state.active.as_ref())?;
-        items.extend_from_slice(unhanded);
         Ok(Self {
+            raw: Arc::clone(&state.history),
+            summary,
             input_provenance,
-            source: HistorySnapshot {
-                revision: state.history_position,
-                items: items.into(),
-            },
-            base_len,
-            preserve_from,
+            revision: state.history_position,
+            covered: covered_index,
+            preserve_from: prefix + preserve.saturating_sub(covered_index),
             previous_coverage: covered,
         })
     }
-    fn view(&self) -> HistoryView<'_> {
-        HistoryView::new(
-            &self.source.items[..self.base_len],
-            &self.source.items[self.base_len..],
-        )
+    pub(super) fn view(&self) -> HistoryView<'_> {
+        HistoryView::new(self.summary.as_slice(), &self.raw[self.covered..])
     }
-}
+    pub(super) fn snapshot(&self) -> HistorySnapshot {
+        HistorySnapshot {
+            revision: self.revision,
+            items: self.view().iter().cloned().collect::<Vec<_>>().into(),
+        }
+    }
+    pub(super) fn matches(&self, state: &SessionState) -> bool {
+        self.revision == state.history_position
+            && Arc::ptr_eq(&self.raw, &state.history)
+            && self.previous_coverage == state.projection.as_ref().map_or(0, |p| p.covered_items)
+    }
+    async fn project(
+        &self,
+        execution: &ExecutionConfig,
+        loop_id: LoopId,
+        request_index: u32,
+        cancellation: &CancellationToken,
+        deadline: tokio::time::Instant,
+    ) -> Result<PreparedPrompt, PromptError> {
+        let tools = execution.tools().specs();
+        let child = cancellation.child_token();
+        let prepare = async {
+            execution
+                .prompt()
+                .prepare(PromptRequest {
+                    loop_id,
+                    request_index,
+                    history: self.view(),
+                    model: execution.descriptor(),
+                    reasoning: execution.reasoning(),
+                    tools,
+                    cancellation: child.clone(),
+                    deadline,
+                })
+                .await
+        };
+        tokio::pin!(prepare);
+        // Declared after the future so unwind/drop cancels the provider's
+        // child before destroying its retained future.
+        let _cancel = child.clone().drop_guard();
+        let result = tokio::select! {
+            _ = cancellation.cancelled() => Err(PromptError::Cancelled),
+            _ = tokio::time::sleep_until(deadline) => Err(PromptError::Cancelled),
+            result = &mut prepare => result,
+        };
+        child.cancel();
+        self.input_provenance.project(self.view(), result?)
+    }
 
-impl RequestHistory {
+    #[allow(clippy::too_many_arguments)]
     pub(super) async fn prepare_manual(
         &self,
+        source: HistorySnapshot,
         resources: &crate::BoundCompactionResources,
         loop_id: LoopId,
         settings: &CompactionSettings,
         cancellation: &CancellationToken,
         deadline: tokio::time::Instant,
     ) -> Result<Option<engine::CompactionPlan>, Fault> {
-        let source = &self.source;
-        let prompt = resources.prompt.prepare(PromptRequest {
-            loop_id,
-            request_index: 0,
-            history: HistoryView::new(&source.items, &[]),
-            model: resources.model.descriptor(),
-            reasoning: resources.reasoning,
-            tools: &resources.tools,
-            cancellation: cancellation.clone(),
-            deadline,
-        });
+        let child = cancellation.child_token();
+        let prepare = async {
+            resources
+                .prompt
+                .prepare(PromptRequest {
+                    loop_id,
+                    request_index: 0,
+                    history: self.view(),
+                    model: resources.model.descriptor(),
+                    reasoning: resources.reasoning,
+                    tools: &resources.tools,
+                    cancellation: child.clone(),
+                    deadline,
+                })
+                .await
+        };
+        tokio::pin!(prepare);
+        let _cancel = child.clone().drop_guard();
         let prompt = tokio::select! {
             _ = cancellation.cancelled() => Err(PromptError::Cancelled),
-            result = tokio::time::timeout_at(deadline, prompt) => result.unwrap_or(Err(PromptError::Cancelled)),
+            _ = tokio::time::sleep_until(deadline) => Err(PromptError::Cancelled),
+            result = &mut prepare => result,
         };
-        prompt
-            .and_then(|prompt| self.input_provenance.project(&source.items, prompt))
-            .map_err(|error| failure(error.to_string()))
-            .and_then(|prompt| {
-                let request = ModelRequest::new(
-                    prompt.messages,
-                    resources.tools.clone(),
-                    ModelLimits::default(),
-                    resources.reasoning,
-                )
-                .map_err(|error| failure(error.to_string()))?;
-                engine::prepare(
-                    source.clone(),
-                    source.items.len(),
-                    resources.model.descriptor(),
-                    settings,
-                    request,
-                )
-                .map_err(|error| failure(error.to_string()))
-            })
+        child.cancel();
+        let prompt = prompt
+            .and_then(|prompt| self.input_provenance.project(self.view(), prompt))
+            .map_err(|error| failure(error.to_string()))?;
+        let request = ModelRequest::new(
+            prompt.messages,
+            resources.tools.clone(),
+            ModelLimits::default(),
+            resources.reasoning,
+        )
+        .map_err(|error| failure(error.to_string()))?;
+        engine::prepare(
+            source,
+            self.view().len(),
+            resources.model.descriptor(),
+            settings,
+            request,
+        )
+        .map_err(|error| failure(error.to_string()))
     }
 }
 
@@ -133,172 +170,153 @@ fn incomplete_tail(raw: &[HistoryItem]) -> Option<usize> {
     let HistoryItem::Assistant(assistant) = &raw[start] else {
         return None;
     };
-    assistant
-        .content
-        .iter()
-        .filter_map(minicore_runtime::model::AssistantPart::as_tool_call)
-        .any(|call| {
-            !raw[start + 1..].iter().any(|item| matches!(item,
+    assistant.content.iter().filter_map(minicore_host_runtime::model::AssistantPart::as_tool_call)
+        .any(|call| !raw[start + 1..].iter().any(|item| matches!(item,
             HistoryItem::ToolResult(result) if result.loop_id == assistant.loop_id
-                && result.request_index == assistant.request_index
-                && &result.call_id == call.tool_call_id() && &result.tool_name == call.name()
-        ))
-        })
+                && result.request_index == assistant.request_index && &result.call_id == call.tool_call_id()
+                && &result.tool_name == call.name())))
         .then_some(start)
 }
 
 impl SessionController {
-    pub(in crate::session) fn bind_compaction_prompt(
+    pub(in crate::session) async fn prepare_request(
         self: &Arc<Self>,
         turn_id: &TurnId,
-        config: &SessionConfig,
+        request_index: u32,
         execution: &ExecutionConfig,
-    ) -> Result<ExecutionConfig, Fault> {
-        ExecutionConfig::new(
-            execution.model().clone(),
-            execution.reasoning(),
-            execution.tools().clone(),
-            execution.policy().cloned(),
-            Arc::new(SessionPrompt {
-                session: Arc::downgrade(self),
-                turn_id: turn_id.clone(),
-                inner: execution.prompt().clone(),
-                model: execution.model().clone(),
-                settings: config.execution.compaction.clone(),
-            }),
-        )
-        .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))
-    }
-    fn request_history(
-        &self,
-        turn_id: &TurnId,
-        request: &PromptRequest<'_>,
-    ) -> Result<(RequestHistory, LoadId), Fault> {
-        let state = self.state.lock().expect("Session mutex poisoned");
-        let active = state
-            .active
-            .as_ref()
-            .filter(|active| &active.info.id == turn_id && active.loop_id == Some(request.loop_id))
-            .ok_or_else(stale)?;
-        if active.accepted > request.history.appended().len()
-            || state.history.len() != active.raw_base_len + active.accepted
-            || request.history.base().len() != active.raw_base_len
-        {
-            return Err(stale());
+        cancellation: &CancellationToken,
+        prompt_deadline: &mut tokio::time::Instant,
+        options: &minicore_host_runtime::ExecutionOptions,
+    ) -> Result<ModelRequest, Fault> {
+        let prepare = self.prepare_request_inner(
+            turn_id,
+            request_index,
+            execution,
+            cancellation,
+            prompt_deadline,
+            options,
+        );
+        tokio::select! {
+            _ = cancellation.cancelled() => Err(prompt_fault("prompt preparation cancelled")),
+            result = AssertUnwindSafe(prepare).catch_unwind() => result.unwrap_or_else(|_| Err(prompt_fault("prompt preparation panicked"))),
         }
-        Ok((
-            RequestHistory::new(
-                &state,
-                active.raw_base_len,
-                &request.history.appended()[active.accepted..],
-            )?,
-            active.info.load_id.clone(),
-        ))
     }
-}
-struct SessionPrompt {
-    session: Weak<SessionController>,
-    turn_id: TurnId,
-    inner: Arc<dyn PromptProvider>,
-    model: Arc<dyn Model>,
-    settings: CompactionSettings,
-}
-impl PromptProvider for SessionPrompt {
-    fn prepare<'a>(&'a self, request: PromptRequest<'a>) -> PromptFuture<'a> {
-        Box::pin(async move {
-            let owner = self.session.upgrade().ok_or(PromptError::Cancelled)?;
-            let (history, load_id) = owner
-                .request_history(&self.turn_id, &request)
-                .map_err(|_| PromptError::InvalidHistory)?;
-            let prompt = self.project(&history, &request).await?;
-            if !self.settings.enabled {
-                return Ok(prompt);
-            }
-            let normal = ModelRequest::new(
-                prompt.messages.clone(),
-                request.tools.to_vec(),
-                ModelLimits::default(),
-                request.reasoning,
+    async fn prepare_request_inner(
+        self: &Arc<Self>,
+        turn_id: &TurnId,
+        request_index: u32,
+        execution: &ExecutionConfig,
+        cancellation: &CancellationToken,
+        prompt_deadline: &mut tokio::time::Instant,
+        options: &minicore_host_runtime::ExecutionOptions,
+    ) -> Result<ModelRequest, Fault> {
+        let (history, loop_id, load_id, settings) = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            let active = state
+                .active
+                .as_ref()
+                .filter(|active| &active.info.id == turn_id)
+                .ok_or_else(stale)?;
+            (
+                RequestHistory::new(&state)?,
+                active.loop_id,
+                active.info.load_id.clone(),
+                active.info.config.execution.compaction.clone(),
             )
-            .map_err(|_| PromptError::InvalidHistory)?;
-            if !engine::estimate_context(request.model, &self.settings, &normal)
-                .map_err(|_| PromptError::InvalidHistory)?
+        };
+        let prompt = history
+            .project(
+                execution,
+                loop_id,
+                request_index,
+                cancellation,
+                *prompt_deadline,
+            )
+            .await
+            .map_err(|error| prompt_fault(error.to_string()))?;
+        let request = execution
+            .request(prompt.messages)
+            .map_err(|error| prompt_fault(error.to_string()))?;
+        if !settings.enabled
+            || !engine::estimate_context(execution.descriptor(), &settings, &request)
+                .map_err(|error| failure(error.to_string()))?
                 .automatic_due
-            {
-                return Ok(prompt);
+        {
+            return Ok(request);
+        }
+        let source = history.snapshot();
+        let Some(plan) = engine::prepare(
+            source.clone(),
+            history.preserve_from,
+            execution.descriptor(),
+            &settings,
+            request.clone(),
+        )
+        .map_err(|error| failure(error.to_string()))?
+        else {
+            return Ok(request);
+        };
+        if plan.covered().end <= usize::from(history.previous_coverage > 0) {
+            return Ok(request);
+        }
+        let binding = CompactionBinding::Automatic {
+            turn_id: turn_id.clone(),
+            load_id,
+            loop_id,
+            request_index,
+        };
+        let compaction_deadline = options.deadline.map_or_else(
+            || tokio::time::Instant::now() + options.model_timeout,
+            |turn| turn.min(tokio::time::Instant::now() + options.model_timeout),
+        );
+        let mut completion = self.start_automatic(
+            binding,
+            source,
+            history.previous_coverage,
+            plan,
+            execution.model().clone(),
+            cancellation.child_token(),
+            compaction_deadline,
+        )?;
+        // The registered compaction/save owns its work even when the caller's
+        // timeout drops this wait. Finalization fences that original work.
+        loop {
+            if let Some(result) = completion.borrow_and_update().clone() {
+                result?;
+                break;
             }
-            let Some(plan) = engine::prepare(
-                history.source.clone(),
-                history.preserve_from,
-                request.model,
-                &self.settings,
-                normal,
+            completion.changed().await.map_err(|_| stale())?;
+        }
+        drop(history);
+        // Compaction is a separate operation. Its time does not consume or
+        // reset an outstanding prompt call; this is a new projection of the
+        // newly committed context. Steering rebuilds retain this deadline.
+        *prompt_deadline = options.deadline.map_or_else(
+            || tokio::time::Instant::now() + options.prompt_timeout,
+            |turn| turn.min(tokio::time::Instant::now() + options.prompt_timeout),
+        );
+        let history = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            RequestHistory::new(&state)?
+        };
+        let prompt = history
+            .project(
+                execution,
+                loop_id,
+                request_index,
+                cancellation,
+                *prompt_deadline,
             )
-            .map_err(|_| PromptError::InvalidHistory)?
-            else {
-                return Ok(prompt);
-            };
-            // A/F may rebuild the same request after input arrives. Merely
-            // resummarizing the previous summary is not progress or new work.
-            if plan.covered().end <= usize::from(history.previous_coverage > 0) {
-                return Ok(prompt);
-            }
-            let binding = CompactionBinding::Automatic {
-                turn_id: self.turn_id.clone(),
-                load_id,
-                loop_id: request.loop_id,
-                request_index: request.request_index,
-            };
-            let mut completion = owner
-                .start_automatic(
-                    binding,
-                    &history,
-                    plan,
-                    self.model.clone(),
-                    request.cancellation.child_token(),
-                    request.deadline,
-                )
-                .map_err(|_| PromptError::Cancelled)?;
-            loop {
-                if let Some(result) = completion.borrow_and_update().clone() {
-                    result.map_err(|_| PromptError::InvalidHistory)?;
-                    break;
-                }
-                completion
-                    .changed()
-                    .await
-                    .map_err(|_| PromptError::Cancelled)?;
-            }
-            let (history, _) = owner
-                .request_history(&self.turn_id, &request)
-                .map_err(|_| PromptError::InvalidHistory)?;
-            self.project(&history, &request).await
-        })
+            .await
+            .map_err(|error| prompt_fault(error.to_string()))?;
+        execution
+            .request(prompt.messages)
+            .map_err(|error| prompt_fault(error.to_string()))
     }
 }
-impl SessionPrompt {
-    async fn project(
-        &self,
-        history: &RequestHistory,
-        request: &PromptRequest<'_>,
-    ) -> Result<PreparedPrompt, PromptError> {
-        let prompt = self
-            .inner
-            .prepare(PromptRequest {
-                loop_id: request.loop_id,
-                request_index: request.request_index,
-                history: history.view(),
-                model: request.model,
-                reasoning: request.reasoning,
-                tools: request.tools,
-                cancellation: request.cancellation.clone(),
-                deadline: request.deadline,
-            })
-            .await?;
-        history
-            .input_provenance
-            .project(&history.source.items, prompt)
-    }
+
+fn prompt_fault(message: impl Into<String>) -> Fault {
+    Fault::new(FaultKind::TurnInternalUnexpected, message.into())
 }
 
 #[cfg(test)]

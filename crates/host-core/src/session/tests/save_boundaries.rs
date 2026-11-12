@@ -253,8 +253,8 @@ async fn failed_save_retains_report_and_primary_failure_without_reappend_or_succ
         active.info.persistence_fault.as_ref().unwrap().kind(),
         Some(FaultKind::SessionHistoryWriteFailed)
     );
-    assert!(active.report.as_ref().unwrap().partial.is_some());
-    assert!(active.report.as_ref().unwrap().history_failure.is_some());
+    assert!(active.pending_partial.is_some());
+    assert!(active.info.persistence_fault.is_some());
     assert!(state.completed.is_empty());
     assert_eq!(state.history.len(), 1);
 }
@@ -336,4 +336,67 @@ async fn synchronous_backend_panics_are_failed_saves_not_lost_owners() {
         state.active.as_ref().unwrap().info.outcome,
         original.outcome
     );
+}
+
+#[tokio::test]
+async fn usage_only_failed_request_is_saved_and_cold_read_without_invented_text() {
+    let usage = minicore_host_runtime::model::Usage::from_optional(Some(19), None, None);
+    let fixture = setup(
+        Arc::new(Resources {
+            model: model(vec![vec![ModelEvent::Usage { usage }]]),
+            tools: ToolSet::default(),
+        }),
+        |inner| inner,
+    );
+    send(&fixture, "record actual usage");
+    until(&fixture, |state| state.completed.len() == 1).await;
+    let turn_id = {
+        let state = fixture.session.state.lock().unwrap();
+        let result = state.completed.values().next().unwrap();
+        assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));
+        assert_eq!(result.partials.len(), 1);
+        let partial = &result.partials[0].partial;
+        assert!(partial.content.is_empty());
+        assert!(partial.incomplete_tool_calls.is_empty());
+        assert_eq!(partial.usage, Some(usage));
+        result.info.id.clone()
+    };
+    let stored = records(&fixture);
+    assert!(
+        matches!(&stored[1].entry, HistoryEntry::Partial { partial, .. } if partial.usage == Some(usage) && partial.content.is_empty())
+    );
+    let original = &fixture.session;
+    let incarnation = HostIncarnation::new().unwrap();
+    let access = ConnectionRegistry::new(original.host_id.clone(), incarnation.clone());
+    let connection = access.connect().unwrap();
+    let cold = SessionController::new(
+        original.id.clone(),
+        original.agent_id.clone(),
+        original.host_id.clone(),
+        incarnation,
+        original.info(&fixture.connection.caller()).unwrap().config,
+        access,
+        original.resources_owned().unwrap(),
+        Arc::new(JournalHistory::new(fixture.store.clone())),
+        Vec::new(),
+        Arc::new(AtomicBool::new(true)),
+    );
+    original.begin_host_shutdown_owned(false);
+    original.release_host_resources_owned().await.unwrap();
+    let saved = cold
+        .turn_result_snapshot(&connection.caller(), &turn_id)
+        .await
+        .unwrap();
+    assert_eq!(saved.data.partials.len(), 1);
+    assert!(saved.data.partials[0].partial.content.is_empty());
+    assert_eq!(
+        saved.data.partials[0]
+            .partial
+            .usage
+            .as_ref()
+            .unwrap()
+            .input_tokens(),
+        Some(19)
+    );
+    assert!(cold.state.lock().unwrap().active.is_none());
 }

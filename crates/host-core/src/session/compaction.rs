@@ -4,9 +4,9 @@ use super::*;
 use crate::CompactionResourceFuture;
 mod prompt;
 use minicore_host_compaction::{self as engine, CompactionCandidate, HistorySnapshot};
+use minicore_host_runtime::model::{Model, ModelCallContext};
+use minicore_host_runtime::prompt::PromptError;
 use minicore_host_storage::CompactionProjection;
-use minicore_runtime::model::{Model, ModelCallContext};
-use minicore_runtime::prompt::PromptError;
 use prompt::RequestHistory;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -34,28 +34,6 @@ impl CompactionBinding {
     }
 }
 
-/// Original owner failure handed to this Turn's next terminal report. Runtime
-/// intentionally reports only a prompt failure, so the Host retains its own
-/// Fault and exact request binding rather than replacing it with a generic one.
-/// The ActiveTurn consumes this once; it is not a result cache or logging flag.
-pub(super) struct CompactionFailure {
-    pub(super) binding: CompactionBinding,
-    pub(super) fault: Fault,
-    pub(super) history: bool,
-}
-impl CompactionFailure {
-    pub(super) fn matches(&self, active: &ActiveTurn, report: &LoopReport) -> bool {
-        matches!(&self.binding, CompactionBinding::Automatic {
-            turn_id, load_id, loop_id, request_index,
-        } if turn_id == &active.info.id
-            && load_id == &active.info.load_id
-            && Some(*loop_id) == active.loop_id
-            && *loop_id == report.loop_id
-            // Runtime counts an issued request only after prompt preparation.
-            // A failed prompt is the next unissued index, not the last response.
-            && *request_index == report.requests)
-    }
-}
 pub(super) struct CompactionWork {
     pub(super) binding: CompactionBinding,
     pub(super) activity: CompactionActivity,
@@ -117,6 +95,11 @@ impl SessionController {
         let preparation = self
             .resources_owned()?
             .resolve_for_compaction(info.config.clone());
+        let snapshot = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            RequestHistory::new(&state)?
+        };
+        let source = snapshot.snapshot();
         let (receipt, record) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             Self::open(&state)?;
@@ -152,7 +135,9 @@ impl SessionController {
                     "Session configuration changed before compaction admission",
                 ));
             }
-            let snapshot = RequestHistory::new(&state, state.history.len(), &[])?;
+            if !snapshot.matches(&state) {
+                return Err(stale());
+            }
             let receipt_index = state
                 .controls
                 .get(&request.operation_id)
@@ -167,7 +152,7 @@ impl SessionController {
                 CompactionSource::Manual {
                     operation_id: request.operation_id.clone(),
                 },
-                snapshot.source.clone(),
+                source.clone(),
                 snapshot.previous_coverage,
                 CancellationToken::new(),
             );
@@ -351,7 +336,15 @@ impl SessionController {
                 .cancellation
                 .clone()
         };
-        let source = &history.source;
+        let source = {
+            let state = self.state.lock().expect("Session mutex poisoned");
+            state
+                .compaction
+                .as_ref()
+                .expect("registered manual work")
+                .source
+                .clone()
+        };
         if source.items.is_empty() {
             self.complete_compaction(binding, CompactionOutcome::Unchanged, Ok(()));
             return;
@@ -381,19 +374,22 @@ impl SessionController {
                 return;
             }
         };
-        let deadline =
-            tokio::time::Instant::now() + Duration::from_millis(config.execution.model_timeout_ms);
+        let prompt_deadline =
+            tokio::time::Instant::now() + Duration::from_millis(config.execution.prompt_timeout_ms);
         let plan = history
             .prepare_manual(
+                source,
                 &resources,
                 loop_id,
                 &config.execution.compaction,
                 &cancellation,
-                deadline,
+                prompt_deadline,
             )
             .await;
         match plan {
             Ok(Some(plan)) if self.plan_advances(binding, &plan) => {
+                let deadline = tokio::time::Instant::now()
+                    + Duration::from_millis(config.execution.model_timeout_ms);
                 self.generate_and_commit(
                     binding,
                     plan,
@@ -522,7 +518,7 @@ impl SessionController {
             } if state.active.as_ref().is_some_and(|active| {
                 &active.info.id == turn_id
                     && &active.info.load_id == load_id
-                    && active.loop_id == Some(*loop_id)
+                    && active.loop_id == *loop_id
                     && active.info.state == TurnState::Running
             }) => {}
             _ => return Err(stale()),
@@ -620,7 +616,7 @@ impl SessionController {
                 *persistence = PersistenceState::Failed;
                 *fault = Some(error.clone());
                 let _ = work.completion.send_replace(Some(Err(error.clone())));
-                Self::handoff_compaction_failure(state, binding, error, true);
+                Self::claim_compaction_failure(state, binding, error, true);
                 self.publish_compaction(state);
                 Vec::new()
             }
@@ -672,7 +668,7 @@ impl SessionController {
         work.activity.cancellation_requested |=
             work.cancellation.is_cancelled() && !work.committing();
         if let CompactionOutcome::Failed { fault } = &result {
-            Self::handoff_compaction_failure(state, binding, fault, false);
+            Self::claim_compaction_failure(state, binding, fault, false);
         }
         if let CompactionBinding::Manual {
             operation_id,
@@ -704,7 +700,7 @@ impl SessionController {
         records.extend(self.closed_record(state, previous));
         records
     }
-    fn handoff_compaction_failure(
+    pub(super) fn claim_compaction_failure(
         state: &mut SessionState,
         binding: &CompactionBinding,
         fault: &Fault,
@@ -714,7 +710,7 @@ impl SessionController {
             turn_id,
             load_id,
             loop_id,
-            ..
+            request_index,
         } = binding
         else {
             return;
@@ -722,26 +718,21 @@ impl SessionController {
         let Some(active) = state.active.as_mut().filter(|active| {
             &active.info.id == turn_id
                 && &active.info.load_id == load_id
-                && active.loop_id == Some(*loop_id)
+                && active.loop_id == *loop_id
+                && active.info.requests == u64::from(*request_index)
         }) else {
             return;
         };
         if active.info.outcome.is_some() {
-            // A previously claimed terminal outcome stays authoritative. Save
-            // faults already belong to persistence_fault, never to cleanup.
             if !history {
                 active.info.cleanup_faults.push(fault.clone());
             }
         } else {
-            active.compaction_failure = Some(CompactionFailure {
-                binding: binding.clone(),
-                fault: fault.clone(),
-                history,
-            });
+            active.claim_terminal(TurnOutcome::Failed, (!history).then(|| fault.clone()));
         }
     }
-    /// Runtime's terminal callback runs before join, even when its prompt
-    /// future was dropped. Fence it before touching the accepted raw cursor.
+    /// A cancelled preparation waiter does not abandon its registered save.
+    /// Fence the original compaction before appending subsequent records.
     pub(super) async fn wait_compaction_boundary(&self) -> Result<(), Fault> {
         loop {
             let changed = self.changed.notified();
@@ -767,10 +758,12 @@ impl SessionController {
             changed.await;
         }
     }
+    #[allow(clippy::too_many_arguments)]
     fn start_automatic(
         self: &Arc<Self>,
         binding: CompactionBinding,
-        snapshot: &RequestHistory,
+        source: HistorySnapshot,
+        previous_coverage: u64,
         plan: engine::CompactionPlan,
         model: Arc<dyn Model>,
         cancellation: CancellationToken,
@@ -782,7 +775,7 @@ impl SessionController {
             || state.lifecycle != SessionLifecycle::Open
             || state.compaction.is_some()
             || state.history_work.is_some()
-            || state.history_position != snapshot.source.revision
+            || state.history_position != source.revision
             || cancellation.is_cancelled()
         {
             return Err(stale());
@@ -796,13 +789,13 @@ impl SessionController {
         else {
             return Err(stale());
         };
-        let active = state
+        let _active = state
             .active
             .as_ref()
             .filter(|active| {
                 &active.info.id == turn_id
                     && &active.info.load_id == load_id
-                    && active.loop_id == Some(*loop_id)
+                    && active.loop_id == *loop_id
                     && active.info.state == TurnState::Running
             })
             .ok_or_else(stale)?;
@@ -811,7 +804,7 @@ impl SessionController {
         let association = CompactionSource::Automatic {
             turn_id: turn_id.clone(),
             load_id: load_id.clone(),
-            response_index: active.response_base + u64::from(*request_index),
+            response_index: u64::from(*request_index),
         };
         let context = ModelCallContext::new(
             *loop_id,
@@ -822,8 +815,8 @@ impl SessionController {
         let work = CompactionWork::new(
             binding.clone(),
             association,
-            snapshot.source.clone(),
-            snapshot.previous_coverage,
+            source,
+            previous_coverage,
             cancellation,
         );
         let completion = work.completion.subscribe();

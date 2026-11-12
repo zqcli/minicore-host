@@ -92,7 +92,10 @@ async fn exercise(client: HostClient, reader: HostClient, resources: Arc<Fixture
     let response = history.latest_response.unwrap();
     assert_eq!(response.model.as_str(), "fixture/model");
     assert_eq!(response.raw_item_index, 1);
-    assert_eq!(response.usage, minicore_runtime::model::Usage::default());
+    assert_eq!(
+        response.usage,
+        minicore_host_runtime::model::Usage::default()
+    );
     assert!(!ended.data.history_save.pending);
     assert_eq!(resources.model.calls.load(Ordering::SeqCst), 1);
     client.close();
