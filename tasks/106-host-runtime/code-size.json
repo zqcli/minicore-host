@@ -1,0 +1,47 @@
+{
+  "method": "Tracked Rust files under crate src or tests directories; byte newline count, plus a final unterminated line. Physical lines include comments, blank lines and inline test modules. Task probes excluded. This is source size, not production-only LOC or performance.",
+  "baseline_host_revision": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+  "baseline_runtime_revision": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+  "candidate_revision": "6b2f217886e3952aafa1c4b297476101940a68c1",
+  "baseline_host": {
+    "src": {
+      "files": 225,
+      "physical_lines": 55059
+    },
+    "tests": {
+      "files": 150,
+      "physical_lines": 62629
+    }
+  },
+  "baseline_runtime": {
+    "src": {
+      "files": 49,
+      "physical_lines": 10938
+    },
+    "tests": {
+      "files": 19,
+      "physical_lines": 12768
+    }
+  },
+  "candidate": {
+    "src": {
+      "files": 266,
+      "physical_lines": 63587
+    },
+    "tests": {
+      "files": 162,
+      "physical_lines": 66526
+    }
+  },
+  "delta_combined": {
+    "src": {
+      "files": -8,
+      "physical_lines": -2410
+    },
+    "tests": {
+      "files": -7,
+      "physical_lines": -8871
+    }
+  },
+  "production_revision": "1009c719ced338ebb05c5bacccc8c9403f882ec2"
+}

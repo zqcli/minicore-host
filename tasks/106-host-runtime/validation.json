@@ -1,0 +1,189 @@
+{
+  "task": "106-host-runtime",
+  "recorded_at": "2026-11-12T15:27:56.246847+00:00",
+  "repository": "https://github.com/zqcli/minicore-host",
+  "source": {
+    "baseline_dev": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+    "imported_runtime": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+    "production_local_commit": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+    "validated_local_commit": "6b2f217886e3952aafa1c4b297476101940a68c1",
+    "published_code_commit": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "published_code_tree": "63328a524b8a2d73bfbac7c044efada130367c21",
+    "host_version": "0.10.1",
+    "spec_version": "4.10.1",
+    "spec_sha256": "b1426061eb63478f392e8f5638792df1c7d8a1bad08d80c80f3203288816182b",
+    "unchanged_tui_baseline": "3beeb1d8a525e58ce6352e05061f242c5580e248"
+  },
+  "local_gate": {
+    "command": "./scripts/check.sh",
+    "exit_code": 0,
+    "toolchain": "1.90.0",
+    "environment": {
+      "CARGO_BUILD_JOBS": "4",
+      "CARGO_INCREMENTAL": "0"
+    },
+    "unique_rust_cases": 1110,
+    "test_targets": 138,
+    "doctests": 6,
+    "python_checks": 28,
+    "checks": [
+      "working and committed whitespace",
+      "rustfmt",
+      "strict workspace/all-targets Clippy",
+      "workspace/all-targets tests",
+      "workspace doctests",
+      "strict no-deps rustdoc"
+    ],
+    "counting_command": "cargo test --workspace --all-targets --locked -- --list",
+    "counting_identity": "test target executable path plus case name; nested subprocess and standard-user re-executions are not added",
+    "log_sha256": {
+      "full-gate.log": "3284d939ebf5fda02c320c342b98da9aa887ed3572f59d2ffe2858e24dfc7e7c",
+      "test-list-final.log": "dbbfeffc559de5b5feb03962c490ba4d2315356aa2f44ecf94d2d923618721e3",
+      "candidate-release-final.log": "09f51f3720f96d6d8440bfb3beeba81a377546aa8501fa603e76b26b20a07902"
+    }
+  },
+  "dependencies": {
+    "external_locked_packages": 225,
+    "external_versions_sources_checksums_unchanged": true,
+    "workspace_packages": [
+      {
+        "name": "minicore-host",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-compaction",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-core",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-diagnostics",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-local-tools",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-protocol",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-provider",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-resources",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-runtime",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-storage",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-tools",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-transport",
+        "version": "0.10.1"
+      },
+      {
+        "name": "minicore-host-workspace",
+        "version": "0.10.1"
+      }
+    ]
+  },
+  "release_build": {
+    "source": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+    "command": "cargo build --package minicore-host --release --locked --target x86_64-unknown-linux-gnu",
+    "exit_code": 0,
+    "host_binary_sha256": "4808e137f7d4f54a5553c66ff9972d2d878d4ff278aa05f4f19aa90cfb848c83"
+  },
+  "local_package": {
+    "source_checkout": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "binary_source": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+    "production_sources_identical": true,
+    "command": "python scripts/package-release.py x86_64-unknown-linux-gnu",
+    "exit_code": 0,
+    "checks": [
+      "actual staged Host --help succeeds on stderr with no protocol stdout",
+      "exact 19-file archive payload",
+      "exact Host executable digest",
+      "Unix mode 0755 on the sole executable",
+      "documentation links target the actual published source commit"
+    ],
+    "archive": "minicore-host-0.10.1-x86_64-unknown-linux-gnu.tar.gz",
+    "archive_files": 19,
+    "host_binary_sha256": "4808e137f7d4f54a5553c66ff9972d2d878d4ff278aa05f4f19aa90cfb848c83",
+    "archive_sha256": "3397be34e4829c168f9155b635f6165a582b45d6ff13c51332b3bc986d78e514",
+    "log_sha256": "590a14088c916d983436685de76679bab7e29fcfb085704ea8e526399a230195"
+  },
+  "performance": {
+    "report": "performance/README.md",
+    "comparison": "performance/comparison.json",
+    "initial_rounds": 3,
+    "confirmatory_rounds": 4,
+    "production_source": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+    "final_test_only_difference": [
+      "crates/host-transport/tests/diagnostic_compaction.rs"
+    ],
+    "all_workload_equivalence_checks_passed": true,
+    "limitations": [
+      "quiet project windows, not proven machine isolation",
+      "loopback model fixture, not a live provider or TUI",
+      "all initial and confirmatory samples retained; no discarded warmup samples",
+      "confirmation shows a compaction slowdown signal; general speedup and no-regression are not established",
+      "no CPU instruction profiling; source review cannot assign a causal timing contribution"
+    ]
+  },
+  "native_ci": {
+    "run_id": 43242142126,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126",
+    "head_sha": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "record": "ci-source.json",
+    "status": "completed",
+    "platform_cases": {
+      "linux_x64": 1110,
+      "macos_arm64": 1103,
+      "macos_x64": 1103,
+      "windows_x64": 1091
+    },
+    "targets_per_platform": 138,
+    "doctests_per_platform": 6,
+    "windows_standard_user_checks": 5,
+    "conclusion": "success",
+    "attempt": 1,
+    "successful_jobs": 9,
+    "completed_at": "2026-11-12T15:22:13Z",
+    "independently_verified_packages": 4
+  },
+  "review": {
+    "requested_workers": 3,
+    "requested_model": "gpt-6-astra",
+    "requested_reasoning": "max",
+    "effective_configuration_independently_attested": false,
+    "scopes": [
+      "SPEC and ownership",
+      "Runtime model/tool primitives",
+      "Session Turn driver",
+      "provider/compaction integration",
+      "native process cleanup assertions",
+      "actual deadline handling",
+      "source comparison for compaction performance signal"
+    ],
+    "remaining_blocking_source_findings": []
+  },
+  "limits": [
+    "No live external-provider validation",
+    "TUI repository unchanged; no actual TUI acceptance claim",
+    "No power-loss test or general capacity/saturation benchmark",
+    "Remote tag publication requires authenticated Git push; the available connector exposes branch updates only and terminal Git had no push authentication when this record was written."
+  ]
+}

@@ -1,6 +1,6 @@
 # MiniCore Host
 
-## In progress: integrated execution layer (0.10.1)
+## Current checkpoint: integrated execution layer (0.10.1)
 
 [Task 106](tasks/106-host-runtime/TASK.md) implements the owner's approved
 SPEC 4.10.1 design: Runtime becomes an internal Host workspace package,
@@ -9,12 +9,41 @@ requests share the same execution implementation. The source checkpoints are
 Host `685806af4761eaaa75bae11cd70e5d7a7a0177b0` and its actual Runtime dependency
 `3aa47629929906832dcb309afb7d242c1ae3e53f`.
 
-The owner authorized publishing Host 0.10.1 and tag `v0.10.1` after verification.
-Implementation, validation and publication are in progress; the historical
-checks below do not validate this new work. Task 106 records the current scope,
-disjoint implementation ownership and exact verification/publication evidence.
+The implementation is published on dev as
+[`1e198a8`](https://github.com/zqcli/minicore-host/commit/1e198a8af2643c64ac4497ac006834adfe65f50d),
+with the exact tree of the locally verified source `6b2f217`. All 13 workspace
+packages use 0.10.1. The local full gate passes **1,110 unique Rust cases,
+6 doctests and 28 Python checks**, formatting, strict Clippy/rustdoc and whitespace.
+The Linux release package contains one executable and passes smoke/readback checks.
+All 225 external locked package versions, sources and checksums are unchanged.
 
-## Current checkpoint: native multi-platform CI (0.9.20)
+[Native CI run 43242142126](https://github.com/zqcli/minicore-host/actions/runs/43242142126)
+passed all nine jobs on its first attempt: quality, native tests on Linux x64,
+macOS ARM64/x64 and Windows x64, and all four native packages. Each package was
+downloaded and independently checked against its archive and executable hashes;
+each contains exactly 19 files and one Host executable. The
+[CI record](tasks/106-host-runtime/ci-source.json) retains the exact evidence.
+The remote still has only dev;
+publication used a leased fast-forward and preserved its prior history.
+The requested `v0.10.1` tag awaits an authenticated Git push: the available
+connector can update branches but cannot create tags, and terminal Git has no
+push authentication. This verification record does not attest a remote tag.
+
+[Performance evidence](tasks/106-host-runtime/performance/README.md) retains
+the initial three paired rounds and a balanced four-round confirmation. The
+confirmation's ordinary-request medians are shorter, while compaction medians
+increase by about 0.29 ms and 1.38 ms for its 256/1,024-group fixtures. Both sets,
+including their opposite results and order effects, remain available. Source
+review found no new history-size traversal or deep copy in the inspected paths,
+but did not establish a cause for that slowdown signal. This checkpoint does not
+claim general acceleration or proven absence of regressions.
+
+[Task 106](tasks/106-host-runtime/TASK.md),
+[validation](tasks/106-host-runtime/validation.json) and
+[publication mapping](tasks/106-host-runtime/publication.json) record the exact
+source identities, commands, outcomes, limitations and remaining tag step.
+
+## Previous checkpoint: native multi-platform CI (0.9.20)
 
 [Task 105](tasks/105-multiplatform-ci/TASK.md) completes native Linux x64, macOS
 ARM64, macOS x64 and Windows x64 CI and gated release packaging against dev
@@ -155,7 +184,7 @@ representation and measured performance changes are separate work.
 ## Implemented scope and closed findings
 
 - Strict protocol/Fault/receipt contracts, direct identities, real persistent/memory storage, OS ownership locks, full-history validation and original-save confirmation.
-- Host/Agent/Session lifecycle, defaults, immutable Turn configuration, controls, deletion, graceful/force shutdown, ownership and reclamation; real Runtime dual queues and same-Turn continuation, authoritative complete/partial history, independent save/cleanup failures.
+- Host/Agent/Session lifecycle, defaults, immutable Turn configuration, controls, deletion, graceful/force shutdown, ownership and reclamation; Session-owned input queues and complete Turn execution, internal Runtime model/tool calls, authoritative complete/partial history, independent save/cleanup failures.
 - Production HTTP/SSE resources; builtin agent/read/edit/write/bash, frozen Ask/Auto/ReadOnly approvals, real process supervision and file/edit ownership, manual/automatic compaction and independent delegation/notification scopes.
 - All 52 catalogue routes have real shared typed/stdio/WSS implementations, including authentication/operator rights, reload, observations/UTF-8 catch-up and actual retained or saved result reads. Auxiliary discovery/workspace queries deliberately retain their basic specified scope, not a generic platform.
 - Complete reconstructed business diagnostic scope is fixed in [Task053](tasks/053-business-diagnostics/TASK.md). Runtime actual retry waits, first force claims, rejected resource/message attempts and true failure/save-recovery scheduling are source-derived facts, not observer reconstruction or acknowledgements.
@@ -183,9 +212,9 @@ not measurements of this simplification or evidence of a performance increase.
 
 ## Dependencies and six-stage boundary
 
-- Complete SPEC v4.93 is unchanged, SHA-256 `f044519fd361c9842f41696d6309d56c04598f5d481c66e94737079ba9491bd3`.
-- All Runtime edges/lock pin published 0.10.0 `3aa47629929906832dcb309afb7d242c1ae3e53f` on `feat/host-history-handoff`. [Publication evidence](docs/runtime-retry-wait-publication.json) and exact-head CI42746444546 passed; producer and independent Runtime gates pass 324 cases and 2 doctests. There is no local override/bootstrap/vendor path. Actual elapsed retry waits appear in joined reports and Host diagnostics in integer milliseconds, with no added client event field or retry-policy change.
-- Runtime upstream dev 3fd5ecda, reference Agent f36a87366d8e2fe0a1c8216463887902e471c739 and TUI 3beeb1d8a525e58ce6352e05061f242c5580e248 remain unchanged. Agent is reference, not baseline; Agent/TUI still pin old Runtime b276d9c. No joint TUI integration is claimed.
+- The current complete design baseline is SPEC v4.10.1, SHA-256 `b1426061eb63478f392e8f5638792df1c7d8a1bad08d80c80f3203288816182b`.
+- Runtime is the internal `minicore-host-runtime` 0.10.1 package at `crates/host-runtime`, referenced through a workspace path dependency. Its imported source was external Runtime 0.10.0 `3aa47629929906832dcb309afb7d242c1ae3e53f`; Host no longer builds against that Git dependency. The standalone loop/report lifecycle is removed. The shared model driver returns authoritative output and actual retry waits, while Session owns the Turn and history. The prior external-source [publication evidence](docs/runtime-retry-wait-publication.json) remains historical evidence.
+- The original Runtime repository, reference Agent baseline `f36a87366d8e2fe0a1c8216463887902e471c739`, and TUI baseline `3beeb1d8a525e58ce6352e05061f242c5580e248` are outside this change. Agent remains a code reference. No joint TUI integration is claimed.
 
 | Stage | Actual boundary | Remaining |
 | --- | --- | --- |
@@ -196,7 +225,7 @@ not measurements of this simplification or evidence of a performance increase.
 | 5. Actual TUI | Intentionally unchanged this round | Explicitly deferred, not passed |
 | 6. Convergence | Scoped reviews, complete fixed gates, real performance evidence and incremental dev backups | External final acceptance and main decision; not automatically authorized by green CI |
 
-Local-use limits remain explicit: uncontrolled destruction is not normal stopped shutdown; unpublished-create save failure has no new recovery endpoint; workspace Git checks assume stable local configuration/attributes. Task 105 verifies the four declared native runners; filesystem and local-tool requirements remain documented in [the CI guide](docs/ci.md). No speculative defensive platform was added.
+Local-use limits remain explicit: uncontrolled destruction is not normal stopped shutdown; unpublished-create save failure has no new recovery endpoint; workspace Git checks assume stable local configuration/attributes. Task 106 verifies this source on the four native runners established by Task 105; filesystem and local-tool requirements remain documented in [the CI guide](docs/ci.md). No speculative defensive platform was added.
 
 ## Historical review index
 

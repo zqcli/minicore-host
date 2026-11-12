@@ -1,0 +1,337 @@
+{
+  "schema_version": 1,
+  "task": "106-host-runtime",
+  "recorded_at": "2026-11-12T15:23:43Z",
+  "repository": "https://github.com/zqcli/minicore-host",
+  "source": {
+    "verified_commit": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "verified_tree": "63328a524b8a2d73bfbac7c044efada130367c21",
+    "source_identical_local_commit": "6b2f217886e3952aafa1c4b297476101940a68c1",
+    "host_version": "0.10.1",
+    "runtime": {
+      "package": "minicore-host-runtime",
+      "version": "0.10.1",
+      "path": "crates/host-runtime",
+      "integration": "Internal workspace library compiled into the single Host executable",
+      "imported_revision": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+      "imported_version": "0.10.0"
+    },
+    "spec": {
+      "version": "4.10.1",
+      "sha256": "b1426061eb63478f392e8f5638792df1c7d8a1bad08d80c80f3203288816182b"
+    },
+    "cargo_lock_sha256": "37f022017139aa6b008b6e6e901bf7ba48c9eca09816946d713a9c2484115837",
+    "workflow_sha256": "403f7e32a712d04dd495dde81b1bae49a278bcc58a685c59329c8c70d488b2fa"
+  },
+  "workflow": {
+    "run_id": 43242142126,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126",
+    "event": "push",
+    "head_branch": "dev",
+    "head_sha": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-11-12T14:54:52Z",
+    "completed_at": "2026-11-12T15:22:13Z",
+    "successful_jobs": 9,
+    "toolchain": "1.90.0"
+  },
+  "quality": {
+    "job_id": 131265124649,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265124649",
+    "command": "./scripts/check.sh",
+    "conclusion": "success",
+    "python_checks": 28,
+    "checks": [
+      "committed and working-tree whitespace",
+      "28 Python regression checks",
+      "rustfmt",
+      "strict workspace/all-targets Clippy",
+      "workspace/all-targets tests",
+      "six doctests",
+      "strict rustdoc"
+    ]
+  },
+  "native_commands": [
+    "cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings",
+    "cargo test --workspace --all-targets --locked --no-fail-fast",
+    "cargo test --workspace --doc --locked",
+    "cargo test --workspace --all-targets --locked -- --list"
+  ],
+  "counting": {
+    "identity": "target executable path plus case name from each native --list",
+    "method": "Pair sequential Cargo target-header order with stdout case groups terminated by each target summary; validate every group count and deduplicate the target/case pairs. This tolerates stdout/stderr buffering without assigning cases to the most recently displayed stderr header.",
+    "targets_per_platform": 138,
+    "exclude": [
+      "nested subprocess probe output",
+      "standard-user re-executions"
+    ],
+    "aggregate_across_platforms": false,
+    "case_digest_format": "SHA-256 of sorted target-path TAB case-name LF records; Windows path separators normalized to forward slashes"
+  },
+  "platforms": [
+    {
+      "name": "Linux x64",
+      "runner": "ubuntu-24.04",
+      "target": "x86_64-unknown-linux-gnu",
+      "native_job": 131265125460,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125460",
+      "package_job": 131274176863,
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176863",
+      "cases": 1110,
+      "test_targets": 138,
+      "doctests": 6,
+      "sorted_target_case_utf8_sha256": "2dacc2d4c585a40b2148b9d1052550f60f958e17f313b36015a9db307ab4d9df",
+      "package": {
+        "filename": "minicore-host-0.10.1-x86_64-unknown-linux-gnu.tar.gz",
+        "archive_files": 19,
+        "archive_bytes": 7790122,
+        "archive_sha256": "508cc6089442e5aa417c0233ba7e7e7954a9ed4e3f893250019c54cf18937eb0",
+        "host_path": "minicore-host-0.10.1-x86_64-unknown-linux-gnu/bin/minicore-host",
+        "host_bytes": 22380464,
+        "host_sha256": "c85ea22bd58c0ad40ac061e94425d1d5b39dc70bd7759da001642e5949250288",
+        "artifact_id": 13955099481,
+        "artifact_name": "minicore-host-0.10.1-x86_64-unknown-linux-gnu",
+        "artifact_outer_zip_sha256": "dac6a794aae4e7ab1743c454064070d34f5a94a554aa27050897d95794a2e7f7",
+        "artifact_outer_zip_bytes": 7790340,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/artifacts/13955099481",
+        "created_at": "2026-11-12T15:12:11Z",
+        "expires_at": "2027-02-10T14:54:52Z",
+        "downloaded_archive_independently_verified": true
+      }
+    },
+    {
+      "name": "macOS ARM64",
+      "runner": "macos-15",
+      "target": "aarch64-apple-darwin",
+      "native_job": 131265125541,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125541",
+      "package_job": 131274176462,
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176462",
+      "cases": 1103,
+      "test_targets": 138,
+      "doctests": 6,
+      "sorted_target_case_utf8_sha256": "164cc7f631d77de3020389b5e2092b2001d9f1c5daf421185d2c534d6eabf207",
+      "package": {
+        "filename": "minicore-host-0.10.1-aarch64-apple-darwin.tar.gz",
+        "archive_files": 19,
+        "archive_bytes": 7215545,
+        "archive_sha256": "a9e1ebc1a52544b0716bcbb024ec8a129f48368373e03bafab39e9bde43ceab9",
+        "host_path": "minicore-host-0.10.1-aarch64-apple-darwin/bin/minicore-host",
+        "host_bytes": 18771312,
+        "host_sha256": "c55409cf1fd9c907d1ed8e61afa03527ea9d85e8243346534106c216ffb6a182",
+        "artifact_id": 13957142387,
+        "artifact_name": "minicore-host-0.10.1-aarch64-apple-darwin",
+        "artifact_outer_zip_sha256": "30e03a3bf6146c14137072e949e7c2f6a3f1745d6505fc98185332a0ba7f6cef",
+        "artifact_outer_zip_bytes": 7215755,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/artifacts/13957142387",
+        "created_at": "2026-11-12T15:22:10Z",
+        "expires_at": "2027-02-10T14:54:52Z",
+        "downloaded_archive_independently_verified": true
+      }
+    },
+    {
+      "name": "macOS x64",
+      "runner": "macos-15-intel",
+      "target": "x86_64-apple-darwin",
+      "native_job": 131265125032,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125032",
+      "package_job": 131274176466,
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176466",
+      "cases": 1103,
+      "test_targets": 138,
+      "doctests": 6,
+      "sorted_target_case_utf8_sha256": "8aa77166e80533318f0b505715a091e26d2671f648db1be437f9cc8b701bd212",
+      "package": {
+        "filename": "minicore-host-0.10.1-x86_64-apple-darwin.tar.gz",
+        "archive_files": 19,
+        "archive_bytes": 7523558,
+        "archive_sha256": "e112083c5bd6c6ce56885e2a6dac3198b98a1eec30a2079fb58df75ee3f8d358",
+        "host_path": "minicore-host-0.10.1-x86_64-apple-darwin/bin/minicore-host",
+        "host_bytes": 19427096,
+        "host_sha256": "6572b4c2bc273e378b00ace5a61316d17d4ce74868de9a397a7ee9fef8c19b94",
+        "artifact_id": 13957795030,
+        "artifact_name": "minicore-host-0.10.1-x86_64-apple-darwin",
+        "artifact_outer_zip_sha256": "05ca0991e6b68c811baa67713bffcb4f7c76fb0cdb1b2e1bacc883f64854a2b6",
+        "artifact_outer_zip_bytes": 7523766,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/artifacts/13957795030",
+        "created_at": "2026-11-12T15:17:32Z",
+        "expires_at": "2027-02-10T14:54:52Z",
+        "downloaded_archive_independently_verified": true
+      }
+    },
+    {
+      "name": "Windows x64",
+      "runner": "windows-2025",
+      "target": "x86_64-pc-windows-msvc",
+      "native_job": 131265125157,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125157",
+      "package_job": 131274176453,
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176453",
+      "cases": 1091,
+      "test_targets": 138,
+      "doctests": 6,
+      "sorted_target_case_utf8_sha256": "bc7fff3887bae7eb781ba651c167cd4008cfa8fa2916d813eeae4987c96c6c54",
+      "package": {
+        "filename": "minicore-host-0.10.1-x86_64-pc-windows-msvc.zip",
+        "archive_files": 19,
+        "archive_bytes": 6929291,
+        "archive_sha256": "29a475c956ee68aa1347664b9f9d91b759bf66a93ba5ce6ad1b0cf67dfe4c63f",
+        "host_path": "minicore-host-0.10.1-x86_64-pc-windows-msvc/bin/minicore-host.exe",
+        "host_bytes": 18700800,
+        "host_sha256": "6cbb6b34431de7bf6947990bfa60b17ae92fbb8b44f8ce495a8b7956760826b9",
+        "artifact_id": 13957205345,
+        "artifact_name": "minicore-host-0.10.1-x86_64-pc-windows-msvc",
+        "artifact_outer_zip_sha256": "eac96f083df6d5845fc31a65dfdb0c8a01856f803f2b279429bce238f551e1d5",
+        "artifact_outer_zip_bytes": 6929499,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/artifacts/13957205345",
+        "created_at": "2026-11-12T15:12:45Z",
+        "expires_at": "2027-02-10T14:54:52Z",
+        "downloaded_archive_independently_verified": true
+      }
+    }
+  ],
+  "windows_standard_user": {
+    "job_id": 131265125157,
+    "command": ".\\scripts\\windows-user-tests.ps1",
+    "is_administrator": false,
+    "profile_loaded": true,
+    "executable_write_access": "denied",
+    "passed_existing_cases": 5,
+    "additional_unique_cases": 0,
+    "exit_code": 0,
+    "temporary_account_removed": true,
+    "cases": [
+      "stable_identity_discovery_and_atomic_object_roundtrip",
+      "writes_confirm_exact_boundaries_and_reopen_native_content",
+      "close_is_stable_and_explicit_delete_never_recurses",
+      "actual_identity_is_saved_new_incarnation_is_generated_and_root_is_exclusive",
+      "stdio_message_executes_production_http_adapter_and_persists_real_output"
+    ],
+    "case_exit_codes": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "packaging": {
+    "build_command": "cargo build --package minicore-host --release --locked --target \"$TARGET\"",
+    "package_command": "python scripts/package-release.py \"$TARGET\"",
+    "requires": [
+      "quality",
+      "complete native platform matrix"
+    ],
+    "smoke": "CI runs the actual copied native Host executable --help from its package stage; exit 0, empty stdout, usage on stderr",
+    "archive_verification": [
+      "exact staged file set without duplicate entries",
+      "one Host executable and no separate Runtime executable",
+      "archived Host SHA-256 equals the smoke-tested release binary",
+      "Unix Host mode 0755 and no other executable files or links"
+    ],
+    "independent_download_verification": "All four GitHub artifact ZIPs were downloaded. Their byte counts and SHA-256 digests match GitHub metadata; each contains exactly one distribution archive. Each inner archive SHA-256, regular-file count, sole Host executable and Host SHA-256 were checked against the successful CI packaging logs.",
+    "artifact_digest_note": "GitHub's outer artifact ZIP digest is distinct from the contained distribution archive SHA-256."
+  },
+  "evidence": [
+    {
+      "job_id": 131265124649,
+      "name": "Quality gate (Linux, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265124649",
+      "conclusion": "success",
+      "started_at": "2026-11-12T14:54:56Z",
+      "completed_at": "2026-11-12T14:58:59Z",
+      "decoded_log_utf8_bytes": 247644,
+      "decoded_log_utf8_sha256": "30372bd3b7fe70ec219a6ee397c7baa7550b4caa180a4cc396c698b2331255cc"
+    },
+    {
+      "job_id": 131265125032,
+      "name": "Clippy and tests (macos-15-intel, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125032",
+      "conclusion": "success",
+      "started_at": "2026-11-12T14:54:57Z",
+      "completed_at": "2026-11-12T15:09:22Z",
+      "decoded_log_utf8_bytes": 391627,
+      "decoded_log_utf8_sha256": "fd55a938ff247f0f599d4c3590637cdfd3e3d366feffdc93d4b0722ba4f36307"
+    },
+    {
+      "job_id": 131265125157,
+      "name": "Clippy and tests (windows-2025, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125157",
+      "conclusion": "success",
+      "started_at": "2026-11-12T14:55:00Z",
+      "completed_at": "2026-11-12T15:04:46Z",
+      "decoded_log_utf8_bytes": 403909,
+      "decoded_log_utf8_sha256": "5a6e0dc7460c4d3ac031dca21f36cb95dcb8bca7cb4b5e56de52a120c5f28ae4"
+    },
+    {
+      "job_id": 131265125460,
+      "name": "Clippy and tests (ubuntu-24.04, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125460",
+      "conclusion": "success",
+      "started_at": "2026-11-12T14:54:55Z",
+      "completed_at": "2026-11-12T14:58:56Z",
+      "decoded_log_utf8_bytes": 392743,
+      "decoded_log_utf8_sha256": "ba5266c3df2722a64d4a028f55f9ac51e6ef40212980a533dc127379b72e805f"
+    },
+    {
+      "job_id": 131265125541,
+      "name": "Clippy and tests (macos-15, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131265125541",
+      "conclusion": "success",
+      "started_at": "2026-11-12T14:54:57Z",
+      "completed_at": "2026-11-12T15:02:21Z",
+      "decoded_log_utf8_bytes": 391818,
+      "decoded_log_utf8_sha256": "e8387321f79b4454b5914f5fc60fb12472ac6ebd2c10563b366214178d42d3c5"
+    },
+    {
+      "job_id": 131274176453,
+      "name": "Package (x86_64-pc-windows-msvc)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176453",
+      "conclusion": "success",
+      "started_at": "2026-11-12T15:09:31Z",
+      "completed_at": "2026-11-12T15:12:49Z",
+      "decoded_log_utf8_bytes": 49733,
+      "decoded_log_utf8_sha256": "2888aa0c40a330443e58e4ee13b6cf9a3574878a8939f649e19dc7419f93266d"
+    },
+    {
+      "job_id": 131274176462,
+      "name": "Package (aarch64-apple-darwin)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176462",
+      "conclusion": "success",
+      "started_at": "2026-11-12T15:19:28Z",
+      "completed_at": "2026-11-12T15:22:13Z",
+      "decoded_log_utf8_bytes": 47029,
+      "decoded_log_utf8_sha256": "e5bfec324f065d6fe9bcbaa11ae7a9118352846f8c195fb1788a2658f7aa0fb5"
+    },
+    {
+      "job_id": 131274176466,
+      "name": "Package (x86_64-apple-darwin)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176466",
+      "conclusion": "success",
+      "started_at": "2026-11-12T15:09:32Z",
+      "completed_at": "2026-11-12T15:17:36Z",
+      "decoded_log_utf8_bytes": 46819,
+      "decoded_log_utf8_sha256": "54abbaed4b9f4f7af49914db82ba58217e3628c93a5d2ab3dffbc82c2216a595"
+    },
+    {
+      "job_id": 131274176863,
+      "name": "Package (x86_64-unknown-linux-gnu)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43242142126/job/131274176863",
+      "conclusion": "success",
+      "started_at": "2026-11-12T15:09:25Z",
+      "completed_at": "2026-11-12T15:12:13Z",
+      "decoded_log_utf8_bytes": 46300,
+      "decoded_log_utf8_sha256": "2a80854be3fd1115fd19565ce809939bfca711db1a5dbe0eb233d9b23ffdce6e"
+    }
+  ],
+  "limits": [
+    "Only the four declared native runner configurations are validated.",
+    "The downloaded binaries were inspected locally; their execution smoke tests ran on the respective native CI runners.",
+    "CI uses actual Host execution with loopback model fixtures; live external-provider and actual TUI acceptance are not claimed.",
+    "Filesystem contract checks are not power-loss testing; Windows durable storage retains its local NTFS and documented namespace-permission requirements.",
+    "No raw logs, temporary account identities, signed download URLs, or binary artifacts are committed in this record.",
+    "This record describes the exact source CI run above and does not claim a later documentation or tag workflow has completed."
+  ]
+}

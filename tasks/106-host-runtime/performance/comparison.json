@@ -1,0 +1,917 @@
+{
+  "datasets": [
+    {
+      "name": "initial_3_rounds",
+      "directory": "paired-1009c71",
+      "rounds": 3,
+      "utc": "2026-11-12T14:47:58Z",
+      "files_sha256": {
+        "method.json": "f05739984f8bd67db6253663b5d9a000a75fddc3e0e2411149090428d20966fc",
+        "samples.jsonl": "1cfcae849cf03aa85d98e152d46ffa083d2f7279a9b79f709af19a90b78f3b39",
+        "summary.json": "8e4cbe3dbaade3beb74293cc0fcff7b266f054802a5c6c67904f3e6134003edd"
+      }
+    },
+    {
+      "name": "confirmatory_4_balanced_rounds",
+      "directory": "confirmatory-1009c71",
+      "rounds": 4,
+      "utc": "2026-11-12T14:50:29Z",
+      "files_sha256": {
+        "method.json": "368df8629034c083136d01cbc87c37809e02b25d0d90fdd21dc3b4addda07b83",
+        "samples.jsonl": "419ba8873157d80e8f53571ebd489ca4cc252e3a8912943ed8c56b6bb94b09ec",
+        "summary.json": "2ecf5ba2a4a4a85af5e001886c35abeaaa5616f6415c7f630a51be907245bec3"
+      }
+    }
+  ],
+  "same_sources_binaries_runner_helper_and_probe_verified": true,
+  "definitions": {
+    "duration": "Host: response write to next request body arrival; compaction: total_ns. All raw samples are retained.",
+    "ratio": "candidate pooled median / baseline pooled median; below 1 means a shorter measured duration.",
+    "order": "AB is baseline then candidate; BA is candidate then baseline. Round numbering resets within each dataset.",
+    "combined_limit": "All seven rounds include 4 AB and 3 BA pairs; the four-round confirmatory dataset is exactly balanced. Combined values do not erase the initial order effect.",
+    "components": "Prepare/generate component medians are independent; their sum need not equal the median total. Generate includes request construction and summary projection, not only ModelDriver."
+  },
+  "cases": [
+    {
+      "case": "steer",
+      "historical_groups": null,
+      "series": [
+        {
+          "dataset": "initial_3_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 45,
+                "median_ns": 1171360,
+                "min_ns": 870224,
+                "max_ns": 3665402
+              },
+              "candidate": {
+                "samples": 45,
+                "median_ns": 1201721,
+                "min_ns": 676745,
+                "max_ns": 12094050
+              }
+            },
+            "candidate_to_baseline_median_ratio": 1.0259194440650183
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 30,
+                  "median_ns": 1235120.0,
+                  "min_ns": 998237,
+                  "max_ns": 3665402
+                },
+                "candidate": {
+                  "samples": 30,
+                  "median_ns": 1123730.0,
+                  "min_ns": 676745,
+                  "max_ns": 12094050
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.9098144309864629
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 15,
+                  "median_ns": 1009480,
+                  "min_ns": 870224,
+                  "max_ns": 1346524
+                },
+                "candidate": {
+                  "samples": 15,
+                  "median_ns": 1241043,
+                  "min_ns": 966258,
+                  "max_ns": 1384238
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.2293883979870825
+            }
+          }
+        },
+        {
+          "dataset": "confirmatory_4_balanced_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 60,
+                "median_ns": 1146319.5,
+                "min_ns": 850902,
+                "max_ns": 18763514
+              },
+              "candidate": {
+                "samples": 60,
+                "median_ns": 982459.0,
+                "min_ns": 705450,
+                "max_ns": 1733826
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.8570551229391108
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 30,
+                  "median_ns": 1256509.5,
+                  "min_ns": 921981,
+                  "max_ns": 18763514
+                },
+                "candidate": {
+                  "samples": 30,
+                  "median_ns": 871858.0,
+                  "min_ns": 705450,
+                  "max_ns": 1733826
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.6938729870327284
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 30,
+                  "median_ns": 1063426.5,
+                  "min_ns": 850902,
+                  "max_ns": 3857907
+                },
+                "candidate": {
+                  "samples": 30,
+                  "median_ns": 1055024.0,
+                  "min_ns": 854520,
+                  "max_ns": 1699213
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.9920986546790023
+            }
+          }
+        },
+        {
+          "dataset": "all_7_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 105,
+                "median_ns": 1155908,
+                "min_ns": 850902,
+                "max_ns": 18763514
+              },
+              "candidate": {
+                "samples": 105,
+                "median_ns": 1027984,
+                "min_ns": 676745,
+                "max_ns": 12094050
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.8893302927222582
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 60,
+                  "median_ns": 1256509.5,
+                  "min_ns": 921981,
+                  "max_ns": 18763514
+                },
+                "candidate": {
+                  "samples": 60,
+                  "median_ns": 913910.0,
+                  "min_ns": 676745,
+                  "max_ns": 12094050
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.7273403026399721
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 45,
+                  "median_ns": 1054038,
+                  "min_ns": 850902,
+                  "max_ns": 3857907
+                },
+                "candidate": {
+                  "samples": 45,
+                  "median_ns": 1150656,
+                  "min_ns": 854520,
+                  "max_ns": 1699213
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.0916646268920096
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "large_history_steer",
+      "historical_groups": null,
+      "series": [
+        {
+          "dataset": "initial_3_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 21,
+                "median_ns": 3128039,
+                "min_ns": 2434263,
+                "max_ns": 58057410
+              },
+              "candidate": {
+                "samples": 21,
+                "median_ns": 3036663,
+                "min_ns": 2398371,
+                "max_ns": 6260062
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.9707880880001816
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 14,
+                  "median_ns": 3257862.0,
+                  "min_ns": 2434263,
+                  "max_ns": 58057410
+                },
+                "candidate": {
+                  "samples": 14,
+                  "median_ns": 3194892.5,
+                  "min_ns": 2496432,
+                  "max_ns": 6260062
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.9806715262954662
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 7,
+                  "median_ns": 2937721,
+                  "min_ns": 2476532,
+                  "max_ns": 9075030
+                },
+                "candidate": {
+                  "samples": 7,
+                  "median_ns": 3009534,
+                  "min_ns": 2398371,
+                  "max_ns": 3885798
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.02444513961673
+            }
+          }
+        },
+        {
+          "dataset": "confirmatory_4_balanced_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 28,
+                "median_ns": 2952145.0,
+                "min_ns": 2369669,
+                "max_ns": 4271899
+              },
+              "candidate": {
+                "samples": 28,
+                "median_ns": 2435708.5,
+                "min_ns": 2061904,
+                "max_ns": 4073074
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.8250639789034753
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 14,
+                  "median_ns": 2896653.5,
+                  "min_ns": 2369669,
+                  "max_ns": 3845402
+                },
+                "candidate": {
+                  "samples": 14,
+                  "median_ns": 2852301.5,
+                  "min_ns": 2229009,
+                  "max_ns": 4073074
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.9846885379973821
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 14,
+                  "median_ns": 3000156.0,
+                  "min_ns": 2511908,
+                  "max_ns": 4271899
+                },
+                "candidate": {
+                  "samples": 14,
+                  "median_ns": 2356745.5,
+                  "min_ns": 2061904,
+                  "max_ns": 3618297
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.7855409852021028
+            }
+          }
+        },
+        {
+          "dataset": "all_7_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 49,
+                "median_ns": 3019714,
+                "min_ns": 2369669,
+                "max_ns": 58057410
+              },
+              "candidate": {
+                "samples": 49,
+                "median_ns": 2809591,
+                "min_ns": 2061904,
+                "max_ns": 6260062
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.9304162579635025
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 28,
+                  "median_ns": 3049878.0,
+                  "min_ns": 2369669,
+                  "max_ns": 58057410
+                },
+                "candidate": {
+                  "samples": 28,
+                  "median_ns": 3110104.5,
+                  "min_ns": 2229009,
+                  "max_ns": 6260062
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.019747183329956
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 21,
+                  "median_ns": 2980598,
+                  "min_ns": 2476532,
+                  "max_ns": 9075030
+                },
+                "candidate": {
+                  "samples": 21,
+                  "median_ns": 2461407,
+                  "min_ns": 2061904,
+                  "max_ns": 3885798
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.8258097871635155
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "compaction",
+      "historical_groups": 256,
+      "series": [
+        {
+          "dataset": "initial_3_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 9,
+                "median_ns": 6488557,
+                "min_ns": 4096221,
+                "max_ns": 13871784,
+                "component_median_ns": {
+                  "prepare_ns": 274579,
+                  "generate_ns": 6216810
+                }
+              },
+              "candidate": {
+                "samples": 9,
+                "median_ns": 7077301,
+                "min_ns": 4155614,
+                "max_ns": 15884284,
+                "component_median_ns": {
+                  "prepare_ns": 298842,
+                  "generate_ns": 6205921
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 1.0907357367747559
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 5944507.0,
+                  "min_ns": 4096221,
+                  "max_ns": 8052032,
+                  "component_median_ns": {
+                    "prepare_ns": 273163.0,
+                    "generate_ns": 5661505.5
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 7481355.5,
+                  "min_ns": 4484313,
+                  "max_ns": 15884284,
+                  "component_median_ns": {
+                    "prepare_ns": 324441.0,
+                    "generate_ns": 6509070.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.258532541050082
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 3,
+                  "median_ns": 10352209,
+                  "min_ns": 4413882,
+                  "max_ns": 13871784,
+                  "component_median_ns": {
+                    "prepare_ns": 353873,
+                    "generate_ns": 9998336
+                  }
+                },
+                "candidate": {
+                  "samples": 3,
+                  "median_ns": 4997711,
+                  "min_ns": 4155614,
+                  "max_ns": 13233362,
+                  "component_median_ns": {
+                    "prepare_ns": 294735,
+                    "generate_ns": 4590636
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.4827675909557081
+            }
+          }
+        },
+        {
+          "dataset": "confirmatory_4_balanced_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 12,
+                "median_ns": 4884707.0,
+                "min_ns": 4017510,
+                "max_ns": 12527174,
+                "component_median_ns": {
+                  "prepare_ns": 255689.0,
+                  "generate_ns": 4516378.0
+                }
+              },
+              "candidate": {
+                "samples": 12,
+                "median_ns": 5175038.5,
+                "min_ns": 4227672,
+                "max_ns": 7264510,
+                "component_median_ns": {
+                  "prepare_ns": 263592.0,
+                  "generate_ns": 4871743.0
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 1.0594368300903207
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 4722650.0,
+                  "min_ns": 4017510,
+                  "max_ns": 6279335,
+                  "component_median_ns": {
+                    "prepare_ns": 252295.5,
+                    "generate_ns": 4338860.5
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 5141279.5,
+                  "min_ns": 4394349,
+                  "max_ns": 6782175,
+                  "component_median_ns": {
+                    "prepare_ns": 269536.5,
+                    "generate_ns": 4871743.0
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.0886429229352164
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 5467633.0,
+                  "min_ns": 4406798,
+                  "max_ns": 12527174,
+                  "component_median_ns": {
+                    "prepare_ns": 260235.0,
+                    "generate_ns": 5193764.0
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 5186345.0,
+                  "min_ns": 4227672,
+                  "max_ns": 7264510,
+                  "component_median_ns": {
+                    "prepare_ns": 262568.5,
+                    "generate_ns": 4885264.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.948553972075302
+            }
+          }
+        },
+        {
+          "dataset": "all_7_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 21,
+                "median_ns": 5347161,
+                "min_ns": 4017510,
+                "max_ns": 13871784,
+                "component_median_ns": {
+                  "prepare_ns": 267027,
+                  "generate_ns": 5106201
+                }
+              },
+              "candidate": {
+                "samples": 21,
+                "median_ns": 5299625,
+                "min_ns": 4155614,
+                "max_ns": 15884284,
+                "component_median_ns": {
+                  "prepare_ns": 280817,
+                  "generate_ns": 5018808
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.9911100488651828
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 12,
+                  "median_ns": 5201367.0,
+                  "min_ns": 4017510,
+                  "max_ns": 8052032,
+                  "component_median_ns": {
+                    "prepare_ns": 264841.0,
+                    "generate_ns": 4846071.5
+                  }
+                },
+                "candidate": {
+                  "samples": 12,
+                  "median_ns": 5633392.5,
+                  "min_ns": 4394349,
+                  "max_ns": 15884284,
+                  "component_median_ns": {
+                    "prepare_ns": 289829.5,
+                    "generate_ns": 5372626.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.0830599917290973
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 9,
+                  "median_ns": 6221425,
+                  "min_ns": 4406798,
+                  "max_ns": 13871784,
+                  "component_median_ns": {
+                    "prepare_ns": 267027,
+                    "generate_ns": 5940714
+                  }
+                },
+                "candidate": {
+                  "samples": 9,
+                  "median_ns": 5050452,
+                  "min_ns": 4155614,
+                  "max_ns": 13233362,
+                  "component_median_ns": {
+                    "prepare_ns": 268928,
+                    "generate_ns": 4704500
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.8117837955130859
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case": "compaction",
+      "historical_groups": 1024,
+      "series": [
+        {
+          "dataset": "initial_3_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 9,
+                "median_ns": 37731444,
+                "min_ns": 17000863,
+                "max_ns": 51708901,
+                "component_median_ns": {
+                  "prepare_ns": 1205165,
+                  "generate_ns": 36395048
+                }
+              },
+              "candidate": {
+                "samples": 9,
+                "median_ns": 19388271,
+                "min_ns": 17632690,
+                "max_ns": 65125601,
+                "component_median_ns": {
+                  "prepare_ns": 1022886,
+                  "generate_ns": 18188792
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.5138491651684468
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 38058136.5,
+                  "min_ns": 22973570,
+                  "max_ns": 51708901,
+                  "component_median_ns": {
+                    "prepare_ns": 1281215.0,
+                    "generate_ns": 36757398.0
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 19209577.0,
+                  "min_ns": 17632690,
+                  "max_ns": 42982626,
+                  "component_median_ns": {
+                    "prepare_ns": 988900.5,
+                    "generate_ns": 18078231.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.5047429739498674
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 3,
+                  "median_ns": 20462850,
+                  "min_ns": 17000863,
+                  "max_ns": 40669901,
+                  "component_median_ns": {
+                    "prepare_ns": 1025725,
+                    "generate_ns": 19437125
+                  }
+                },
+                "candidate": {
+                  "samples": 3,
+                  "median_ns": 20347518,
+                  "min_ns": 17715740,
+                  "max_ns": 65125601,
+                  "component_median_ns": {
+                    "prepare_ns": 1022886,
+                    "generate_ns": 19324632
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.9943638349496771
+            }
+          }
+        },
+        {
+          "dataset": "confirmatory_4_balanced_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 12,
+                "median_ns": 18976002.0,
+                "min_ns": 16477063,
+                "max_ns": 48993671,
+                "component_median_ns": {
+                  "prepare_ns": 987506.5,
+                  "generate_ns": 18027388.0
+                }
+              },
+              "candidate": {
+                "samples": 12,
+                "median_ns": 20357357.5,
+                "min_ns": 16788198,
+                "max_ns": 54987445,
+                "component_median_ns": {
+                  "prepare_ns": 1056785.5,
+                  "generate_ns": 19019225.0
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 1.0727948647981804
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 18976002.0,
+                  "min_ns": 18058637,
+                  "max_ns": 48993671,
+                  "component_median_ns": {
+                    "prepare_ns": 1020363.5,
+                    "generate_ns": 18027388.0
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 19649059.0,
+                  "min_ns": 16790590,
+                  "max_ns": 54987445,
+                  "component_median_ns": {
+                    "prepare_ns": 1056785.5,
+                    "generate_ns": 18210986.0
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.0354688516580046
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 6,
+                  "median_ns": 18704148.5,
+                  "min_ns": 16477063,
+                  "max_ns": 40327409,
+                  "component_median_ns": {
+                    "prepare_ns": 962122.0,
+                    "generate_ns": 17720522.5
+                  }
+                },
+                "candidate": {
+                  "samples": 6,
+                  "median_ns": 21254134.5,
+                  "min_ns": 16788198,
+                  "max_ns": 43752838,
+                  "component_median_ns": {
+                    "prepare_ns": 1077083.0,
+                    "generate_ns": 20206569.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.136332642996285
+            }
+          }
+        },
+        {
+          "dataset": "all_7_rounds",
+          "pooled": {
+            "variants": {
+              "baseline": {
+                "samples": 21,
+                "median_ns": 22973570,
+                "min_ns": 16477063,
+                "max_ns": 51708901,
+                "component_median_ns": {
+                  "prepare_ns": 1025725,
+                  "generate_ns": 21768405
+                }
+              },
+              "candidate": {
+                "samples": 21,
+                "median_ns": 19534948,
+                "min_ns": 16788198,
+                "max_ns": 65125601,
+                "component_median_ns": {
+                  "prepare_ns": 1022886,
+                  "generate_ns": 18634628
+                }
+              }
+            },
+            "candidate_to_baseline_median_ratio": 0.8503226969077945
+          },
+          "order_groups": {
+            "AB_baseline_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 12,
+                  "median_ns": 30049253.0,
+                  "min_ns": 18058637,
+                  "max_ns": 51708901,
+                  "component_median_ns": {
+                    "prepare_ns": 1077021.0,
+                    "generate_ns": 29073524.5
+                  }
+                },
+                "candidate": {
+                  "samples": 12,
+                  "median_ns": 19209577.0,
+                  "min_ns": 16790590,
+                  "max_ns": 54987445,
+                  "component_median_ns": {
+                    "prepare_ns": 1038291.0,
+                    "generate_ns": 18078231.5
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 0.6392697016461607
+            },
+            "BA_candidate_first": {
+              "variants": {
+                "baseline": {
+                  "samples": 9,
+                  "median_ns": 19138960,
+                  "min_ns": 16477063,
+                  "max_ns": 40669901,
+                  "component_median_ns": {
+                    "prepare_ns": 976253,
+                    "generate_ns": 18190969
+                  }
+                },
+                "candidate": {
+                  "samples": 9,
+                  "median_ns": 20347518,
+                  "min_ns": 16788198,
+                  "max_ns": 65125601,
+                  "component_median_ns": {
+                    "prepare_ns": 1022886,
+                    "generate_ns": 19324632
+                  }
+                }
+              },
+              "candidate_to_baseline_median_ratio": 1.063146482358498
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "interpretation": {
+    "cpu_profile_collected": false,
+    "all_measured_samples_retained": true,
+    "additional_timing_after_confirmation": false,
+    "compaction_confirmation_signal": "Pooled candidate medians are 5.9% longer at 256 groups and 7.3% longer at 1024 groups; each size is slower in 3 of 4 confirmation rounds. This is a measured regression signal, not an established causal cost of ModelDriver.",
+    "initial_order_effect": "The initial 1024-group apparent gain depends strongly on baseline-first order and changes direction in balanced confirmation; it is not an established improvement.",
+    "host_results": "Host confirmation pooled medians are shorter, but individual rounds and order strata vary; the complete initial and confirmation results must both be considered.",
+    "claim_limit": "These small scripted-fixture runs do not establish overall acceleration, absence of regressions or live-provider performance."
+  },
+  "read_only_source_review": {
+    "baseline_runtime_source": "3aa47629929906832dcb309afb7d242c1ae3e53f",
+    "candidate_host_source": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+    "compaction_import_only_files": [
+      "crates/host-compaction/src/plan.rs",
+      "crates/host-compaction/src/source.rs"
+    ],
+    "unchanged_history_sized_path": [
+      "group_data",
+      "utility_record_bytes",
+      "utility_request",
+      "CompactionPlan::project",
+      "estimate_request_tokens"
+    ],
+    "byte_identical_runtime_files": [
+      "src/value.rs",
+      "src/model/message.rs",
+      "src/model/request.rs",
+      "src/model/replay.rs",
+      "src/model/model_ref.rs"
+    ],
+    "actual_probe_features_and_versions_matched": [
+      "serde_json",
+      "serde",
+      "serde_core",
+      "tokio",
+      "futures-util"
+    ],
+    "new_driver_work_in_fixture": "One call per repetition, one fixed 47-byte text delta plus Finish/EOF. Descriptor/limits checks, child cancellation, panic containment, output assembly and cooperative yield are present; request.clone shares two Arcs and does not traverse messages.",
+    "result": "No newly introduced history-sized traversal or serialization was identified in the inspected paths. The timing difference remains unattributed. This source check is not a CPU profile and does not prove absence of a performance problem.",
+    "production_changes_for_benchmark": false
+  }
+}

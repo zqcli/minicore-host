@@ -1,0 +1,70 @@
+{
+  "repository": "https://github.com/zqcli/minicore-host",
+  "destination_branch": "dev",
+  "original_dev": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+  "published_code_head": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+  "published_code_tree": "63328a524b8a2d73bfbac7c044efada130367c21",
+  "method": "Create exact Git trees and commits through the repository connector; verify tree identities, then fast-forward dev with expected_sha and force=false. Fetch and verify the resulting remote tree and original ancestry.",
+  "remote_topic_branch_created": false,
+  "mappings": [
+    {
+      "role": "SPEC first",
+      "local": "b490ed9fc7617f140227a69536a14265b9762d16",
+      "remote": "52920fd1c94584a37ed5a1f50d64c267661c30fd",
+      "tree": "6dfcbff291ada0a8dacf8e35435468124b645901"
+    },
+    {
+      "role": "pinned import and integrated implementation",
+      "local": "b55b4f33cde5456d0264a6a97be05a00411fb101",
+      "includes_local_import": "d482060e92fe90c5a1918ef9dbe8a8449398f001",
+      "remote": "c7ddbdbc446c8112204aa3d8a71f44fd7dd41988",
+      "tree": "906c46a611090e97857d12583b7a4017bd90e3a5"
+    },
+    {
+      "role": "resource assertions",
+      "local": "2f0518046073dd33bea6e49ca611b3a8a52df40b",
+      "remote": "47d6bcb7af7313d518a9bee6c5609d5a6f06dc78",
+      "tree": "52f85de1fe0e615d6928bf88c0725255e9e028f9"
+    },
+    {
+      "role": "continuous native request indexes",
+      "local": "c728f2699cef63041b35b62d761e76d1a0dc0551",
+      "remote": "194284e87b9cd9e8033eb08c20a982710a4bccca",
+      "tree": "c574d04aab1bd2c6663ea86c717f145724b2adba"
+    },
+    {
+      "role": "actual deadlines and provider doctest",
+      "local": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+      "remote": "982593255fcf9b31ef1cd30a1b668420120e2ac6",
+      "tree": "5e1433f2c9fb874da7feb4fdec78388de6c8c514"
+    },
+    {
+      "role": "same-save owner return window fixture",
+      "local": "6b2f217886e3952aafa1c4b297476101940a68c1",
+      "remote": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+      "tree": "63328a524b8a2d73bfbac7c044efada130367c21"
+    }
+  ],
+  "requested_tag": {
+    "name": "v0.10.1",
+    "status": "native verification complete; remote publication pending authenticated Git push",
+    "intended_target": "final dev commit containing the verified code plus only PROJECT.md and Task 106 evidence records",
+    "authorization": "explicit owner request; no further owner approval required",
+    "blocker": "The connector exposes branch ref updates only. Terminal Git has no push authentication. This record does not attest that the remote tag exists."
+  },
+  "history_rewritten": false,
+  "evidence_only_publication": {
+    "parent": "1e198a8af2643c64ac4497ac006834adfe65f50d",
+    "paths": [
+      "PROJECT.md",
+      "tasks/106-host-runtime/"
+    ],
+    "source_test_dependencies_workflows_unchanged": true,
+    "checks": [
+      "whitespace",
+      "JSON and JSONL parsing and evidence consistency",
+      "relative Markdown links"
+    ],
+    "native_verification": "ci-source.json describes the fully passed source run; it does not claim a later documentation or tag-triggered workflow has completed."
+  }
+}

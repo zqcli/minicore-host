@@ -1,0 +1,191 @@
+{
+  "cases": [
+    {
+      "case": "steer",
+      "historical_groups": null,
+      "variants": {
+        "baseline": {
+          "samples": 60,
+          "median_ns": 1146319.5,
+          "min_ns": 850902,
+          "max_ns": 18763514
+        },
+        "candidate": {
+          "samples": 60,
+          "median_ns": 982459.0,
+          "min_ns": 705450,
+          "max_ns": 1733826
+        }
+      },
+      "candidate_to_baseline_median_ratio": 0.8570551229391108,
+      "paired_rounds": [
+        {
+          "round": 0,
+          "baseline_median_ns": 1381021,
+          "candidate_median_ns": 876637,
+          "candidate_to_baseline_ratio": 0.6347745617191918
+        },
+        {
+          "round": 1,
+          "baseline_median_ns": 1054038,
+          "candidate_median_ns": 1302334,
+          "candidate_to_baseline_ratio": 1.2355664596532572
+        },
+        {
+          "round": 2,
+          "baseline_median_ns": 1105991,
+          "candidate_median_ns": 865382,
+          "candidate_to_baseline_ratio": 0.7824494051036581
+        },
+        {
+          "round": 3,
+          "baseline_median_ns": 1147100,
+          "candidate_median_ns": 1009104,
+          "candidate_to_baseline_ratio": 0.8797001133292651
+        }
+      ]
+    },
+    {
+      "case": "large_history_steer",
+      "historical_groups": null,
+      "variants": {
+        "baseline": {
+          "samples": 28,
+          "median_ns": 2952145.0,
+          "min_ns": 2369669,
+          "max_ns": 4271899
+        },
+        "candidate": {
+          "samples": 28,
+          "median_ns": 2435708.5,
+          "min_ns": 2061904,
+          "max_ns": 4073074
+        }
+      },
+      "candidate_to_baseline_median_ratio": 0.8250639789034753,
+      "paired_rounds": [
+        {
+          "round": 0,
+          "baseline_median_ns": 3048499,
+          "candidate_median_ns": 2410010,
+          "candidate_to_baseline_ratio": 0.7905562704793409
+        },
+        {
+          "round": 1,
+          "baseline_median_ns": 2980598,
+          "candidate_median_ns": 2332534,
+          "candidate_to_baseline_ratio": 0.7825724904868083
+        },
+        {
+          "round": 2,
+          "baseline_median_ns": 2869615,
+          "candidate_median_ns": 3466788,
+          "candidate_to_baseline_ratio": 1.2081021321675556
+        },
+        {
+          "round": 3,
+          "baseline_median_ns": 3103430,
+          "candidate_median_ns": 2377556,
+          "candidate_to_baseline_ratio": 0.7661058892902369
+        }
+      ]
+    },
+    {
+      "case": "compaction",
+      "historical_groups": 256,
+      "variants": {
+        "baseline": {
+          "samples": 12,
+          "median_ns": 4884707.0,
+          "min_ns": 4017510,
+          "max_ns": 12527174
+        },
+        "candidate": {
+          "samples": 12,
+          "median_ns": 5175038.5,
+          "min_ns": 4227672,
+          "max_ns": 7264510
+        }
+      },
+      "candidate_to_baseline_median_ratio": 1.0594368300903207,
+      "paired_rounds": [
+        {
+          "round": 0,
+          "baseline_median_ns": 4389727,
+          "candidate_median_ns": 4895502,
+          "candidate_to_baseline_ratio": 1.1152178711796883
+        },
+        {
+          "round": 1,
+          "baseline_median_ns": 4713841,
+          "candidate_median_ns": 5050452,
+          "candidate_to_baseline_ratio": 1.0714090695888978
+        },
+        {
+          "round": 2,
+          "baseline_median_ns": 5055573,
+          "candidate_median_ns": 5299625,
+          "candidate_to_baseline_ratio": 1.0482738554066968
+        },
+        {
+          "round": 3,
+          "baseline_median_ns": 6221425,
+          "candidate_median_ns": 5322238,
+          "candidate_to_baseline_ratio": 0.8554692855736427
+        }
+      ]
+    },
+    {
+      "case": "compaction",
+      "historical_groups": 1024,
+      "variants": {
+        "baseline": {
+          "samples": 12,
+          "median_ns": 18976002.0,
+          "min_ns": 16477063,
+          "max_ns": 48993671
+        },
+        "candidate": {
+          "samples": 12,
+          "median_ns": 20357357.5,
+          "min_ns": 16788198,
+          "max_ns": 54987445
+        }
+      },
+      "candidate_to_baseline_median_ratio": 1.0727948647981804,
+      "paired_rounds": [
+        {
+          "round": 0,
+          "baseline_median_ns": 18902302,
+          "candidate_median_ns": 21179767,
+          "candidate_to_baseline_ratio": 1.1204861185690504
+        },
+        {
+          "round": 1,
+          "baseline_median_ns": 19138960,
+          "candidate_median_ns": 22973321,
+          "candidate_to_baseline_ratio": 1.2003432265912046
+        },
+        {
+          "round": 2,
+          "baseline_median_ns": 19049702,
+          "candidate_median_ns": 18118351,
+          "candidate_to_baseline_ratio": 0.951109418929493
+        },
+        {
+          "round": 3,
+          "baseline_median_ns": 17563257,
+          "candidate_median_ns": 19534948,
+          "candidate_to_baseline_ratio": 1.112262264339695
+        }
+      ]
+    }
+  ],
+  "paired_workload_equivalence_verified": true,
+  "samples_sha256": "419ba8873157d80e8f53571ebd489ca4cc252e3a8912943ed8c56b6bb94b09ec",
+  "load_end": [
+    0.29833984375,
+    0.9736328125,
+    2.3037109375
+  ]
+}

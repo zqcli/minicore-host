@@ -1,0 +1,103 @@
+{
+  "sources": {
+    "baseline": {
+      "source_revision": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+      "source_tree": "4f55c41bf73be9fc3e8976dbe1b9af48e28c98e7",
+      "binary": "/workspace/scratch/205d9cb12bb1/build/baseline/release/minicore-host",
+      "binary_sha256": "0a8ef3d950db47fe291eb12e7c914ca999fc36e043fc5b89f291a736874338f7",
+      "cargo_lock_sha256": "4bbe7be43ab90c6a21afa8fb36a97f4cb862820a44d5445a552c3b02593f88fd"
+    },
+    "candidate": {
+      "source_revision": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+      "source_tree": "5e1433f2c9fb874da7feb4fdec78388de6c8c514",
+      "binary": "/workspace/scratch/205d9cb12bb1/build/candidate/x86_64-unknown-linux-gnu/release/minicore-host",
+      "binary_sha256": "4808e137f7d4f54a5553c66ff9972d2d878d4ff278aa05f4f19aa90cfb848c83",
+      "cargo_lock_sha256": "37f022017139aa6b008b6e6e901bf7ba48c9eca09816946d713a9c2484115837"
+    }
+  },
+  "runner_sha256": "8daead5849caef7065ae00f2a9c7dc8893689445d0d2a37355be7e723a457e04",
+  "helper_sha256": "6c62caf417c61d5fc93807459573057847c2e80fa659a576ac3db4cc7326729f",
+  "compaction_builds": {
+    "baseline": {
+      "source_revision": "685806af4761eaaa75bae11cd70e5d7a7a0177b0",
+      "source_archive_sha256": "5b6224668413b28cf6ef4b6ecebb4ce8e695c6399049e397df9e3d24a976d3e7",
+      "normalized_probe_sha256": "660b997c05b56932bb7a9d5f6b65803222ce0d3ee45951ef5180ff878f914072",
+      "compiled_probe_sha256": "660b997c05b56932bb7a9d5f6b65803222ce0d3ee45951ef5180ff878f914072",
+      "candidate_import_only": false,
+      "cargo_lock_sha256": "4bbe7be43ab90c6a21afa8fb36a97f4cb862820a44d5445a552c3b02593f88fd",
+      "binary": "/workspace/scratch/205d9cb12bb1/build/task106-compaction-baseline/target/release/examples/task106_compaction",
+      "binary_sha256": "e04605e4854be6891d4db53de12d1859e8525e2773199bcb68aa65486a487479",
+      "build_command": [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/workspace/scratch/205d9cb12bb1/build/task106-compaction-baseline/source/Cargo.toml",
+        "--target-dir",
+        "/workspace/scratch/205d9cb12bb1/build/task106-compaction-baseline/target",
+        "-p",
+        "minicore-host-compaction",
+        "--example",
+        "task106_compaction"
+      ],
+      "build_duration_ns": 38255493534,
+      "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8\n",
+      "fixture": "Task104 DeterministicSummaryFixture; no live provider or Session owners"
+    },
+    "candidate": {
+      "source_revision": "1009c719ced338ebb05c5bacccc8c9403f882ec2",
+      "source_archive_sha256": "a4b5791de7cee515cd3072b71f292b464c160c53e466d28254b6e5f4e35b8dea",
+      "normalized_probe_sha256": "660b997c05b56932bb7a9d5f6b65803222ce0d3ee45951ef5180ff878f914072",
+      "compiled_probe_sha256": "cd6565a4eb26920405079cc2d052905d9c53d8fe2689d031ec582516eae2f17e",
+      "candidate_import_only": true,
+      "cargo_lock_sha256": "37f022017139aa6b008b6e6e901bf7ba48c9eca09816946d713a9c2484115837",
+      "binary": "/workspace/scratch/205d9cb12bb1/build/task106-compaction-candidate-1009c71/target/release/examples/task106_compaction",
+      "binary_sha256": "678cef9170edfbc9a3e6a80a456fa0e5d0fccaf4330061adb85a7f0c38baafd2",
+      "build_command": [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--manifest-path",
+        "/workspace/scratch/205d9cb12bb1/build/task106-compaction-candidate-1009c71/source/Cargo.toml",
+        "--target-dir",
+        "/workspace/scratch/205d9cb12bb1/build/task106-compaction-candidate-1009c71/target",
+        "-p",
+        "minicore-host-compaction",
+        "--example",
+        "task106_compaction"
+      ],
+      "build_duration_ns": 117921826019,
+      "rustc": "rustc 1.90.0 (1159e78c4 2025-09-14)\nbinary: rustc\ncommit-hash: 1159e78c4747b02ef996e55082b704c09b970588\ncommit-date: 2025-09-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.90.0\nLLVM version: 20.1.8\n",
+      "fixture": "Task104 DeterministicSummaryFixture; no live provider or Session owners"
+    }
+  },
+  "rounds": 3,
+  "pair_order": "baseline/candidate, reversed on odd rounds",
+  "host_cases": [
+    {
+      "seed_turns": 0,
+      "body_bytes": 0,
+      "steps": 16
+    },
+    {
+      "seed_turns": 64,
+      "body_bytes": 4096,
+      "steps": 8
+    }
+  ],
+  "workload_checks": "Each request must contain every expected historical/current user and assistant message in order. Paired Host request byte counts and dialogue hashes must match. Paired compaction repetitions must match input sizes, coverage and token counts.",
+  "utc": "2026-11-12T14:47:58Z",
+  "platform": "Linux-6.18.57-x86_64-with-glibc2.41",
+  "logical_cpus": 9,
+  "affinity_cpus": 9,
+  "load_begin": [
+    0.3193359375,
+    1.48388671875,
+    2.6962890625
+  ],
+  "limits": "Run only in a coordinated no-build window; machine isolation is not promised. Host timings start after deliberate fixture gating, immediately before response writes, and end after receipt of the next HTTP body. They include fixture write, loopback HTTP, request encoding and owner work, not a live model. Setup and post-run validation excluded. Compaction reuses Task104 deterministic Model fixture; no provider/storage/Session latency. All per-transition/per-repetition durations are retained; no raw transcripts or compressed logs."
+}
