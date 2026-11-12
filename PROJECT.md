@@ -1,5 +1,19 @@
 # MiniCore Host
 
+## In progress: integrated execution layer (0.10.1)
+
+[Task 106](tasks/106-host-runtime/TASK.md) implements the owner's approved
+SPEC 4.10.1 design: Runtime becomes an internal Host workspace package,
+Session drives each complete public Turn, and ordinary and compaction model
+requests share the same execution implementation. The source checkpoints are
+Host `685806af4761eaaa75bae11cd70e5d7a7a0177b0` and its actual Runtime dependency
+`3aa47629929906832dcb309afb7d242c1ae3e53f`.
+
+The owner authorized publishing Host 0.10.1 and tag `v0.10.1` after verification.
+Implementation, validation and publication are in progress; the historical
+checks below do not validate this new work. Task 106 records the current scope,
+disjoint implementation ownership and exact verification/publication evidence.
+
 ## Current checkpoint: native multi-platform CI (0.9.20)
 
 [Task 105](tasks/105-multiplatform-ci/TASK.md) completes native Linux x64, macOS

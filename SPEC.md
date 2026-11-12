@@ -1,4 +1,4 @@
-**设计基线：v4.93｜2026-11-09。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列；模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.10.1｜2026-11-12。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -8,7 +8,7 @@
 
 minicore-host 是承载多 Agent、多 Session 的后端。产品可以包含管理、存储、执行适配和客户端接入等模块；其中 Host 对象只管理自身与所属对象，并提供对外通信入口；不管理其他 Host，也不因此成为全部业务的执行者。
 
-Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 管本会话，Runtime 执行一个已绑定的 Turn。Agent 是有身份的参与者，Role 是纯角色配置，Session 是可经历多轮执行的上下文；使用层说的 subagent 不要求每次都创建一个新 Agent 实体。
+Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 管本会话并完整驱动每个 Turn。Runtime 收入同一 Host workspace 的 `crates/host-runtime`，只提供模型调用、工具执行及共享原生数据类型。Agent 是有身份的参与者，Role 是纯角色配置，Session 是可经历多轮执行的上下文；使用层说的 subagent 不要求每次都创建一个新 Agent 实体。
 
 | 范围 | 本版安排 |
 | --- | --- |
@@ -23,11 +23,11 @@ Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 
 
 现有 Web 和远程查看等配套能力沿用同一客户端接口适配，不要求本次新增独立客户端产品。工具卡片的布局、收起展开和滚动由客户端约定，Host 只提供通用数据与事件。
 
-本版不做旧配置、实体记录或历史的数据迁移、导入、转换、双写及迁移回退。程序读取实际支持的格式；不支持时明确报错，不自动改写旧文件。正常持久化初始化和 JSONL 历史读取继续保留。本地 Host 与 Agent 随同编译；外部客户端与所连接 Host 的兼容由使用者手动保证，不设计版本或能力差异协商、自动适配与降级。
+本版不做旧配置、实体记录或历史的数据迁移、导入、转换、双写及迁移回退。程序读取实际支持的格式；不支持时明确报错，不自动改写旧文件。正常持久化初始化和 JSONL 历史读取继续保留。本地 Host、Agent 与内部 Runtime 随同编译、验证和发布；不保留独立 Runtime 产品或完整 AgentLoop API 的兼容承诺。外部客户端与所连接 Host 的兼容由使用者手动保证，不设计版本或能力差异协商、自动适配与降级。
 
 ## Rule：所有实现共同遵守的要求
 
-1. **只做直接所属的工作。** Host 创建和管理 Agent，Agent 创建和管理 Session，SessionController 管本 Session，Runtime 推进 Session 交付的本轮模型与工具循环。有生命周期的对象保存自身 ID 与直接归属 ID，根对象没有上级；引用不嵌套整份所属对象。对下级业务，统一入口按所属关系分派；上层不跨层改队列、选择默认 Session、取消 Turn、写历史或结算工具等待，下层不持有任意操控全 Host 的接口。
+1. **只做直接所属的工作。** Host 创建和管理 Agent，Agent 创建和管理 Session，SessionController 管本 Session 并唯一驱动本轮模型与工具循环，Runtime 执行其明确交付的单次模型调用或工具工作。有生命周期的对象保存自身 ID 与直接归属 ID，根对象没有上级；引用不嵌套整份所属对象。对下级业务，统一入口按所属关系分派；上层不跨层改队列、选择默认 Session、取消 Turn、写历史或结算工具等待，下层不持有任意操控全 Host 的接口。
 
 2. **标准接口，逐层交接。** 普通业务输入统一使用 message.send。本 Host 内跨 Agent 由 Host 路由到目标 Agent，再由目标 Agent 交给 SessionController；目标明确也不增加 fast path 或 Session 直达通道。同进程使用普通调用，不强制各层增设网络、队列或序列化。本版直接调用标准接口投递消息，不设计防重、自动补投或可靠投递机制；消息编号用于标识与关联。
 
@@ -57,7 +57,7 @@ Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 
 
 15. **持久化和诊断各负其责。** persistent 历史按实际消费及产生顺序追加，在完整模型响应、普通工具批次结束和 Turn 收尾时完成相应保存确认，不逐 token 同步，也不把全部保存推迟到整轮结束。完整记录写入并完成必要同步后，才对对应范围声明 persisted。日志统一结构、只存约定诊断元信息，不保存或恢复会话正文，不承担任务完成与结果交付；日志故障不阻断业务 Fault 上报或 memory 回收。
 
-16. **输入与共享能力在所属边界适配。** 普通消息正文仅为 text 字符串；GUI／TUI 与工具把路径和说明写入文本，Session 将其封装为 Runtime 输入，模型按需调用读取工具。Host 消息层不解释文件格式，纯文本约定不改变模型、ToolResult 和其他接口的结构。应用启动入口装配共享能力，Host 以窄接口提供给直接所有者；不要求每层独立进程、actor、crate 或服务。
+16. **输入与共享能力在所属边界适配。** 普通消息正文仅为 text 字符串；GUI／TUI 与工具把路径和说明写入文本，Session 将其记入本方历史并组装模型请求，模型按需调用读取工具。Host 消息层不解释文件格式，纯文本约定不改变模型、ToolResult 和其他接口的结构。应用启动入口装配共享能力，Host 以窄接口提供给直接所有者；不要求每层独立进程、actor、crate 或服务。
 
 17. **Host 只关注自身与内部。** Host 提供标准外部接口，收到请求后按自身的认证、操作权和所属关系逐层处理；不维护其他 Host 的地址簿、连接、路由或执行关系。后续由 tool/subagent 作为客户端调用其他 Host，连接选择、远程等待及结果组织归调用工具；源方的内部身份不授予目标 Host 的内部调用资格。
 
@@ -80,13 +80,13 @@ Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 
 | Host | 管理 Agent、自身配置、共享能力、通信入口和整个 Host 的客户端操作归属；本 Host 内跨 Agent 路由 | id、host_incarnation、Agent 注册表、有效连接上下文与当前操作连接引用；根对象没有上级 |
 | Agent | 管理自己的配置、Session 集合、默认收件入口、创建与启停 | id、host_id、mode、名称、AgentConfig、default_session_id |
 | Session | 由 Agent 内部的 SessionController 管理本上下文的两类输入、历史、配置、Turn、保存与收尾 | id、agent_id、mode、有效配置、next-step／next-turn 及实际结果 |
-| Turn | Session 管理的一轮执行，可顺序调用多个内部 AgentLoop；按本轮绑定推进模型与工具，持有本轮未完成 ToolCalls | id、session_id、本轮输入、配置与资源绑定、工具执行及结果 |
+| Turn | Session 管理并完整驱动的一轮执行；按本轮固定绑定串行推进模型请求和工具批次，持有本轮未完成 ToolCalls | id、session_id、本轮输入、配置与资源绑定、工具执行及结果 |
 | ToolCall | 一次标准工具调用，执行与收尾归所属 Turn；启动子代理的调用只负责启动并返回 | id、turn_id、工具名、参数、状态、输出与结果；启动回执可引用子 Session 和任务 MessageId |
 | SessionRunner | 当前驱动 Session 的驻留对象；卸载后必要的会话数据仍由 SessionController 管理 | id（LoadId）、session_id、执行任务、取消信号与瞬时资源 |
 | Role | 职责与工作方式的配置值，无运行生命周期 | name、description、instructions |
 | Message 与 Input | Message 表示投递内容；Input 是 Session 已接收的队列条目 | MessageId、可信来源、目标、text、所属队列与队内顺序；Input 保留 session_id，对外沿用 MessageId |
 
-这些是职责边界，不要求每一项成为独立进程、crate、actor 或队列。SessionController 属于 Agent 层；Runtime 每次调用只服务已绑定的一个 Turn，不取得 Session 队列、公共 Turn 接续或下一轮调度权。Host 汇总 Agent 提供的公开状态；Session 定位和管理交所属 Agent，SessionController 处理本会话。共享模型客户端、存储适配和事件设施通过窄接口使用，不建立第二份会话权威状态。
+这些是职责边界，不要求每一项成为独立进程、crate、actor 或队列。SessionController 属于 Agent 层，沿用自己的驱动任务管理完整 Turn；Runtime 不持有独立循环任务、Session 队列或 Turn 状态机，也不决定后继模型请求或下一 Turn。Host 汇总 Agent 提供的公开状态；Session 定位和管理交所属 Agent，SessionController 处理本会话。共享模型客户端、存储适配和事件设施通过窄接口使用，不建立第二份会话权威状态。
 
 ## 身份、归属与运行编号
 
@@ -208,7 +208,7 @@ Host、Agent、Session、Turn 各自维护自己的生命周期。Role 和配置
 | starting | 先取得数据根目录独占使用权，再读取持久记录并逐层初始化；不接受普通业务写入 |
 | running | 受理本层请求，路由到 Agent；下层继续检查自己的归属与状态 |
 | draining | 拒绝新的对象创建请求、根任务入口和新委派，逐层传达排空要求；已接受工作继续，必要回复、子结果和交互回答按已登记关联及可信来源处理 |
-| stopping | 封闭新的业务接收与调度，要求 Agent 逐层停止；实际所有者完成结束报告、必要结果交接、保存和资源清理，内部收尾回调继续处理 |
+| stopping | 封闭新的业务接收与调度，要求 Agent 逐层停止；实际所有者接手真实执行结果、完成必要数据交接、保存和资源清理，内部收尾回调继续处理 |
 | stopped | 本次实例的执行与必要保存、清理均已结束，不再执行或写入，释放数据目录使用权 |
 
 host.shutdown 仅支持 graceful、force 两种策略，均作用于本 Host，并遵守当前操作资格。force 是通过接口发起的受控停止：立即停止业务执行，再完成必要记录保存与清理后退出；复用 stopping → stopped，不新增生命周期状态。Host 接手退出并更新状态后返回当前事实，实际退出仍由 Host 跟踪至结束；具体请求与统一回执见第 6 章。普通 Turn、Session 的取消能力保持原职责。
@@ -224,7 +224,7 @@ draining 拒绝新的独立委派，不因使用新 Agent、新 Session 或复�
 
 模型在 draining 中发起新委派时，agent 工具将明确拒绝作为普通工具结果返回，例如“Host 正在退出，未接受此子任务。”不伪造受理、不自动重试，也不一律将父 Turn 判为 failed。已有子结果可用于总结，但不能据此再次扩展委派。
 
-force 沿 Host → Agent → Session 及实际执行所有者逐层落实中止，范围包含本 Host 的模型调用、普通工具及受管工具进程、子执行和可取消的压缩计算；不等待这些工作正常完成，也不承诺撤销已有外部副作用。Runtime 和工具沿原结束路径交出实际 partial、结果及取消或失败事实；必要的结束报告、结果交接、写入和同步不得随业务执行一并丢弃。同进程嵌入只停止目标 Host，不退出共享进程或关闭其他 Host 仍使用的设施；独立 Host 进程也须在必要保存与清理完成后退出。仅发出取消信号、丢弃 future 或直接杀掉 Host 进程不能代替本接口的收尾。
+force 沿 Host → Agent → Session 及实际执行所有者逐层落实中止，范围包含本 Host 的模型调用、普通工具及受管工具进程、子执行和可取消的压缩计算；不等待这些工作正常完成，也不承诺撤销已有外部副作用。Runtime 和工具沿原结束路径交出实际 partial、结果及取消或失败事实；必要的执行结果接手、数据交接、写入和同步不得随业务执行一并丢弃。同进程嵌入只停止目标 Host，不退出共享进程或关闭其他 Host 仍使用的设施；独立 Host 进程也须在必要保存与清理完成后退出。仅发出取消信号、丢弃 future 或直接杀掉 Host 进程不能代替本接口的收尾。
 
 两种策略的退出屏障都包含已经接受的创建工作：由直接所有者明确提交或中止，保留真实部分结果，并完成实际已提交数据的必要保存；不补造成功或回滚。graceful 按原接收边界完成，force 停止后续业务步骤，进入 stopping 后不能因创建完成而启动新 Turn。只有相关执行已终止、必要结果已按原规则处置、保存确认和资源清理均已完成，且旧工作不再可能执行或写入，才能报告 stopped 并释放目录使用权。
 
@@ -298,9 +298,9 @@ closed 对两种 mode 都是终态。普通会话无论 persistent 或 memory，
 
 ## Turn 生命周期与终态
 
-Turn 的生命周期为 starting、running、cancelling、finalizing、finished，活动可描述为 preparing、model、tools、interaction。同一 Session 每次只执行一个 Turn；一轮可包含多次模型请求，也可在同一 TurnId 下顺序调用多个内部 AgentLoop，同一时刻最多一个内部执行。普通工具批次可并行执行，当前批次结清后才推进下一次模型请求；独立子 Session 可与父模型并行，不靠未闭合的启动 ToolCall 实现。TurnId 在输入绑定执行尝试时产生，直到 finished 不变；finished 不重新进入 running。
+Turn 的生命周期为 starting、running、cancelling、finalizing、finished，活动可描述为 preparing、model、tools、interaction。同一 Session 每次只执行一个 Turn；一轮可包含多次模型请求，均由同一 Session 驱动任务在原 TurnId 下推进，同一时刻最多一个普通模型请求。普通工具批次可并行执行，当前批次结清后才推进下一次模型请求；独立子 Session 可与父模型并行，不靠未闭合的启动 ToolCall 实现。TurnId 在输入绑定执行尝试时产生，直到 finished 不变；finished 不重新进入 running。
 
-模型无后续工具调用的正常输出使本次内部 AgentLoop 结束，只形成公共 Turn 的完成候选。SessionController 接手实际返回结果，在本轮结束边界检查是否有可消费的 next-step：有则绑定给原 Turn，带累计上下文再次调用现有 Runtime；没有且本轮普通工具已经结清，才认领正常结束并进入 finalizing。内部 LoopId 可以变化，公共 TurnId 保持不变。next-turn 不阻止本轮结束；独立子执行也不阻止父 Turn 结束。进入 finalizing 后的新输入留给下一 Turn，不重新打开旧轮。
+模型无后续工具调用的正常输出只形成 Turn 的完成候选。SessionController 接手并保存该完整响应，在本轮结束边界检查是否有可消费的 next-step：有则绑定给原 Turn，在同一驱动任务中准备下一模型请求；没有且本轮普通工具已经结清，才认领正常结束并进入 finalizing。不结束或重启一个中间循环，也不另建接续生命周期。next-turn 不阻止本轮结束；独立子执行也不阻止父 Turn 结束。进入 finalizing 后的新输入留给下一 Turn，不重新打开旧轮。
 
 SessionController 依据 Runtime 和工具执行事实完成 finalizing：结束本轮交互，确认本轮实际持有的 ToolCalls 已完成或取消并收尾，固定输出与用量，保存本轮尚未保存的内容、必要 partial 和真实结束事实，完成适用保存确认与必要数据交接，再发布 finished。模型响应和工具批次已经按各自边界保存的记录不重复追加。已返回启动结果的委派 ToolCall 不再持有子执行；子方最终结果走新的消息投递。业务 outcome（completed、failed、cancelled）与 persistence（pending、persisted、failed、not_applicable）分开，保存失败不改写执行结果或重跑工具。
 
@@ -377,7 +377,7 @@ graceful 与 force 均在必要保存和清理完成后正常释放目录使用�
 
 历史格式有效与模型输入满足提供方协议是两项检查。resume 加载和输入适配不改写原 JSONL；完整的调用与结果继续作为正常历史使用。旧 ToolCall 没有对应结果记录，不证明工具未执行、执行失败或仍在运行，不据此恢复旧工具、等待关系或自动重做任务。启动 ToolCall 已有受理结果、但没有后续子完成通知时，该 ToolCall 已闭合；通知缺失不构成缺 ToolResult，也不触发子执行恢复或补造消息。
 
-Session 提供历史和新输入，Runtime／模型适配优先复用已有历史处理能力。确因当前模型输入要求而需要转换时，只在本次模型上下文中将未闭合部分表达为普通历史说明，保留原调用身份、已记录内容及“当前历史没有对应结果记录”的事实；不补造成功、失败或取消的 ToolResult，不把所有旧调用一律转成文字。具体编码与混合多工具记录的处理须结合实际 Runtime 核对并验证。
+Session 在准备完整模型请求时复用已有历史处理能力；Runtime 模型调用原语只消费准备好的请求。确因当前模型输入要求而需要转换时，只在本次模型上下文中将未闭合部分表达为普通历史说明，保留原调用身份、已记录内容及“当前历史没有对应结果记录”的事实；不补造成功、失败或取消的 ToolResult，不把所有旧调用一律转成文字。具体编码与混合多工具记录的处理须结合实际原生类型和提供方适配核对并验证。
 
 后续用户输入在新 Turn 中处理，由模型根据历史事实与当前任务决定下一步。Host 不增加历史修复或执行恢复逻辑，UI 不因此增加中断、待核对等恢复状态。
 
@@ -407,13 +407,13 @@ persistent Session 的历史按实际消费和产生顺序追加，在以下边�
 | 用户消息、steer、follow_up、子完成通知 | 保存实际消费的 text、MessageId、来源及适用的 in_reply_to，保留与消费 Turn 的关联；仅 accepted 或仍在队列中不作为恢复队列保存。已入历史的输入纳入随后对应批次或收尾的保存范围 |
 | 一次完整模型响应 | 追加真实完整响应，包括其中的工具调用，保留所属 Turn 以及用于对应 response_index 的轮内响应顺序；将本次尚未确认的相关完整记录合批写入并完成保存确认 |
 | 一批普通工具执行结束 | 复用标准 ToolResult，按原 ToolCallId 与所属 Turn 保存实际结果，完成该批保存确认；agent 启动回执属于本批，独立子任务的后来通知另作输入处理 |
-| Turn 正常结束、失败或取消（含 Host force） | 保存剩余内容、Runtime 结束报告中的实际模型 partial、真实 outcome 与结束原因，明确未完成内容；完整记录不重复接手，尚未确认的保存范围继续按原规则完成，已确认记录不重复追加；不因 Turn 失败而把完整响应改成 partial |
+| Turn 正常结束、失败或取消（含 Host force） | 保存剩余内容、模型调用原语返回的实际 partial、真实 outcome 与结束原因，明确未完成内容；完整记录不重复接手，尚未确认的保存范围继续按原规则完成，已确认记录不重复追加；不因 Turn 失败而把完整响应改成 partial |
 | 压缩等已有独立保存操作 | 保存实际提交的压缩内容或历史变化，继续遵循其提交与保存边界，不等下一次 Turn 结束才确认 |
 | memory Session | 不创建自身 JSONL，必要结果按既定所有权交接 |
 
-流式片段先用于当前执行和观察，不逐 token 同步磁盘。可控失败或取消（包括 host.shutdown 的 force）时，persistent Session 保存 Runtime 结束报告正式交出的必要 partial 与真实结束事实，并明确未完成属性；完整记录按已接手范围处理，不能伪造完整模型响应或依赖公共观察事件拼接保存。memory 仍按既定内存与必要结果交接规则处理。正常模型响应和工具批次的确认可以合并本边界涉及的完整记录，但不得统一延后到整个 Turn 结束。崩溃、外部强杀或断电等非受控退出只保证此前已经确认的保存范围；重启仍只读取实际有效历史，不恢复旧执行或未消费队列。具体 JSONL 字段、记录编码及平台同步调用由工程规格落实。
+流式片段先用于当前执行和观察，不逐 token 同步磁盘。可控失败或取消（包括 host.shutdown 的 force）时，persistent Session 保存 模型调用原语正式交出的必要 partial 与真实结束事实，并明确未完成属性；完整记录按已接手范围处理，不能伪造完整模型响应或依赖公共观察事件拼接保存。memory 仍按既定内存与必要结果交接规则处理。正常模型响应和工具批次的确认可以合并本边界涉及的完整记录，但不得统一延后到整个 Turn 结束。崩溃、外部强杀或断电等非受控退出只保证此前已经确认的保存范围；重启仍只读取实际有效历史，不恢复旧执行或未消费队列。具体 JSONL 字段、记录编码及平台同步调用由工程规格落实。
 
-Host、Agent 和 SessionController 各自持有本方保存工作。存储适配只提供写入和同步事实，不裁定业务完成。Runtime 通过第 5 章的内部产出回调及时交出新增完整记录，SessionController 接手并按上述边界组织本方历史保存；不重复交付已有上下文，也不能只在整个 Turn 结束时交出新增历史。耗时 I/O 在业务状态保护之外进行，完成后核对原记录或版本；客户端断线或停止等待不撤销已接受保存，Host force 也不丢弃必要保存及其完成回调。message.send 的 accepted、数据已交给接收方、当前可读与持久化完成分别表达，不为保存标记额外持久化排队输入、所有中间工具输出或 memory 上下文。
+Host、Agent 和 SessionController 各自持有本方保存工作。存储适配只提供写入和同步事实，不裁定业务完成。SessionController 直接接手模型调用和工具批次的实际结果，追加本批新增完整记录并按上述边界组织本方历史保存；Runtime 不拥有另一份历史，不通过完整记录回调或最终报告再次交付相同记录。耗时 I/O 在业务状态保护之外进行，完成后核对原记录或版本；客户端断线或停止等待不撤销已接受保存，Host force 也不丢弃必要保存及其完成回调。message.send 的 accepted、数据已交给接收方、当前可读与持久化完成分别表达，不为保存标记额外持久化排队输入、所有中间工具输出或 memory 上下文。
 
 写入或同步失败保留真实执行 outcome 和已有可读数据，使用 SESSION_HISTORY_WRITE_FAILED 等既定错误并保持相关阻塞。在同次 Host 运行中，按原记录身份及保存范围核对：完整写入但未确认同步时，可完成原范围的必要同步；能确认尚未写入时，才继续同一份保存；部分写入、损坏或仍不确定时保持阻塞，不盲目追加、覆盖或自动修复。核对与继续保存不调用模型、不重跑工具、不生成第二份业务结果，也不跨重启恢复旧保存工作。
 
@@ -434,17 +434,17 @@ stop、unload、close 和运行实例回收不隐式删除 persistent 历史。�
 | 1 接入请求 | TUI → Host | 将任务和路径组织为 text；核对接入认证与当前连接操作权，定位直属 Agent |
 | 2 选择接收者 | Agent | 校验 Session 归属，必要时解析本次调用的默认入口，交 SessionController |
 | 3 接收入队 | SessionController | 核对接收条件和接受时的操作资格；steer 入 next-step，follow_up 入 next-turn，接收后返回 accepted 和实际队列，不等待加载或 Turn 启动 |
-| 4 绑定本轮 | SessionController → Runtime | 新 Turn 先取当前 next-step，再取一个 next-turn；认领输入并绑定 TurnId、配置和资源，由 Session 适配为现有 LoopRequest 并调用 AgentLoop::start |
-| 5 模型与工具 | Runtime 与能力适配 → SessionController | 执行本轮模型、普通工具和压缩；完整模型响应与工具批次结果按原顺序交接本批新增标准记录，由 SessionController 保存并按边界确认。agent 启动工具受理后返回，独立子执行归其 Session 与委派范围 |
+| 4 绑定本轮 | SessionController | 新 Turn 先取当前 next-step，再取一个 next-turn；认领输入并绑定 TurnId、配置、资源和执行身份，由既有 Session 任务直接驱动 |
+| 5 模型与工具 | SessionController → Runtime 原语与能力适配 | Session 准备完整 ModelRequest，并直接等待单次模型调用及工具批次；完整响应和实际工具结果由 Session 按原顺序追加并完成保存屏障，再推进后继工作。压缩按本方明确边界执行；agent 启动工具受理后返回，独立子执行归其 Session 与委派范围 |
 | 6 输出与通知 | 执行所有者／委派范围 | 状态和输出走观察设施；子完成通知另经标准 message.send 进入父方两队列，不当作旧 ToolResult |
-| 7 判断接续与收尾 | Runtime → SessionController | 接收本次 Runtime 实际结果；正常完成后有可消费 next-step 则在原 Turn 接续 Runtime，否则认领 finalizing 并保存收尾；失败或取消按原 Turn 收尾，独立子执行可继续 |
+| 7 判断继续与收尾 | SessionController | 无工具的完整响应保存后，有可消费 next-step 则在原 Turn 准备下一请求，否则认领 finalizing 并保存收尾；失败或取消按原 Turn 收尾，独立子执行可继续 |
 | 8 后续推进 | SessionController | 当前 Turn finished 后，按两队列规则开启下一 Turn 或 idle；显式暂停和实际阻塞继续生效 |
 
 普通 ToolResult 通过标准工具执行通道完成原调用，不入消息队列。异步委派的启动 ToolResult 也遵守此规则；子方后来完成时，由仍有效的委派范围发出新的文本消息，使用独立 MessageId 和原委派关联，不再次完成原 ToolCall。
 
 ## 调度权与并发边界
 
-SessionController 位于 Agent 层内部，是本 Session 的业务权威，负责队列、历史、本轮配置、Turn，以及直接持有的保存与收尾操作。Runtime 每次调用推进已交接的模型与工具循环，报告该次输出和执行事实；公共 Turn 的接续、收尾与结束由 SessionController 决定。Runtime 不直接读队列、不维护长期会话状态、不决定下一轮。Host 和 Agent 管理直属对象并汇总公开状态，不复制 Session 的调度表。
+SessionController 位于 Agent 层内部，是本 Session 的业务权威，负责队列、历史、本轮配置、完整 Turn 驱动，以及直接持有的保存与收尾操作。它在既有驱动任务中准备请求、等待模型和工具、确认保存并决定下一步。Runtime 原语只交付本次实际执行结果，不另起完整循环任务，不读队列、不维护会话历史，也不决定下一步或下一 Turn。Host 和 Agent 管理直属对象并汇总公开状态，不复制 Session 的调度表。
 
 同一 Session 最多一个活动 Turn；一个 Turn 的模型请求串行，工具批次可以并行但在继续模型前结清。并行子 Session 不占据父 Turn 的未完成 ToolCall：启动调用返回后，父方可以继续工作或正常结束。所有等待和 I/O 均在业务状态锁外进行，收件、查询、取消和独立子执行继续可处理；不增加全局调度器、执行名额或每层 actor。
 
@@ -468,7 +468,7 @@ SessionController 持有两条独立队列：next-step 接收 steer，next-turn 
 | 普通 ToolResult | 完成当前调用，按正常工具循环推进，不入上述队列 |
 | 控制和现有交互回答 | 进入直接管理入口或已有接收口，不依赖模型从两队列解释；手动压缩不进入 next-step／next-turn |
 
-Runtime 在准备模型输入时经现有 LoopInputs::take 请求新输入，由 SessionController 在短时串行边界检查队列、暂停与原执行身份并认领允许的消息。普通 text 在该边界封装为 Runtime 标准输入，Session 保留其 MessageId、来源与顺序；历史和本次新输入的交接必须使每条输入只进入上下文一次。已经生成的历史和已发请求保持原样。Runtime 可保留本轮临时数据，不复制两队列或长期历史。取批次以当前已就绪条目为准，不新增等待窗口或容量上限。
+SessionController 在准备每个模型请求时，在短时串行边界检查队列、暂停与原执行身份并认领允许的消息；异步准备完成、请求正式交给模型调用原语前再核对可消费输入。普通 text 由 Session 记入标准历史，同时保留 MessageId、来源与顺序；每条已绑定输入只入历史和本次上下文一次。准备期间新认领的输入并入原请求，必要时更新请求投影；已发请求保持原样。Runtime 不回调取输入、不复制两队列或长期历史。取批次以当前已就绪条目为准，不新增等待窗口或容量上限。
 
 输入从 queued 经内部认领，再确认 bound 到执行尝试。绑定前准备失败可退回原队列的原顺序；绑定后即使启动失败、请求失败或取消，也不自动重排。bound 只表示归属一次尝试，不保证模型已收到。input.remove 与认领在同一入口裁定，只移除尚未绑定的条目。本次接受的实际目标与队列随该输入保留，不因之后的默认入口或运行状态变化而迁移。
 
@@ -476,9 +476,13 @@ Runtime 在准备模型输入时经现有 LoopInputs::take 请求新输入，由
 
 普通输入在 Session 开放、可执行且未显式暂停时触发相应调度；follow_up 不打断活动 Turn，steer 请求在下一允许边界继续，空闲时两者均可启动新 Turn。message.send 不新增 passive／wake 参数；范围关闭中的内部结束记录如需保留，只由实际所有者处理，不作为新的模型唤醒消息绕过关闭。
 
-## Runtime 能力接口
+## 内部 Runtime 与依赖方向
 
-Session 执行适配层在启动 Runtime 前确认公共 TurnId 与以下 ExecutionRef 的绑定，使极快返回的输出仍归属原执行；Runtime 自己生成的 LoopId 由 Session 内部关联，不替代公共身份。该关联不产生新的执行实体，也不要求 Runtime 请求携带 Host／Agent 管理字段。
+Runtime 位于同一 Host workspace 的 `crates/host-runtime`，与 Host 使用同一锁文件、验证和发布。它是下层内部 crate，不是 Host 根对象的一部分；`host-core` 及模型、工具、存储和压缩适配可以依赖它，Runtime 不反向依赖这些 crate 或持有 Host 控制接口。提供方客户端、HTTP/SSE 与提供方编码继续由 `host-provider` 实现。原生历史、模型和工具值类型继续复用，已有存储与公开载荷不因搬动代码而改格式。
+
+SessionController 沿用既有驱动任务唯一管理整个 Turn，不再另起完整 Runtime 循环及控制句柄。删除被替代的独立 AgentLoop 启停、运行中配置更新、LoopInputs、完整历史回调和 LoopReport 对账接口；不以别名或兼容外壳保留第二套生命周期。模型／工具原语保留实际异步调用及普通工具并发所需的机制，但不取得队列消费、历史追加、Turn 结束或下一步决策权。
+
+Session 在调用任何原语前确认公共 TurnId 与以下 ExecutionRef 的绑定，使极快返回的输出仍归属原执行：
 
 ```typescript
 type ExecutionRef = TurnRef & {
@@ -486,86 +490,73 @@ type ExecutionRef = TurnRef & {
 };
 ```
 
-TurnRef 已包含 session_id 与 turn_id。原 Host 运行与 Agent 归属来自已绑定的可信上下文，纯 Runtime 无须理解 Host／Agent 管理层级。普通工具回调再沿用原 tool_call_id；独立子完成通知使用新的 MessageId 和有效委派来源，不冒用旧父调用或旧 LoadId。
+TurnRef 已包含 session_id 与 turn_id。原 Host 运行与 Agent 归属来自已绑定的可信上下文，Runtime 不必理解管理层级。普通模型请求直接使用同一 Turn 内连续的 response_index，重试保持该序号；工具继续使用原 tool_call_id。原生类型及持久记录中的 LoopId 可保留为内部关联字段，不表示独立循环，不建立多 Loop 到 Turn 的映射或公开实体，也不因此迁移、重写旧记录。独立子完成通知使用新的 MessageId 和有效委派来源，不冒用旧父调用或旧 LoadId。
 
 | 接口边界 | 负责内容 |
 | --- | --- |
-| 输入与上下文 | Session 提供本轮绑定的配置、有效历史和已认领的标准输入；Runtime 请求准备下一次模型调用，不直接读队列。Runtime／模型适配按存储章节规则处理旧工具历史 |
-| 模型 | 使用本轮绑定的模型和参数，返回流式输出、完整模型响应或结构化错误；复用既有响应和 ModelError 类型，由 Runtime ModelDriver 唯一负责当前模型调用的有限重试 |
-| 工具 | 执行本轮普通 ToolCall，按原调用 ID 交付进度和标准 ToolResult；一批工具结清后继续模型。agent 启动调用返回受理结果，子执行由委派范围独立持有，后来完成消息走标准输入 |
-| 压缩 | 复用已有压缩候选类型；历史替换与提交由 Session 所有者核对原工作、适用版本和取消状态 |
-| 输出与历史交接 | 流式载荷供既定观察设施分发；新增完整 HistoryItem 通过窄内部回调交 SessionController 接手并保存，适用边界完成确认后再推进模型或工具 |
-| 完成候选 | 现有 LoopReport.outcome 为 Completed 时交 SessionController 判断；可消费 next-step 绑定到原 Turn 后复用 AgentLoop::start 接续，否则认领 finalizing，后续输入留给下一 Turn |
-| 取消与实际停止 | 信号针对原执行，沿用 LoopReport 交接实际 outcome、完整历史变化、可选模型 partial 及清理事实；partial 来自 Runtime 模型组装与结束返回路径，不从公共观察流还原。SessionController 完成必要收尾与适用保存后才发布 turn.finished；Runtime 返回、accepted 或等待超时均不能单独表示公共 Turn 已完成 |
+| 请求准备 | Session 认领输入、组织有效历史、框架与 Role 提示词、工具声明、模型参数及必要压缩，形成完整 ModelRequest；Runtime 不回调获取历史、输入或 Prompt |
+| 模型调用 | Runtime 共享 ModelDriver 执行一次逻辑请求，管理流式组装、协议校验、有限重试、取消和期限，直接返回真实完整响应或结构化失败及可选 partial |
+| 工具执行 | Runtime 原语按已绑定声明、策略与原 ToolCallId 执行普通工具，提供实时进度与交互并返回实际标准结果；实际工具及受管进程清理由具体工具所有者确认，Session 持有并等待其清理句柄，原语返回不等于实际停止；不决定下一模型请求 |
+| 压缩 | Session／压缩能力准备无工具请求，调用同一模型原语；候选及模型上下文投影的替换由 Session 核对原工作、版本和取消状态后提交，原始历史保持不变 |
+| 记录与保存 | Session 从本次结果追加新增标准记录，直接完成适用保存屏障；Runtime 不持有完整会话历史，也不在最终结果中重复交付历史 |
+| 继续与结束 | Session 在同一 Turn 驱动中决定运行工具、处理 next-step 或认领 finalizing；普通工具、必要保存和数据交接未完成前不发布 turn.finished |
 
-输入、模型响应、工具结果、压缩和输出载荷复用 Runtime 实际类型。启动与输入沿用现有接口；运行中完整记录的及时产出补充一个窄内部回调，不增加公共业务方法、第二套结果结构或请求调度层。公共 Event 可复用相应数据内容，但不承接保存确认、继续执行或结束认领；这些事项不依赖订阅者或 UI 回应。观察适配层补齐公共事件上下文，Host 和 Agent 不逐片重新调度流式正文。
+公共观察只分发原语与 Session 已有的真实状态和载荷，不参与记录接手、保存确认或结束认领。输出与重试进度的内部接收口绑定原请求，不是完整历史回调，也不把观察流升级为权威结果。Host 和 Agent 不逐片重新调度正文。
 
-模型重试固定由 Runtime 的 ModelDriver 承担；模型适配器提供结构化错误与可安全重试依据，Session 负责统一 Fault 和公共状态的适配。首版关闭底层 SDK 额外重试，Host、Agent、Session 与执行循环不再追加重试层；重试只重复当前模型调用，不重跑已完成业务工具。完整规则见“有限重试与期限”，进度通过“模型重试进度”中已定的完整 turn.state 发布。普通工具业务错误仍通过工具结果交回模型，执行故障与取消走统一收尾出口。
+### 本轮绑定与完整模型请求
 
-### 启动与输入适配
+SessionController 在状态锁外准备历史、配置与实际资源；进入短时串行边界后，核对本 Session 仍可执行、原 Load、适用历史与配置版本，按两队列规则认领全部初始输入并登记 Turn。配置更新先提交时须使用新版本；普通收件引起的业务 revision 变化不单独使准备失效。既有 Session 任务持有执行、取消及收尾责任，启动回执或客户端请求结束不释放它。
 
-Session 到 Runtime 的启动沿用现有 `AgentLoop::start(LoopRequest, LoopOptions, Arc<dyn LoopInputs>)`；`LoopRequest` 继续包含 `history`、单一 `input` 和 `config`。Session 自行组织适配，不新增公共启动接口，也不要求 Runtime 增加 `TurnStart`、`initial_inputs` 或 Host 专属类型。
+初始输入按当前 next-step 批次、一个 next-turn 的顺序整体绑定，逐条保留 MessageId、来源、模式与顺序；不再拆成单一首项和首次回调交付的余项。已绑定项各记入历史一次，先于后来允许认领的输入。pause 只阻止新队列消费，不撤销已绑定批次。运行中的 follow_up 留给下一 Turn，本轮配置和实际资源从绑定至结束保持固定。
 
-SessionController 在状态锁外准备历史、配置和实际资源；进入短时串行边界后，核对本 Session 仍可执行、原 Load、适用历史与配置版本，按两队列规则认领并确认初始输入和本轮绑定。配置更新先提交时须使用新版本；普通收件引起的业务 revision 变化不单独使准备失效。同步启动与执行 owner 登记连续完成，准备、等待、I/O 和可能耗时的资源释放放在边界外。
+每次普通模型请求由 Session 选定原 Turn 与 response_index，在锁外准备完整 ModelRequest。请求包含实际模型所需的提示词、有效消息、工具声明及参数；旧工具历史按第 4 章适配。准备包含异步提示词或压缩时，在发出请求前再次核对原执行、取消、历史提交及可消费 next-step；新认领输入按真实顺序加入本方历史，并更新本次请求投影。请求交给模型原语后不再修改；后来输入留给下一允许边界。请求编号来自明确登记，不从回调次数、事件或最近状态推算。
 
-初始批次按既定顺序逐条交接：第一项放入 `LoopRequest.input`，其余已绑定项由 Session 的输入适配在首次 `LoopInputs::take` 时先行交付，再交付后来允许认领的 next-step。已绑定余项只是本次执行的内部交接暂存，不构成第三条消息队列；pause 仅阻止新队列消费，不撤销这批绑定。Session 保留原 MessageId、来源、模式和绑定事实，Runtime 的 Prompt／Steering 历史标签不改写公共 follow_up／steer 语义。
+历史由 Session 单一持有。请求准备和压缩使用共享的不可变历史视图、已确认前缀与新增后缀；不在每步深复制完整历史，不在 Runtime 另存一份累计记录。对模型必要的上下文投影和提供方请求编码在实际请求边界完成，只缓存有明确用途的共享数据，不为合仓增加快照平台、复制队列或全量对账。
 
-运行中的新输入仍由 Session 的 `LoopInputs::take` 适配按本章规则认领；它同步返回已就绪内容，不等待、不做 I/O，也不按调用次数推算模型请求编号。follow_up 只在新 Turn 绑定时交接。本轮配置及资源保持固定，Session 配置更新不通过 Runtime 的运行中更新能力改变当前 Turn。
+提示词准备、普通模型调用、工具策略、工具执行和压缩模型调用分别使用明确的期限；适用上级绝对截止点优先。准备期间的新输入、重试及同轮继续不重置已有操作期限。Runtime 模型原语沿用已有流协议校验、完成与 EOF 条件、用量组装、panic 隔离、取消、partial 和安全重试判定；Session 与提供方适配不追加隐式重试。
 
-执行 owner 与控制句柄由 Session 持有，启动回执或客户端请求结束不释放已接受的执行。启动失败沿用绑定前／后的既定规则：绑定前保留有效输入及顺序，绑定后记录本轮失败且不自动重排，bound 不等于模型已收到。结束判定、历史保存和取消继续遵守各自交接边界，不能把内部 Runtime 返回直接当作公共 turn.finished。
+绑定前准备失败保留有效输入及原顺序；绑定后失败记录原 Turn 结果，不自动回队或重发，bound 不等于模型已收到。普通输入、取消和实际失败按原所有者边界认领，不用预期请求结果代替接受事实。
 
-### 新增完整记录交接
+### 新增完整记录与保存屏障
 
-单次模型调用继续由现有 ModelDriver 承担，AgentLoop 推进模型与工具循环。Runtime 在完整记录产生的位置增加一个窄的内部产出回调，由 Session 执行适配装配接收方；沿用现有启动调用形状与输入契约，不把回调扩成公共事件订阅、业务消息队列或独立执行实体。
+Session 直接等待原语结果，在本方历史中追加实际新增记录；完整模型响应、普通工具结果、已绑定输入分别沿既有类型表达。模型和工具原语不交付历史前缀、累计 appended 或结束时的历史副本。普通工具可以并行完成，批次记录仍按原调用顺序组织，不让完成先后改变历史关联。
 
-回调只交本次新增且有序的标准 HistoryItem，包含完整模型响应、工具结果，以及此前实际消费但尚未交接的输入记录。批次保持 Runtime 的原历史顺序，普通工具并行完成不另行改变记录顺序。沿用已绑定 ExecutionRef、原内部 LoopId 及该 Loop 内的增量位置，不新增公共编号；既有历史仅供模型上下文使用，不随每次交接重发。
-
-| 交接位置 | 本次交出的内容 | 继续执行的条件 |
+| 执行边界 | Session 接手及追加的内容 | 继续执行的条件 |
 | --- | --- | --- |
-| 完整模型响应已经形成 | 新增响应及此前尚未交接的实际输入等完整记录 | Session 接手并完成本边界适用的保存确认后，才执行后续工具或继续处理正常完成候选 |
-| 普通工具批次已结清 | 本批新增的标准工具结果，包含 Runtime 实际结算的失败或取消结果 | 完成本批适用保存确认后，才发起下一模型请求 |
-| 内部执行收尾 | 尚未交接的完整记录；真实结束事实仍通过既有 LoopReport／收尾载荷交接 | 按既有结束与保存边界处理，公共 Turn 由 Session 收尾；已接手记录不重复追加 |
+| 完整模型响应形成 | 实际完整响应与此前已消费但尚未确认保存的输入 | 完成本边界适用保存确认后，才执行响应中的工具或判断正常完成候选 |
+| 普通工具批次结清 | 本批实际标准结果，包括真实失败或取消结果；具体工具所有者另行确认实际清理，Session 等待相应句柄 | 确认本批工具实际清理并完成适用保存确认后，才准备下一模型请求；原语返回不代替清理确认 |
+| Turn 收尾 | 尚未保存的实际内容、必要 partial 与原 Turn 真实结束事实 | 所属工具清理、必要交接及适用保存处理结束后，才发布公共 finished |
 
-接手记录与确认保存是两个事实，可在同一个内部调用中依次完成，不另建两阶段回执。Session 先登记本次接手范围并持有对应保存工作，再在业务状态锁外组织编码、写入和必要同步；使用既有 pending／persisted／failed／not_applicable 表达保存情况。Session 的已接手位置与已确认保存范围分别维护，保存失败不撤销已经接手的内容。
+接手记录与确认保存是两个事实。Session 先登记本次新增范围并持有对应保存工作，在状态锁外编码、写入和同步，完成后核对原范围；沿用 pending／persisted／failed／not_applicable，不另建两阶段回执。已追加位置与已确认保存范围分别维护，保存失败不撤销已经接手的内容。
 
-保存失败沿既定存储 Fault、阻塞与原范围核对规则处理，阻止越过该保存边界的新模型或工具执行；不把存储错误当作可重试模型错误或普通工具业务结果，不重跑已完成工具，也不覆盖已确认的业务结果。普通取消、Host force 或等待者结束均不丢弃已由 Session 接管的必要保存工作；退出时的状态与保存屏障按 Host 生命周期规则处理。
+保存失败沿既定 Fault、阻塞与原范围核对规则处理，阻止越过该保存边界的新模型或工具执行；不把存储错误当作模型可重试错误或普通工具业务结果，不重跑已完成工具，也不覆盖已确认的业务结果。普通取消、Host force 或等待者结束均不丢弃必要保存。原范围恢复确认也不重新追加记录或调用模型。
 
-交接采用同进程调用，按实际生命周期使用借用、共享所有权或必要的新增记录副本；只处理本次增量，不反复深复制、拼装或序列化整份历史。按已定边界合批，不逐 token 写盘，也不为合批增加固定等待窗口。memory 只接手必要内存内容，不创建自身 JSONL；观察事件可复用相应结果载荷，但不承担内部交接或保存确认。
+按实际生命周期使用借用、共享所有权及必要的新增记录副本，只处理本批增量，不反复复制或序列化整份历史。按已定边界合批，不逐 token 写盘，也不新增合批等待窗口。memory 只保留本方运行所需内容和必要结果交接，不创建自身 JSONL；观察事件不承担保存确认。
 
-完整记录回调仅处理标准 HistoryItem。可控失败或取消时的未完成模型输出按下述结束报告交接，不伪装为完整 HistoryItem，也不把公共流式观察事件拼接成权威响应。最终 LoopReport 中完整记录的补齐继续遵守已接手范围规则。
+### 未完成输出与真实停止
 
-### 未完成输出与结束报告
+可控失败或取消（包括 Host force）时，模型调用原语从实际流组装及失败／取消返回路径直接交出原请求的结构化原因、实际用量和可选 partial。Session 按已登记的 Turn 与 response_index 接手一次，不经过独立循环 join，不读取公共流式观察或显示缓存来重建结果。
 
-可控失败或取消（包括 Host force）时，Runtime 从模型组装处沿实际失败／取消返回路径保留必要的未完成输出，并在现有 LoopReport 中增加可选模型 partial。AgentLoop::join 的调用形状及完整记录回调保持原职责，不新增公共接口、第二套结束报告或独立 partial 资源；Session 不以 TUI 是否在线、公共流式事件是否送达来决定取得和保存的内容。
-
-| 结束报告中的内容 | 交接约束 |
+| 本次模型调用的结果 | 接手约束 |
 | --- | --- |
-| loop_id 与 outcome | 继续提供原内部执行关联、真实完成／失败／取消结论及原因；partial 内不重复保存整套身份或另一份 Fault |
-| appended | 继续只含完整的标准 HistoryItem，Session 按已接手范围补齐尚未接手部分 |
-| 可选模型 partial | 只包含尚未形成完整响应的原 request_index 与实际已有内容；Session 通过原 Loop 与请求关联映射到公共 response_index |
-| 没有未完成模型响应 | 不补造空回答、模型片段或未发生的工具结果；Turn 失败或取消本身不意味着必有 partial |
+| 完整响应 | 保留实际内容、finish_reason 和用量；即使后续工具或保存失败，也不改成 partial |
+| 失败或取消及可选 partial | 只保留该请求实际已有且尚未形成完整响应的内容及原原因；不伪造完整响应、空回答或未知用量 |
+| 未完成工具名称或参数 | 保留为未完成内容，不补齐、不创建可执行 ToolCall，不伪造 ToolResult |
+| 没有模型 partial | 如实省略；工具阶段失败或 Turn 取消本身不证明模型有未完成输出 |
 
-partial 按“模型响应是否完整”判断，和 Turn 最终是否成功分开。已有完整模型响应及其真实 finish_reason 保持原样；在工具阶段失败或取消，不将此前完整回复改成 partial。尚未完整生成的工具名称、参数等片段只能作为未完成内容保留，不补齐参数、不据此创建可执行 ToolCall 或伪造 ToolResult。已经实际执行的普通工具仍由原工具机制交回真实结果并收尾。
+同一 Turn 同时最多一个普通模型请求，所需 partial 来自该请求实际返回值；不预建通用片段仓库。同一请求已经交接完整响应时，不再保存相同内容的 partial。正文观察及必要补读继续沿原 Turn、response_index、channel 和输出范围衔接，不追加成第二份聊天回答。
 
-一个内部 Loop 同时最多只有一个未完成模型请求，结束报告携带该请求实际保留的内容即可；复用已有内容块、通道与工具片段类型，不预建通用片段列表或结果平台。报告按原内部执行接手一次：完整记录以已接手范围为准，不因尚未保存而重复追加；同一请求已经形成并交接完整响应时，不再将相同内容另存为 partial。正文观察及必要补读继续沿原 Turn、response_index、channel 和输出范围衔接，不把报告内容再追加成第二份聊天回答。
+Session 在受控收尾中保存必要 partial、实际结果和真实结束事实；memory 只按原生命周期及必要结果交接处理。后续模型请求按历史适配规则使用实际内容，不把 partial 冒充完整 AssistantHistory，也不自动续跑旧任务。
 
-persistent Session 在受控收尾（包括 Host force）中保存格式有效、明确标注未完成的内容及真实结束事实，按既定保存边界确认；memory Session 不创建自身文件，只按原生命周期和必要结果交接规则处理。保存记录与后续模型输入适配分别承担各自职责：原内容保持真实，后续请求复用既有历史适配，不将 partial 冒充完整 AssistantHistory，也不自动续跑旧任务。
+取消和 Host force 向原模型与工具执行传递信号；Session 驱动仍等待实际返回、普通工具及受管进程清理，完成必要保存与交接。不能通过丢弃 future、终止驱动任务或只观察取消事件冒充完成。失败先认领时，后续清理取消不覆盖 failed；取消先认领时保留 cancelled，后续问题作为清理事实。进程崩溃、外部强杀或确实无法取得结果时只处理实际已有内容，不补造输出、保存确认或干净终态。
 
-取得报告后，Session 仍按原终态认领、工具清理、保存和必要交接规则收尾；Failed 与 Cancelled 都适用，取消不覆盖先认领的失败或已经确认的完成结果。Host force 复用取消路径及 AgentLoop::join 接手真实报告，再完成必要保存；不因停止后继业务而丢弃已产生的结果。进程崩溃、外部强杀或确实未取得结束报告的异常只处理实际已经取得的内容，不补造输出、保存确认或干净终态。
+### 同一 Turn 内继续与结束
 
-### Runtime 返回与同轮接续
+完整模型响应保存后，包含工具调用时由原 Turn 执行并结清该批，保存工具结果后再准备下一请求；无工具调用时，SessionController 在同一短时状态边界核对原 Turn、取消、正常结束认领及可消费 next-step。有输入则绑定到原 Turn，由同一驱动任务继续；无输入且普通工具已结清才认领 finalizing。next-turn 不阻止当前 Turn 完成。
 
-Session 通过现有 `AgentLoop::join()` 接手 `LoopReport`，并确认前一次内部执行实际结束后再启动后继；不以观察事件或仅收到完成通知代替执行所有者的交接。报告中的 `LoopOutcome::Completed` 只形成正常完成候选；`Failed`、`Cancelled` 或 join 失败沿原 Turn 的错误、取消与收尾规则处理。
+准备后续请求时保留 TurnId、LoadId、active_turn_id、配置与实际资源绑定，公共 Turn 保持 running，活动可以为 preparing；不重复启动或发布 Turn，不把一次模型调用结束映射成 Session idle。原绝对期限不变。取消、关闭或 finalizing 已认领时不得发起后继模型或工具；已经绑定的输入沿用不自动回队规则。
 
-正常完成后，SessionController 在同一短时状态边界核对原 Turn、取消和结束认领，以及可消费的 next-step。有输入则绑定给原 Turn，基于累计有效历史再次调用现有 `AgentLoop::start`；首项和余项沿用前述输入适配。此时只取 next-step，不因内部 LoopId 变化而消费 next-turn。无可消费输入且普通工具已结清时，才认领 finalizing。
-
-接续准备期间保留原 TurnId、LoadId、active_turn_id、配置和实际资源绑定，公共 Turn 保持 running，活动可为 preparing；不重复发布公共 Turn 启动，也不将内部 Finished 直接映射成公共 finalizing、finished 或 Session idle。每次内部启动生成自己的 LoopId；整轮已有的明确期限沿用原截止点，不因接续延长。
-
-取消和关闭在接续准备期间仍由原 Session／Turn 接受并裁定；安装后继执行前须再次核对。已认领取消、关闭或 finalizing 时不得继续安装。内部循环已经完成不代表公共 Turn 已认领正常结束。接续启动失败按原 Turn 失败收尾，已经绑定的输入沿用不自动回队规则。
-
-Session 在既有 ExecutionRef 下保留每次内部 LoopId 的关联。影响当前执行的状态、结果与回调必须核对原内部执行；旧 Loop 的迟到输出按原响应关联处理，不能覆盖后继 Loop 的活动状态或再次触发接续。LoopId 不加入公共 ExecutionRef，不新增公共执行实体。
-
-每个 Loop 的新增历史只接手一次；`LoopReport.appended` 包含本次内部执行的全部新增记录，最终补齐以 Session 已接手范围为准，已经接手但尚未保存的内容不重复追加。保存失败不回退已接手位置。内部 `(LoopId, request_index)` 映射到同一 Turn 内连续的 response_index；请求数、工具批次数和用量按实际结果汇总。同一 LoadId 内的 runner_revision 不因内部循环变化而归零。公共 turn.finished 只在本轮最终收尾和适用保存确认完成后发布。
+输出、状态和实际结果按原 Turn 与 response_index 处理。迟到进度不能覆盖新请求状态或重复追加结果，也不能再次推动调度；已完成原请求的真实输出仍归原响应保留。请求数、工具批次数及用量由 Session 按实际结果累计，runner_revision 在同一 LoadId 内连续。无需独立 Loop 关联表、累计报告去重或报告补齐路径；公共 turn.finished 只在本轮最终收尾和适用保存处理完成后发布。
 
 ## 工具句柄、交互与压缩
 
@@ -596,9 +587,13 @@ Session 的 pending_interactions 是当前待回答请求列表，没有待回�
 
 手动 session.compact 由目标 SessionController 直接接收，在 Session 开放、上下文可用，且没有活动 Turn、已认领的启动工作或另一项压缩时开始。否则按实际原因返回忙碌或不可执行，不自动取消当前任务，也不保存待执行的压缩命令。压缩与新 Turn 启动在同一 Session 管理边界裁定先后：启动先认领则压缩返回忙碌；压缩先认领则暂不启动新 Turn。手动压缩复用已有压缩能力，不新建对话 Turn，不进入两条消息队列，也不把命令文本交给模型解释。
 
-手动压缩期间，用户消息和子完成通知照常进入原有 next-step／next-turn 队列，暂不消费。压缩及必要保存、收尾结束后重新检查队列，按当时的暂停、阻塞与调度规则继续；不因压缩结束清除用户暂停，不改变两队列的顺序规则，也不阻塞其他 Session。自动压缩继续由 Runtime 在执行循环允许的模型请求边界触发，历史提交仍归 Session 所有者，不受手动压缩仅在空闲时开始的限制。
+手动压缩期间，用户消息和子完成通知照常进入原有 next-step／next-turn 队列，暂不消费。压缩及必要保存、收尾结束后重新检查队列，按当时的暂停、阻塞与调度规则继续；不因压缩结束清除用户暂停，不改变两队列的顺序规则，也不阻塞其他 Session。自动压缩由 Session 驱动在准备普通模型请求的明确边界触发，历史提交也归 Session 所有者，不受手动压缩仅在空闲时开始的限制。
 
-压缩经历 preparing、summarizing、merging、committing、finished。压缩提交与其他历史写入共用 Session 写入边界；提交前取消保留原历史，提交先完成则不能宣称已回滚。失败保留可用原历史，提交不确定时核对实际记录，不因取消或报错就假定未写入。手动压缩的操作关联与取消回执按第 6 章处理；实际压缩类型、提交版本核对和取消信号沿既有 Runtime 适配落实。
+压缩经历 preparing、summarizing、merging、committing、finished。压缩提交与其他历史写入共用 Session 写入边界；提交前取消保留原历史，提交先完成则不能宣称已回滚。失败保留可用原历史，提交不确定时核对实际记录，不因取消或报错就假定未写入。手动压缩的操作关联与取消回执按第 6 章处理；实际压缩类型、提交版本核对和取消信号由 Session 与压缩能力接口落实。
+
+普通请求和压缩共用 Runtime 模型调用原语；压缩只提交无工具的完整 ModelRequest，不创建对话 Turn，不取得工具执行权限。每次压缩模型调用初期只尝试一次，真实请求次数和用量单独记入该压缩工作，不计入普通响应序号。
+
+压缩的模型调用期限、所属压缩操作及原 Turn 的适用绝对期限明确传入并取最早截止点；提示词准备与压缩分别计时，不用外层 prompt_timeout 隐式截断压缩，也不因分块调用、重试或新输入重置原操作期限。
 
 新输入与正常收尾、工具完成与取消、保存和关闭都由相应直接所有者裁定一次。执行结果、必要数据交接、保存确认和客户端观察是不同事实；最终 Session 完成条件见《生命周期与控制》，数据可读性见《输出观察与读取》。
 
@@ -676,7 +671,7 @@ accepted 表示目标 SessionController 已接手输入和正文，不保证执�
 | 目标在接收前明确拒绝 | 返回拒绝与 Fault，不新增输入 |
 | 输入已入队，回执形成时已知绑定前加载或准备失败 | 返回 result.delivery=accepted 并附 result.start_error；输入保持 queued，由原目标按既定规则处理 |
 | 接收回执已形成，随后才发现绑定前加载或准备失败 | 原回执保持不变；通过 Session 状态、事件或查询报告，输入保持 queued，不补发原调用返回 |
-| 已绑定 Turn 后 Runtime 启动失败 | 保留 accepted，记录该 Turn 的 failed；输入保持 bound，不退回队列 |
+| 已绑定 Turn 后执行准备或首次请求失败 | 保留 accepted，记录该 Turn 的 failed；输入保持 bound，不退回队列 |
 | 组合创建部分成功 | 外层返回已经发布的对象 ID，result.steps 保留各步骤事实；因前置失败而跳过的步骤才写 not_attempted |
 | 调用超时或连接中断，未收到完整返回 | 报告本次调用未得到确认，不据此断言未接收，也不自动补投 |
 | 现有进度或结果查不到 | 只表示当前不可查询，不证明未接收或未执行 |
@@ -944,7 +939,7 @@ type CompactCancelRequest = {
 };
 ```
 
-启动请求的 operation_id 贯穿其回执、活动手动压缩状态和既有查询。取消请求使用自己的 operation_id，同时以必填 target_operation_id 定位本 Session 的原手动压缩；不新增 CompactionId、通用任务实体或另一套操作生命周期。自动压缩继续按实际 Runtime／Turn 归属处理，不为套用本结构虚构手动操作编号。
+启动请求的 operation_id 贯穿其回执、活动手动压缩状态和既有查询。取消请求使用自己的 operation_id，同时以必填 target_operation_id 定位本 Session 的原手动压缩；不新增 CompactionId、通用任务实体或另一套操作生命周期。自动压缩继续按实际 Session／Turn 归属处理，不为套用本结构虚构手动操作编号。
 
 取消由目标 SessionController 核对当前操作资格、适用运行及原操作身份，并与压缩提交按原边界裁定。回执复用 ReceiptBase 与上述方法分支，cancel_claimed 只表示本次是否认领原压缩的取消，不表示执行已经停止；原操作已在取消或已结束时返回 false 和仍可确认的真实状态。已提交的历史不承诺回滚。session.compact.cancel 不清除两条输入队列，也不取消后来的 Turn 或另一项压缩；实际收尾后按第 5 章的暂停、阻塞及调度规则继续。
 
@@ -1027,7 +1022,7 @@ Host 运行环境的装配代码登记可用工具模块，复用同一声明供
 
 需要对象能力的工具，通过后端构造函数或薄包装器获得必要的窄接口及可信调用上下文。来源 Session、当前 Turn／执行关联和内部调用资格由后端绑定，不能由模型参数自报；目标对象仍使用工具 action 的业务参数。agent 工具据此组合标准对象接口，按实际拥有的协作范围处理委派；不向普通 ToolContext 增加整份 Host、Agent、Session 或 UI 对象，也不要求所有工具使用统一的业务上下文大结构。
 
-本轮工具声明和实现保持同一绑定，范围包含该公共 Turn 内的所有模型请求、工具调用和内部 Loop 接续。session.update 修改 tools 从下一 Turn 生效；Agent 默认值更新仅影响新 Session。资源更新、缺失处理及旧资源释放统一遵守第 2 章，普通调用与独立子执行的结束、取消和清理遵守本章及第 5 章既有所有权规则。
+本轮工具声明和实现保持同一绑定，范围包含该公共 Turn 内的所有模型请求、工具调用和同轮继续。session.update 修改 tools 从下一 Turn 生效；Agent 默认值更新仅影响新 Session。资源更新、缺失处理及旧资源释放统一遵守第 2 章，普通调用与独立子执行的结束、取消和清理遵守本章及第 5 章既有所有权规则。
 
 例如同一 Agent 下，S1 选择 read，S2 选择 read、edit、bash；两者各自构造 ToolSet，Runtime 只收到对应集合。S1 后续显式加入 agent 工具，从下一 Turn 起才可发起委派。进度、过程正文、结果与子执行关联采用第 9 章统一的公共观察映射。
 
@@ -1162,7 +1157,7 @@ agent.create 在一次公共调用中组合创建 Agent 与默认 Session；sess
 
 ## 派发与接收的建立顺序
 
-主 Session 的 Runtime 按普通 ToolCall 机制调用 agent 工具实现。工具根据意图使用标准创建接口：新 Agent 由 Host 创建，默认 Session 交该 Agent 创建；在已有 Agent 下新建 Session 时，由该 Agent 直接处理，不另建 Agent，也不重复创建默认 Session。跨 Agent 的调用沿 Host 路由，同 Agent 调用沿所属 Agent 处理。
+主 Session 通过 Runtime 工具原语按普通 ToolCall 机制调用 agent 工具实现。工具根据意图使用标准创建接口：新 Agent 由 Host 创建，默认 Session 交该 Agent 创建；在已有 Agent 下新建 Session 时，由该 Agent 直接处理，不另建 Agent，也不重复创建默认 Session。跨 Agent 的调用沿 Host 路由，同 Agent 调用沿所属 Agent 处理。
 
 工具取得目标 Session 后，登记本次 Host 运行、root／parent／child SessionRef、任务 MessageId 和发起 ToolCallRef，准备通用结果接收及必要观察，再投递首条消息。工具可在同一次 create 的内部先创建空对象，再完成准备与消息投递；这不要求模型拆成多次调用。任何带初始消息的委派组合，以及对已有 Session 的首次 send(delegate:true)，都须在目标实际接受任务前完成该登记与接收准备，不能先接受任务、再补建委派。
 
@@ -1189,7 +1184,7 @@ result.steps 中各步骤只表达状态和错误；部分失败保留实际已�
 
 通知使用独立 MessageId 和实际子执行来源，保留原任务消息及发起调用的追溯关联。原 ToolCallId 不要求全局唯一，也不再决定通知的执行归属。模型根据系统提示词识别来源、整合结果并决定后续工作；单次输出 final 不代表整个根协作范围的业务目标已经完成。
 
-Runtime 与模型适配按标准工具协议结清当前工具批次，再准备后续请求，不需要支持未闭合 ToolCall 跨过后续模型请求的特殊编码。父方无当前工具续跑且无可消费 next-step 时，可正常结束 Turn；独立子任务稍后完成，以新消息继续当前允许的下一步或开启新 Turn，不重开 finished。
+Session 等待 Runtime 工具原语按标准工具协议结清当前工具批次，完成保存屏障后再准备后续请求，不需要支持未闭合 ToolCall 跨过后续模型请求的特殊编码。父方无当前工具续跑且无可消费 next-step 时，可正常结束 Turn；独立子任务稍后完成，以新消息继续当前允许的下一步或开启新 Turn，不重开 finished。
 
 普通创建空对象和未建立委派的一般消息投递，只承诺其本身的动作；create 带 text 或 send(delegate:true) 按本章先准备委派，再接受任务，只有有效委派范围承担自动完成通知。复用子会话时明确本次活动和接收方，不把任意 final／idle 当成每条 send 的独占成功结果。需要汇总子结果的临时中间方可调用 wait 保持自身执行；根交互会话可以结束当前 Turn 并等待后续通知。
 
@@ -1391,7 +1386,7 @@ session.state 返回轻量权威状态，不携带完整 Role、正文或历史�
 
 load／unload 管驻留，resume 管允许的后续消费；关闭后的两种 mode 都不能 reopen。损坏或不完整 JSONL 返回 SESSION_HISTORY_LOAD_FAILED，保持加载或执行阻塞；再次 resume 必须重新通过校验，不能清除错误后使用残缺上下文或向已知损坏历史追加。读取历史不重派旧输入，也不恢复旧 Turn、队列或等待关系。
 
-不设置外部 turn.start；SessionController 认领输入、绑定 Turn 与配置后启动 Runtime。控制语义、模式回收和删除范围由生命周期章节统一定义。
+不设置外部 turn.start；SessionController 认领输入、绑定 Turn 与配置后，由既有驱动任务调用模型和工具原语。控制语义、模式回收和删除范围由生命周期章节统一定义。
 
 ## 消息与输入 4 项
 
@@ -1554,7 +1549,7 @@ attempt 与 max_attempts 均为包含首次请求的总尝试口径；重试进�
 | 模型响应实际完成 | 沿用 model.response.finished 及实际结果；正常 turn.state 将 model_retry 清空，后续工具或模型按原流程推进 |
 | 最终失败、取消或离开当前模型请求 | 先按真实状态清空 model_retry，进入适用收尾；公共 turn.finished 在 Session 完成既定收尾后发布，不为单次尝试伪造响应或 Turn 完成 |
 
-Runtime 在安排、实际开始与结束重试时，通过内部执行状态或窄内部交接提供真实进度；Session 执行适配核对原内部 Loop 与请求关联，登记可查询状态后，再派生完整 turn.state。不能从可能丢弃的公共输出事件拼出权威重试状态；没有订阅、慢消费或断线不改变重试与结束判定。成功、失败、取消及离开该请求时，清空进度也必须发布正常状态更新，使只订阅 state 的客户端可以正确收起提示；初始快照或补查取得当前值，不承诺重放每个中间阶段。
+Runtime 模型调用原语在安排、实际开始与结束重试时，直接向原请求的内部接收口提供真实进度；Session 核对原 Turn 与 response_index，登记可查询状态后，再派生完整 turn.state。不能从可能丢弃的公共输出事件拼出权威重试状态；没有订阅、慢消费或断线不改变重试与结束判定。成功、失败、取消及离开该请求时，清空进度也必须发布正常状态更新，使只订阅 state 的客户端可以正确收起提示；初始快照或补查取得当前值，不承诺重放每个中间阶段。
 
 ## 标准事件分发与订阅衔接
 
@@ -1701,7 +1696,7 @@ resync_required 是某一订阅的结束通知，不是可调用接口。Host �
 
 需要提供过程正文的工具，在绑定时取得窄的内部输出能力，并在实际产生处提交文本与通道。Session 执行适配依据可信调用绑定确定原 Host 运行、Session、Turn、ToolCall 及适用 LoadId，维护对应来源的 UTF-8 字节位置和实际可读范围；工具不自行生成公共身份、事件编号或另一套正文游标。正文沿已有读取与生命周期规则保留，公共推送不成为唯一正文来源，也不因此新增永久输出库或延长 memory 寿命。
 
-Runtime 的实时进度和 ToolFinished 是观察信号，不替代完整结果交接；ToolFinished 中的 outcome 与 output_bytes 不能构造缺失的结果正文。Session 通过第 5 章的完整记录及执行收尾取得实际结果后，沿本章既有完成事件提供；事件是否送达不决定工具结果、必要保存或委派收尾。具体内部回调与薄包装器按现有类型实现，不增加工具专用公共 RPC。
+Runtime 的实时进度和 ToolFinished 是观察信号，不替代完整结果交接；ToolFinished 中的 outcome 与 output_bytes 不能构造缺失的结果正文。Session 通过第 5 章的原语返回值及实际工具收尾取得结果后，沿本章既有完成事件提供；事件是否送达不决定工具结果、必要保存或委派收尾。实际工具结果由原语返回，实时观察按现有类型适配，不增加完整历史回调或工具专用公共 RPC。
 
 ## 工具与子执行的观察关联
 
@@ -2019,7 +2014,7 @@ HTTP 状态码、JSON-RPC 标准错误码与这组业务码分别保留。第 10
 | --- | --- |
 | 接受前 | 返回拒绝、未发送或实际部分提交事实 |
 | 输入已接受，绑定 Turn 前加载或准备失败 | 输入留在队列，报告真实错误与阻塞；回执形成时已知则附 start_error，之后发现则由状态事件与查询反映，不补写原回执 |
-| 已绑定 Turn 后 Runtime 启动失败 | 该 Turn 按 failed 收尾，原输入保持 bound，不自动重新入队 |
+| 已绑定 Turn 后执行准备或首次请求失败 | 该 Turn 按 failed 收尾，原输入保持 bound，不自动重新入队 |
 | 活动执行发生最终故障 | 保留 partial，认领失败并真实收尾；按错误类别保留所需暂停或硬阻塞；临时子方如仍有保留输入则驻留，实际委派结束后才完成收尾与最终通知 |
 | 已认领完成或取消后又有问题 | 沿用原 outcome，附保存、交付或 cleanup 问题，不再认领第二个结果 |
 | 调用者断线或不再等待 | 原所有者继续管理已接受工作；观察订阅可以结束，不据此取消执行 |
@@ -2055,22 +2050,22 @@ block_reason 至少包含可理解的原因和解除条件。resume 可以核对
 
 模型适配复用现有 ModelError，保留 kind、delivery、retry_hint 与诊断；同时依据 HTTP 状态及提供方 type/code 等已识别信息分类，不能只按 429 或 message 文本决定恢复。临时速率限制和服务过载等已识别的暂时故障，仍须同时满足安全重复、剩余尝试及时间条件。余额、消费上限、硬配额、认证问题和未分类原因停止自动重试。Session 将结构化原因映射到统一 Fault，Fault.retry_after_ms 仅为等待建议，不是上层重试授权。
 
-Runtime ModelDriver 是模型自动重试的唯一负责人；首版关闭底层 SDK 的额外自动重试，Host、Agent、Session 和 AgentLoop 不在其外再重试。沿用现有安全判定：delivery 为 NotStarted、retry_hint 为 Retryable、尚未观察到任何模型事件，并且仍有剩余尝试与期限，才重新调用当前请求。未收到文字不能证明尚未执行；Started、Unknown 或已出现任意模型事件后均不自动从头重发。有状态请求及上游工具必须由适配器提供可安全重复的依据。重试保持原 Turn、当前请求及其上下文，不重新运行已经完成的业务工具；流中断保留真实 partial，不拼接新的生成。
+Runtime 共享模型调用原语中的 ModelDriver 是模型自动重试的唯一负责人；首版关闭底层 SDK 的额外自动重试，Host、Agent、Session、压缩和提供方适配不在其外再重试。沿用现有安全判定：delivery 为 NotStarted、retry_hint 为 Retryable、尚未观察到任何模型事件，并且仍有剩余尝试与期限，才重新调用当前请求。未收到文字不能证明尚未执行；Started、Unknown 或已出现任意模型事件后均不自动从头重发。有状态请求及上游工具必须由适配器提供可安全重复的依据。重试保持原 Turn、当前请求及其上下文，不重新运行已经完成的业务工具；流中断保留真实 partial，不拼接新的生成。
 
 总尝试次数包含首次请求。整次模型调用的期限在首次尝试前确定，取本轮绝对 deadline 与 model_timeout 的更早者；每次尝试和退避等待共同使用该期限，重试不重置它。等待与请求都响应原执行取消。沿用指数退避及当前 30 秒单次重试等待上限；有效 Retry-After 是等待下限，超过该上限或剩余时间不足时停止自动重试，不向下截断后提前请求。次数耗尽或不能继续时保留实际结构化原因，补充实际尝试事实与停止原因，不统一改成 RETRY_FAILED；期限和取消仍按既有真实结果收尾。等待属于原 Turn 的 model 阶段，不新增 retrying 生命周期。
 
 有限重试与单次操作期限不属于资源配额。首版复用现有 Runtime 配置及合法范围，不增加模型并发额度、整 Turn 执行名额、共享冷却、熔断服务或新的重试配置平台。提供方分类依据参见 [OpenAI 错误码](https://developers.openai.com/api/docs/guides/error-codes)、[OpenAI 限流](https://developers.openai.com/api/docs/guides/rate-limits)、[Claude API 错误](https://platform.claude.com/docs/en/api/errors) 和 [Claude 限额](https://platform.claude.com/docs/en/api/rate-limits)；实际适配遵守本节的结构化错误和安全重试约束。
 
-| 既有 Runtime 配置 | 首版沿用的默认值与含义 |
+| Turn 绑定的模型调用配置 | 沿用的默认值与含义 |
 | --- | --- |
 | model_retry_attempts | 2，包含首次，即默认最多重试一次；设为 1 时不自动重试 |
 | model_retry_base_delay | 100 ms，作为既有指数退避的基础等待 |
 | model_timeout | 10 分钟，覆盖一次逻辑模型调用的全部尝试与等待 |
-| deadline | 沿用本轮已有可选绝对期限；存在更早期限时优先，不因重试或同轮内部 Loop 接续延长 |
+| deadline | 沿用本轮已有可选绝对期限；存在更早期限时优先，不因重试或同轮后续请求延长 |
 
-这些值在原执行配置绑定边界确定，当前 Turn 继续使用原配置。Runtime 的真实尝试数和停止原因在既有内部结果／诊断交接中补齐；requests 仍表示逻辑模型请求数，不能代替内部尝试次数，waiting.attempt 也不是已发送计数。进度通道和结束载荷的这部分适配需要实现，不从现有文本增量或 Runtime Finished 摘要倒推。
+这些值在原执行配置绑定边界确定，当前 Turn 继续使用原配置。共享模型调用原语直接返回真实尝试数和停止原因；requests 仍表示普通逻辑模型请求数，不能代替内部尝试次数，waiting.attempt 也不是已发送计数。压缩复用相同的流组装、错误、取消和期限机制，但每次 utility 请求初期固定总尝试数为 1；其调用期限显式受原压缩操作和适用 Turn 截止点约束，不混入提示词准备超时。请求进度由内部接收口更新，不从文本增量或尽力提供的观察事件倒推。
 
-最终失败由 Session 从完整结束报告取得原结构化错误，映射为现有 Fault，连同 failed 结果及可读错误摘要通过正常状态、turn.finished 和结果查询表达。公共完成仍受既定真实收尾与适用保存边界约束；诊断细节按现有查询与日志规则获取。ModelError 保留的 Retryable 提示不授权上层重新开启原 Turn，推送失败也不触发重做。
+最终失败由 Session 从模型调用返回值取得原结构化错误，映射为现有 Fault，连同 failed 结果及可读错误摘要通过正常状态、turn.finished 和结果查询表达。公共完成仍受既定真实收尾与适用保存边界约束；诊断细节按现有查询与日志规则获取。ModelError 保留的 Retryable 提示不授权上层重新开启原 Turn，推送失败也不触发重做。
 
 RPC 或控制等待超时只结束本次等待，stop／close 保留真实 stopping／closing。普通 wait 工具报告新输入可用、取消或已定义的等待期限，不据此宣告子方成功或已停止；不再提供启动调用的 wait_mode。子 Session 明确执行期限由直接所有者执行；父 Turn 取消不默认取消独立子执行，根范围关闭按范围收尾。
 
@@ -2135,7 +2130,7 @@ interface LogRecord {
 
 scope 表示运行域，level 表示严重程度，service/component 表示产生位置，不构成新的实体层级，也不决定 Fault 类型。Runtime 内部事件可用 RUNTIME，Turn 所有者的终态用 TURN，客户端用 CLIENT。
 
-本地 host/agent/session/turn/tool_call 字段按实际可得信息填写，必须属于同一执行链。独立 TUI/Web 没有本地执行 Host 时省略本地链；观察连接的 Host 及其对象时，把实际获得的 target_host_id、target_host_incarnation、target_agent_id、target_session_id、target_turn_id、target_tool_call_id 放入 attributes。嵌入应用只在事件确属本地执行上下文时填写本地链；Runtime 独立运行或 Host 身份尚未建立时也不伪造 ID。客户端记录 Host 返回的 Fault 时保留其 type/code 与 diagnostic_id，来源用对应 target_* 属性关联。独立子执行和通知填写自己的实际执行链；发起关系可用 attributes 中的 origin_session_id、origin_turn_id、origin_tool_call_id 追溯，不把已结束父 Turn 冒作当前 Turn。
+本地 host/agent/session/turn/tool_call 字段按实际可得信息填写，必须属于同一执行链。独立 TUI/Web 没有本地执行 Host 时省略本地链；观察连接的 Host 及其对象时，把实际获得的 target_host_id、target_host_incarnation、target_agent_id、target_session_id、target_turn_id、target_tool_call_id 放入 attributes。嵌入应用只在事件确属本地执行上下文时填写本地链；内部 Runtime 测试或 Host 身份尚未建立时也不伪造 ID。客户端记录 Host 返回的 Fault 时保留其 type/code 与 diagnostic_id，来源用对应 target_* 属性关联。独立子执行和通知填写自己的实际执行链；发起关系可用 attributes 中的 origin_session_id、origin_turn_id、origin_tool_call_id 追溯，不把已结束父 Turn 冒作当前 Turn。
 
 | 字段 | 约束 |
 | --- | --- |
@@ -2263,7 +2258,7 @@ interface LoggingStatus {
 
 ## 从现有能力到新归属
 
-基于此前审查的固定代码版本开展重构，版本与原始链接列于“参考资料”；本次文档 review 不表示重新审查了代码的最新分支。已有审批等执行控制继续放在相应运行配置中，不因 Role 简化而删除。
+本版从 Host 0.9.20（685806af4761eaaa75bae11cd70e5d7a7a0177b0）及其实际固定 Runtime 0.10.0（3aa47629929906832dcb309afb7d242c1ae3e53f）重构为 Host 0.10.1；不以 Runtime 其他分支代替该输入基线。历史参考版本与原始链接列于“参考资料”；设计约束不等于实现或运行验证已完成。已有审批等执行控制继续放在相应运行配置中，不因 Role 简化而删除。
 
 | 现有能力 | 目标归属 |
 | --- | --- |
@@ -2272,7 +2267,7 @@ interface LoggingStatus {
 | 参与者身份与默认入口 | AgentRecord，含 mode 和可空默认 Session 引用 |
 | Session 队列与执行状态 | Agent 内部的 SessionController，统一接收、Turn 绑定和生命周期 |
 | 子任务关联、等待与结果 | agent 启动调用先返回；独立子执行归目标 Session，范围所有者管理通知与清理；最终结果是新消息，显式等待是普通工具 |
-| 执行循环 | SessionController 通过执行适配交付已绑定 Turn，Runtime 推进本轮模型、工具与压缩 |
+| 执行循环 | SessionController 在既有任务中完整驱动 Turn；内部 host-runtime 提供模型调用与工具原语，压缩在 Session 明确边界调用共享模型能力 |
 | 状态版本 | Host incarnation、跨 Runner 驻留连续的 Controller revision，以及 LoadId 内的 Runner revision |
 | input.push、input.resume | 分别收敛到 message.send、session.resume |
 | 原 session.open、卸载式 close | 明确区分 load／unload 与逻辑 close |
@@ -2290,7 +2285,7 @@ interface LoggingStatus {
 | --- | --- |
 | 1. 核心契约与存储 | 补齐核心公共类型、消息与操作回执、执行错误和持久记录格式，明确目录使用权、保存确认和格式校验；辅助查询字段随相应模块实现和 TUI 对接确定 |
 | 2. Host 与实体 | 重构服务级 Agent，引入实体 Agent、Role、mode、默认入口及逐层启停；统一日志装配 |
-| 3. Session 与 Runtime | 打通 next-step／next-turn、输入绑定、普通工具批次、启动回执、独立子执行、完成通知、模型、取消、压缩及收尾；冻结工具适配层范围归属与通用结果交接 |
+| 3. Session 与内部 Runtime | 将执行原语纳入 host-runtime；Session 在既有任务中驱动完整 Turn，直接准备 ModelRequest、处理两队列并等待真实结果；保留工具、委派、压缩、取消与保存边界，删除被替代的完整循环及对账接口 |
 | 4. 客户端接入 | 同进程 API、stdio、WSS 共用业务语义，落实网络认证、连接初始化、Host 唯一操作连接与接受边界 |
 | 5. TUI 实际对接 | 从 TUI 使用 Host 完成多轮输入、创建与切换、工具、流式观察、历史、配置和控制；按独立客户端约定展示 |
 | 6. 收敛与清理 | 通过对应功能和边界验证后，移除被替代代码与不再需要的兼容路径 |
@@ -2347,7 +2342,7 @@ interface LoggingStatus {
 | 工具包信息与模块声明 | 首版可沿现有构建信息组织，名称、说明与参数格式只以 ToolSpec 为准；无专属客户端适配仍可通用观察 |
 | 工具与客户端解耦 | 没有专属展示或展示失效时，通用卡片仍显示已有输入、状态、实际输出和结果；不重跑工具、不改写执行状态，agent 子执行按真实关联观察。无界面执行，以及 Host 仍运行时折叠、退订或客户端断线，都不改变已接受工作的归属与收尾 |
 | 现有标准交互暂时无人回答或客户端断线 | 按原 pending、答复、取消和期限处理，不直接判工具失败；新的有效操作端可回答仍未结算的原请求，不能将特殊界面依赖误当通用展示替代 |
-| 实际对接 | TUI 到 Host 的日常操作及 SessionController 到 Runtime 的模型、工具、压缩、取消和输出；typed API、stdio、WSS 的同一操作语义一致 |
+| 实际对接 | TUI 到 Host 的日常操作及 SessionController 完整驱动中的模型、工具、压缩、取消和输出；共享模型与工具原语实际调用，typed API、stdio、WSS 的同一操作语义一致 |
 
 同一目录的占用验证须覆盖同进程与跨进程、不同路径写法、失败清理与异常退出后的实际可重新取得，不靠残留标记永久阻塞。graceful 与 force 都必须在旧执行实际结束、必要业务保存确认与资源清理完成且不再可能写入之后释放目录使用权。不同 Host 可使用各自目录并行运行，多个客户端连接已有 Host。
 
@@ -2429,7 +2424,7 @@ interface LoggingStatus {
 | 两次配置更新并发，或校验时收到普通消息 | 更新提交核对配置版本；并发配置冲突保留已生效值，普通业务 revision 变化不误报配置冲突 |
 | 同一 Agent 下 S1、S2 选择不同工具 | 各自 ToolSet 的模型声明与执行实现一致，Session 可覆盖 Agent 默认列表；Host 登记不自动暴露给所有会话 |
 | 工具模块名称冲突或所选工具绑定失败 | 明确失败，不静默替换或删减；绑定前失败按原规则保留已接受输入 |
-| 当前 Turn 执行期间修改 Session 工具列表 | 本轮全部模型请求及内部 Loop 接续保持原集合，下一 Turn 才使用新集合；未列入本轮集合的工具不进入执行 |
+| 当前 Turn 执行期间修改 Session 工具列表 | 本轮全部模型请求及同轮继续保持原集合，下一 Turn 才使用新集合；未列入本轮集合的工具不进入执行 |
 | 部分字段或工具列表更新 | 未提交字段不变，显式清空仅用于允许字段，数组整体替换；任何校验失败不造成部分更新 |
 | Host 重载同时包含可热更与需重启的实际变更 | 整次不应用，明确需重启项目；仅全部可热更且校验成功时整体发布 |
 | 实际更换 Host 访问密钥且整次 reload 成功 | 新密钥生效，旧密钥不能接入，旧认证网络连接及订阅失效，若其中包含操作连接则同时释放其操作权；本地可信嵌入与 stdio 不受影响，Session 继续执行 |
@@ -2447,13 +2442,13 @@ interface LoggingStatus {
 
 | 场景 | 必须观察到的事实 |
 | --- | --- |
-| 新 Turn 绑定多个初始输入并启动现有 Runtime | 首项通过 LoopRequest.input，其余已绑定项经首次 LoopInputs::take 按原顺序交接，均优先于后来输入；每项只进入上下文一次，后续 follow_up 留在 next-turn |
-| 初始批次绑定后、首次 take 前 pause 或取消 | pause 只阻止新队列消费，已绑定余项仍按原归属交接；取消按原执行收尾，未送达项不自动回队，不把 bound 标成模型已收到 |
-| Runtime 准备下一次模型请求时收到 steer | 由 SessionController 从 next-step 认领当前已就绪批次，可越过更早 next-turn；不修改已发出的请求 |
+| 新 Turn 绑定多个初始输入 | Session 一次认领并按 next-step 批次、一个 next-turn 的顺序记入历史，均优先于后来输入；每项只进入上下文一次，后续 follow_up 留在 next-turn |
+| 初始批次绑定后、首个请求发出前 pause 或取消 | pause 只阻止新队列消费，已绑定批次仍归原 Turn；取消按原执行收尾，未送达项不自动回队，不把 bound 标成模型已收到 |
+| Session 异步准备模型请求或压缩时收到 steer | 发出模型请求前由 SessionController 核对并认领可消费 next-step，按顺序更新本次请求投影，可越过更早 next-turn；每项只绑定一次，不修改已发请求 |
 | 模型 final 与 next-step 同时发生 | 绑定先成立则原 Turn 继续；正常结束先认领则后续新 Turn 消费，不能丢输入或重开 finished |
-| T1 的内部 L1 正常完成，next-step 有输入 | L1 实际结束后才启动 L2，仍归 T1；active_turn_id、配置与资源保持，follow_up 留队，公共响应序号和统计连续，不出现中间 idle 或 turn.finished |
-| L2 已开始，L1 的迟到输出、状态或返回才被处理 | 原输出按原响应关联保留；旧状态不覆盖当前执行，报告不重复合并历史、统计或触发接续，内部 LoopId 不变成新的公共身份 |
-| 同轮接续准备与 turn.cancel 竞争，或接续启动失败 | 取消先认领则不安装后继，原 Turn 按取消收尾；启动失败按原 Turn 失败收尾；已绑定输入不自动回队，后续输入按原规则处理 |
+| T1 收到无工具的完整响应，next-step 有输入 | 完成本次响应保存后，同一 Session 驱动任务准备下一请求，仍归 T1；配置与资源保持，follow_up 留队，响应序号和统计连续，不出现中间 idle、turn.finished 或第二个循环任务 |
+| 后继请求已开始，前一请求的迟到输出或进度才被处理 | 原输出按 Turn 与 response_index 保留；旧进度不覆盖当前状态，不重复追加结果、统计或触发调度，不依赖多 Loop 映射或最终报告对账 |
+| 同轮下一请求准备与 turn.cancel 竞争，或准备失败 | 取消先认领则不发出后继请求，原 Turn 按取消收尾；准备失败按原 Turn 失败收尾；已绑定输入不自动回队，后续输入按原规则处理 |
 | 委派启动与普通工具批次 | 启动调用受理后返回并完成；普通批次结清后继续模型，不要求未闭合 ToolCall 与模型请求并行，子 Session 独立执行 |
 | 父模型 final，独立子执行仍在运行 | 无当前工具续跑或可消费 next-step 时，父 Turn 正常 finished；next-turn 可开启新 Turn，不等待独立子执行 |
 | 子完成通知在父方 busy／idle 时到达 | busy 选择 next-step，idle 选择 next-turn；接收与结束竞争由正常队列机制处理，通知可驱动新 Turn，不补旧 ToolResult |
@@ -2472,7 +2467,9 @@ interface LoggingStatus {
 | 活动 Turn 或压缩尚未结束时请求手动压缩 | 返回忙碌，不取消原工作、不新增对话 Turn、不将压缩命令排入两条消息队列 |
 | 手动压缩与新 Turn 启动竞争 | 由同一 Session 边界认领；启动先成立则压缩拒绝，压缩先成立则新输入留队等待 |
 | 手动压缩期间收到用户消息或子完成通知 | 正常入原有队列，压缩及必要保存收尾结束后按原暂停／阻塞规则继续；不清除用户暂停，其他 Session 可继续执行 |
-| 活动 Turn 内需要自动压缩 | Runtime 在允许的模型请求边界使用原有压缩能力，不受手动空闲条件限制；不新增消息或控制队列 |
+| 活动 Turn 内需要自动压缩 | Session 在准备普通模型请求的明确边界调用压缩能力，不受手动空闲条件限制；不新增消息、控制队列或独立循环 |
+| 普通响应和压缩分别调用模型 | 共用同一模型驱动的流校验、取消、partial 和用量能力；压缩无工具、不新建 Turn、每次 utility 请求只尝试一次，统计不混入普通响应序号 |
+| 压缩时间超过提示词准备预算，或原压缩／Turn deadline 到达 | 压缩按显式模型调用及所属操作期限执行，不被 prompt_timeout 隐式截断；原截止点到达则真实取消，不因分块请求或新输入延长 |
 | 压缩计算期间又有新输入或发生取消 | 历史提交由 Session 所有者核对原工作与适用版本，不覆盖后来接受的输入，取消不伪装已提交内容回滚 |
 | 压缩 O1 结束、O3 已开始，针对 O1 的取消 O2 才到达 | 按 target_operation_id 只核对 O1；其状态仍可查询则返回已知事实，已不存在则明确错误，都不取消 O3 |
 | 手动压缩取消已认领，实际执行与收尾尚未结束 | cancel_claimed 只报告认领事实；原压缩仍由实际所有者收尾，两队列保留，原有暂停与阻塞继续生效 |
@@ -2480,18 +2477,20 @@ interface LoggingStatus {
 | 历史末尾半条记录或完整行内记录损坏 | 明确返回 SESSION_HISTORY_LOAD_FAILED 及可确定的位置，保留文件、不自动修复或追加、不用已读前缀启动模型；仅 S1 文件有问题时 S2 可正常使用 |
 | 最后一条内容完整且符合格式，但无末尾换行 | 正常读取，不将缺少换行误判为记录损坏 |
 | 格式有效的历史包含未完成旧任务或工具关联 | 不因未完成业务判为文件损坏，不重建执行或等待，不要求先核对或解除旧关系 |
-| resume 历史中有工具调用但没有对应结果记录 | 原 JSONL 保持原样，不推断未执行或失败，不补造 ToolResult、不自动重跑；复用实际 Runtime 处理能力，必要时仅在本次模型输入中形成真实历史说明 |
+| resume 历史中有工具调用但没有对应结果记录 | 原 JSONL 保持原样，不推断未执行或失败，不补造 ToolResult、不自动重跑；Session 准备请求时复用原生历史适配，必要时仅在本次模型输入中形成真实历史说明 |
 | 同一历史中混有完整与缺结果的工具调用 | 保留完整调用和结果的关联，只按实际适配需要处理未闭合部分；不将所有旧调用一律转成文字，不生成新的 UI 恢复状态 |
 | 加载中途失败且已有有效内存上下文 | 不用部分加载内容覆盖有效上下文；保留上下文不表示可以绕过故障继续执行或追加损坏文件 |
 | persistent 长 Turn 中已有完整模型响应或工具批次结束 | 对应完整记录完成保存确认，Turn 可以继续；不等待整轮结束才确认，也不逐 token 同步 |
 | 完整模型响应包含一个长时间运行的工具调用 | 响应及此前尚未交接的实际输入先进入 Session，并完成本边界的适用保存确认后才执行工具；不等工具结束才取得响应 |
 | 既有历史很长，只新增一条响应或一个工具批次 | 交接只覆盖新增标准记录，保持输入、响应和工具结果原顺序，不反复复制或编码整份历史，不逐 token 保存 |
-| 记录已交给 Session，随后写入或同步失败，LoopReport 又返回相同记录 | 已接手范围保持；报告只补尚未接手部分，原保存范围按存储规则核对，不重复追加，不因保存失败重试模型或重跑工具 |
-| 没有观察订阅，或订阅输出被丢弃、客户端断线 | 完整记录仍经内部回调交给 Session，保存确认不依赖 UI 消费；普通取消和 Host force 均不丢弃已由 Session 接管的必要保存工作 |
+| 长历史下连续准备多次请求，或发生压缩替换 | Session 使用共享历史视图与新增后缀准备实际上下文，不在 Runtime 保存累计副本；只在真实请求边界执行必要投影和提供方编码，压缩提交不复制或覆盖后来输入 |
+| 读取既有包含 LoopId 的原生持久记录 | 原生关联字段保持可读且不隐含活动循环，不新增映射表、不重建执行、不迁移或重写旧文件 |
+| 记录已追加，随后写入或同步失败并进入收尾 | Session 保持已追加范围，只核对原保存工作；没有最终累计报告再次补齐记录，不重复追加，不因保存失败重试模型或重跑工具 |
+| 没有观察订阅，或订阅输出被丢弃、客户端断线 | Session 仍从模型和工具原语的真实返回值取得完整结果，保存确认不依赖 UI 消费；普通取消和 Host force 均不丢弃已接管的必要保存工作 |
 | 子代理启动回执已返回，父 Turn 与子执行仍在继续 | 回执随原工具批次保存，后来子完成通知按实际消费顺序另行保存，不改写启动结果 |
 | 输入或子完成通知已 accepted，但尚未消费 | 仅留在当前运行队列，不创建恢复队列；已消费后才按实际历史顺序保存 |
-| 模型输出中途发生可控失败、普通取消或 Host force | Runtime 从实际组装与结束路径通过 LoopReport 交出原请求的必要 partial；Session 按原规则保存或交接，不伪造完整响应、不重复追加已接手记录 |
-| 无客户端订阅，或流式观察缺少部分片段时模型失败 | 结束报告仍交出 Runtime 实际已有内容；必要保存不依赖界面已收到哪些片段，观察端按原输出范围衔接 |
+| 模型输出中途发生可控失败、普通取消或 Host force | 共享模型调用原语从实际组装与结束路径直接返回原请求的必要 partial；Session 按原规则保存或交接，不伪造完整响应、不重复追加已接手记录 |
+| 无客户端订阅，或流式观察缺少部分片段时模型失败 | 模型调用返回值仍交出实际已有内容；必要保存不依赖界面已收到哪些片段，观察端按原输出范围衔接 |
 | 完整模型响应已经交接，随后工具执行失败或取消 | 保留完整模型响应与真实工具结果，不因 Turn outcome 改成 failed／cancelled 而另存同内容 partial |
 | 模型工具名称或参数尚未完整生成就中断 | 只保留实际未完成片段，不补齐参数、不执行半截工具、不伪造 ToolResult |
 | persistent 与 memory 接收同类未完成模型输出 | persistent 按原保存边界记录明确未完成内容；memory 只按原必要交接及生命周期处理，不新增 JSONL |
@@ -2601,7 +2600,7 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 架构方向、首版范围与方法目录已经确认。下列稳定编号跟踪核心契约落实与模块衔接，不代表每个辅助字段都需要另作架构决策。实施者按正文细化；必须改变既定行为、责任或范围时再提出。原待决 08 已移出 Host 职责，后续远程工具见“外部调用与工具边界”；原待决 10 的首版结论已回填第 7、9、10 章，延期扩展保留在第 7 章。其余编号保持不变，用于跟踪尚未完成的工程规格和实现验证，不表示需要重新选择架构方案。
 
-**当前推进：工具扩展这一组首版架构事项已处理完。接下来从 01 的公共接口契约开始，按已有规则落实核心类型、校验与调用样例，再推进存储、调度、Runtime 及 TUI 对接。** 本章其余条目继续作为工程待落实清单保留；只有实施中发现必须改变既定行为、责任或首版范围时，再提出新的架构决策。
+**当前推进：v4.10.1 已确认 Runtime 纳入 Host workspace、Session 唯一驱动完整 Turn、共享模型调用及工具原语、直接结果保存和删除旧完整循环接口；按第 5、11、13 章落实 Host 0.10.1。** 本章其余条目继续作为工程待落实清单保留；只有实施中发现必须改变既定行为、责任或首版范围时，再提出新的架构决策。
 
 ## 维护规则
 
@@ -2645,7 +2644,7 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 - 明确根范围、单中间成员、普通会话和临时子方的持有与释放，避免把 memory mode 当成统一自动关闭策略；启动工具结束后独立子执行归委派范围，不保留原 ToolCall。
 
-- 按已定取消与保留输入、显式 pause、unload、单 Session close、根范围关闭及 Agent.stop 规则落实竞争；Host.shutdown 仅有 graceful／force 两种策略，graceful 完成剩余工作且不自动限时升级，force 立即停止业务执行并完成必要保存与清理。控制在实际接受或生效后返回形成时回执，后续工作仍归直接所有者；force 生效后不降级。落实逐层接收检查、在途创建结算、明确请求 force、真实结束报告与工具结果、partial、必要结果交接、写入与同步确认及目录释放的统一退出屏障；不引入永久任务表或跨重启恢复。
+- 按已定取消与保留输入、显式 pause、unload、单 Session close、根范围关闭及 Agent.stop 规则落实竞争；Host.shutdown 仅有 graceful／force 两种策略，graceful 完成剩余工作且不自动限时升级，force 立即停止业务执行并完成必要保存与清理。控制在实际接受或生效后返回形成时回执，后续工作仍归直接所有者；force 生效后不降级。落实逐层接收检查、在途创建结算、明确请求 force、真实模型与工具结果、partial、必要结果交接、写入与同步确认及目录释放的统一退出屏障；不引入永久任务表或跨重启恢复。
 
 完成产物：命令处理矩阵、句柄归属和交接位置、执行身份校验及关键竞争判定表。
 
@@ -2681,9 +2680,11 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 完成产物：配置和更新 DTO、生效矩阵、热更分类、资源绑定接口与模型请求样例。
 
-## 待决 07：Session 与 Runtime 的执行适配
+## 待决 07：Session 与内部 Runtime 的执行落实
 
-**P1，执行模块实现前冻结。回填执行、协作和错误章节。**
+**P1：架构已由 v4.10.1 冻结，本项只跟踪实现和验证。** Session 驱动完整 Turn、内部 crate 依赖方向、完整请求、直接结果、保存屏障及无独立循环的边界按第 5 章执行，不再作为未定架构选择。
+
+- 从实际固定 Runtime 导入有用的原生类型、模型驱动与工具机制；不增加新依赖层或兼容外壳。普通请求和压缩共用模型调用能力，提供方留在 host-provider；压缩每次请求初期只尝试一次，显式期限及真实用量独立关联。
 
 - 核对旧工具历史的既有适配能力，覆盖完整、缺结果与混合记录，验证不改原历史、不补造结果、不重跑旧任务。
 
@@ -2691,9 +2692,9 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 - 复用普通工具执行、结果、取消和清理接口，落实当前批次结清后推进模型。对接工具适配层的委派范围、启动即返回、一次完成通知及普通输入等待能力；验证父方 busy／idle／取消／暂停／关闭、极快完成和临时父方释放等场景。必要 memory 结果在释放前交给明确所有者，不用观察事件承担交付。
 
-- 按已确认的手动压缩空闲准入、消息留队、operation_id／target_operation_id 关联及统一回执，落实原操作核对、实际取消信号与压缩提交版本；自动压缩沿原 Runtime／Turn 归属处理。对接本轮 cwd、文件路径和结果引用，不扩展两队列为控制指令队列，不隐式增加工作区隔离。
+- 按已确认的手动压缩空闲准入、消息留队、operation_id／target_operation_id 关联及统一回执，落实原操作核对、实际取消信号与压缩提交版本；自动压缩由原 Session／Turn 驱动处理。对接本轮 cwd、文件路径和结果引用，不扩展两队列为控制指令队列，不隐式增加工作区隔离。
 
-完成产物：普通工具与双队列执行接口、启动／子执行／完成通知时序、等待输入及取消语义、根范围和临时子方的收尾约定、压缩与运行交互适配。
+完成产物：同 workspace 的内部 host-runtime、Session 唯一整轮驱动、完整模型请求与共享模型调用、真实工具结果和保存屏障；普通工具与双队列、启动／子执行／完成通知、等待输入、取消、压缩和交互均通过原所有权边界验证，删除旧接口及失去用途的映射和包装。
 
 ## 待决 09：事件订阅与数据读取契约
 
@@ -2741,7 +2742,7 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 这些是既有审查的定位信息，不声明它们是最新版本，也不表示本次重新进行了代码验证。
 
-当前顶层 Agent 管理 Store、Profiles、Models、Sessions 与事件资源；Profile 混合模型、提示词、工具和执行控制；Session 已保存历史、输入和活动执行。参见 [Agent 实现](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/agent.rs)、[配置](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/config.rs)、[Profile](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/profiles.rs)、[Session](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/sessions.rs)。
+此前 Agent 基线中的顶层 Agent 管理 Store、Profiles、Models、Sessions 与事件资源；Profile 混合模型、提示词、工具和执行控制；Session 已保存历史、输入和活动执行。参见 [Agent 实现](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/agent.rs)、[配置](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/config.rs)、[Profile](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/profiles.rs)、[Session](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/sessions.rs)。
 
 固定基线已依赖 tracing 和 tracing-subscriber，由 CLI 初始化诊断输出；process-wrap 的 tracing 被明确关闭以避免记录脚本文本。沿用这些基础，统一字段与应用入口职责，不为日志改写 Session 历史格式。参见 [依赖配置](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/Cargo.toml) 与 [CLI 初始化](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/cli.rs)。
 
@@ -2749,15 +2750,15 @@ Host 对外提供前文的标准接口，收到请求后核对接入与操作资
 
 RPC 原能力可从 [分派与方法清单](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/rpc/server/dispatch.rs) 核对；统一输入接收的重构基础可见 [Session 输入处理](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/sessions/inputs.rs)。
 
-现有启动与输入接口参见 Agent 实际锁定依赖中的 [Runtime AgentLoop、LoopRequest 与 LoopInputs](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/mod.rs) 和 [输入交接及执行循环](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/runner.rs)。Session 按第 5 章适配已有接口，公共身份、队列模式和完成语义由其自身管理。
+本版执行重构的直接输入为 Host 0.9.20（685806af4761eaaa75bae11cd70e5d7a7a0177b0）实际固定的 Runtime 0.10.0（3aa47629929906832dcb309afb7d242c1ae3e53f），而不是上表旧 Agent 的依赖或 Runtime 开发分支。原完整循环与输入回调仅为需要拆除的源结构，不是 v4.10.1 的接口约束；新职责见第 5 章。
 
-工具模块复用现有 [Tool 声明与执行类型](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/tools/tool.rs)、[ToolContext](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/tools/context.rs)、[ToolSet 注册与构建](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/tools/set.rs) 和 [ExecutionConfig](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/execution.rs)。模型声明取自本轮绑定的工具集合，参见 [请求组装](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/runner/model.rs)；Session 的选择、可信上下文绑定及按公共 Turn 固定配置按第 7 章落实。
+共享模型调用从该固定 Runtime 的 [ModelDriver](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/model/driver.rs)、[安全重试与等待判定](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/model/driver/failure.rs)、[ModelError](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/model/error.rs) 和实际流组装能力提取。复用完整响应与 partial、协议校验、真实尝试和用量，不保留独立循环报告作为 Session 的结果来源。压缩采用同一驱动，但总尝试数与显式期限按第 5、11 章约束。
 
-工具观察的数据边界可核对现有 [ToolProgress](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/tools/progress.rs)、[LoopEvent](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/event.rs) 与 [ToolOutput](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/tools/tool.rs)。进度包含可选提示及计数，实时事件为尽力提供；ToolFinished 只有结果状态和输出字节数，ToolOutput 保持文本内容。第 9 章要求真实正文从产生处接入公共观察，完整结果按第 5 章交接，结构化子执行关联由工具适配单独投影，不从这些观察提示或文本结果推造。
+工具执行复用该固定基线的 [Tool 声明与执行类型](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/tools/tool.rs)、[ToolContext](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/tools/context.rs)、[ToolSet](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/tools/set.rs) 及实际取消、交互和清理机制。模型声明取自 Session 固定的本轮工具集合；提供方编码仍归 host-provider，不由工具执行原语组装下一请求。
 
-未完成输出的交接依据现有 [LoopReport 定义](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/mod.rs)、[Runtime 组装与收尾](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/runner.rs) 和 [标准历史类型](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/history.rs)。固定基线的报告尚未直接携带模型 partial；第 5 章要求沿同一结束载荷补齐，替代依赖 [Agent 显示状态提取片段](https://github.com/zqcli/minicore-agent/blob/f36a87366d8e2fe0a1c8216463887902e471c739/src/sessions/active_loop.rs) 作为保存依据的做法。
+[标准历史类型](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/history.rs)、[模型内容与 partial](https://github.com/zqcli/minicore-runtime/blob/3aa47629929906832dcb309afb7d242c1ae3e53f/src/model/response.rs) 及标准工具结果继续作为原生内容依据。Session 直接接手单次调用结果、追加和保存；流式观察只提供实时显示，不用于重建权威 partial，不因内部化而迁移持久格式。
 
-模型重试沿用同一 Runtime 固定依赖的 [LoopOptions 与失败报告](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/agent_loop/mod.rs)、[ModelDriver](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/model/driver.rs)、[安全重试与等待判定](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/model/driver/failure.rs) 和 [ModelError](https://github.com/zqcli/minicore-runtime/blob/b276d9c0a1f3a3c06e32029f831ccd100c9699c7/src/model/error.rs)。重试可观察性可对照 DSH 的 [重试插件](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/llm/llm-retry/src/index.ts) 与 Pi 的 [Session 重试事件](https://github.com/earendil-works/pi/blob/ccbb224c28a17abff4a8ef4f1828dc22cfa5bd04/packages/coding-agent/src/core/agent-session.ts)；MiniCore 采用本文既定的 Runtime 单一负责人和完整 turn.state，不复制其事件命名或另设重试层。
+重试可观察性可对照 DSH 的 [重试插件](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/llm/llm-retry/src/index.ts) 与 Pi 的 [Session 重试事件](https://github.com/earendil-works/pi/blob/ccbb224c28a17abff4a8ef4f1828dc22cfa5bd04/packages/coding-agent/src/core/agent-session.ts)；MiniCore 采用共享 ModelDriver 单一负责人和完整 turn.state，不复制其事件命名或另设重试层。
 
 新增完整记录的交接可对照 DSH 的 [Session 追加](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/core/session/src/index.ts) 与 [保存确认边界](https://github.com/deepseek-ai/deepseek-harness/blob/fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159/packages/session/session-checkpoint-policy/src/index.ts)，以及 Pi 的 [完整消息接收](https://github.com/earendil-works/pi/blob/4b11874f384bf339398d3f388b94868bf69ddf9e/packages/coding-agent/src/core/agent-session.ts) 与 [逐条历史追加](https://github.com/earendil-works/pi/blob/4b11874f384bf339398d3f388b94868bf69ddf9e/packages/coding-agent/src/core/session-manager.ts)。MiniCore 的记录类型、所有权、memory 行为和持久化确认按本文契约实现。
 
