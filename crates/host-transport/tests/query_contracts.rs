@@ -378,7 +378,7 @@ async fn query_identity_and_values_match_over_real_pipes_for_readonly_and_replac
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_loops() {
+async fn raw_result_and_wait_keep_complete_and_partial_indexes_within_one_turn() {
     let (host, resources) = fixture();
     let (client, server) = common::pipes::stdio(host.clone(), options(2000)).await;
     let session = create(&client).await;
@@ -396,7 +396,7 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
         .await
         .unwrap();
     session
-        .send(input("first complete Loop"), options(2000))
+        .send(input("first complete request"), options(2000))
         .await
         .unwrap();
     resources.model.started.acquire().await.unwrap().forget();
@@ -406,7 +406,7 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
         .await
         .unwrap()
         .source;
-    let mut continuation = input("next internal Loop, same Turn");
+    let mut continuation = input("next request, same Turn");
     continuation.mode = MessageMode::Steer;
     session.send(continuation, options(2000)).await.unwrap();
     resources.model.finish.add_permits(1);
@@ -463,7 +463,7 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
     let native = host
         .turn_result(&retained_reader.caller(), session.target(), &turn)
         .unwrap();
-    assert_eq!(native.partials[0].partial.request_index, 0);
+    assert_eq!(native.partials[0].partial.request_index, 1);
     let loops: Vec<_> = native
         .history
         .iter()
@@ -476,7 +476,7 @@ async fn raw_result_and_wait_keep_complete_and_partial_indexes_across_internal_l
         })
         .collect();
     assert_eq!(loops.len(), 2);
-    assert_ne!(loops[0], loops[1]);
+    assert_eq!(loops[0], loops[1]);
     let (mut peer, raw_server) = raw(host);
     peer.initialize().await;
     for method in ["turn.result", "turn.wait"] {
