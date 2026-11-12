@@ -57,6 +57,113 @@ async fn pending_stream_reports_exact_turn_or_port_deadline_source() {
     }
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn absent_outer_deadline_uses_the_configured_maximum_model_budget_and_port_source() {
+    let probe = StreamProbe::shared();
+    let model = ScriptModel::new(
+        descriptor(),
+        vec![Behavior::ProbedStream {
+            events: Vec::new(),
+            terminal: StreamTerminal::Pending,
+            probe: Arc::clone(&probe),
+        }],
+    );
+    let started = TokioInstant::now();
+    let call_model = Arc::clone(&model);
+    let run = tokio::spawn(async move {
+        let driver = ModelDriver::new(
+            call_model.as_ref(),
+            ModelDriverConfig::new(MAX_MODEL_CALL_TIMEOUT, 1, Duration::from_millis(100)),
+        )
+        .unwrap();
+        driver
+            .call(
+                request(),
+                ModelCallParams {
+                    loop_id: loop_id(),
+                    request_index: 0,
+                    cancellation: CancellationToken::new(),
+                    deadline: None,
+                },
+                &mut |_| {},
+            )
+            .await
+    });
+    probe.wait_for_terminal().await;
+    assert_eq!(
+        *lock(&model.deadlines),
+        [(started + MAX_MODEL_CALL_TIMEOUT).into_std()]
+    );
+    tokio::time::advance(MAX_MODEL_CALL_TIMEOUT - Duration::from_secs(1)).await;
+    assert!(!run.is_finished());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let report = run.await.unwrap();
+    let failure = report.outcome.unwrap_err();
+    assert_eq!(failure.error().kind(), ModelErrorKind::Timeout);
+    assert_eq!(failure.deadline_source(), Some(DeadlineSource::Port));
+    assert_eq!(report.attempts, 1);
+    assert!(probe.dropped());
+    assert!(lock(&model.tokens)[0].is_cancelled());
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn retries_without_an_outer_deadline_share_the_original_model_deadline() {
+    let probe = StreamProbe::shared();
+    let model = ScriptModel::new(
+        descriptor(),
+        vec![
+            Behavior::StartError(retryable_error(None)),
+            Behavior::ProbedStream {
+                events: Vec::new(),
+                terminal: StreamTerminal::Pending,
+                probe: Arc::clone(&probe),
+            },
+        ],
+    );
+    let started = TokioInstant::now();
+    let budget = Duration::from_secs(10);
+    let delay = Duration::from_secs(2);
+    let call_model = Arc::clone(&model);
+    let run = tokio::spawn(async move {
+        let driver = ModelDriver::new(
+            call_model.as_ref(),
+            ModelDriverConfig::new(budget, 2, delay),
+        )
+        .unwrap();
+        driver
+            .call(
+                request(),
+                ModelCallParams {
+                    loop_id: loop_id(),
+                    request_index: 0,
+                    cancellation: CancellationToken::new(),
+                    deadline: None,
+                },
+                &mut |_| {},
+            )
+            .await
+    });
+    model.wait_for_completions(1).await;
+    tokio::time::advance(delay).await;
+    probe.wait_for_terminal().await;
+    assert_eq!(*lock(&model.deadlines), [(started + budget).into_std(); 2]);
+    tokio::time::advance(budget - delay - Duration::from_secs(1)).await;
+    assert!(!run.is_finished());
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let report = run.await.unwrap();
+    let failure = report.outcome.unwrap_err();
+    assert_eq!(failure.error().kind(), ModelErrorKind::Timeout);
+    assert_eq!(failure.deadline_source(), Some(DeadlineSource::Port));
+    assert_eq!(report.attempts, 2);
+    assert_eq!(report.retry_wait_elapsed, delay);
+    assert!(probe.dropped());
+    assert!(
+        lock(&model.tokens)
+            .iter()
+            .all(CancellationToken::is_cancelled)
+    );
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn adapter_timeout_has_no_core_deadline_provenance() {
     let model = ScriptModel::new(
@@ -88,7 +195,7 @@ async fn expired_turn_deadline_is_reported_before_model_invocation() {
         RetryPolicySnapshot::new(1, Duration::ZERO),
     ));
     let mut call_context = context(CancellationToken::new(), Duration::from_secs(30));
-    call_context.deadline = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+    call_context.deadline = Instant::now().checked_sub(Duration::from_secs(1));
     let (progress, _receiver) = progress_channel();
     let failure = driver
         .run_detailed(request(), call_context, &progress)

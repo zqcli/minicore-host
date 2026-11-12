@@ -390,7 +390,7 @@ impl SessionController {
         resources: BoundResources,
     ) -> (TurnOutcome, Option<Fault>) {
         use minicore_host_runtime::model::{
-            AssistantPart, ModelCallContext, ModelDriver, ModelDriverConfig, ModelFinishReason,
+            AssistantPart, ModelCallParams, ModelDriver, ModelDriverConfig, ModelFinishReason,
         };
         use minicore_host_runtime::tools::{ToolBatchContext, ToolBatchStop, run_tool_batch};
         let execution = match self.resources_owned().and_then(|resolver| {
@@ -493,19 +493,14 @@ impl SessionController {
                 }
                 break request;
             };
-            let context = ModelCallContext::new(
+            let params = ModelCallParams {
                 loop_id,
                 request_index,
-                cancellation.clone(),
-                options
-                    .deadline
-                    .unwrap_or_else(|| {
-                        tokio::time::Instant::now() + std::time::Duration::from_secs(24 * 60 * 60)
-                    })
-                    .into_std(),
-            );
+                cancellation: cancellation.clone(),
+                deadline: options.deadline.map(tokio::time::Instant::into_std),
+            };
             let report = driver
-                .call(request, context, &mut |event| {
+                .call(request, params, &mut |event| {
                     self.observe_model_call(turn_id, request_index, event)
                 })
                 .await;
@@ -531,9 +526,8 @@ impl SessionController {
             let response = match report.outcome {
                 Ok(response) => response,
                 Err(mut failure) => {
-                    let deadline = options.deadline.is_some()
-                        && failure.deadline_source()
-                            == Some(minicore_host_runtime::DeadlineSource::Turn);
+                    let deadline = failure.deadline_source()
+                        == Some(minicore_host_runtime::DeadlineSource::Turn);
                     let stopped = self.turn_stopped(turn_id, options.deadline) || deadline;
                     {
                         let mut state = self.state.lock().expect("Session mutex poisoned");

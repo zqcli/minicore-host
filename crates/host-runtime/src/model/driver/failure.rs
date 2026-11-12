@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use tokio::time::Instant as TokioInstant;
+use tokio_util::sync::CancellationToken;
 
 use crate::error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary};
 use crate::time::DeadlineSource;
 use crate::value::Text;
 
-use super::super::port::ModelCallContext;
 use super::super::{DeliveryState, ModelError, ModelErrorKind, ModelPartial, RetryHint};
 use super::MAX_MODEL_RETRY_DELAY;
 
@@ -218,7 +218,7 @@ pub(super) fn retry_fits(deadline: TokioInstant, delay: Duration) -> bool {
 }
 
 pub(super) async fn wait_for_retry(
-    context: &ModelCallContext,
+    cancellation: &CancellationToken,
     deadline: TokioInstant,
     deadline_source: DeadlineSource,
     retry_at: TokioInstant,
@@ -226,7 +226,7 @@ pub(super) async fn wait_for_retry(
 ) -> Result<(), ModelDriverFailure> {
     let deadline_source = tokio::select! {
         biased;
-        _ = context.cancellation.cancelled() => None,
+        _ = cancellation.cancelled() => None,
         _ = tokio::time::sleep_until(deadline) => Some(deadline_source),
         _ = tokio::time::sleep_until(retry_at) => return Ok(()),
     };

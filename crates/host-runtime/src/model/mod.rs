@@ -23,5 +23,6 @@ pub use usage::Usage;
 
 pub(crate) use driver::{MAX_MODEL_CALL_TIMEOUT, MAX_MODEL_RETRY_DELAY};
 pub use driver::{
-    ModelCallEvent, ModelCallReport, ModelDriver, ModelDriverConfig, ModelDriverFailure,
+    ModelCallEvent, ModelCallParams, ModelCallReport, ModelDriver, ModelDriverConfig,
+    ModelDriverFailure,
 };

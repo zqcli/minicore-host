@@ -8,9 +8,9 @@ use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_host_runtime::{
     LoopId,
     model::{
-        DeliveryState, Model, ModelCallContext, ModelCallReport, ModelDescriptor, ModelDriver,
-        ModelDriverConfig, ModelErrorKind, ModelEvent, ModelLimits, ModelMessage, ModelRequest,
-        ReasoningPreference,
+        DeliveryState, Model, ModelCallContext, ModelCallParams, ModelCallReport, ModelDescriptor,
+        ModelDriver, ModelDriverConfig, ModelErrorKind, ModelEvent, ModelLimits, ModelMessage,
+        ModelRequest, ReasoningPreference,
     },
 };
 use serde_json::{Value, json};
@@ -84,7 +84,12 @@ async fn run(model: Arc<dyn Model>) -> (LoopId, ModelCallReport) {
         ReasoningPreference::Auto,
     )
     .unwrap();
-    let context = context(0, CancellationToken::new());
+    let context = ModelCallParams {
+        loop_id: LoopId::new().unwrap(),
+        request_index: 0,
+        cancellation: CancellationToken::new(),
+        deadline: None,
+    };
     let id = context.loop_id;
     let report = tokio::time::timeout(
         Duration::from_secs(5),

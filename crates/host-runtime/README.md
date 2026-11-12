@@ -15,6 +15,11 @@ and panic isolation. Its returned report contains actual attempt count, retry
 wait, response or failure, usage, and partial output; observations do not supply
 these facts.
 
+`ModelCallParams` carries the owner's optional execution deadline. The driver
+combines it with the configured model timeout once per logical request and gives
+each provider attempt a `ModelCallContext` with that same effective deadline.
+An absent execution deadline does not create an artificial Turn deadline.
+
 `run_tool_batch` awaits the validated response's tools in order under the same
 frozen execution snapshot. The Session registers and settles its interactions
 through `ToolBatchHost`. The batch returns ordered results and any stop reason;

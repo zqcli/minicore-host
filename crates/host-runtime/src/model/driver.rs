@@ -1,11 +1,13 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use futures_util::{FutureExt, StreamExt};
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::time::Instant as TokioInstant;
+use tokio_util::sync::CancellationToken;
 
+use crate::ids::LoopId;
 use crate::time::{DeadlineSource, effective_deadline};
 use crate::value::Text;
 
@@ -64,6 +66,16 @@ pub struct ModelCallReport {
     pub retry_wait_elapsed: Duration,
 }
 
+/// Owner-supplied identity and cancellation for one logical model request.
+#[derive(Clone, Debug)]
+pub struct ModelCallParams {
+    pub loop_id: LoopId,
+    pub request_index: u32,
+    pub cancellation: CancellationToken,
+    /// The actual enclosing execution deadline, when one was configured.
+    pub deadline: Option<Instant>,
+}
+
 type Observer<'a> = &'a mut (dyn FnMut(ModelCallEvent) + Send);
 
 pub struct ModelDriver<'a> {
@@ -111,7 +123,7 @@ impl<'a> ModelDriver<'a> {
     pub async fn call(
         &self,
         request: ModelRequest,
-        context: ModelCallContext,
+        params: ModelCallParams,
         observer: Observer<'_>,
     ) -> ModelCallReport {
         let mut attempts = 0;
@@ -119,7 +131,7 @@ impl<'a> ModelDriver<'a> {
         let outcome = self
             .run_requests(
                 request,
-                context,
+                params,
                 &mut |event| {
                     if let ModelCallEvent::AttemptStarted(attempt) = &event {
                         attempts = *attempt;
@@ -141,10 +153,10 @@ impl<'a> ModelDriver<'a> {
     async fn run_detailed(
         &self,
         request: ModelRequest,
-        context: ModelCallContext,
+        params: ModelCallParams,
         progress: &mpsc::UnboundedSender<ModelDriverProgress>,
     ) -> Result<ModelResponse, ModelDriverFailure> {
-        self.call(request, context, &mut |event| {
+        self.call(request, params, &mut |event| {
             let event = match event {
                 ModelCallEvent::TextDelta(text) => ModelDriverProgress::TextDelta(text),
                 ModelCallEvent::ReasoningDelta(text) => ModelDriverProgress::ReasoningDelta(text),
@@ -159,27 +171,30 @@ impl<'a> ModelDriver<'a> {
     async fn run_requests(
         &self,
         request: ModelRequest,
-        context: ModelCallContext,
+        params: ModelCallParams,
         observer: Observer<'_>,
         retry_wait_elapsed: &mut Duration,
     ) -> Result<ModelResponse, ModelDriverFailure> {
-        let deadline = effective_deadline(Some(context.deadline), self.model_call_timeout)
-            .map_err(|_| {
+        let deadline =
+            effective_deadline(params.deadline, self.model_call_timeout).map_err(|_| {
                 ModelDriverFailure::ordinary(generated_error(
                     ModelErrorKind::InvalidRequest,
                     DeliveryState::NotStarted,
                 ))
             })?;
-        precheck(&context, deadline.tokio(), deadline.source())?;
+        precheck(&params.cancellation, deadline.tokio(), deadline.source())?;
         self.validate_request(&request)
             .map_err(ModelDriverFailure::ordinary)?;
 
         let mut attempt = 0;
         loop {
-            precheck(&context, deadline.tokio(), deadline.source())?;
-            let mut attempt_context = context.clone();
-            attempt_context.deadline = deadline.standard();
-            attempt_context.cancellation = context.cancellation.child_token();
+            precheck(&params.cancellation, deadline.tokio(), deadline.source())?;
+            let attempt_context = ModelCallContext::new(
+                params.loop_id,
+                params.request_index,
+                params.cancellation.child_token(),
+                deadline.standard(),
+            );
             let _attempt_cancel = attempt_context.cancellation.clone().drop_guard();
             let start = catch_unwind(AssertUnwindSafe(|| {
                 self.model.start(request.clone(), attempt_context.clone())
@@ -218,7 +233,7 @@ impl<'a> ModelDriver<'a> {
                             }));
                             let wait_started = TokioInstant::now();
                             let waited = wait_for_retry(
-                                &context,
+                                &params.cancellation,
                                 deadline.tokio(),
                                 deadline.source(),
                                 retry_deadline,
@@ -378,11 +393,11 @@ impl<'a> ModelDriver<'a> {
 mod tests;
 
 fn precheck(
-    context: &ModelCallContext,
+    cancellation: &CancellationToken,
     deadline: TokioInstant,
     source: DeadlineSource,
 ) -> Result<(), ModelDriverFailure> {
-    if context.cancellation.is_cancelled() {
+    if cancellation.is_cancelled() {
         return Err(ModelDriverFailure::ordinary(generated_error(
             ModelErrorKind::Cancelled,
             DeliveryState::NotStarted,

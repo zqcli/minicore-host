@@ -6,7 +6,7 @@ use minicore_host_runtime::model::{
 };
 
 /// Runtime checks identities within one response. The public Host identity is
-/// (TurnId, original ToolCallId), including every response and internal Loop.
+/// (TurnId, original ToolCallId), covering all responses within the same Turn.
 /// This binding lasts for that public Turn and reads its accepted records; it
 /// does not reserve IDs from a partial response or a failed model attempt.
 struct TurnModel {

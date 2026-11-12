@@ -96,8 +96,13 @@ fn tool_request() -> ModelRequest {
     )
 }
 
-fn context(cancellation: CancellationToken, deadline_after: Duration) -> ModelCallContext {
-    ModelCallContext::new(loop_id(), 0, cancellation, Instant::now() + deadline_after)
+fn context(cancellation: CancellationToken, deadline_after: Duration) -> ModelCallParams {
+    ModelCallParams {
+        loop_id: loop_id(),
+        request_index: 0,
+        cancellation,
+        deadline: Some(Instant::now() + deadline_after),
+    }
 }
 
 fn with_retry(retry_policy: RetryPolicySnapshot) -> ModelDriverConfig {
@@ -187,7 +192,7 @@ impl TestDriver {
     async fn run(
         &self,
         request: ModelRequest,
-        context: ModelCallContext,
+        context: ModelCallParams,
         progress: &mpsc::UnboundedSender<ModelDriverProgress>,
     ) -> Result<ModelResponse, ModelError> {
         self.run_detailed(request, context, progress)
@@ -197,7 +202,7 @@ impl TestDriver {
     async fn run_detailed(
         &self,
         request: ModelRequest,
-        context: ModelCallContext,
+        context: ModelCallParams,
         progress: &mpsc::UnboundedSender<ModelDriverProgress>,
     ) -> Result<ModelResponse, ModelDriverFailure> {
         ModelDriver::from_validated(
@@ -214,6 +219,7 @@ struct ScriptModel {
     descriptor: ModelDescriptor,
     behaviors: Mutex<VecDeque<Behavior>>,
     requests: Mutex<Vec<ModelRequest>>,
+    deadlines: Mutex<Vec<Instant>>,
     tokens: Mutex<Vec<CancellationToken>>,
     starts: AtomicUsize,
     start_notify: Notify,
@@ -227,6 +233,7 @@ impl ScriptModel {
             descriptor,
             behaviors: Mutex::new(behaviors.into()),
             requests: Mutex::new(Vec::new()),
+            deadlines: Mutex::new(Vec::new()),
             tokens: Mutex::new(Vec::new()),
             starts: AtomicUsize::new(0),
             start_notify: Notify::new(),
@@ -291,6 +298,7 @@ impl Model for ScriptModel {
         request: ModelRequest,
         context: ModelCallContext,
     ) -> ModelStartFuture<'a> {
+        lock(&self.deadlines).push(context.deadline);
         lock(&self.tokens).push(context.cancellation);
         let behavior = self.take_behavior();
         if let Behavior::RequireDropThenEvents {

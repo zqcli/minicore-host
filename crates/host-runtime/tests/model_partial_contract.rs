@@ -6,10 +6,10 @@ use std::time::Duration;
 use futures_util::{StreamExt, stream};
 use minicore_host_runtime::error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary};
 use minicore_host_runtime::model::{
-    AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelDescriptor,
-    ModelDriver, ModelDriverConfig, ModelError, ModelErrorKind, ModelEvent, ModelFinishReason,
-    ModelLimits, ModelMessage, ModelPartial, ModelRequest, ModelStartFuture, ModelStream,
-    ProviderReplay, ReasoningPreference, Usage,
+    AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelCallParams,
+    ModelDescriptor, ModelDriver, ModelDriverConfig, ModelError, ModelErrorKind, ModelEvent,
+    ModelFinishReason, ModelLimits, ModelMessage, ModelPartial, ModelRequest, ModelStartFuture,
+    ModelStream, ProviderReplay, ReasoningPreference, Usage,
 };
 use minicore_host_runtime::tools::ToolSpec;
 use minicore_host_runtime::{DeadlineSource, LoopId};
@@ -97,13 +97,13 @@ fn request() -> ModelRequest {
     )
     .unwrap()
 }
-fn context(index: u32, cancellation: CancellationToken, after: Duration) -> ModelCallContext {
-    ModelCallContext::new(
-        LoopId::new().unwrap(),
-        index,
+fn context(index: u32, cancellation: CancellationToken, after: Duration) -> ModelCallParams {
+    ModelCallParams {
+        loop_id: LoopId::new().unwrap(),
+        request_index: index,
         cancellation,
-        (tokio::time::Instant::now() + after).into_std(),
-    )
+        deadline: Some((tokio::time::Instant::now() + after).into_std()),
+    }
 }
 fn text_success() -> Behavior {
     Behavior::Events(vec![

@@ -6,9 +6,9 @@ use minicore_host_runtime::{
     ExecutionConfig, ExecutionOptions, InteractionAnswer, InteractionId, LoopId,
     PendingInteraction,
     model::{
-        AssistantPart, Model, ModelCallContext, ModelDescriptor, ModelDriver, ModelDriverConfig,
-        ModelEvent, ModelFinishReason, ModelMessage, ModelRequest, ModelStartFuture, ModelStream,
-        ReasoningPreference,
+        AssistantPart, Model, ModelCallContext, ModelCallParams, ModelDescriptor, ModelDriver,
+        ModelDriverConfig, ModelEvent, ModelFinishReason, ModelMessage, ModelRequest,
+        ModelStartFuture, ModelStream, ReasoningPreference,
     },
     prompt::DefaultPromptProvider,
     tools::{
@@ -122,12 +122,12 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
     )
     .unwrap();
     let options = ExecutionOptions::default();
-    let context = ModelCallContext::new(
-        LoopId::new().unwrap(),
-        0,
-        Default::default(),
-        Instant::now() + Duration::from_secs(5),
-    );
+    let context = ModelCallParams {
+        loop_id: LoopId::new().unwrap(),
+        request_index: 0,
+        cancellation: Default::default(),
+        deadline: Some(Instant::now() + Duration::from_secs(5)),
+    };
     let driver = ModelDriver::new(
         model.as_ref(),
         ModelDriverConfig::new(options.model_timeout, 1, options.model_retry_base_delay),
@@ -159,7 +159,7 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
             loop_id: context.loop_id,
             request_index: 0,
             cancellation: context.cancellation.clone(),
-            deadline: Some(context.deadline),
+            deadline: context.deadline,
             policy_timeout: options.policy_timeout,
             tool_timeout: options.tool_timeout,
         },

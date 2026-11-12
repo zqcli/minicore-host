@@ -3,7 +3,7 @@ use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
 use minicore_host_runtime::{
     ExecutionOptions,
     model::{
-        AssistantPart, ModelCallContext, ModelDriver, ModelDriverConfig, ModelFinishReason,
+        AssistantPart, ModelCallParams, ModelDriver, ModelDriverConfig, ModelFinishReason,
         ModelMessage,
     },
     tools::run_tool_batch,
@@ -96,12 +96,12 @@ async fn production_http_provider_round_trip_executes_real_files_and_shell() {
         let response = driver
             .call(
                 config.request(messages.clone()).unwrap(),
-                ModelCallContext::new(
-                    context.loop_id,
-                    index as u32,
-                    context.cancellation.clone(),
-                    Instant::now() + Duration::from_secs(10),
-                ),
+                ModelCallParams {
+                    loop_id: context.loop_id,
+                    request_index: index as u32,
+                    cancellation: context.cancellation.clone(),
+                    deadline: Some(Instant::now() + Duration::from_secs(10)),
+                },
                 &mut |_| {},
             )
             .await

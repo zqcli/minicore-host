@@ -6,10 +6,10 @@ use minicore_host_runtime::{
     DeadlineSource, ExecutionConfig, ExecutionOptions, InteractionId, LoopId, ToolResultHistory,
     interaction::{InteractionAnswer, PendingInteraction},
     model::{
-        AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelCallReport,
-        ModelDescriptor, ModelDriver, ModelDriverConfig, ModelError, ModelErrorKind, ModelEvent,
-        ModelFinishReason, ModelLimits, ModelMessage, ModelPartial, ModelRequest, ModelResponse,
-        ModelStartFuture, ReasoningPreference, RetryHint,
+        AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelCallParams,
+        ModelCallReport, ModelDescriptor, ModelDriver, ModelDriverConfig, ModelError,
+        ModelErrorKind, ModelEvent, ModelFinishReason, ModelLimits, ModelMessage, ModelPartial,
+        ModelRequest, ModelResponse, ModelStartFuture, ReasoningPreference, RetryHint,
     },
     prompt::DefaultPromptProvider,
     tools::{
@@ -102,13 +102,15 @@ async fn call_cancelable(
         ),
     )
     .unwrap();
-    let deadline = options
-        .deadline
-        .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(86_400));
     driver
         .call(
             full_request(&tools),
-            ModelCallContext::new(LoopId::new().unwrap(), 0, cancellation, deadline.into_std()),
+            ModelCallParams {
+                loop_id: LoopId::new().unwrap(),
+                request_index: 0,
+                cancellation,
+                deadline: options.deadline.map(Into::into),
+            },
             &mut |_| {},
         )
         .await
@@ -262,7 +264,12 @@ async fn tool_exchange(
     )
     .unwrap();
     let initial = full_request(&tools);
-    let context = context(CancellationToken::new());
+    let context = ModelCallParams {
+        loop_id: LoopId::new().unwrap(),
+        request_index: 0,
+        cancellation: CancellationToken::new(),
+        deadline: Some(Instant::now() + Duration::from_secs(3)),
+    };
     let first = driver
         .call(initial.clone(), context.clone(), &mut |_| {})
         .await
@@ -289,7 +296,7 @@ async fn tool_exchange(
             loop_id: context.loop_id,
             request_index: context.request_index,
             cancellation: context.cancellation.clone(),
-            deadline: Some(context.deadline),
+            deadline: context.deadline,
             policy_timeout: Duration::from_secs(3),
             tool_timeout: Duration::from_secs(3),
         },
@@ -560,7 +567,12 @@ async fn cancellation_after_partial_output_closes_transport_and_has_no_assistant
         driver
             .call(
                 full_request(&ToolSet::default()),
-                context(token),
+                ModelCallParams {
+                    loop_id: LoopId::new().unwrap(),
+                    request_index: 0,
+                    cancellation: token,
+                    deadline: None,
+                },
                 &mut |event| {
                     let _ = events.send(event);
                 },

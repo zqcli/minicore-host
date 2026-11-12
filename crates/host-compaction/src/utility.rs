@@ -6,8 +6,8 @@ use crate::{
 use minicore_host_runtime::{
     SummaryHistory, Text,
     model::{
-        AssistantPart, Model, ModelCallContext, ModelDriver, ModelDriverConfig, ModelErrorKind,
-        ModelFinishReason, ModelMessage, ModelRequest, Usage,
+        AssistantPart, Model, ModelCallContext, ModelCallParams, ModelDriver, ModelDriverConfig,
+        ModelErrorKind, ModelFinishReason, ModelMessage, ModelRequest, Usage,
     },
 };
 use serde_json::{Value, json};
@@ -66,13 +66,13 @@ async fn generate_inner(
     usage: &mut Vec<UtilityUsage>,
 ) -> Result<CompactionCandidate, CompactionError> {
     check_active(&context)?;
+    let remaining = context.deadline.saturating_duration_since(Instant::now());
+    if remaining.is_zero() {
+        return Err(CompactionError::Timeout);
+    }
     let driver = ModelDriver::new(
         model,
-        ModelDriverConfig::new(
-            Duration::from_secs(24 * 60 * 60),
-            1,
-            Duration::from_millis(100),
-        ),
+        ModelDriverConfig::new(remaining, 1, Duration::from_millis(100)),
     )?;
     if driver.descriptor() != &plan.descriptor {
         return Err(CompactionError::ModelChanged);
@@ -219,7 +219,18 @@ async fn call_model(
     observation: &mut UtilityUsage,
 ) -> Result<Text, CompactionError> {
     check_active(&context)?;
-    let report = driver.call(request, context, &mut |_| {}).await;
+    let report = driver
+        .call(
+            request,
+            ModelCallParams {
+                loop_id: context.loop_id,
+                request_index: context.request_index,
+                cancellation: context.cancellation,
+                deadline: Some(context.deadline),
+            },
+            &mut |_| {},
+        )
+        .await;
     let response = match report.outcome {
         Ok(response) => response,
         Err(failure) => {

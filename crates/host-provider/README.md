@@ -1,13 +1,13 @@
 # minicore-host-provider
 
-A real HTTP/SSE implementation of `minicore_runtime::model::Model` for
+A real HTTP/SSE implementation of `minicore_host_runtime::model::Model` for
 OpenAI-compatible **Chat Completions**. No endpoint is called by construction.
 No default model, token cap, automatic retry layer or fake completion exists.
 
 ```rust,no_run
 use std::{collections::BTreeSet, sync::Arc};
 use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel};
-use minicore_runtime::model::{Model, ModelDescriptor, ReasoningPreference};
+use minicore_host_runtime::model::{Model, ModelDescriptor, ReasoningPreference};
 
 let descriptor = ModelDescriptor::new(
     "production/chat".parse()?,

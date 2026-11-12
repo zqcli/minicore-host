@@ -69,6 +69,7 @@ pub struct ModelCallContext {
     /// Zero-based request index within that owning execution.
     pub request_index: u32,
     pub cancellation: CancellationToken,
+    /// The effective deadline of this actual provider attempt, set by the model driver.
     pub deadline: Instant,
 }
 
