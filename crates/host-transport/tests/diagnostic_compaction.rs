@@ -590,7 +590,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     std::fs::rename(&automatic_history, &original).unwrap();
     std::fs::write(&automatic_history, b"").unwrap();
     gate.add_permits(1);
-    state_where(&session, |state| {
+    let failed_automatic_save = state_where(&session, |state| {
         matches!(
             state.data.compaction.as_ref().map(|a| &a.state),
             Some(CompactionState::Committing {
@@ -630,7 +630,54 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     );
     std::fs::remove_file(&automatic_history).unwrap();
     std::fs::rename(&original, &automatic_history).unwrap();
-    session.resume(control(), options()).await.unwrap();
+    // Finalizing records the failure before the original driver has returned.
+    // Wait only for that explicit refusal; a successful admission is never retried.
+    let resume = control();
+    tokio::time::timeout(WAIT, async {
+        loop {
+            match session.resume(resume.clone(), options()).await {
+                Ok(_) => break,
+                Err(CallError::Business(fault))
+                    if fault.kind() == Some(FaultKind::SessionBusy)
+                        && fault.message() == "original execution or save is still returning" =>
+                {
+                    let state = session.state(options()).await.unwrap();
+                    assert_eq!(
+                        state.data.active_turn_id.as_ref(),
+                        Some(&automatic_save_turn)
+                    );
+                    assert!(state.data.owned_work.history_save);
+                    assert!(!state.data.saving);
+                    let compaction = state.data.compaction.as_ref().unwrap();
+                    assert_eq!(
+                        compaction.state,
+                        failed_automatic_save
+                            .data
+                            .compaction
+                            .as_ref()
+                            .unwrap()
+                            .state
+                    );
+                    assert!(matches!(
+                        &compaction.source,
+                        CompactionSource::Automatic { turn_id, .. }
+                        if turn_id == &automatic_save_turn
+                    ));
+                    let turn = session
+                        .turn(automatic_save_turn.clone(), options())
+                        .await
+                        .unwrap();
+                    assert_eq!(turn.data.state.state, TurnState::Finalizing);
+                    assert_eq!(turn.data.state.outcome, Some(TurnOutcome::Failed));
+                    assert_eq!(turn.data.state.persistence, PersistenceState::Failed);
+                    tokio::task::yield_now().await;
+                }
+                Err(error) => panic!("unexpected original-save resume failure: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("original execution must return before same-save continuation is admitted");
     let automatic_saved = session
         .wait_turn(automatic_save_turn, options())
         .await
