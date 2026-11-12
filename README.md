@@ -19,7 +19,7 @@ sandbox, and configured credential exclusion does not isolate same-user processe
 ## Local checks
 
 See [native CI and distribution packages](docs/ci.md) for platform jobs, release
-archives for Linux x64, macOS ARM64/x64 and Windows x64, with the fixed Runtime
+archives for Linux x64, macOS ARM64/x64 and Windows x64, with the internal Runtime
 library compiled into each Host executable.
 The initial configuration template is [example.host.json](example.host.json).
 

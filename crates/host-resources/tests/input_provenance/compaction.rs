@@ -305,6 +305,18 @@ async fn automatic_utility_uses_peer_projection_and_protects_actual_fresh_input(
     assert_eq!(peer, peer_http["messages"][4]);
     assert!(!data.to_string().contains(fresh.as_str()));
     assert!(!data.to_string().contains("automatic fresh input"));
+    let accepted = host.history(&caller, &target).unwrap();
+    assert_eq!(accepted.len(), before.len() + 1);
+    assert_eq!(&accepted[..before.len()], before.as_slice());
+    assert!(
+        matches!(&accepted[before.len()..], [HistoryItem::User(user)]
+        if user.input.as_text() == "automatic fresh input" && user.kind == minicore_host_runtime::UserMessageKind::Prompt)
+    );
+    let fresh_record = host.message(&caller, &target, &fresh).unwrap();
+    assert_eq!(fresh_record.input.message_id, fresh);
+    assert_eq!(fresh_record.source, MessageSource::User);
+    assert_eq!(fresh_record.input.mode, MessageMode::FollowUp);
+    assert_eq!(fresh_record.input.in_reply_to, Some(peer_id.clone()));
     utility.finish(answer("Automatic fixture summary."));
     let normal = fixture.next().await;
     assert_fixed(&normal.body, "TARGET");
@@ -319,13 +331,21 @@ async fn automatic_utility_uses_peer_projection_and_protects_actual_fresh_input(
         Some(&peer_id),
         "automatic fresh input",
     );
-    assert_eq!(host.history(&caller, &target).unwrap(), before);
+    assert_eq!(host.history(&caller, &target).unwrap(), accepted);
     normal.finish(answer("after automatic compaction"));
     settled(&host, &caller, &target, 3).await;
     compacted(&host, &caller, &target).await;
+    let finished = host.history(&caller, &target).unwrap();
+    assert_eq!(finished.len(), accepted.len() + 1);
+    assert_eq!(&finished[..accepted.len()], accepted.as_slice());
+    assert!(matches!(finished.last(), Some(HistoryItem::Assistant(_))));
     assert_eq!(
-        &host.history(&caller, &target).unwrap()[..before.len()],
-        before.as_slice()
+        finished
+            .iter()
+            .filter(|item| matches!(item, HistoryItem::User(user)
+        if user.input.as_text() == "automatic fresh input"))
+            .count(),
+        1
     );
     stop(&host).await;
 }

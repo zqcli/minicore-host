@@ -95,6 +95,18 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
     assert_eq!(peer_http["messages"].as_array().unwrap().len(), 5);
     let native = host.history(&caller, &target).unwrap();
     let native_bytes = serde_json::to_vec(&native).unwrap();
+    let readable_before = host
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(readable_before.data.next_cursor.is_none());
     for item in &native {
         if let HistoryItem::User(user) = item {
             assert_eq!(user.input.as_text(), "identical raw text");
@@ -136,7 +148,34 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
     .unwrap();
     let connection = reopened.connect().unwrap();
     let caller = connection.caller();
-    send(
+    // A cold content read preserves the complete saved projection, including
+    // provenance, without accepting a new input or loading execution.
+    let cold = reopened
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(cold.data.next_cursor.is_none());
+    assert_eq!(
+        serde_json::to_value(&cold.data.items).unwrap(),
+        serde_json::to_value(&readable_before.data.items).unwrap()
+    );
+    assert!(
+        !reopened
+            .session_context(&caller, &target)
+            .await
+            .unwrap()
+            .data
+            .history_loaded
+    );
+    assert_eq!(read_history_bytes(&path).unwrap(), stored_before);
+    let restart_id = send(
         &reopened,
         &caller,
         &target,
@@ -154,21 +193,76 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
         Some(&original),
         "identical raw text",
     );
+    assert_input(
+        &restart_http["messages"][2],
+        &original,
+        MessageSource::User,
+        None,
+        "identical raw text",
+    );
+    assert_input(
+        &restart_http["messages"][6],
+        &restart_id,
+        MessageSource::User,
+        None,
+        "after restart",
+    );
+    assert_eq!(restart_http["messages"].as_array().unwrap().len(), 7);
+    let accepted = reopened.history(&caller, &target).unwrap();
+    assert_eq!(accepted.len(), native.len() + 1);
     assert_eq!(
-        serde_json::to_vec(&reopened.history(&caller, &target).unwrap()).unwrap(),
+        serde_json::to_vec(&accepted[..native.len()]).unwrap(),
         native_bytes
     );
-    assert_eq!(
-        &read_history_bytes(&path).unwrap()[..stored_before.len()],
-        stored_before.as_slice()
+    assert!(
+        matches!(&accepted[native.len()..], [HistoryItem::User(user)]
+        if user.input.as_text() == "after restart" && user.kind == minicore_host_runtime::UserMessageKind::Prompt)
     );
+    let restart_record = reopened.message(&caller, &target, &restart_id).unwrap();
+    assert_eq!(restart_record.input.message_id, restart_id);
+    assert_eq!(restart_record.source, MessageSource::User);
+    assert_eq!(restart_record.input.mode, MessageMode::FollowUp);
+    assert!(restart_record.input.in_reply_to.is_none());
+    // The fresh bound input is readable, but its response save boundary has
+    // not occurred; the entire prior journal remains byte-for-byte intact.
+    assert_eq!(read_history_bytes(&path).unwrap(), stored_before);
     restarted.finish(answer("restarted answer"));
     settled(&reopened, &caller, &target, 1).await;
+    let final_history = reopened.history(&caller, &target).unwrap();
+    assert_eq!(final_history.len(), accepted.len() + 1);
+    assert_eq!(&final_history[..accepted.len()], accepted.as_slice());
+    let stored_after = read_history_bytes(&path).unwrap();
+    assert_eq!(
+        &stored_after[..stored_before.len()],
+        stored_before.as_slice()
+    );
+    let appended: Vec<Value> = std::str::from_utf8(&stored_after[stored_before.len()..])
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(appended.len(), 3);
+    assert_eq!(appended[0]["entry"]["kind"], "input");
+    assert_eq!(
+        appended[0]["entry"]["data"]["message_id"],
+        restart_id.as_str()
+    );
+    assert_eq!(
+        appended[0]["entry"]["data"]["source"],
+        json!({"kind": "user"})
+    );
+    assert_eq!(appended[0]["entry"]["data"]["mode"], "follow_up");
+    assert_eq!(
+        appended[0]["entry"]["data"]["user"]["input"]["text"],
+        "after restart"
+    );
+    assert_eq!(appended[1]["entry"]["kind"], "runtime");
+    assert_eq!(appended[2]["entry"]["kind"], "turn_finished");
     stop(&reopened).await;
 }
 
 #[tokio::test]
-async fn same_turn_internal_loops_keep_reply_and_steer_order_without_consuming_follow_up() {
+async fn same_turn_requests_keep_reply_and_steer_order_without_consuming_follow_up() {
     let mut fixture = Fixture::start().await;
     let builder = HostResourceBuilder::builtins().unwrap();
     let host =
@@ -262,10 +356,48 @@ async fn same_turn_internal_loops_keep_reply_and_steer_order_without_consuming_f
         })
         .collect();
     assert_eq!(inputs.len(), 3);
-    assert_ne!(inputs[0].loop_id, inputs[1].loop_id);
+    assert_eq!(inputs[0].loop_id, inputs[1].loop_id);
+    assert_ne!(inputs[0].loop_id, inputs[2].loop_id);
     assert_eq!(
-        inputs[1].kind,
-        minicore_host_runtime::UserMessageKind::Prompt
+        inputs
+            .iter()
+            .map(|input| input.input.as_text())
+            .collect::<Vec<_>>(),
+        ["base", "next step", "later turn"]
+    );
+    assert_eq!(
+        inputs.iter().map(|input| input.kind).collect::<Vec<_>>(),
+        [
+            minicore_host_runtime::UserMessageKind::Prompt,
+            minicore_host_runtime::UserMessageKind::Steering,
+            minicore_host_runtime::UserMessageKind::Prompt,
+        ]
+    );
+    assert!(matches!(
+        &history[..],
+        [
+            HistoryItem::User(_),
+            HistoryItem::Assistant(_),
+            HistoryItem::User(_),
+            HistoryItem::Assistant(_),
+            HistoryItem::User(_),
+            HistoryItem::Assistant(_)
+        ]
+    ));
+    let responses = history
+        .iter()
+        .filter_map(|item| match item {
+            HistoryItem::Assistant(response) => Some((response.loop_id, response.request_index)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        responses,
+        [
+            (inputs[0].loop_id, 0),
+            (inputs[1].loop_id, 1),
+            (inputs[2].loop_id, 0)
+        ]
     );
     assert_eq!(steer_record.input.mode, MessageMode::Steer);
     stop(&host).await;
