@@ -57,6 +57,7 @@ async fn exercise(client: HostClient, reader: HostClient) {
         first
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 50
                 },

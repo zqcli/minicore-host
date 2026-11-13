@@ -1201,19 +1201,23 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 1,
             },
         )
         .await
         .unwrap();
-    assert!(matches!(&first.data.items[0],HistoryItemData::User {text, ..} if text=="observe"));
+    assert!(
+        matches!(&first.data.items[0].item,HistoryItemData::User {text, ..} if text=="observe")
+    );
     let old_cursor = first.data.next_cursor.clone().unwrap();
     let second = host
         .history_read(
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: Some(old_cursor.clone()),
                 limit: 1,
             },
@@ -1221,9 +1225,25 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
         .await
         .unwrap();
     assert!(
-        matches!(&second.data.items[0],HistoryItemData::Assistant {response} if matches!(&response.content[0],minicore_host_runtime::model::AssistantPart::Text(text) if text.as_ref()=="saved真实正文"))
+        matches!(&second.data.items[0].item,HistoryItemData::Assistant {response} if matches!(&response.content[0],minicore_host_runtime::model::AssistantPart::Text(text) if text.as_ref()=="saved真实正文"))
     );
-    assert!(second.data.next_cursor.is_none());
+    let terminal = host
+        .history_read(
+            &caller,
+            &target,
+            &HistoryReadRequest {
+                direction: HistoryDirection::Forward,
+                cursor: second.data.next_cursor,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(
+        matches!(&terminal.data.items[0].item, HistoryItemData::TurnFinished { terminal } if terminal.requests == 1)
+    );
+    assert_eq!(terminal.data.upper_bound, 3);
+    assert!(terminal.data.next_cursor.is_none());
     let mut host_states = subscribe(
         &host,
         &caller,
@@ -1277,6 +1297,7 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
                 &caller,
                 &target,
                 &HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: Some(old_cursor),
                     limit: 1
                 }
@@ -1291,13 +1312,14 @@ async fn history_pages_read_real_saved_content_without_recreating_old_execution(
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 20,
             },
         )
         .await
         .unwrap();
-    assert_eq!(page.data.items.len(), 2);
+    assert_eq!(page.data.items.len(), 3);
     assert!(page.data.next_cursor.is_none());
     assert_eq!(
         reopened

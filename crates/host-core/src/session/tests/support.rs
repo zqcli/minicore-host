@@ -131,6 +131,8 @@ pub(super) fn setup(
             id.clone(),
             agent_id.clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
@@ -212,7 +214,7 @@ impl HistoryBackend for GatedJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         Box::pin(async move {
             let number = self.count.fetch_add(1, Ordering::SeqCst);
             let gate = self.gates.lock().unwrap().pop_front();
@@ -236,7 +238,7 @@ impl HistoryBackend for FailedSave {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, _: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, _: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.count.fetch_add(1, Ordering::SeqCst);
         Box::pin(async {
             Err(Fault::new(
@@ -262,7 +264,7 @@ impl HistoryBackend for FailureJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.appends.fetch_add(1, Ordering::SeqCst);
         if let Some(failure) = self.failures.lock().unwrap().pop_front().flatten() {
             self.inner.inject_next_append_fault(failure);
@@ -415,7 +417,7 @@ impl HistoryBackend for ConstructorPanicHistory {
     fn load(&self) -> LoadFuture<'_> {
         Box::pin(async { Ok(Vec::new()) })
     }
-    fn append<'a>(&'a self, _: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, _: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         panic!("fixture append construction panic")
     }
     fn reconcile(&self) -> SaveFuture<'_> {
@@ -450,12 +452,12 @@ impl HistoryBackend for TerminalClaimJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         Box::pin(async move {
             if (self.fail_first
                 || entries
                     .iter()
-                    .any(|entry| matches!(entry, HistoryEntry::Partial { .. })))
+                    .any(|entry| matches!(&entry.entry, HistoryEntry::Partial { .. })))
                 && self.first.swap(false, Ordering::SeqCst)
             {
                 self.entered.add_permits(1);

@@ -9,6 +9,8 @@ use std::ops::Range;
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 struct InputContext {
+    #[serde(skip)]
+    received_at: Timestamp,
     message_id: MessageId,
     source: MessageSource,
     // Scheduling is public input history data; keep the prompt context unchanged.
@@ -27,6 +29,7 @@ impl InputProvenance {
     /// Called only alongside acceptance or validated replacement of history.
     pub(super) fn record(&mut self, position: usize, entry: &HistoryEntry) {
         if let HistoryEntry::Input {
+            received_at,
             message_id,
             source,
             mode,
@@ -37,6 +40,7 @@ impl InputProvenance {
             self.0.insert(
                 position,
                 InputContext {
+                    received_at: *received_at,
                     message_id: message_id.clone(),
                     source: source.clone(),
                     mode: *mode,
@@ -48,10 +52,12 @@ impl InputProvenance {
 
     /// Public reads use the original native position, never equal-text matching
     /// or model-prompt parsing. Native-only input keeps its metadata absent.
+    #[cfg(test)]
     pub(super) fn history_item(&self, position: usize, item: &HistoryItem) -> HistoryItemData {
         match (item, self.0.get(&position)) {
             (HistoryItem::User(user), Some(context)) => HistoryItemData::from_input(
                 user,
+                Some(context.received_at),
                 &context.message_id,
                 &context.source,
                 context.mode,
@@ -80,6 +86,7 @@ impl InputProvenance {
             HistoryItem::User(user) => {
                 let context = self.0.get(&position).ok_or_else(invalid_binding)?;
                 Ok(HistoryEntry::Input {
+                    received_at: context.received_at,
                     turn_id: turn_id.clone(),
                     message_id: context.message_id.clone(),
                     source: context.source.clone(),

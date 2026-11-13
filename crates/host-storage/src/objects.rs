@@ -327,6 +327,11 @@ impl SessionStore {
         if record.data.mode != self.mode {
             return Err(StorageError::InvalidStorageMode);
         }
+        if record.data.last_activity_at < record.data.created_at {
+            return Err(StorageError::InvalidObject {
+                reason: "Session activity precedes its creation".into(),
+            });
+        }
         if record
             .data
             .title
@@ -379,9 +384,15 @@ impl SessionStore {
             }
             if old.data.agent_config_revision != record.data.agent_config_revision
                 || old.data.parent != record.data.parent
+                || old.data.created_at != record.data.created_at
             {
                 return Err(StorageError::InvalidObject {
                     reason: "Session creation provenance cannot change".into(),
+                });
+            }
+            if record.data.last_activity_at < old.data.last_activity_at {
+                return Err(StorageError::InvalidObject {
+                    reason: "Session activity cannot move backwards".into(),
                 });
             }
             if old.data.closed.is_some() && record.data.closed != old.data.closed {

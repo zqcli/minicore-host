@@ -282,6 +282,7 @@ pub async fn history(session: &SessionClient) -> Value {
         session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 100,
                 },

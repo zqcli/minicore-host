@@ -52,7 +52,14 @@ async fn pages(session: &SessionClient, limit: u64) -> Value {
     let mut cursor = None;
     loop {
         let page = session
-            .history(HistoryReadRequest { cursor, limit }, options(3000))
+            .history(
+                HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
+                    cursor,
+                    limit,
+                },
+                options(3000),
+            )
             .await
             .unwrap();
         assert!(page.data.items.len() <= limit as usize);

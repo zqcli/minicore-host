@@ -5,8 +5,7 @@ use super::{
 };
 use crate::{
     CompactionProjection, FilePosition, HISTORY_SCHEMA_VERSION, HistoryEntry, HistoryProblem,
-    HistoryRecord, SCHEMA_VERSION, SessionStore, StorageError, file_handle::FileHandle,
-    strict_json,
+    HistoryRecord, SessionStore, StorageError, file_handle::FileHandle, strict_json,
 };
 use minicore_host_protocol::SessionId;
 use minicore_host_runtime::history::HistoryItem;
@@ -115,7 +114,7 @@ pub(super) fn decode_history(
                     HistoryProblem::InvalidRecord("missing or invalid schema_version".into()),
                 )
             })?;
-        if version != u64::from(SCHEMA_VERSION) && version != u64::from(HISTORY_SCHEMA_VERSION) {
+        if version != u64::from(HISTORY_SCHEMA_VERSION) {
             return Err(StorageError::UnsupportedSchema {
                 found: version,
                 supported: HISTORY_SCHEMA_VERSION,

@@ -48,6 +48,11 @@ impl SessionController {
             }
             let control = Self::control_facts(&state);
             Ok(Some(SessionSummary {
+                created_at: state.info.created_at,
+                last_activity_at: state.info.last_activity_at,
+                workspace: state.info.config.workspace.clone(),
+                model: state.info.config.model.clone(),
+                reasoning: state.info.config.reasoning,
                 id: self.id.clone(),
                 agent_id: self.agent_id.clone(),
                 title: state.info.title.clone(),

@@ -76,6 +76,8 @@ fn initial_history_retry_syncs_existing_empty_file_before_publishing_session() {
         session.id().clone(),
         agent.id().clone(),
         SessionData {
+            created_at: minicore_host_protocol::Timestamp::now(),
+            last_activity_at: minicore_host_protocol::Timestamp::now(),
             title: None,
             mode: StorageMode::Persistent,
             agent_config_revision: 1,
@@ -130,6 +132,8 @@ fn partial_explicit_delete_can_continue_while_closed_ownership_record_remains() 
             session.id().clone(),
             agent.id().clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,

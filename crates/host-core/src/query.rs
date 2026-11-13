@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageData {
+    pub received_at: Timestamp,
+    pub history_position: Option<u64>,
     pub text: String,
     pub mode: MessageMode,
     pub source: MessageSource,
@@ -54,6 +56,8 @@ pub struct TurnListSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnHistoryItemData {
+    pub position: u64,
+    pub recorded_at: Timestamp,
     /// The actual public Turn index for complete model and tool records. User
     /// input and summaries do not belong to a model response.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +67,8 @@ pub struct TurnHistoryItemData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnPartialData {
+    pub position: u64,
+    pub recorded_at: Timestamp,
     pub response_index: u64,
     pub partial: ModelPartialData,
 }
@@ -82,6 +88,23 @@ pub struct TurnResultData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SavedTurnTerminal {
+    pub position: u64,
+    pub recorded_at: Timestamp,
+    #[serde(flatten)]
+    pub terminal: TurnTerminalData,
+}
+impl std::ops::Deref for SavedTurnTerminal {
+    type Target = TurnTerminalData;
+    fn deref(&self) -> &Self::Target {
+        &self.terminal
+    }
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TurnTerminalData {
+    pub finished_at: Timestamp,
+    pub requests: u64,
+    pub tool_rounds: u64,
+    pub model_attempts: Vec<u8>,
     pub outcome: TurnOutcome,
     pub reason: Option<String>,
 }

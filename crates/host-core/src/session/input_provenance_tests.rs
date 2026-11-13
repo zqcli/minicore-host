@@ -43,6 +43,7 @@ fn user(text: &str) -> UserHistory {
 }
 fn input(text: &str, source: MessageSource, reply: Option<MessageId>) -> HistoryEntry {
     HistoryEntry::Input {
+        received_at: minicore_host_protocol::Timestamp::now(),
         turn_id: TurnId::new().unwrap(),
         message_id: MessageId::new().unwrap(),
         source,
@@ -137,6 +138,10 @@ async fn task055_validated_load_and_summary_slices_keep_native_positions_not_row
     let entries = vec![
         first,
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 0,
+            tool_rounds: 0,
+            model_attempts: Vec::new(),
             turn_id: TurnId::new().unwrap(),
             outcome: TurnOutcome::Completed,
             reason: None,
@@ -166,7 +171,7 @@ async fn task055_validated_load_and_summary_slices_keep_native_positions_not_row
         .state
         .lock()
         .unwrap()
-        .replace_history(&entries)
+        .replace_history(&test_history_records(&owner.id, entries.clone()))
         .unwrap();
     let original = owner.state.lock().unwrap().history.clone();
     // A committed summary changes native offsets, not provenance identity.
@@ -215,7 +220,7 @@ async fn task055_failed_history_replacement_does_not_publish_new_input_metadata(
         .state
         .lock()
         .unwrap()
-        .replace_history(std::slice::from_ref(&entry))
+        .replace_history(&test_history_records(&owner.id, [entry.clone()]))
         .unwrap();
     let original = RequestHistory::new(&owner.state.lock().unwrap()).unwrap();
     let invalid = vec![
@@ -233,7 +238,7 @@ async fn task055_failed_history_replacement_does_not_publish_new_input_metadata(
             .state
             .lock()
             .unwrap()
-            .replace_history(&invalid)
+            .replace_history(&test_history_records(&owner.id, invalid.clone()))
             .is_err()
     );
     let retained = RequestHistory::new(&owner.state.lock().unwrap()).unwrap();
@@ -264,7 +269,7 @@ async fn task055_native_legacy_rows_are_not_assigned_adjacent_known_input_facts(
         .state
         .lock()
         .unwrap()
-        .replace_history(&entries)
+        .replace_history(&test_history_records(&owner.id, entries.clone()))
         .unwrap();
     let history = RequestHistory::new(&owner.state.lock().unwrap()).unwrap();
     let messages = project(&history).await;
@@ -275,7 +280,10 @@ async fn task055_native_legacy_rows_are_not_assigned_adjacent_known_input_facts(
     let public = state.readable_history.as_ref().unwrap();
     for position in [0, 2] {
         let expected = serde_json::json!({"kind":"user", "text":"same text"});
-        assert_eq!(serde_json::to_value(&public[position]).unwrap(), expected);
+        assert_eq!(
+            serde_json::to_value(&public[position].item).unwrap(),
+            expected
+        );
         assert_eq!(
             serde_json::to_value(
                 state
@@ -286,7 +294,7 @@ async fn task055_native_legacy_rows_are_not_assigned_adjacent_known_input_facts(
             expected
         );
     }
-    let known = serde_json::to_value(&public[1]).unwrap();
+    let known = serde_json::to_value(&public[1].item).unwrap();
     assert_eq!(known["message_id"], serde_json::json!(id(&entry)));
     assert_eq!(known["source"], serde_json::json!({"kind":"user"}));
     assert_eq!(known["mode"], "follow_up");

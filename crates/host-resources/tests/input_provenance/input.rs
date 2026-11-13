@@ -100,6 +100,7 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },
@@ -155,6 +156,7 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },

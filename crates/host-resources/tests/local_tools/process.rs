@@ -660,6 +660,7 @@ async fn persistent_reopen_keeps_native_history_but_not_old_edit_or_process_obse
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },

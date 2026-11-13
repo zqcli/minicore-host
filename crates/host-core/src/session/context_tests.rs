@@ -87,7 +87,7 @@ impl HistoryBackend for GatedJournal {
         self.loads.fetch_add(1, Ordering::SeqCst);
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.appends.fetch_add(1, Ordering::SeqCst);
         Box::pin(async move {
             if self.armed.swap(false, Ordering::SeqCst) {
@@ -154,6 +154,8 @@ fn fixture() -> Fixture {
         id,
         agent_id,
         SessionData {
+            created_at: minicore_host_protocol::Timestamp::now(),
+            last_activity_at: minicore_host_protocol::Timestamp::now(),
             title: None,
             mode: StorageMode::Persistent,
             agent_config_revision: 0,

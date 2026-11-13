@@ -1,7 +1,7 @@
 use minicore_host_protocol::{
     Fault, FaultDetails, FaultKind, HistoryLoadDetails, PersistenceState, StorageMode, TurnId,
 };
-use minicore_host_storage::{HistoryEntry, SaveRange, SessionJournal, SessionStore};
+use minicore_host_storage::{HistoryRecord, SaveRange, SessionJournal, SessionStore};
 use std::{
     future::Future,
     pin::Pin,
@@ -13,11 +13,11 @@ pub type SaveFuture<'a> =
 /// Narrow save ownership boundary. The implementation must keep accepted
 /// batches through cancellation and perform disk work outside owner state locks.
 pub type LoadFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Vec<HistoryEntry>, Fault>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<Vec<HistoryRecord>, Fault>> + Send + 'a>>;
 /// A validated cold snapshot, or None when the existing execution owner has
 /// acquired the journal and must publish its accepted history instead.
 pub type HistoryReadFuture<'a> =
-    Pin<Box<dyn Future<Output = Result<Option<Vec<HistoryEntry>>, Fault>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<Option<Vec<HistoryRecord>>, Fault>> + Send + 'a>>;
 pub trait HistoryBackend: Send + Sync + std::any::Any {
     fn mode(&self) -> StorageMode;
     /// Original entries in save order. The Session separately projects readable
@@ -44,7 +44,7 @@ pub trait HistoryBackend: Send + Sync + std::any::Any {
             ))
         })
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a>;
+    fn append<'a>(&'a self, entries: Vec<HistoryRecord>) -> SaveFuture<'a>;
     /// Explicitly continue only the original retained append. Never reload,
     /// accept another batch, or infer confirmation from readable bytes.
     fn reconcile(&self) -> SaveFuture<'_> {
@@ -70,7 +70,7 @@ impl HistoryBackend for MemoryHistory {
     fn load(&self) -> LoadFuture<'_> {
         Box::pin(async { Ok(Vec::new()) })
     }
-    fn append<'a>(&'a self, _entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, _entries: Vec<HistoryRecord>) -> SaveFuture<'a> {
         Box::pin(async { Ok(PersistenceState::NotApplicable) })
     }
 }
@@ -93,7 +93,7 @@ struct JournalState {
 enum PendingAppend {
     /// No journal range has been accepted yet. Opening/encoding failure cannot
     /// discard the original records or authorize a different append.
-    Unaccepted(Vec<HistoryEntry>),
+    Unaccepted(Vec<HistoryRecord>),
     Accepted(SaveRange),
 }
 impl JournalState {
@@ -116,7 +116,7 @@ impl JournalState {
                     .journal
                     .as_mut()
                     .expect("opened journal")
-                    .accept(entries.clone())
+                    .accept_batch(entries.clone())
                     .map_err(write_fault)?;
                 self.pending = Some(PendingAppend::Accepted(range));
                 Ok(range)
@@ -207,9 +207,7 @@ impl HistoryBackend for JournalHistory {
                     .as_ref()
                     .expect("opened journal")
                     .loaded_records()
-                    .iter()
-                    .map(|record| record.entry.clone())
-                    .collect())
+                    .to_vec())
             })
             .await
             .map_err(|_| {
@@ -238,13 +236,7 @@ impl HistoryBackend for JournalHistory {
                     gate.block();
                 }
                 let history = store.read_history().map_err(load_fault)?;
-                Ok(Some(
-                    history
-                        .records
-                        .into_iter()
-                        .map(|record| record.entry)
-                        .collect(),
-                ))
+                Ok(Some(history.records))
             })
             .await
             .map_err(|_| {
@@ -275,7 +267,7 @@ impl HistoryBackend for JournalHistory {
                         .loaded_records()
                         .iter()
                         .filter(|record| record.entry.turn_id() == Some(&id))
-                        .map(|record| record.entry.clone())
+                        .cloned()
                         .collect());
                 }
                 // Validate the whole file before filtering. Do not accept a
@@ -286,7 +278,6 @@ impl HistoryBackend for JournalHistory {
                     .records
                     .into_iter()
                     .filter(|record| record.entry.turn_id() == Some(&id))
-                    .map(|record| record.entry)
                     .collect())
             })
             .await
@@ -298,7 +289,7 @@ impl HistoryBackend for JournalHistory {
             })?
         })
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<HistoryRecord>) -> SaveFuture<'a> {
         let state = Arc::clone(&self.state);
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {

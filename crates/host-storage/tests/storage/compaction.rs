@@ -27,6 +27,10 @@ fn complete_turn() -> Vec<HistoryEntry> {
         input(turn.clone(), loop_id),
         response(turn.clone(), loop_id),
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id: turn,
             outcome: TurnOutcome::Completed,
             reason: None,
@@ -51,6 +55,10 @@ fn partial_turn() -> Vec<HistoryEntry> {
             },
         },
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id: turn,
             outcome: TurnOutcome::Cancelled,
             reason: None,
@@ -142,7 +150,7 @@ fn repeated_compaction_reload_keeps_raw_bytes_and_projects_only_latest_summary()
 }
 
 #[test]
-fn original_v1_shapes_and_literal_summary_remain_exact_when_v2_is_appended() {
+fn current_envelopes_and_literal_summary_remain_exact_when_compaction_is_appended() {
     let f = Fixture::new();
     let mut entries = tool_exchange();
     entries.push(HistoryEntry::Summary {
@@ -154,12 +162,11 @@ fn original_v1_shapes_and_literal_summary_remain_exact_when_v2_is_appended() {
     entries.extend(complete_turn());
     let mut bytes = Vec::new();
     for (position, entry) in entries.iter().cloned().enumerate() {
-        let mut record = HistoryRecord::new(f.session.id().clone(), position as u64, entry);
-        record.schema_version = 1;
+        let record = HistoryRecord::new(f.session.id().clone(), position as u64, entry);
         serde_json::to_writer(&mut bytes, &record).unwrap();
         bytes.push(b'\n');
     }
-    // Existing v1 without a trailing newline is supported without normalization.
+    // A complete current envelope without a newline needs no normalization.
     bytes.pop();
     fs::write(f.history_path(), &bytes).unwrap();
     let loaded = f.session.read_history().unwrap();
@@ -178,20 +185,20 @@ fn original_v1_shapes_and_literal_summary_remain_exact_when_v2_is_appended() {
     assert!(
         loaded.records[..10]
             .iter()
-            .all(|record| record.schema_version == 1)
+            .all(|record| record.schema_version == HISTORY_SCHEMA_VERSION)
     );
     assert_eq!(loaded.records[10].schema_version, HISTORY_SCHEMA_VERSION);
     assert_eq!(loaded.runtime_history(), raw(&entries));
     assert_eq!(loaded.model_history().unwrap().len(), 3);
-    assert_eq!(f.session.load().unwrap().schema_version, 1);
+    assert_eq!(f.session.load().unwrap().schema_version, SCHEMA_VERSION);
 }
 
 #[test]
-fn v1_compaction_and_unknown_history_versions_fail_without_changes() {
+fn old_and_unknown_history_versions_fail_without_changes() {
     let f = Fixture::new();
     let prior = complete_turn();
     let prefix = record_bytes(&f.session, prior);
-    for version in [0, 1, 3, 999] {
+    for version in [0, 1, 2, 4, 999] {
         let mut record = HistoryRecord::new(
             f.session.id().clone(),
             3,
@@ -362,6 +369,10 @@ fn historical_missing_and_mixed_results_remain_raw_without_fabricated_outcomes()
         assistant,
         tool_result(turn.clone(), loop_id),
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 1,
+            model_attempts: vec![1],
             turn_id: turn,
             outcome: TurnOutcome::Cancelled,
             reason: Some("historical cancellation, tool outcome unknown".into()),

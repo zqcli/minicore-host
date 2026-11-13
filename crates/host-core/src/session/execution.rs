@@ -57,6 +57,7 @@ impl SessionController {
             .clone()
     }
     pub(super) fn wake(self: &Arc<Self>) {
+        self.checkpoint_activity();
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.driver_running
             || state.preparing
@@ -135,6 +136,7 @@ impl SessionController {
                             return;
                         }
                         state.history_loaded = true;
+                        self.checkpoint_activity_locked(&mut state);
                         // Validated history is Controller-owned; no Runner has
                         // been bound yet. Do not leave a completed load stuck
                         // in loading if pause/cancel prevents Turn binding.
@@ -299,20 +301,13 @@ impl SessionController {
                     terminal_accepted: false,
                     pending_interaction: None,
                 });
-                let records = self.observe_bound(&state, &batch);
                 self.publish(&mut state);
-                let mut records = records
-                    .into_iter()
-                    .map(|record| {
-                        record.published(state.controller_revision, state.runner_revision)
-                    })
-                    .collect::<Vec<_>>();
                 let active = state.active.as_ref().expect("bound actual Turn");
-                records.push(diagnostics::turn_started(
+                let records = vec![diagnostics::turn_started(
                     &self.turn_identity(&active.info),
                     &active.info,
                     state.controller_revision,
-                ));
+                )];
                 let context = diagnostic::turn_context(&self.turn_identity(&active.info));
                 (batch, records, context)
             };
@@ -360,15 +355,20 @@ impl SessionController {
         batch: Vec<QueuedInput>,
         resources: BoundResources,
     ) {
-        {
+        let records = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
-            self.accept_bound_inputs(&mut state, batch);
+            let records = self.accept_bound_inputs(&mut state, batch);
             let active = state.active.as_mut().expect("bound Turn");
             if active.info.state == TurnState::Starting {
                 active.info.state = TurnState::Running;
             }
             self.publish(&mut state);
-        }
+            records
+                .into_iter()
+                .map(|record| record.published(state.controller_revision, state.runner_revision))
+                .collect::<Vec<_>>()
+        };
+        diagnostic::emit(records);
         let result = AssertUnwindSafe(self.run_steps(&turn_id, resources))
             .catch_unwind()
             .await;
@@ -608,8 +608,7 @@ impl SessionController {
                         (false, Vec::new())
                     } else if self.schedulable(&state) && !state.next_step.is_empty() {
                         let batch = take_batch(&mut state, false, turn_id);
-                        let records = self.observe_bound(&state, &batch);
-                        self.accept_bound_inputs(&mut state, batch);
+                        let records = self.accept_bound_inputs(&mut state, batch);
                         self.publish(&mut state);
                         (true, records)
                     } else {
@@ -747,8 +746,7 @@ impl SessionController {
             return false;
         }
         let batch = take_batch(&mut state, false, turn_id);
-        let records = self.observe_bound(&state, &batch);
-        self.accept_bound_inputs(&mut state, batch);
+        let records = self.accept_bound_inputs(&mut state, batch);
         self.publish(&mut state);
         drop(state);
         diagnostic::emit(records);
@@ -772,7 +770,7 @@ impl SessionController {
         diagnostic::emit(scheduling);
     }
     pub(super) async fn finish_turn(
-        &self,
+        self: &Arc<Self>,
         turn_id: &TurnId,
         outcome: TurnOutcome,
         fault: Option<Fault>,
@@ -823,13 +821,9 @@ impl SessionController {
             }
         }
         Self::record_delegated_result(&mut state, &result, inputs);
-        state.completed.insert(
-            turn_id.clone(),
-            RetainedTurnResult {
-                result,
-                start_history: active.start_history,
-            },
-        );
+        state
+            .completed
+            .insert(turn_id.clone(), RetainedTurnResult { result });
         let previous = state.lifecycle;
         Self::finish_memory_close(&mut state);
         self.publish(&mut state);

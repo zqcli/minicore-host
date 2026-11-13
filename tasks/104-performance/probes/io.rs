@@ -65,6 +65,7 @@ fn journal(size: usize, repetitions: usize) -> ProbeResult<Value> {
     let text = "x中🙂".repeat(size);
     let bytes = text.len();
     let entry = HistoryEntry::Input {
+        received_at: minicore_host_protocol::Timestamp::now(),
         turn_id: TurnId::new()?,
         message_id: MessageId::new()?,
         source: MessageSource::User,

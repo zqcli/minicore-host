@@ -1,6 +1,6 @@
 use minicore_host_protocol::{
     AgentConfig, AgentId, ConfigRevision, HostId, MessageId, MessageMode, MessageSource,
-    SessionConfig, SessionId, SessionRef, StorageMode, TurnId, TurnOutcome,
+    SessionConfig, SessionId, SessionRef, StorageMode, Timestamp, TurnId, TurnOutcome,
 };
 use minicore_host_runtime::{
     LoopId,
@@ -10,12 +10,11 @@ use minicore_host_runtime::{
 use serde::{Deserialize, Serialize};
 
 /// Object-file schema version, independent of the design-specification version.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
-/// New JSONL records use v2. Original v1 history branches remain readable in
-/// their exact shape; compaction coverage is only defined in v2. No file is
-/// rewritten or migrated when v2 records are appended to an existing v1 log.
-pub const HISTORY_SCHEMA_VERSION: u32 = 2;
+/// Timestamped native Host envelopes. Older envelopes are explicitly unsupported;
+/// their bytes and native Runtime values are never migrated or backfilled.
+pub const HISTORY_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +83,8 @@ pub struct SessionRecord {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionData {
+    pub created_at: Timestamp,
+    pub last_activity_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     pub mode: StorageMode,
@@ -135,6 +136,7 @@ impl SaveRange {
 )]
 pub enum HistoryEntry {
     Input {
+        received_at: Timestamp,
         turn_id: TurnId,
         message_id: MessageId,
         source: MessageSource,
@@ -154,6 +156,10 @@ pub enum HistoryEntry {
         partial: ModelPartial,
     },
     TurnFinished {
+        finished_at: Timestamp,
+        requests: u64,
+        tool_rounds: u64,
+        model_attempts: Vec<u8>,
         turn_id: TurnId,
         outcome: TurnOutcome,
         reason: Option<String>,
@@ -196,14 +202,24 @@ pub struct HistoryRecord {
     pub schema_version: u32,
     pub session_id: SessionId,
     pub position: u64,
+    pub recorded_at: Timestamp,
     pub entry: HistoryEntry,
 }
 impl HistoryRecord {
     pub fn new(session_id: SessionId, position: u64, entry: HistoryEntry) -> Self {
+        Self::at(session_id, position, Timestamp::now(), entry)
+    }
+    pub fn at(
+        session_id: SessionId,
+        position: u64,
+        recorded_at: Timestamp,
+        entry: HistoryEntry,
+    ) -> Self {
         Self {
             schema_version: HISTORY_SCHEMA_VERSION,
             session_id,
             position,
+            recorded_at,
             entry,
         }
     }

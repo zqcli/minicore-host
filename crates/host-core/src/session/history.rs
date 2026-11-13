@@ -28,7 +28,7 @@ impl SessionController {
     /// Accept only this newly returned delta, then save the original unsaved
     /// native range. Input records were authored directly at queue consumption.
     pub(super) async fn save_history(
-        &self,
+        self: &Arc<Self>,
         turn_id: &TurnId,
         items: &[HistoryItem],
     ) -> Result<(), Fault> {
@@ -74,25 +74,46 @@ impl SessionController {
                     item: item.clone(),
                 });
             }
+            let accepted_at = Timestamp::now();
+            let records = entries
+                .into_iter()
+                .enumerate()
+                .map(|(offset, entry)| {
+                    let position = state.history_position + offset as u64;
+                    let recorded_at = state
+                        .readable_history
+                        .as_ref()
+                        .and_then(|rows| rows.get(position as usize))
+                        .map_or(accepted_at, |row| row.recorded_at);
+                    HistoryRecord::at(self.id.clone(), position, recorded_at, entry)
+                })
+                .collect::<Vec<_>>();
             let end = state.history.len() + items.len();
             let binding = Self::register_turn_save(
                 &mut state,
                 turn_id,
                 Boundary::Complete { loop_id, end },
-                entries.len(),
+                records.len(),
             )?;
             Arc::make_mut(&mut state.history).extend_from_slice(items);
             state.active.as_mut().expect("checked Turn").save_cursor = end;
             // Inputs became readable at consumption; only the returned delta
             // is newly readable here. Save confirmation remains independent.
-            state
-                .readable_history
-                .as_mut()
-                .expect("loaded history")
-                .extend(items.iter().map(HistoryItemData::from));
-            let diagnostics = self.observe_history(&mut state, items);
+            let readable = state.readable_history.as_mut().expect("loaded history");
+            let existing = readable.len() as u64;
+            readable.extend(
+                records
+                    .iter()
+                    .filter(|record| record.position >= existing)
+                    .map(HistoryRecordData::from_record),
+            );
+            for record in &records {
+                state.info.last_activity_at = state.info.last_activity_at.max(record.recorded_at);
+            }
+            let diagnostics = self.observe_history(&mut state, &records);
+            self.checkpoint_activity_locked(&mut state);
             self.publish(&mut state);
-            (binding, entries, diagnostics)
+            (binding, records, diagnostics)
         };
         diagnostic::emit(diagnostics);
         self.persist_registered(binding, entries).await
@@ -100,7 +121,7 @@ impl SessionController {
 
     /// The one failed model call's real partial survives a prior save failure.
     /// Resuming the original range reaches this method without rerunning work.
-    pub(super) async fn save_partial(&self, turn_id: &TurnId) -> Result<(), Fault> {
+    pub(super) async fn save_partial(self: &Arc<Self>, turn_id: &TurnId) -> Result<(), Fault> {
         let (binding, entries) = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let active = state
@@ -118,12 +139,18 @@ impl SessionController {
             let partial = partial.clone();
             let loop_id = active.loop_id;
             let response_index = u64::from(partial.request_index);
-            let entries = vec![HistoryEntry::Partial {
-                turn_id: turn_id.clone(),
-                loop_id,
-                response_index: partial.request_index,
-                partial: partial.clone(),
-            }];
+            let recorded_at = Timestamp::now();
+            let entries = vec![HistoryRecord::at(
+                self.id.clone(),
+                state.history_position,
+                recorded_at,
+                HistoryEntry::Partial {
+                    turn_id: turn_id.clone(),
+                    loop_id,
+                    response_index: partial.request_index,
+                    partial: partial.clone(),
+                },
+            )];
             let binding =
                 Self::register_turn_save(&mut state, turn_id, Boundary::Partial { loop_id }, 1)?;
             let active = state.active.as_mut().expect("checked Turn");
@@ -137,7 +164,9 @@ impl SessionController {
                 .readable_history
                 .as_mut()
                 .expect("loaded history")
-                .extend(entries.iter().filter_map(HistoryItemData::from_entry));
+                .extend(entries.iter().map(HistoryRecordData::from_record));
+            state.info.last_activity_at = state.info.last_activity_at.max(recorded_at);
+            self.checkpoint_activity_locked(&mut state);
             self.publish(&mut state);
             (binding, entries)
         };
@@ -181,9 +210,9 @@ impl SessionController {
         Ok(binding)
     }
     async fn persist_registered(
-        &self,
+        self: &Arc<Self>,
         binding: SaveBinding,
-        entries: Vec<HistoryEntry>,
+        entries: Vec<HistoryRecord>,
     ) -> Result<(), Fault> {
         let result = checked_save(async { self.backend.append(entries).await }).await;
         self.settle_save(&binding, result)
@@ -192,9 +221,10 @@ impl SessionController {
         &self,
         state: &mut SessionState,
         binding: compaction::CompactionBinding,
+        entry_count: usize,
     ) -> SaveBinding {
         let binding = SaveBinding::Compaction(binding);
-        state.history_position += 1;
+        state.history_position += entry_count as u64;
         state.history_work = Some(HistorySaveWork {
             binding: binding.clone(),
             running: true,
@@ -519,7 +549,7 @@ impl SessionController {
     }
     /// Accept and confirm the original terminal record before result publication.
     /// False keeps finalization with its current owner and outstanding save.
-    pub(super) async fn save_terminal(&self, turn_id: &TurnId) -> bool {
+    pub(super) async fn save_terminal(self: &Arc<Self>, turn_id: &TurnId) -> bool {
         let save = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             if state.history_work.is_some() {
@@ -537,7 +567,12 @@ impl SessionController {
             let save = if active.terminal_accepted {
                 None
             } else {
+                let recorded_at = Timestamp::now();
                 let entry = HistoryEntry::TurnFinished {
+                    finished_at: recorded_at,
+                    requests: active.info.requests,
+                    tool_rounds: active.info.tool_rounds,
+                    model_attempts: active.info.model_attempts.clone(),
                     turn_id: turn_id.clone(),
                     outcome,
                     reason: active
@@ -557,6 +592,8 @@ impl SessionController {
                             })
                         }),
                 };
+                let entry =
+                    HistoryRecord::at(self.id.clone(), state.history_position, recorded_at, entry);
                 let Ok(binding) =
                     Self::register_turn_save(&mut state, turn_id, Boundary::Terminal, 1)
                 else {
@@ -567,8 +604,15 @@ impl SessionController {
                     .as_mut()
                     .expect("checked original Turn")
                     .terminal_accepted = true;
+                state
+                    .readable_history
+                    .as_mut()
+                    .expect("loaded history")
+                    .push(HistoryRecordData::from_record(&entry));
+                state.info.last_activity_at = state.info.last_activity_at.max(recorded_at);
                 Some((binding, vec![entry]))
             };
+            self.checkpoint_activity_locked(&mut state);
             self.publish(&mut state);
             save
         };

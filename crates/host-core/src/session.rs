@@ -3,7 +3,7 @@ use crate::diagnostics::{self as diagnostic, Record};
 use crate::types::*;
 use futures_util::FutureExt;
 use minicore_host_protocol::*;
-use minicore_host_storage::{HistoryEntry, SessionRecord, SessionStore};
+use minicore_host_storage::{HistoryEntry, HistoryRecord, SessionRecord, SessionStore};
 
 mod close;
 mod collaboration;
@@ -101,11 +101,10 @@ impl ActiveTurn {
         newly_claimed
     }
 }
-/// A held result keeps its original native slice position in the Session's
-/// append-only history. No second input index or projected transcript is stored.
+/// Native execution result. Public records are projected from the Session's
+/// accepted history, without another input index or projected transcript.
 struct RetainedTurnResult {
     result: TurnResult,
-    start_history: usize,
 }
 impl std::ops::Deref for RetainedTurnResult {
     type Target = TurnResult;
@@ -148,7 +147,7 @@ struct SessionState {
         BTreeMap<(OperationId, usize), compaction::FinishedManualCompaction>,
     // Accepted content in original order, not model context or save confirmation.
     // None until loaded; retained on unload and released with the Session body.
-    readable_history: Option<Vec<HistoryItemData>>,
+    readable_history: Option<Vec<HistoryRecordData>>,
     output: BTreeMap<TurnId, observation::TurnObservation>,
     edits: minicore_host_workspace::EditJournal,
     edits_complete: bool,
@@ -214,10 +213,24 @@ impl SessionController {
         history: Vec<HistoryItem>,
         agent_enabled: Arc<AtomicBool>,
     ) -> Arc<Self> {
-        let readable_history = (backend.mode() == StorageMode::Memory)
-            .then(|| history.iter().map(HistoryItemData::from).collect());
+        let created_at = Timestamp::now();
+        let readable_history = (backend.mode() == StorageMode::Memory).then(|| {
+            history
+                .iter()
+                .enumerate()
+                .map(|(position, item)| HistoryRecordData {
+                    position: position as u64,
+                    recorded_at: created_at,
+                    turn_id: None,
+                    response_index: None,
+                    item: item.into(),
+                })
+                .collect()
+        });
         let state = SessionState {
             info: SessionInfo {
+                created_at,
+                last_activity_at: created_at,
                 agent_config_revision: 0,
                 id: id.clone(),
                 agent_id: agent_id.clone(),
@@ -388,3 +401,15 @@ impl SessionController {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+fn test_history_records(
+    session_id: &SessionId,
+    entries: impl IntoIterator<Item = HistoryEntry>,
+) -> Vec<HistoryRecord> {
+    entries
+        .into_iter()
+        .enumerate()
+        .map(|(position, entry)| HistoryRecord::new(session_id.clone(), position as u64, entry))
+        .collect()
+}

@@ -413,6 +413,7 @@ async fn reject_duplicate(mode: StorageMode, continuation: bool) {
         .session
         .history(
             HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },
@@ -437,6 +438,7 @@ async fn reject_duplicate(mode: StorageMode, continuation: bool) {
         let cold = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 100,
                 },

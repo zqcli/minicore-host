@@ -110,6 +110,7 @@ async fn task071_owned_compaction_reports_only_actual_active_operation() {
         let turn_id = TurnId::new().unwrap();
         let loop_id = LoopId::new().unwrap();
         entries.push(HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: turn_id.clone(),
             message_id: MessageId::new().unwrap(),
             source: MessageSource::User,
@@ -138,12 +139,21 @@ async fn task071_owned_compaction_reports_only_actual_active_operation() {
             }),
         });
         entries.push(HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id,
             outcome: TurnOutcome::Completed,
             reason: None,
         });
     }
-    fixture.session.backend.append(entries).await.unwrap();
+    fixture
+        .session
+        .backend
+        .append(test_history_records(&fixture.session.id, entries))
+        .await
+        .unwrap();
     fixture
         .session
         .control(

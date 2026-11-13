@@ -7,6 +7,7 @@ async fn read(fixture: &Fixture) -> Vec<HistoryItemData> {
         .history_read(
             &fixture.connection.caller(),
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },
@@ -15,6 +16,9 @@ async fn read(fixture: &Fixture) -> Vec<HistoryItemData> {
         .unwrap()
         .data
         .items
+        .into_iter()
+        .map(|row| row.item)
+        .collect()
 }
 
 #[tokio::test]
@@ -63,14 +67,14 @@ async fn pending_partial_read_does_not_confirm_its_save() {
     gates[1].add_permits(1);
     assert_eq!(saves.recv().await, Some(2));
     assert_eq!(
-        serde_json::to_value(read(&fixture).await).unwrap(),
+        serde_json::to_value(&read(&fixture).await[..items.len()]).unwrap(),
         serde_json::to_value(&items).unwrap()
     );
     gates[2].add_permits(1);
     until(&fixture, |state| state.completed.len() == 1).await;
     assert_single_terminal(&fixture, TurnOutcome::Failed, 1);
     assert_eq!(
-        serde_json::to_value(read(&fixture).await).unwrap(),
+        serde_json::to_value(&read(&fixture).await[..items.len()]).unwrap(),
         serde_json::to_value(items).unwrap()
     );
 }
@@ -119,12 +123,17 @@ async fn failed_partial_read_and_reconcile_keep_one_content_entry() {
             .unwrap();
         until(&fixture, |state| state.completed.len() == 1).await;
         assert_single_terminal(&fixture, TurnOutcome::Failed, 1);
-        assert_eq!(serde_json::to_value(read(&fixture).await).unwrap(), before);
+        let after = read(&fixture).await;
+        assert_eq!(serde_json::to_value(&after[..2]).unwrap(), before);
+        assert!(matches!(&after[2], HistoryItemData::TurnFinished { .. }));
         fixture
             .session
             .resume(&fixture.connection.caller())
             .unwrap();
-        assert_eq!(serde_json::to_value(read(&fixture).await).unwrap(), before);
+        assert_eq!(
+            serde_json::to_value(read(&fixture).await).unwrap(),
+            serde_json::to_value(after).unwrap()
+        );
         assert_eq!(backend.appends.load(Ordering::SeqCst), 3);
         assert_eq!(backend.reconciles.load(Ordering::SeqCst), 1);
         assert_eq!(model.calls.load(Ordering::SeqCst), 1);

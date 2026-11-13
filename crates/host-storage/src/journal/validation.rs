@@ -1,7 +1,7 @@
 //! One validator for accepted batches and decoded durable history.
 use crate::{
     CompactionProjection, FilePosition, HISTORY_SCHEMA_VERSION, HistoryEntry, HistoryProblem,
-    HistoryRecord, SCHEMA_VERSION, StorageError,
+    HistoryRecord, StorageError,
 };
 use minicore_host_protocol::{SessionId, TurnId, TurnOutcome};
 use minicore_host_runtime::{
@@ -20,22 +20,12 @@ pub(super) fn validate_envelope(
     expected: u64,
     location: FilePosition,
 ) -> Result<(), StorageError> {
-    if record.schema_version != SCHEMA_VERSION && record.schema_version != HISTORY_SCHEMA_VERSION {
+    if record.schema_version != HISTORY_SCHEMA_VERSION {
         return Err(StorageError::UnsupportedSchema {
             found: u64::from(record.schema_version),
             supported: HISTORY_SCHEMA_VERSION,
             position: Some(location),
         });
-    }
-    if record.schema_version == SCHEMA_VERSION
-        && matches!(record.entry, HistoryEntry::Compaction { .. })
-    {
-        return Err(invalid(
-            location,
-            HistoryProblem::InvalidRecord(
-                "compaction coverage requires history schema version 2".into(),
-            ),
-        ));
     }
     if &record.session_id != session {
         return Err(invalid(location, HistoryProblem::WrongSession));
@@ -288,8 +278,48 @@ impl<'a> Validator<'a> {
                 self.delta.partial_loops.insert(*loop_id);
             }
             HistoryEntry::TurnFinished {
-                turn_id, outcome, ..
+                turn_id,
+                outcome,
+                requests,
+                tool_rounds,
+                model_attempts,
+                ..
             } => {
+                let known = self
+                    .delta
+                    .response_next
+                    .get(turn_id)
+                    .or_else(|| self.base.response_next.get(turn_id))
+                    .copied()
+                    .unwrap_or_default() as usize;
+                if *requests < known as u64
+                    || model_attempts.len() as u64 != *requests
+                    || model_attempts[..known].contains(&0)
+                {
+                    return Err(bad(
+                        "terminal request/attempt counts contradict accepted model responses",
+                    ));
+                }
+                let known_batches = self
+                    .base
+                    .calls
+                    .range((turn_id.clone(), String::new())..)
+                    .take_while(|((turn, _), _)| turn == turn_id)
+                    .chain(
+                        self.delta
+                            .calls
+                            .range((turn_id.clone(), String::new())..)
+                            .take_while(|((turn, _), _)| turn == turn_id),
+                    )
+                    .filter(|(_, call)| call.result_position.is_some())
+                    .map(|(_, call)| call.response_index)
+                    .collect::<BTreeSet<_>>()
+                    .len() as u64;
+                if *tool_rounds < known_batches || *tool_rounds > *requests {
+                    return Err(bad(
+                        "terminal tool-round count contradicts accepted tool results",
+                    ));
+                }
                 if *outcome == TurnOutcome::Completed
                     && (self.delta.partial_turns.contains(turn_id)
                         || self.base.partial_turns.contains(turn_id))

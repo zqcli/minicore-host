@@ -61,6 +61,7 @@ async fn typed_service_runtime_and_stdio_query_parity() {
             typed_session
                 .history(
                     HistoryReadRequest {
+                        direction: minicore_host_protocol::HistoryDirection::Forward,
                         cursor: None,
                         limit: 100
                     },
@@ -73,6 +74,7 @@ async fn typed_service_runtime_and_stdio_query_parity() {
             rpc_session
                 .history(
                     HistoryReadRequest {
+                        direction: minicore_host_protocol::HistoryDirection::Forward,
                         cursor: None,
                         limit: 100
                     },

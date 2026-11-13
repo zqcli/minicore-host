@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **1** and history schema **2**, implementing the persistence boundaries of SPEC v4.10.1.
+Object schema **2** and history schema **3**, implementing the persistence boundaries of SPEC v4.10.2. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
@@ -149,19 +149,24 @@ Memory Agent plus persistent Session is rejected; modes never silently change.
 
 Every record has exactly these outer fields:
 
-- `schema_version`: 2 for newly written records. Exact original version-1 branches remain readable; the compaction branch requires version 2. Unsupported versions fail without rewriting.
+- `schema_version`: 3. Earlier and unknown versions fail explicitly without rewriting.
 - `session_id`: this Session's stable ID.
-- `position`: zero-based contiguous Session-local position, not a public cursor.
+- `position`: zero-based contiguous Session-local logical position, exposed unchanged by public record projections; it is neither a physical line number nor a pagination cursor.
+- `recorded_at`: the owner acceptance time in UTC RFC3339, preserved through original-save reconciliation.
 - `entry`: `{kind,data}` with one of the branches below.
 
 | kind | data |
 | --- | --- |
-| `input` | `turn_id,message_id,source,mode,in_reply_to,user` |
+| `input` | `received_at,turn_id,message_id,source,mode,in_reply_to,user` |
 | `runtime` | `turn_id,response_index,item` |
 | `partial` | `turn_id,loop_id,response_index,partial` |
-| `turn_finished` | `turn_id,outcome,reason` |
+| `turn_finished` | `turn_id,finished_at,requests,tool_rounds,model_attempts,outcome,reason` |
 | `summary` | `summary` |
-| `compaction` | `source_position,covered_items,summary` (version 2 only) |
+| `compaction` | `source_position,covered_items,summary` |
+
+Session metadata retains owner-captured `created_at` and the maximum accepted
+`last_activity_at`. Input `received_at` is captured before queueing and survives
+delayed binding. Record order comes from positions, never wall-clock comparison.
 
 Input `user` is the exact Runtime `UserHistory`; text exists only in its native
 `input`, alongside the message's consumed provenance. Queued-but-unconsumed

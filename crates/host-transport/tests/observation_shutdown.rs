@@ -168,6 +168,7 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
         let history = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 100,
                 },

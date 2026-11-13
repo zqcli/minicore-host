@@ -141,6 +141,8 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
                 id.clone(),
                 agent_id.clone(),
                 SessionData {
+                    created_at: minicore_host_protocol::Timestamp::now(),
+                    last_activity_at: minicore_host_protocol::Timestamp::now(),
                     title: None,
                     mode: StorageMode::Persistent,
                     agent_config_revision: 7,

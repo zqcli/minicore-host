@@ -11,7 +11,42 @@ pub(super) struct SessionRecordWork {
     pub(super) running: bool,
     pub(super) fault: Option<Fault>,
 }
+impl SessionRecordWork {
+    pub(super) fn activity_only(&self) -> bool {
+        let mut baseline = self.baseline.clone();
+        baseline.data.last_activity_at = self.candidate.data.last_activity_at;
+        baseline == self.candidate
+    }
+}
+
 impl SessionController {
+    /// A metadata checkpoint belongs to the Session owner, never the reader or
+    /// caller waiting on it. Reuse the same candidate/baseline/reconciliation path.
+    pub(super) fn checkpoint_activity(self: &Arc<Self>) {
+        let mut state = self.state.lock().expect("Session mutex poisoned");
+        self.checkpoint_activity_locked(&mut state);
+    }
+    pub(super) fn checkpoint_activity_locked(self: &Arc<Self>, state: &mut SessionState) {
+        if state.info.mode != StorageMode::Persistent
+            || state.record_work.is_some()
+            || state.releasing
+            || state.released
+            || state.reclaimed
+            || state.deleting
+            || state.lifecycle == SessionLifecycle::Closed
+            || state.executor.is_none()
+            || state
+                .record_base
+                .as_ref()
+                .is_none_or(|base| base.data.last_activity_at >= state.info.last_activity_at)
+        {
+            return;
+        }
+        let candidate = self.record(state);
+        let (sender, receiver) = oneshot::channel();
+        drop(receiver);
+        self.spawn_record_save(state, candidate, sender, None);
+    }
     pub(crate) fn set_source_revision(&self, revision: ConfigRevision) {
         self.state
             .lock()
@@ -24,6 +59,8 @@ impl SessionController {
             .record_base
             .clone()
             .expect("persistent Session has a confirmed record");
+        record.data.created_at = state.info.created_at;
+        record.data.last_activity_at = state.info.last_activity_at;
         record.data.title = state.info.title.clone();
         record.data.config_revision = state.info.config_revision;
         record.data.effective_config = state.info.config.clone();
@@ -95,6 +132,9 @@ impl SessionController {
         let Some(work) = &state.record_work else {
             return Ok(None);
         };
+        if work.running && work.activity_only() {
+            return Ok(None);
+        }
         if work.running {
             return Err(Fault::new(
                 FaultKind::SessionBusy,
@@ -192,6 +232,10 @@ impl SessionController {
             let (updated, record) = match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
+                    state.info.last_activity_at = state
+                        .info
+                        .last_activity_at
+                        .max(candidate.data.last_activity_at);
                     state.info.title = candidate.data.title;
                     state.info.config = candidate.data.effective_config;
                     state.info.config_revision = candidate.data.config_revision;
@@ -200,20 +244,25 @@ impl SessionController {
                         state.residency = Residency::Unloaded;
                         state.load_id = None;
                     }
-                    if state.block_reason.as_ref().is_some_and(|fault| {
-                        matches!(
-                            fault.kind(),
-                            Some(
-                                FaultKind::SessionResourceMissing
-                                    | FaultKind::SessionConfigInvalid
-                                    | FaultKind::SessionConfigConflict
+                    if candidate.data.config_revision != expected_baseline.data.config_revision
+                        && state.block_reason.as_ref().is_some_and(|fault| {
+                            matches!(
+                                fault.kind(),
+                                Some(
+                                    FaultKind::SessionResourceMissing
+                                        | FaultKind::SessionConfigInvalid
+                                        | FaultKind::SessionConfigConflict
+                                )
                             )
-                        )
-                    }) {
+                        })
+                    {
                         state.block_reason = None;
                     }
                     state.record_work = None;
                     state.close_fault = None;
+                    // Register any newer accepted activity before publishing a
+                    // quiescent state: release/shutdown cannot slip between saves.
+                    self.checkpoint_activity_locked(&mut state);
                     self.finish_save_resume(&mut state);
                     self.publish(&mut state);
                     (Ok(state.info.clone()), self.closed_record(&state, previous))
@@ -483,5 +532,289 @@ impl SessionController {
             },
         )?;
         Ok(receipt)
+    }
+}
+
+#[cfg(test)]
+mod activity_tests {
+    use super::*;
+    use crate::{BoundResources, ResourceFuture};
+    use minicore_host_storage::{AgentData, AgentRecord, DataRoot, HostRecord, SessionData};
+    use std::time::Duration;
+
+    /// This fixture deliberately never executes a model; it exercises paused
+    /// input and the production Session metadata writer only.
+    struct IdleResources;
+    impl ResourceResolver for IdleResources {
+        fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
+            Ok(())
+        }
+        fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+            Box::pin(async {
+                Err::<BoundResources, _>(Fault::new(
+                    FaultKind::SessionResourceMissing,
+                    "idle metadata fixture has no model",
+                ))
+            })
+        }
+    }
+    fn fixture() -> (
+        tempfile::TempDir,
+        Arc<SessionController>,
+        SessionStore,
+        crate::ConnectionHandle,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = DataRoot::acquire(dir.path()).unwrap();
+        let host_id = HostId::new().unwrap();
+        let host = root.host(host_id.clone());
+        host.save_host(&HostRecord::new(host_id.clone(), (), 0))
+            .unwrap();
+        let agent_id = AgentId::new().unwrap();
+        let agent = host.agent(agent_id.clone(), StorageMode::Persistent);
+        agent
+            .save(&AgentRecord::new(
+                agent_id.clone(),
+                host_id.clone(),
+                AgentData {
+                    name: "activity metadata fixture".into(),
+                    mode: StorageMode::Persistent,
+                    config: AgentConfig::default(),
+                    config_revision: 0,
+                    default_session_id: None,
+                },
+            ))
+            .unwrap();
+        let id = SessionId::new().unwrap();
+        let store = agent.session(id.clone(), StorageMode::Persistent).unwrap();
+        let created_at = Timestamp::from_unix_milliseconds(0).unwrap();
+        let record = SessionRecord::new(
+            id,
+            agent_id,
+            SessionData {
+                created_at,
+                last_activity_at: created_at,
+                title: None,
+                mode: StorageMode::Persistent,
+                agent_config_revision: 0,
+                config_revision: 0,
+                effective_config: SessionConfig::default(),
+                parent: None,
+                closed: None,
+            },
+        );
+        store.save(&record).unwrap();
+        let incarnation = HostIncarnation::new().unwrap();
+        let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
+        let connection = access.connect().unwrap();
+        let owner = SessionController::from_record(
+            record,
+            store.clone(),
+            host_id,
+            incarnation,
+            access,
+            Arc::new(IdleResources),
+            Arc::new(AtomicBool::new(true)),
+            true,
+        );
+        owner.state.lock().unwrap().paused = true;
+        (dir, owner, store, connection)
+    }
+    async fn settled(owner: &SessionController) {
+        let mut changes = owner.snapshots.subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if owner.state.lock().unwrap().record_work.is_none() {
+                    return;
+                }
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+    }
+    fn message() -> MessageInput {
+        MessageInput {
+            message_id: MessageId::new().unwrap(),
+            mode: MessageMode::FollowUp,
+            text: "accepted while paused".into(),
+            in_reply_to: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn newer_activity_coalesces_before_quiescence_and_survives_shutdown() {
+        let (_dir, owner, store, connection) = fixture();
+        // Deterministic gate between original metadata acceptance and worker I/O.
+        // This is a named scheduling fixture, not a simulated disk confirmation.
+        let candidate = {
+            let mut state = owner.state.lock().unwrap();
+            let mut candidate = owner.record(&state);
+            candidate.data.title = Some("original accepted title".into());
+            candidate.data.config_revision = 1;
+            state.record_work = Some(SessionRecordWork {
+                candidate: candidate.clone(),
+                baseline: state.record_base.clone().unwrap(),
+                operation: None,
+                running: true,
+                fault: None,
+            });
+            candidate
+        };
+        owner.send(&connection.caller(), message()).unwrap();
+        let received_at = owner.state.lock().unwrap().messages[0].received_at;
+        assert!(received_at > candidate.data.last_activity_at);
+        assert_eq!(
+            owner
+                .state
+                .lock()
+                .unwrap()
+                .record_work
+                .as_ref()
+                .unwrap()
+                .candidate,
+            candidate
+        );
+        owner.begin_host_shutdown_owned(true);
+        assert!(!owner.shutdown_status_owned().quiescent);
+        owner.save_record(candidate).await.unwrap();
+        settled(&owner).await;
+        let saved = store.load().unwrap();
+        assert_eq!(saved.data.last_activity_at, received_at);
+        assert_eq!(saved.data.title.as_deref(), Some("original accepted title"));
+        assert_eq!(saved.data.config_revision, 1);
+        assert_eq!(
+            saved.data.created_at,
+            Timestamp::from_unix_milliseconds(0).unwrap()
+        );
+        assert!(owner.state.lock().unwrap().next_turn.is_empty());
+        assert!(!owner.state.lock().unwrap().history_loaded);
+        assert!(store.read_history().unwrap().records.is_empty());
+        let before = store.load().unwrap();
+        owner.info(&connection.caller()).unwrap();
+        owner.summary(&connection.caller()).unwrap();
+        owner
+            .history_read(
+                &connection.caller(),
+                &HistoryReadRequest {
+                    cursor: None,
+                    limit: 3,
+                    direction: HistoryDirection::Backward,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(store.load().unwrap(), before);
+        assert_eq!(
+            owner.info(&connection.caller()).unwrap().last_activity_at,
+            received_at
+        );
+        owner.release_host_resources_owned().await.unwrap();
+        owner.checkpoint_activity();
+        assert!(owner.state.lock().unwrap().record_work.is_none());
+        assert!(owner.state.lock().unwrap().record_task.is_none());
+
+        let incarnation = HostIncarnation::new().unwrap();
+        let access = ConnectionRegistry::new(owner.host_id.clone(), incarnation.clone());
+        let reopened_connection = access.connect().unwrap();
+        let reopened = SessionController::from_record(
+            saved,
+            store,
+            owner.host_id.clone(),
+            incarnation,
+            access,
+            Arc::new(IdleResources),
+            Arc::new(AtomicBool::new(true)),
+            true,
+        );
+        let summary = reopened
+            .summary(&reopened_connection.caller())
+            .unwrap()
+            .unwrap();
+        assert_eq!(summary.last_activity_at, received_at);
+        assert_eq!(summary.title.as_deref(), Some("original accepted title"));
+        assert!(!reopened.state.lock().unwrap().history_loaded);
+    }
+
+    #[tokio::test]
+    async fn paused_input_registers_activity_save_before_force_clear() {
+        let (_dir, owner, store, connection) = fixture();
+        owner.send(&connection.caller(), message()).unwrap();
+        let received_at = owner.state.lock().unwrap().messages[0].received_at;
+        owner.begin_host_shutdown_owned(true);
+        settled(&owner).await;
+        assert_eq!(store.load().unwrap().data.last_activity_at, received_at);
+        assert!(store.read_history().unwrap().records.is_empty());
+        owner.release_host_resources_owned().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn recovered_activity_is_checkpointed_before_load_or_preparation_quiesces() {
+        for explicit_load in [true, false] {
+            let (_dir, owner, store, connection) = fixture();
+            // Durable history can be newer than session.json after a previous
+            // process ended between the original history and metadata saves.
+            // The future value also proves we compare actual timestamps rather
+            // than overwriting recovered activity with the current clock.
+            let recorded_at = Timestamp::from_unix_milliseconds(4_102_444_800_000).unwrap();
+            let mut journal = store.open_journal().unwrap();
+            journal
+                .accept_batch(vec![minicore_host_storage::HistoryRecord::at(
+                    owner.id.clone(),
+                    0,
+                    recorded_at,
+                    HistoryEntry::Summary {
+                        summary: minicore_host_runtime::SummaryHistory {
+                            content: minicore_host_runtime::Text::new("durable original content"),
+                        },
+                    },
+                )])
+                .unwrap();
+            journal.persist_pending().unwrap();
+            drop(journal);
+            if explicit_load {
+                owner
+                    .control(
+                        &connection.caller(),
+                        SessionControlRequest {
+                            operation_id: OperationId::new().unwrap(),
+                        },
+                        SessionControlKind::Load,
+                    )
+                    .unwrap();
+                owner.begin_host_shutdown_owned(true);
+            } else {
+                owner.send(&connection.caller(), message()).unwrap();
+                owner.resume(&connection.caller()).unwrap();
+                let mut changes = owner.snapshots.subscribe();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        let finished = {
+                            let state = owner.state.lock().unwrap();
+                            state.history_loaded
+                                && !state.driver_running
+                                && state.block_reason.is_some()
+                        };
+                        if finished {
+                            break;
+                        }
+                        changes.changed().await.unwrap();
+                    }
+                })
+                .await
+                .unwrap();
+                owner.begin_host_shutdown_owned(true);
+            }
+            owner.wait_quiescent_owned().await;
+            owner.release_host_resources_owned().await.unwrap();
+            assert_eq!(store.load().unwrap().data.last_activity_at, recorded_at);
+            assert_eq!(
+                store.read_history().unwrap().records[0].recorded_at,
+                recorded_at
+            );
+            assert!(owner.state.lock().unwrap().record_work.is_none());
+            owner.checkpoint_activity();
+            assert!(owner.state.lock().unwrap().record_task.is_none());
+        }
     }
 }

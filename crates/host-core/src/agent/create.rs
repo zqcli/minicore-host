@@ -325,10 +325,13 @@ impl AgentOwner {
                 .map_err(|error| {
                     Fault::new(FaultKind::SessionHistoryWriteFailed, error.to_string())
                 })?;
+            let created_at = Timestamp::now();
             let record = SessionRecord::new(
                 prepared.id.clone(),
                 self.id.clone(),
                 SessionData {
+                    created_at,
+                    last_activity_at: created_at,
                     title: None,
                     mode: prepared.mode,
                     agent_config_revision: prepared.agent_revision,

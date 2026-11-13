@@ -16,6 +16,9 @@ fn retained() -> TurnResultSnapshot {
         },
         data: TurnResultData {
             info: Some(TurnStateData {
+                history_position: None,
+                recorded_at: None,
+                finished_at: None,
                 state: TurnState::Finished,
                 runner_revision: 2,
                 config_revision: 1,
@@ -44,8 +47,16 @@ fn saved() -> TurnResultSnapshot {
     value.data.info = None;
     value.data.config = None;
     value.data.saved_terminal = Some(SavedTurnTerminal {
-        outcome: TurnOutcome::Completed,
-        reason: None,
+        position: 0,
+        recorded_at: Timestamp::now(),
+        terminal: crate::TurnTerminalData {
+            finished_at: Timestamp::now(),
+            requests: 0,
+            tool_rounds: 0,
+            model_attempts: Vec::new(),
+            outcome: TurnOutcome::Completed,
+            reason: None,
+        },
     });
     value
 }

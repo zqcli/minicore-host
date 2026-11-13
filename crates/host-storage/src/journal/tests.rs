@@ -35,6 +35,8 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
             session.id().clone(),
             agent.id().clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,

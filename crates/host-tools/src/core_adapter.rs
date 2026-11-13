@@ -55,6 +55,7 @@ impl CoreTurnPort {
                 let info = self.capability.session_snapshot(&target)?;
                 let history = if request.include_output {
                     let page = request.history_page.unwrap_or(HistoryReadRequest {
+                        direction: minicore_host_protocol::HistoryDirection::Forward,
                         cursor: None,
                         limit: u64::MAX,
                     });

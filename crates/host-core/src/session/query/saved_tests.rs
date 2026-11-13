@@ -37,6 +37,10 @@ fn seed(fixture: &Fixture) -> TurnId {
                 },
             },
             HistoryEntry::TurnFinished {
+                finished_at: minicore_host_protocol::Timestamp::now(),
+                requests: 0,
+                tool_rounds: 0,
+                model_attempts: Vec::new(),
                 turn_id: id.clone(),
                 outcome: TurnOutcome::Failed,
                 reason: Some("explicit terminal-only storage fixture".into()),
@@ -97,7 +101,7 @@ impl HistoryBackend for LoadPublicationGate {
     fn read_saved_turn(&self, id: &TurnId) -> LoadFuture<'_> {
         self.inner.read_saved_turn(id)
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.inner.append(entries)
     }
 }

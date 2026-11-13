@@ -37,6 +37,8 @@ pub struct AgentInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
+    pub created_at: Timestamp,
+    pub last_activity_at: Timestamp,
     pub agent_config_revision: ConfigRevision,
     pub id: SessionId,
     pub agent_id: AgentId,
@@ -64,6 +66,8 @@ pub enum MessageBinding {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageRecord {
+    pub received_at: Timestamp,
+    pub history_position: Option<u64>,
     pub input: MessageInput,
     pub source: MessageSource,
     pub queue: InputQueue,
@@ -204,6 +208,8 @@ pub struct ToolCallSnapshot {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HistoryItemData {
     User {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        received_at: Option<Timestamp>,
         text: String,
         /// Absent only when the native history has no original Host input facts.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -229,6 +235,29 @@ pub enum HistoryItemData {
     Summary {
         text: String,
     },
+    Compaction {
+        text: String,
+        source_position: u64,
+        covered_items: u64,
+    },
+    TurnFinished {
+        #[serde(flatten)]
+        terminal: crate::TurnTerminalData,
+    },
+}
+
+/// One accepted native record. Identity remains stable across retained, cold,
+/// result and event views; neither repeated MessageIds nor equal text identify it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HistoryRecordData {
+    pub position: u64,
+    pub recorded_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_index: Option<u64>,
+    #[serde(flatten)]
+    pub item: HistoryItemData,
 }
 
 /// Unfinished model content, never a complete response or executable context.
@@ -252,6 +281,7 @@ impl From<&HistoryItem> for HistoryItemData {
     fn from(value: &HistoryItem) -> Self {
         match value {
             HistoryItem::User(value) => Self::User {
+                received_at: None,
                 text: value.input.as_text().to_owned(),
                 message_id: None,
                 source: None,
@@ -276,7 +306,7 @@ impl From<&HistoryItem> for HistoryItemData {
 pub struct SessionHistorySnapshot {
     #[serde(flatten)]
     pub source: SessionIdentity,
-    pub data: HistoryPageData<HistoryItemData>,
+    pub data: HistoryPageData<HistoryRecordData>,
 }
 
 /// Utility calls are accounted separately from ordinary Turn responses.

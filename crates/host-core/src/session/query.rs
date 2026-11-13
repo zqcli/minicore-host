@@ -2,7 +2,6 @@ mod history;
 mod output;
 mod saved;
 
-use super::observation::TurnObservation;
 use super::*;
 use crate::{
     MessageData, MessageSnapshot, TurnDetailsData, TurnDetailsSnapshot, TurnHistoryItemData,
@@ -20,6 +19,8 @@ impl SessionController {
             source: self.identity(),
             message_id: record.input.message_id,
             data: MessageData {
+                received_at: record.received_at,
+                history_position: record.history_position,
                 text: record.input.text,
                 mode: record.input.mode,
                 source: record.source,
@@ -110,25 +111,18 @@ impl SessionController {
                 Self::available(&state)?;
                 return Ok(None);
             };
+            let (history, partials, _) = saved::project_records(
+                id,
+                state.readable_history.as_deref().expect("retained history"),
+            );
             Ok(Some(TurnResultSnapshot {
                 source: self.turn_identity(&result.info),
                 data: TurnResultData {
                     info: Some(Self::retained_turn_state(&state, &result.info)),
                     config: Some(result.info.config.clone()),
                     saved_terminal: None,
-                    history: project_history(
-                        result,
-                        state.output.get(id),
-                        &state.input_provenance,
-                    )?,
-                    partials: result
-                        .partials
-                        .iter()
-                        .map(|partial| TurnPartialData {
-                            response_index: partial.response_index,
-                            partial: (&partial.partial).into(),
-                        })
-                        .collect(),
+                    history,
+                    partials,
                 },
             }))
         })
@@ -313,56 +307,6 @@ fn missing_turn() -> Fault {
         FaultKind::SessionTurnNotFound,
         "Turn is not available in this Session",
     )
-}
-fn missing_response() -> Fault {
-    Fault::new(
-        FaultKind::SessionInternalUnexpected,
-        "retained Turn history has no matching complete response projection",
-    )
-}
-
-/// Both sources are committed together by `accept_history` under this same
-/// Session lock: native complete records and their accepted output positions.
-/// Pair complete records in their original order, never count input takes or
-/// mistake a per-Loop request index for a public Turn index. The temporary
-/// mapping only joins tool records to their original native model response.
-fn project_history(
-    result: &RetainedTurnResult,
-    output: Option<&TurnObservation>,
-    input_provenance: &input_provenance::InputProvenance,
-) -> Result<Vec<TurnHistoryItemData>, Fault> {
-    let mut indexes = output.into_iter().flat_map(|output| {
-        output
-            .models
-            .iter()
-            .filter(|(_, channels)| channels.values().any(|body| body.completed))
-            .map(|(index, _)| *index)
-    });
-    let mut responses = BTreeMap::new();
-    let mut history = Vec::with_capacity(result.history.len());
-    for (offset, item) in result.history.iter().enumerate() {
-        let response_index = match item {
-            HistoryItem::Assistant(value) => {
-                let index = indexes.next().ok_or_else(missing_response)?;
-                responses.insert((value.loop_id, value.request_index), index);
-                Some(index)
-            }
-            HistoryItem::ToolResult(value) => Some(
-                *responses
-                    .get(&(value.loop_id, value.request_index))
-                    .ok_or_else(missing_response)?,
-            ),
-            HistoryItem::User(_) | HistoryItem::Summary(_) => None,
-        };
-        history.push(TurnHistoryItemData {
-            response_index,
-            item: input_provenance.history_item(result.start_history + offset, item),
-        });
-    }
-    if indexes.next().is_some() {
-        return Err(missing_response());
-    }
-    Ok(history)
 }
 
 #[cfg(test)]

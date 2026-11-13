@@ -530,6 +530,8 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
             session_id.clone(),
             agent_id.clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 3,
@@ -549,6 +551,7 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
         let turn_id = TurnId::new().unwrap();
         let loop_id = LoopId::new().unwrap();
         entries.push(HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: turn_id.clone(),
             message_id: MessageId::new().unwrap(),
             source: MessageSource::User,
@@ -581,6 +584,10 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
             }),
         });
         entries.push(HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id,
             outcome: TurnOutcome::Completed,
             reason: None,
@@ -611,6 +618,20 @@ async fn persistent(path: &Path, resources: Arc<Resources>) -> (Arc<Host>, Conne
     .unwrap();
     let connection = host.connect().unwrap();
     (host, connection)
+}
+async fn metadata_saved(host: &Host, caller: &CallerContext, target: &SessionRef) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = host.session_state(caller, target).unwrap().data;
+            if !state.metadata_saving {
+                assert!(state.metadata_fault.is_none());
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
 }
 async fn shutdown(host: &Arc<Host>, caller: &CallerContext) {
     host.shutdown(
@@ -671,6 +692,7 @@ async fn cold_history_is_unknown_until_explicit_load_and_retained_across_unload(
         Some(201)
     );
     let old_load = warm.data.load_id.unwrap();
+    metadata_saved(&host, &caller, &target).await;
     host.unload(&caller, &target).unwrap();
     let unloaded = host.session_context(&caller, &target).await.unwrap();
     assert!(!unloaded.data.history_loaded);
@@ -770,6 +792,7 @@ async fn failed_reload_retains_old_context_but_never_claims_it_is_valid_for_exec
     let (host, connection) = persistent(dir.path(), resources.clone()).await;
     let caller = connection.caller();
     loaded(&host, &caller, &target).await;
+    metadata_saved(&host, &caller, &target).await;
     host.unload(&caller, &target).unwrap();
     // Unload retains the original journal owner. Replace the filename instead
     // of opening a second writer through its Windows no-write-sharing lease.
@@ -900,6 +923,7 @@ async fn manual_compaction_queries_keep_original_history_until_commit_and_do_not
     assert!(!result.data.history_save.pending);
     let summary = projection.summary.clone();
     let coverage = projection.covered_items;
+    metadata_saved(&host, &caller, &target).await;
     host.unload(&caller, &target).unwrap();
     assert_eq!(
         host.session_context(&caller, &target)
@@ -1306,6 +1330,7 @@ async fn incomplete_model_output_is_not_complete_context_history_and_reclaimed_i
             &caller,
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },
@@ -1317,7 +1342,7 @@ async fn incomplete_model_output_is_not_complete_context_history_and_reclaimed_i
             .data
             .items
             .iter()
-            .any(|item| matches!(item, HistoryItemData::Partial { .. }))
+            .any(|item| matches!(item.item, HistoryItemData::Partial { .. }))
     );
     host.close_session(&caller, &target).unwrap();
     tokio::time::timeout(Duration::from_secs(5), async {

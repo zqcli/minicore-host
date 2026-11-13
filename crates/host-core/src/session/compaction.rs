@@ -41,6 +41,7 @@ pub(super) struct CompactionWork {
     previous_coverage: u64,
     cancellation: CancellationToken,
     candidate: Option<CompactionProjection>,
+    accepted_record: Option<HistoryRecordData>,
     completion: watch::Sender<Option<Result<(), Fault>>>,
     started: Instant,
     #[cfg(test)]
@@ -66,6 +67,7 @@ impl CompactionWork {
             previous_coverage,
             cancellation,
             candidate: None,
+            accepted_record: None,
             completion: watch::channel(None).0,
             started: Instant::now(),
             #[cfg(test)]
@@ -450,8 +452,9 @@ impl SessionController {
                 return;
             }
         };
-        let result = history::checked_save(async { self.backend.append(vec![save.1]).await }).await;
+        let result = history::checked_save(async { self.backend.append(save.1).await }).await;
         let _ = self.settle_save(&save.0, result);
+        self.checkpoint_activity();
     }
     fn record_utility(
         &self,
@@ -487,10 +490,10 @@ impl SessionController {
         diagnostic::emit(records);
     }
     fn claim_compaction_commit(
-        &self,
+        self: &Arc<Self>,
         binding: &CompactionBinding,
         candidate: &CompactionCandidate,
-    ) -> Result<(history::SaveBinding, HistoryEntry), Fault> {
+    ) -> Result<(history::SaveBinding, Vec<HistoryRecord>), Fault> {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         let work = state
             .compaction
@@ -532,30 +535,69 @@ impl SessionController {
         }
         let covered = work.previous_coverage + candidate.covered().end as u64
             - u64::from(work.previous_coverage > 0);
+        // Inputs already accepted for this Turn have published native positions.
+        // Automatic compaction must append that original unsaved prefix before
+        // its marker, within this same registered save; it may not overtake them.
+        let mut records = if let Some(active) = &state.active {
+            state.history[active.save_cursor..]
+                .iter()
+                .enumerate()
+                .map(|(offset, item)| {
+                    let position = state.history_position + offset as u64;
+                    let entry = state.input_provenance.entry(
+                        active.save_cursor + offset,
+                        &active.info.id,
+                        item,
+                    )?;
+                    let recorded_at = state.readable_history.as_ref().expect("loaded history")
+                        [position as usize]
+                        .recorded_at;
+                    Ok(HistoryRecord::at(
+                        self.id.clone(),
+                        position,
+                        recorded_at,
+                        entry,
+                    ))
+                })
+                .collect::<Result<Vec<_>, Fault>>()?
+        } else {
+            Vec::new()
+        };
+        let source_position = state.history_position + records.len() as u64;
         let projection =
-            CompactionProjection::new(state.history_position, covered, candidate.summary.clone());
+            CompactionProjection::new(source_position, covered, candidate.summary.clone());
         projection
-            .validate(
-                &state.history,
-                state.history_position,
-                work.previous_coverage,
-            )
+            .validate(&state.history, source_position, work.previous_coverage)
             .map_err(|error| failure(error.to_string()))?;
         let change = CompactionChange {
-            source_position: state.history_position,
+            source_position,
             covered_items: covered,
             before_tokens: candidate.before_tokens,
             after_tokens: candidate.after_tokens,
         };
-        let entry = projection.clone().into_entry();
+        let recorded_at = Timestamp::now();
+        let entry = HistoryRecord::at(
+            self.id.clone(),
+            source_position,
+            recorded_at,
+            projection.clone().into_entry(),
+        );
+        state.info.last_activity_at = state.info.last_activity_at.max(recorded_at);
         let work = state.compaction.as_mut().expect("checked work");
         work.candidate = Some(projection);
+        work.accepted_record = Some(HistoryRecordData::from_record(&entry));
         work.activity.state = CompactionState::Committing {
             change,
             persistence: PersistenceState::Pending,
             fault: None,
         };
-        let save = self.register_compaction_save(&mut state, binding.clone());
+        records.push(entry);
+        let saved_native_end = state.history.len();
+        if let Some(active) = state.active.as_mut() {
+            active.save_cursor = saved_native_end;
+        }
+        let save = self.register_compaction_save(&mut state, binding.clone(), records.len());
+        self.checkpoint_activity_locked(&mut state);
         self.publish_compaction(&mut state);
         let record = diagnostics::compaction_committing(
             &self.identity(),
@@ -569,7 +611,7 @@ impl SessionController {
         .published(state.controller_revision, state.runner_revision);
         drop(state);
         record.emit();
-        Ok((save, entry))
+        Ok((save, records))
     }
     pub(super) fn settle_compaction_save(
         &self,
@@ -597,19 +639,15 @@ impl SessionController {
                     persistence: *confirmed,
                 };
                 state.projection = work.candidate.take();
-                let summary = state
-                    .projection
-                    .as_ref()
-                    .expect("original candidate retained")
-                    .summary
-                    .clone();
                 state
                     .readable_history
                     .as_mut()
                     .expect("loaded history")
-                    .push(HistoryItemData::Summary {
-                        text: summary.content.as_str().to_owned(),
-                    });
+                    .push(
+                        work.accepted_record
+                            .take()
+                            .expect("original accepted compaction record"),
+                    );
                 self.complete_compaction_locked(state, binding, result, Ok(()))
             }
             Err(error) => {

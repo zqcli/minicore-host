@@ -167,6 +167,8 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
                 session_id.clone(),
                 agent_id.clone(),
                 SessionData {
+                    created_at: minicore_host_protocol::Timestamp::now(),
+                    last_activity_at: minicore_host_protocol::Timestamp::now(),
                     title: None,
                     mode: StorageMode::Persistent,
                     agent_config_revision: 0,
@@ -392,6 +394,42 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
     assert_eq!(result.data.partials.len(), 1);
     assert_eq!(result.data.partials[0].response_index, 2);
     assert_eq!(result.data.history.len(), raw.history.len());
+    let rows = fixture
+        .session
+        .history_read(
+            &caller,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap()
+        .data
+        .items;
+    assert!(result.data.saved_terminal.is_none());
+    for item in &result.data.history {
+        assert_eq!(rows[item.position as usize].turn_id.as_ref(), Some(&first));
+        assert_eq!(rows[item.position as usize].recorded_at, item.recorded_at);
+    }
+    let partial = &result.data.partials[0];
+    assert_eq!(
+        rows[partial.position as usize].recorded_at,
+        partial.recorded_at
+    );
+    assert_eq!(rows[partial.position as usize].response_index, Some(2));
+    let terminal_row = rows.last().unwrap();
+    let HistoryItemData::TurnFinished { terminal } = &terminal_row.item else {
+        panic!("actual memory terminal")
+    };
+    let state = result.data.info.as_ref().unwrap();
+    assert_eq!(state.history_position, Some(terminal_row.position));
+    assert_eq!(state.recorded_at, Some(terminal_row.recorded_at));
+    assert_eq!(state.finished_at, Some(terminal.finished_at));
+    assert_eq!(terminal.requests, 3);
+    assert_eq!(terminal.tool_rounds, 1);
+    assert_eq!(terminal.model_attempts, [1, 1, 1]);
     // Empty complete projections remain complete, while the readable body of
     // the failed request remains a partial and never adds an Assistant item.
     for (response_index, expected) in [(0, ""), (1, ""), (2, "unfinished second Loop")] {

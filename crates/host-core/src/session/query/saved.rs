@@ -70,57 +70,54 @@ impl SessionController {
     }
 }
 
-fn project_saved(id: &TurnId, entries: &[HistoryEntry]) -> Result<TurnResultData, Fault> {
-    let mut history = Vec::new();
-    let mut partials = Vec::new();
-    let mut terminal = None;
-    for entry in entries.iter().filter(|entry| entry.turn_id() == Some(id)) {
-        match entry {
-            HistoryEntry::Input { .. } => history.push(TurnHistoryItemData {
-                response_index: None,
-                item: HistoryItemData::from_entry(entry).expect("Input has public history content"),
-            }),
-            HistoryEntry::Runtime {
-                response_index,
-                item,
-                ..
-            } => history.push(TurnHistoryItemData {
-                // Only complete model/tool records belong to a response; no
-                // inferred index for an explicitly stored User/Summary item.
-                response_index: matches!(
-                    item,
-                    HistoryItem::Assistant(_) | HistoryItem::ToolResult(_)
-                )
-                .then_some(u64::from(*response_index)),
-                item: item.into(),
-            }),
-            HistoryEntry::Partial {
-                response_index,
-                partial,
-                ..
-            } => partials.push(TurnPartialData {
-                response_index: u64::from(*response_index),
-                partial: partial.into(),
-            }),
-            HistoryEntry::TurnFinished {
-                outcome, reason, ..
-            } => {
-                terminal = Some(SavedTurnTerminal {
-                    outcome: *outcome,
-                    reason: reason.clone(),
-                });
-            }
-            // Global summary/compaction markers have no TurnId. Do not guess
-            // ownership based on their position or restore compacted context.
-            HistoryEntry::Summary { .. } | HistoryEntry::Compaction { .. } => {}
-        }
-    }
-    let terminal = terminal.ok_or_else(missing_turn)?;
+fn project_saved(id: &TurnId, records: &[HistoryRecord]) -> Result<TurnResultData, Fault> {
+    let rows = records
+        .iter()
+        .map(HistoryRecordData::from_record)
+        .collect::<Vec<_>>();
+    let (history, partials, terminal) = project_records(id, &rows);
     Ok(TurnResultData {
         info: None,
         config: None,
-        saved_terminal: Some(terminal),
+        saved_terminal: Some(terminal.ok_or_else(missing_turn)?),
         history,
         partials,
     })
+}
+
+pub(super) fn project_records(
+    id: &TurnId,
+    rows: &[HistoryRecordData],
+) -> (
+    Vec<TurnHistoryItemData>,
+    Vec<TurnPartialData>,
+    Option<SavedTurnTerminal>,
+) {
+    let mut history = Vec::new();
+    let mut partials = Vec::new();
+    let mut terminal = None;
+    for row in rows.iter().filter(|row| row.turn_id.as_ref() == Some(id)) {
+        match &row.item {
+            HistoryItemData::Partial { partial } => partials.push(TurnPartialData {
+                position: row.position,
+                recorded_at: row.recorded_at,
+                response_index: row.response_index.expect("native partial response index"),
+                partial: partial.clone(),
+            }),
+            HistoryItemData::TurnFinished { terminal: facts } => {
+                terminal = Some(SavedTurnTerminal {
+                    position: row.position,
+                    recorded_at: row.recorded_at,
+                    terminal: facts.clone(),
+                })
+            }
+            _ => history.push(TurnHistoryItemData {
+                position: row.position,
+                recorded_at: row.recorded_at,
+                response_index: row.response_index,
+                item: row.item.clone(),
+            }),
+        }
+    }
+    (history, partials, terminal)
 }

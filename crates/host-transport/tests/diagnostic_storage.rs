@@ -62,6 +62,7 @@ async fn real_cold_load_and_metadata_failures_keep_business_state_and_record_onl
     let cold = session
         .history(
             HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 10,
             },

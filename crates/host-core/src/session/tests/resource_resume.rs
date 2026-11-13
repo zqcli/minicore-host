@@ -85,6 +85,8 @@ impl RecoveryFixture {
                 id,
                 agent_id,
                 SessionData {
+                    created_at: minicore_host_protocol::Timestamp::now(),
+                    last_activity_at: minicore_host_protocol::Timestamp::now(),
                     title: None,
                     mode,
                     agent_config_revision: 0,

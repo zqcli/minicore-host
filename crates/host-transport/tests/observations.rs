@@ -148,6 +148,7 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
         let page = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 1,
                 },
@@ -156,11 +157,12 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             .await
             .unwrap();
         assert!(
-            matches!(&page.data.items[0], HistoryItemData::User { text, .. } if text == "真实输入")
+            matches!(&page.data.items[0].item, HistoryItemData::User { text, .. } if text == "真实输入")
         );
         let page = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: page.data.next_cursor,
                     limit: 1,
                 },
@@ -169,7 +171,7 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             .await
             .unwrap();
         assert!(matches!(
-            page.data.items[0],
+            page.data.items[0].item,
             HistoryItemData::Assistant { .. }
         ));
         assert!(page.data.next_cursor.is_none());

@@ -85,6 +85,11 @@ pub struct SessionListPage {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {
+    pub created_at: Timestamp,
+    pub last_activity_at: Timestamp,
+    pub workspace: Option<WorkspaceRef>,
+    pub model: ModelRef,
+    pub reasoning: ReasoningPreference,
     pub id: SessionId,
     pub agent_id: AgentId,
     pub title: Option<String>,

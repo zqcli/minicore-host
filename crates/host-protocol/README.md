@@ -40,7 +40,8 @@ root exports, validation, or the direct owners of business state.
 - `Revision`, `ConfigRevision` and `ControllerRevision` use unsigned `u64` integers
   in Rust and JSON, not IDs or timestamps. Consumers must retain integer precision
   and compare only within the documented Host incarnation and owner scope. Owners
-  must use checked increments. No epoch or DateTime encoding is invented here.
+  must use checked increments. Wall-clock metadata is separately encoded by `Timestamp` as UTC RFC3339;
+  comparison uses chronological instants, with input offsets normalized to UTC.
 - Requests carry text, message correlation and a target, never CallerContext,
   operation rights, attachment payloads or caller waiting options. Paths are not
   read or rewritten by message contracts. Empty text is structurally a string;
@@ -117,3 +118,17 @@ live provider, Runtime, storage durability, WSS or TUI acceptance tests.
 
 This crate is a member of the root workspace and uses its committed `Cargo.lock`.
 No standalone workspace, lockfile or local Runtime patch is required.
+
+## Stable history observation
+
+`HistoryReadRequest` carries `cursor`, positive `limit`, and optional `direction`
+(`forward` by default, `backward` for tail-first reading). `HistoryPageData` returns
+`items`, `next_cursor` and the captured exclusive `upper_bound`. Each page is
+oldest-to-newest, and later appends do not enter the fixed pagination window.
+Cursors bind the actual Session, Host incarnation and requested direction.
+
+Core history records expose original native positions and applicable Turn/response
+identity, with UTC owner timestamps. Bound-input and completion events and saved
+Turn results use the same positions. Unbound inputs and cold saved results do not
+acquire fabricated record positions or LoadIds. Host object schema 2 and history
+schema 3 retain these facts; old envelope versions are rejected without migration.

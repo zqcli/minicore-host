@@ -73,13 +73,24 @@ Session history is written through real storage before tools run on a complete r
 
 Explicit Session `resume` captures its own failed original history ranges and metadata candidate. It confirms those originals independently, never reruns a model/tool or reappends confirmed bytes, and cannot unblock queued execution while any captured required save still fails. A partial or changed original remains blocked rather than being repaired. Primary execution outcome remains unchanged.
 
-Public input history includes the actual MessageId, trusted source, scheduling
-mode and optional reply association alongside the complete original text. Live
-history, held Turn results, saved Turn results and cold history use the same
-projection. Native-only legacy input omits unknown metadata; it is never inferred
-from text. Held results retain their original native history offset, so repeated
-text, later Turns, compaction markers and validated reloads do not move identities.
-These read projections do not restore a previous inbox or execution.
+Public history records carry the original Session-local `position`, owner-captured
+UTC `recorded_at`, and applicable original `turn_id` / `response_index`. Input
+content retains `received_at`, MessageId, trusted source, scheduling mode and reply
+association. Repeated MessageIds and equal text do not identify a record. Complete
+responses, tool results, partials, summaries, compaction coverage markers and Turn
+terminal facts remain distinct. Terminal facts include actual request/tool-round
+and model-attempt counts. Bound-message and completion events reuse those positions;
+unbound accepted messages have no invented history position. Retained and cold
+Turn-result reads project these same records without renumbering or old execution
+recovery.
+
+Session details and list summaries expose `created_at`, `last_activity_at`, model,
+reasoning and workspace. Activity is the maximum of actual accepted business
+fact times, never query time, file mtime, ID order or token callbacks. Input
+acceptance and original history boundaries register metadata saves on the existing
+Session owner. An in-flight metadata save preserves its original candidate; newer
+activity is coalesced after successful settlement before exposing quiescence.
+Failures retain the original candidate for explicit reconciliation.
 
 All disk work runs outside owner/access locks. The backend's separate disk-only mutex protects its journal and original pending range. Reload reopens and validates the actual file only when no pending/uncertain history save owns it. `loaded_records()` is an opening baseline, so same-process write -> unload -> load does not reuse it as a stale live cache. A failed reload does not replace retained memory with an unvalidated prefix, truncate files or skip bad records.
 
@@ -162,11 +173,14 @@ response index, retry phase, structured Fault and source RFC3339 retry time.
 A waiting cancellation does not increment the actual-call count. Retry clearing
 is a normal state change, including for state-only subscribers.
 
-`Host::history_read` pages adapted conversation items with an opaque Session/run
-cursor. Already-loaded history copies only the requested page. Cold persistent
-reads use the real SessionStore read path without creating a Runner, changing
-residency or restoring old Turn/ToolCall/output objects. The response does not
-expose JSONL rows or internal Loop identities. Public interaction IDs are stable
+`Host::history_read` accepts `direction` (`forward` by default, or `backward` for
+a recent window) and captures an exclusive `upper_bound` on the first page. Every
+page remains oldest-to-newest; the opaque cursor binds Session, Host incarnation,
+direction, next boundary and the same fixed upper bound. Later appends stay outside
+that window. Loaded histories slice only the requested rows. Cold persistent reads
+validate the whole file before projecting a page, without loading a Runner or
+restoring old execution. The public projection exposes record facts, not raw JSONL
+or internal Loop identities. Public interaction IDs are stable
 Host-format IDs mapped by the original Session to actual Runtime interactions;
 request, state and settlement projections reuse them. `Host::answer_interaction`
 routes through the original Session interaction owner and is exposed by the

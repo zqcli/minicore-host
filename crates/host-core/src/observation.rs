@@ -17,6 +17,12 @@ pub struct HostStateData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnStateData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_position: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<Timestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<Timestamp>,
     pub state: TurnState,
     pub runner_revision: u64,
     pub config_revision: ConfigRevision,
@@ -105,11 +111,15 @@ pub struct ToolInvocationData {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ModelFinishedData {
+    pub history_position: u64,
+    pub recorded_at: Timestamp,
     pub result: ModelResponseData,
     pub output_positions: Vec<ChannelPosition>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ToolFinishedData {
+    pub history_position: u64,
+    pub recorded_at: Timestamp,
     pub result: ToolResultData,
     pub output_positions: Vec<ChannelPosition>,
 }
@@ -218,6 +228,11 @@ pub enum InteractionResolution {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageEventData {
+    pub received_at: Timestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_position: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recorded_at: Option<Timestamp>,
     pub text: String,
     pub mode: MessageMode,
     pub source: MessageSource,

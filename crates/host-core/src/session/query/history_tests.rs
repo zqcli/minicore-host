@@ -114,7 +114,7 @@ impl HistoryBackend for GatedLoadFixture {
     fn read_cold(&self) -> HistoryReadFuture<'_> {
         self.inner.read_cold()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.inner.append(entries)
     }
     fn reconcile(&self) -> SaveFuture<'_> {
@@ -172,6 +172,8 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
             id.clone(),
             agent_id.clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
@@ -213,6 +215,7 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
 }
 fn read_request() -> HistoryReadRequest {
     HistoryReadRequest {
+        direction: minicore_host_protocol::HistoryDirection::Forward,
         cursor: None,
         limit: 100,
     }
@@ -262,7 +265,7 @@ async fn load_winner_history_read_uses_owner_publication() {
         .unwrap()
         .unwrap();
     assert!(
-        matches!(&page.data.items[..], [HistoryItemData::Summary { text }] if text == "persisted seed")
+        matches!(&page.data.items[..], [HistoryRecordData { item: HistoryItemData::Summary { text }, .. }] if text == "persisted seed")
     );
     settled(&fixture).await;
     assert!(fixture.session.state.lock().unwrap().block_reason.is_none());
@@ -287,7 +290,7 @@ impl HistoryBackend for GatedReadFixture {
             result
         })
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.inner.append(entries)
     }
     fn reconcile(&self) -> SaveFuture<'_> {
@@ -410,12 +413,12 @@ async fn delayed_read_returns_newer_owner_records_not_opening_baseline() {
     finished(&fixture).await;
     read_gate.release();
     let page = read.await.unwrap().unwrap();
-    assert_eq!(page.data.items.len(), 3);
+    assert_eq!(page.data.items.len(), 4);
     assert!(
-        matches!(&page.data.items[1], HistoryItemData::User { text, .. } if text == "accepted after the opening read")
+        matches!(&page.data.items[1].item, HistoryItemData::User { text, .. } if text == "accepted after the opening read")
     );
     assert!(matches!(
-        &page.data.items[2],
+        &page.data.items[2].item,
         HistoryItemData::Assistant { .. }
     ));
     assert_eq!(fixture.model.calls.load(Ordering::SeqCst), 1);
@@ -444,9 +447,9 @@ async fn delayed_cold_snapshot_yields_to_newer_retained_history() {
     finished(&fixture).await;
     read_gate.release();
     let page = read.await.unwrap().unwrap();
-    assert_eq!(page.data.items.len(), 3);
+    assert_eq!(page.data.items.len(), 4);
     assert!(
-        matches!(&page.data.items[1], HistoryItemData::User { text, .. } if text == "newer than cold snapshot")
+        matches!(&page.data.items[1].item, HistoryItemData::User { text, .. } if text == "newer than cold snapshot")
     );
 }
 
@@ -630,6 +633,7 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
     // Explicit saved-record fixture spanning every public content variant.
     let entries = vec![
         HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: turn_id.clone(),
             message_id: message_id.clone(),
             source: MessageSource::User,
@@ -668,6 +672,10 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
             },
         },
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 2,
+            tool_rounds: 0,
+            model_attempts: vec![1, 1],
             turn_id,
             outcome: TurnOutcome::Cancelled,
             reason: Some("saved-record fixture".into()),
@@ -681,6 +689,10 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
             },
         },
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 0,
+            tool_rounds: 0,
+            model_attempts: Vec::new(),
             turn_id: TurnId::new().unwrap(),
             outcome: TurnOutcome::Completed,
             reason: None,
@@ -690,18 +702,19 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
     journal.accept(entries.clone()).unwrap();
     journal.persist_pending().unwrap();
     drop(journal);
-    let expected = std::iter::once(summary("persisted seed"))
-        .chain(entries)
-        .filter_map(|entry| HistoryItemData::from_entry(&entry))
+    let expected = fixture
+        .store
+        .read_history()
+        .unwrap()
+        .records
+        .iter()
+        .map(HistoryRecordData::from_record)
         .collect::<Vec<_>>();
-    assert_eq!(expected.len(), 6);
-    assert!(matches!(
-        &expected[1],
-        HistoryItemData::User {
-            text, message_id: Some(id), source: Some(MessageSource::User),
-            mode: Some(MessageMode::Steer), in_reply_to: Some(actual_reply),
-        } if text == "original input 原文" && id == &message_id && actual_reply == &reply
-    ));
+    assert_eq!(expected.len(), 8);
+    assert!(matches!(&expected[1].item, HistoryItemData::User {
+        text, message_id: Some(id), source: Some(MessageSource::User),
+        mode: Some(MessageMode::Steer), in_reply_to: Some(actual_reply), ..
+    } if text == "original input 原文" && id == &message_id && actual_reply == &reply));
     for limit in [1, 2, 3, 100] {
         let mut cursor = None;
         let mut actual = Vec::new();
@@ -710,7 +723,11 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
                 .session
                 .history_read(
                     &fixture.connection.caller(),
-                    &HistoryReadRequest { cursor, limit },
+                    &HistoryReadRequest {
+                        direction: minicore_host_protocol::HistoryDirection::Forward,
+                        cursor,
+                        limit,
+                    },
                 )
                 .await
                 .unwrap();
@@ -722,10 +739,11 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
             assert_eq!(
                 cursor,
                 Some(format!(
-                    "v1.{}.{}.{}",
+                    "v2.{}.{}.f.{}.{}",
                     fixture.session.incarnation,
                     fixture.session.id,
-                    actual.len()
+                    actual.len(),
+                    expected.len()
                 ))
             );
         }
@@ -740,9 +758,12 @@ async fn cold_pages_keep_public_positions_and_input_provenance_across_noncontent
             .history_read(
                 &fixture.connection.caller(),
                 &HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: Some(format!(
-                        "v1.{}.{}.{position}",
-                        fixture.session.incarnation, fixture.session.id
+                        "v2.{}.{}.f.{position}.{}",
+                        fixture.session.incarnation,
+                        fixture.session.id,
+                        expected.len()
                     )),
                     limit: 1,
                 },
@@ -785,6 +806,7 @@ async fn corrupt_and_partial_cold_histories_fail_without_repair_or_prefix() {
             .history_read(
                 &fixture.connection.caller(),
                 &HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 1,
                 },
@@ -839,7 +861,7 @@ impl HistoryBackend for UnsupportedReadFixture {
         self.0.fetch_add(1, Ordering::SeqCst);
         Box::pin(async { Ok(Vec::new()) })
     }
-    fn append<'a>(&'a self, _: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, _: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         panic!("read must not append")
     }
 }
@@ -1004,8 +1026,8 @@ async fn delayed_cold_read_preserves_newer_failed_original_save() {
         .await
         .unwrap();
     assert_eq!(
-        serde_json::to_value(retained.data).unwrap(),
-        serde_json::to_value(page.data).unwrap()
+        serde_json::to_value(&retained.data.items[..page.data.items.len()]).unwrap(),
+        serde_json::to_value(&page.data.items).unwrap()
     );
 }
 
@@ -1054,7 +1076,7 @@ impl HistoryBackend for MemoryReadFixture {
     fn read_cold(&self) -> HistoryReadFuture<'_> {
         panic!("memory read must not enter disk fallback")
     }
-    fn append<'a>(&'a self, _: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, _: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         panic!("memory read must not append")
     }
 }
@@ -1084,7 +1106,7 @@ async fn memory_retained_read_never_enters_a_storage_backend() {
         .await
         .unwrap();
     assert!(
-        matches!(&page.data.items[..], [HistoryItemData::Summary { text }] if text == "memory only")
+        matches!(&page.data.items[..], [HistoryRecordData { item: HistoryItemData::Summary { text }, .. }] if text == "memory only")
     );
     assert!(session.store.lock().unwrap().is_none());
     assert_eq!(model.calls.load(Ordering::SeqCst), 0);
@@ -1134,6 +1156,15 @@ async fn real_host_cold_read_load_and_runtime_preserve_read_only_boundaries() {
         SendMessage::new(input("queued until explicit resume"), target.clone()),
     )
     .unwrap();
+    let mut metadata = host.session_states(&caller, &target).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while metadata.snapshot().unwrap().data.metadata_saving {
+            metadata.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(metadata.snapshot().unwrap().data.metadata_fault.is_none());
     let before = host.session_state(&caller, &target).unwrap();
     let bytes = std::fs::read(&path).unwrap();
     let page = host
@@ -1184,7 +1215,7 @@ async fn real_host_cold_read_load_and_runtime_preserve_read_only_boundaries() {
         .history_read(&reader.caller(), &target, &read_request())
         .await
         .unwrap();
-    assert_eq!(latest.data.items.len(), 3);
+    assert_eq!(latest.data.items.len(), 4);
     assert_eq!(model.calls.load(Ordering::SeqCst), 1);
     host.shutdown(
         &caller,
@@ -1202,4 +1233,298 @@ async fn real_host_cold_read_load_and_runtime_preserve_read_only_boundaries() {
     .await
     .unwrap();
     assert!(host.info(&caller).unwrap().shutdown_fault.is_none());
+}
+
+#[tokio::test]
+async fn fixed_windows_page_backwards_without_admitting_later_appends() {
+    let fixture = setup(|inner| inner);
+    let append = |text: &str| {
+        let mut journal = fixture.store.open_journal().unwrap();
+        journal.accept(vec![summary(text)]).unwrap();
+        journal.persist_pending().unwrap();
+    };
+    append("第二条 🦀");
+    append("third");
+    let caller = fixture.connection.caller();
+    let first = fixture
+        .session
+        .history_read(
+            &caller,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 2,
+                direction: HistoryDirection::Backward,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.data.upper_bound, 3);
+    assert_eq!(
+        first
+            .data
+            .items
+            .iter()
+            .map(|row| row.position)
+            .collect::<Vec<_>>(),
+        [1, 2]
+    );
+    assert!(
+        matches!(&first.data.items[0].item, HistoryItemData::Summary { text } if text == "第二条 🦀")
+    );
+    append("outside first window");
+    let next = fixture
+        .session
+        .history_read(
+            &caller,
+            &HistoryReadRequest {
+                cursor: first.data.next_cursor.clone(),
+                limit: 2,
+                direction: HistoryDirection::Backward,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(next.data.upper_bound, 3);
+    assert_eq!(
+        next.data
+            .items
+            .iter()
+            .map(|row| row.position)
+            .collect::<Vec<_>>(),
+        [0]
+    );
+    assert!(next.data.next_cursor.is_none());
+    assert_eq!(
+        fixture
+            .session
+            .history_read(
+                &caller,
+                &HistoryReadRequest {
+                    cursor: first.data.next_cursor,
+                    limit: 2,
+                    direction: HistoryDirection::Forward,
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind(),
+        Some(FaultKind::SessionHistoryCursorInvalid)
+    );
+
+    // The same bounded slicing applies after owner load, while cold reading
+    // above neither created a Runner nor changed activity metadata.
+    let before = fixture.session.info(&caller).unwrap().last_activity_at;
+    load(&fixture);
+    settled(&fixture).await;
+    let first = fixture
+        .session
+        .history_read(
+            &caller,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 1,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.data.upper_bound, 4);
+    fixture
+        .session
+        .send(&caller, input("new owner input"))
+        .unwrap();
+    finished(&fixture).await;
+    let rest = fixture
+        .session
+        .history_read(
+            &caller,
+            &HistoryReadRequest {
+                cursor: first.data.next_cursor,
+                limit: 100,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(rest.data.upper_bound, 4);
+    assert_eq!(
+        rest.data
+            .items
+            .iter()
+            .map(|row| row.position)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert!(rest.data.next_cursor.is_none());
+    let activity = fixture.session.info(&caller).unwrap().last_activity_at;
+    assert!(activity >= before);
+    fixture
+        .session
+        .history_read(&caller, &read_request())
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture.session.info(&caller).unwrap().last_activity_at,
+        activity
+    );
+}
+
+#[tokio::test]
+async fn native_positions_and_received_times_join_live_saved_and_duplicate_inputs() {
+    use crate::{ActivityEvent, ObservationEvent, ObservationNotification};
+    let fixture = setup(|inner| inner);
+    let caller = fixture.connection.caller();
+    let mut events = fixture
+        .session
+        .access
+        .observation
+        .register(
+            &caller,
+            &fixture.session.access,
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: fixture.session.agent_id.clone(),
+                    session_id: fixture.session.id.clone(),
+                },
+                categories: BTreeSet::from([EventCategory::Completion, EventCategory::Message]),
+            },
+        )
+        .unwrap();
+    fixture.session.pause(&caller).unwrap();
+    let mut message = input("相同输入 🦀");
+    message.mode = MessageMode::Steer;
+    fixture.session.send(&caller, message.clone()).unwrap();
+    fixture.session.send(&caller, message).unwrap();
+    let received = fixture
+        .session
+        .state
+        .lock()
+        .unwrap()
+        .messages
+        .iter()
+        .map(|message| message.received_at)
+        .collect::<Vec<_>>();
+    fixture.session.resume(&caller).unwrap();
+    finished(&fixture).await;
+    let rows = fixture
+        .session
+        .history_read(&caller, &read_request())
+        .await
+        .unwrap()
+        .data
+        .items;
+    assert_eq!(
+        rows.iter().map(|row| row.position).collect::<Vec<_>>(),
+        [0, 1, 2, 3, 4]
+    );
+    for (row, received_at) in rows[1..3].iter().zip(&received) {
+        assert!(
+            matches!(&row.item, HistoryItemData::User { received_at: Some(value), .. } if value == received_at)
+        );
+        assert!(row.recorded_at >= *received_at);
+    }
+    let turn = rows[1].turn_id.as_ref().unwrap();
+    assert_eq!(rows[2].turn_id.as_ref(), Some(turn));
+    assert_eq!(rows[3].response_index, Some(0));
+    assert!(
+        matches!(&rows[4].item, HistoryItemData::TurnFinished { terminal } if terminal.requests == 1 && terminal.tool_rounds == 0 && terminal.model_attempts == [1])
+    );
+    let result = fixture
+        .session
+        .turn_result_snapshot(&caller, turn)
+        .await
+        .unwrap();
+    assert_eq!(
+        result
+            .data
+            .history
+            .iter()
+            .map(|row| row.position)
+            .collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+
+    let resources = fixture.session.resources_owned().unwrap();
+    let config = fixture.session.info(&caller).unwrap().config;
+    fixture.session.begin_host_shutdown_owned(true);
+    fixture.session.wait_quiescent_owned().await;
+    fixture
+        .session
+        .release_host_resources_owned()
+        .await
+        .unwrap();
+    let incarnation = HostIncarnation::new().unwrap();
+    let access = ConnectionRegistry::new(fixture.session.host_id.clone(), incarnation.clone());
+    let connection = access.connect().unwrap();
+    let cold = SessionController::new(
+        fixture.session.id.clone(),
+        fixture.session.agent_id.clone(),
+        fixture.session.host_id.clone(),
+        incarnation,
+        config,
+        access,
+        resources,
+        Arc::new(JournalHistory::new(fixture.store.clone())),
+        Vec::new(),
+        Arc::new(AtomicBool::new(true)),
+    );
+    let saved_rows = cold
+        .history_read(&connection.caller(), &read_request())
+        .await
+        .unwrap()
+        .data
+        .items;
+    assert_eq!(
+        serde_json::to_value(&saved_rows).unwrap(),
+        serde_json::to_value(&rows).unwrap()
+    );
+    let saved = cold
+        .turn_result_snapshot(&connection.caller(), turn)
+        .await
+        .unwrap();
+    assert!(saved.source.load_id.is_none());
+    assert_eq!(
+        serde_json::to_value(&saved.data.history).unwrap(),
+        serde_json::to_value(&result.data.history).unwrap()
+    );
+    let terminal = saved.data.saved_terminal.unwrap();
+    assert_eq!(terminal.position, 4);
+    let retained_state = result.data.info.as_ref().unwrap();
+    assert_eq!(retained_state.recorded_at, Some(terminal.recorded_at));
+    assert_eq!(retained_state.finished_at, Some(terminal.finished_at));
+    assert!(!cold.state.lock().unwrap().history_loaded);
+
+    let mut bound = Vec::new();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let ObservationNotification::Event(push) = event else {
+            panic!("unexpected resync")
+        };
+        match push.event {
+            ObservationEvent::Activity(ActivityEvent::MessageAccepted { data, .. }) => {
+                assert!(data.history_position.is_none())
+            }
+            ObservationEvent::Activity(ActivityEvent::MessageBound { data, .. }) => {
+                let position = data.history_position.unwrap();
+                assert_eq!(data.recorded_at, Some(rows[position as usize].recorded_at));
+                bound.push(position);
+            }
+            ObservationEvent::Activity(ActivityEvent::ModelFinished { data, .. }) => {
+                assert_eq!(data.history_position, 3);
+                assert_eq!(data.recorded_at, rows[3].recorded_at);
+            }
+            ObservationEvent::Activity(ActivityEvent::TurnFinished { data, .. }) => {
+                assert_eq!(data.history_position, Some(4));
+                assert_eq!(data.recorded_at, retained_state.recorded_at);
+                assert_eq!(data.finished_at, retained_state.finished_at);
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(bound, [1, 2]);
 }

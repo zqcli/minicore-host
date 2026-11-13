@@ -126,7 +126,7 @@ impl SessionController {
         Ok(DelegationPermit { state: relation })
     }
     pub(crate) fn receive_delegated_owned(
-        &self,
+        self: &Arc<Self>,
         registration: &DelegationRegistration,
         scope: &Arc<ScopeState>,
         source: SessionRef,
@@ -179,7 +179,7 @@ impl SessionController {
         Ok(receipt)
     }
     pub(crate) fn receive_notification_owned(
-        &self,
+        self: &Arc<Self>,
         relation: &DelegationState,
         mut message: MessageInput,
     ) -> Result<(MessageAccepted, Record), Fault> {

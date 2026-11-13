@@ -67,6 +67,8 @@ impl Fixture {
                 session.id().clone(),
                 agent.id().clone(),
                 SessionData {
+                    created_at: minicore_host_protocol::Timestamp::now(),
+                    last_activity_at: minicore_host_protocol::Timestamp::now(),
                     title: None,
                     mode: StorageMode::Persistent,
                     agent_config_revision: 1,
@@ -91,6 +93,7 @@ impl Fixture {
 }
 fn input(turn_id: TurnId, loop_id: LoopId) -> HistoryEntry {
     HistoryEntry::Input {
+        received_at: minicore_host_protocol::Timestamp::now(),
         turn_id,
         message_id: MessageId::new().unwrap(),
         source: MessageSource::User,
@@ -211,7 +214,7 @@ fn stable_identity_discovery_and_atomic_object_roundtrip() {
     let root_path = f.root.canonical_path().to_owned();
     let bytes = fs::read(root_path.join("host.json")).unwrap();
     let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_eq!(value["schema_version"], 1);
+    assert_eq!(value["schema_version"], SCHEMA_VERSION);
     assert!(value.get("host_incarnation").is_none());
     assert!(value["data"].get("id").is_none());
     assert_eq!(f.root.load_host::<HostConfig>().unwrap().unwrap().id, id);
@@ -239,7 +242,8 @@ fn unsupported_objects_and_ownership_mismatch_are_not_rewritten() {
     let path = f.session.canonical_path().join("session.json");
     let original = fs::read(&path).unwrap();
     for (field, value) in [
-        ("schema_version", serde_json::json!(2)),
+        ("schema_version", serde_json::json!(1)),
+        ("schema_version", serde_json::json!(3)),
         ("agent_id", serde_json::json!(AgentId::new().unwrap())),
         ("id", serde_json::json!(SessionId::new().unwrap())),
     ] {
@@ -284,6 +288,8 @@ fn memory_records_and_journal_create_no_files() {
             session.id().clone(),
             agent_id.clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Memory,
                 agent_config_revision: 1,
@@ -348,6 +354,10 @@ fn writes_confirm_exact_boundaries_and_reopen_native_content() {
     assert_eq!(journal.persist_pending().unwrap().range, first_range);
     assert_eq!(journal.positions().persisted, Some(2));
     let end = HistoryEntry::TurnFinished {
+        finished_at: minicore_host_protocol::Timestamp::now(),
+        requests: 1,
+        tool_rounds: 0,
+        model_attempts: vec![1],
         turn_id: turn,
         outcome: TurnOutcome::Completed,
         reason: None,
@@ -473,6 +483,7 @@ fn unsupported_history_schema_has_original_position_and_is_unchanged() {
         vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())],
     );
     let second = HistoryRecord {
+        recorded_at: minicore_host_protocol::Timestamp::now(),
         schema_version: 999,
         session_id: f.session.id().clone(),
         position: 1,
@@ -751,6 +762,10 @@ fn partial_model_fragments_are_distinct_and_never_projected_as_complete_assistan
             input(turn.clone(), loop_id),
             partial.clone(),
             HistoryEntry::TurnFinished {
+                finished_at: minicore_host_protocol::Timestamp::now(),
+                requests: 1,
+                tool_rounds: 0,
+                model_attempts: vec![1],
                 turn_id: turn.clone(),
                 outcome: TurnOutcome::Cancelled,
                 reason: Some("cancelled while receiving model output".into()),
@@ -1010,6 +1025,9 @@ fn same_revision_config_changes_and_creation_provenance_changes_are_rejected() {
     changed = original.clone();
     changed.data.agent_config_revision += 1;
     assert!(f.session.save(&changed).is_err());
+    changed = original.clone();
+    changed.data.created_at = minicore_host_protocol::Timestamp::from_unix_milliseconds(0).unwrap();
+    assert!(f.session.save(&changed).is_err());
     changed = original;
     changed.data.config_revision = 0;
     assert!(f.session.save(&changed).is_err());
@@ -1176,6 +1194,10 @@ fn failed_batch_validation_never_commits_a_finished_turn_or_native_normalization
         journal
             .accept(vec![
                 HistoryEntry::TurnFinished {
+                    finished_at: minicore_host_protocol::Timestamp::now(),
+                    requests: 0,
+                    tool_rounds: 0,
+                    model_attempts: Vec::new(),
                     turn_id: turn.clone(),
                     outcome: TurnOutcome::Failed,
                     reason: None
@@ -1212,6 +1234,8 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
             healthy.id().clone(),
             f.agent.id().clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,
@@ -1253,6 +1277,8 @@ fn create_sibling_session(agent: &AgentStore) -> SessionStore {
             session.id().clone(),
             agent.id().clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 1,
@@ -1519,3 +1545,207 @@ fn concurrent_parent_child_metadata_saves_preserve_confirmed_records() {
 
 #[path = "storage/compaction.rs"]
 mod compaction;
+
+#[test]
+fn timestamped_history_requires_original_metadata_and_terminal_counters() {
+    let f = Fixture::new();
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let entries = [
+        input(turn.clone(), loop_id),
+        HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 0,
+            tool_rounds: 0,
+            model_attempts: vec![],
+            turn_id: turn,
+            outcome: TurnOutcome::Cancelled,
+            reason: None,
+        },
+    ];
+    for (index, field) in [
+        (0, "recorded_at"),
+        (0, "received_at"),
+        (1, "finished_at"),
+        (1, "requests"),
+        (1, "tool_rounds"),
+        (1, "model_attempts"),
+    ] {
+        let valid = entries
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(position, entry)| {
+                serde_json::to_value(HistoryRecord::new(
+                    f.session.id().clone(),
+                    position as u64,
+                    entry,
+                ))
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let invalid = match field {
+            "requests" | "tool_rounds" => serde_json::json!(-1),
+            "model_attempts" => serde_json::json!([256]),
+            _ => serde_json::json!("not-a-timestamp"),
+        };
+        for replacement in [None, Some(serde_json::Value::Null), Some(invalid)] {
+            let mut records = valid.clone();
+            let data = if field == "recorded_at" {
+                &mut records[index]
+            } else {
+                &mut records[index]["entry"]["data"]
+            };
+            if let Some(replacement) = replacement {
+                data[field] = replacement;
+            } else {
+                data.as_object_mut().unwrap().remove(field);
+            }
+            let bytes = records
+                .iter()
+                .flat_map(|record| {
+                    let mut line = serde_json::to_vec(record).unwrap();
+                    line.push(b'\n');
+                    line
+                })
+                .collect::<Vec<_>>();
+            fs::write(f.history_path(), &bytes).unwrap();
+            assert!(
+                f.session.read_history().is_err(),
+                "accepted invalid {field}"
+            );
+            assert!(f.session.open_journal().is_err(), "opened invalid {field}");
+            assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn terminal_counters_agree_with_known_response_and_tool_result_facts() {
+    let f = Fixture::new();
+    for partial in [false, true] {
+        let turn = TurnId::new().unwrap();
+        let loop_id = LoopId::new().unwrap();
+        let response = if partial {
+            HistoryEntry::Partial {
+                turn_id: turn.clone(),
+                loop_id,
+                response_index: 0,
+                partial: minicore_host_runtime::model::ModelPartial {
+                    request_index: 0,
+                    content: vec![AssistantPart::Text("unfinished".into())],
+                    incomplete_tool_calls: vec![],
+                    usage: None,
+                    provider_replay: None,
+                },
+            }
+        } else {
+            response(turn.clone(), loop_id)
+        };
+        let prefix = vec![input(turn.clone(), loop_id), response];
+        let terminal = |requests, tool_rounds, model_attempts| HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests,
+            tool_rounds,
+            model_attempts,
+            turn_id: turn.clone(),
+            outcome: TurnOutcome::Failed,
+            reason: None,
+        };
+        for invalid in [
+            terminal(0, 0, vec![]),
+            terminal(1, 0, vec![]),
+            terminal(1, 0, vec![0]),
+            terminal(1, 2, vec![1]),
+            terminal(2, 0, vec![1]),
+        ] {
+            let mut entries = prefix.clone();
+            entries.push(invalid);
+            let bytes = record_bytes(&f.session, entries.clone());
+            fs::write(f.history_path(), &bytes).unwrap();
+            assert!(f.session.read_history().is_err());
+            assert!(f.session.open_journal().is_err());
+            assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
+            let mut journal = SessionJournal::memory(f.session.id().clone());
+            assert!(journal.accept(entries).is_err());
+            assert_eq!(journal.positions().accepted, 0);
+            let mut valid = prefix.clone();
+            // A second admitted request can fail locally before any model attempt.
+            valid.push(terminal(2, 0, vec![1, 0]));
+            journal.accept(valid).unwrap();
+        }
+    }
+    let turn = TurnId::new().unwrap();
+    let loop_id = LoopId::new().unwrap();
+    let mut entries = vec![
+        input(turn.clone(), loop_id),
+        tool_response(turn.clone(), loop_id),
+        tool_result(turn.clone(), loop_id),
+    ];
+    let terminal = |tool_rounds| HistoryEntry::TurnFinished {
+        finished_at: minicore_host_protocol::Timestamp::now(),
+        requests: 1,
+        tool_rounds,
+        model_attempts: vec![1],
+        turn_id: turn.clone(),
+        outcome: TurnOutcome::Cancelled,
+        reason: None,
+    };
+    entries.push(terminal(0));
+    let mut journal = SessionJournal::memory(f.session.id().clone());
+    assert!(journal.accept(entries.clone()).is_err());
+    *entries.last_mut().unwrap() = terminal(1);
+    journal.accept(entries).unwrap();
+}
+
+#[test]
+fn session_timestamps_are_required_and_activity_cannot_precede_creation() {
+    use minicore_host_protocol::Timestamp;
+    let f = Fixture::new();
+    let path = f.session.canonical_path().join("session.json");
+    let original = fs::read(&path).unwrap();
+    for field in ["created_at", "last_activity_at"] {
+        for replacement in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!("invalid")),
+        ] {
+            let mut json: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            if let Some(value) = replacement {
+                json["data"][field] = value;
+            } else {
+                json["data"].as_object_mut().unwrap().remove(field);
+            }
+            let bytes = serde_json::to_vec(&json).unwrap();
+            fs::write(&path, &bytes).unwrap();
+            assert!(f.session.load().is_err());
+            assert_eq!(fs::read(&path).unwrap(), bytes);
+        }
+    }
+    fs::write(&path, &original).unwrap();
+    let mut invalid = f.session.load().unwrap();
+    invalid.data.created_at = Timestamp::from_unix_milliseconds(1000).unwrap();
+    invalid.data.last_activity_at = Timestamp::from_unix_milliseconds(999).unwrap();
+    assert!(matches!(
+        f.session.save(&invalid),
+        Err(StorageError::InvalidObject { .. })
+    ));
+    assert_eq!(fs::read(&path).unwrap(), original);
+    let bytes = serde_json::to_vec(&invalid).unwrap();
+    fs::write(&path, &bytes).unwrap();
+    assert!(matches!(
+        f.session.load(),
+        Err(StorageError::InvalidObject { .. })
+    ));
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    fs::write(&path, &original).unwrap();
+    let baseline = f.session.load().unwrap();
+    let mut advanced = baseline.clone();
+    advanced.data.last_activity_at = Timestamp::from_unix_milliseconds(4_102_444_800_000).unwrap();
+    f.session.save(&advanced).unwrap();
+    assert!(matches!(
+        f.session.save(&baseline),
+        Err(StorageError::InvalidObject { .. })
+    ));
+    assert_eq!(f.session.load().unwrap(), advanced);
+}

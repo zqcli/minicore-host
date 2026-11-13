@@ -181,10 +181,55 @@ impl TextRangeData {
 pub struct HistoryPageData<T> {
     pub items: Vec<T>,
     pub next_cursor: Option<String>,
+    /// Exclusive native-record boundary captured for the entire pagination window.
+    pub upper_bound: u64,
+}
+
+/// Owner-captured wall time. Comparison uses the instant, never an RFC3339 string.
+/// Serialization always normalizes the instant to UTC.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct Timestamp(time::OffsetDateTime);
+impl Timestamp {
+    pub fn now() -> Self {
+        Self(time::OffsetDateTime::now_utc())
+    }
+    pub fn from_unix_milliseconds(value: i64) -> Result<Self, ValidationError> {
+        let value = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(value) * 1_000_000)
+            .map_err(|_| invalid("timestamp is outside the supported range"))?;
+        Self::normalized(value)
+    }
+    fn normalized(value: time::OffsetDateTime) -> Result<Self, ValidationError> {
+        value
+            .checked_to_offset(time::UtcOffset::UTC)
+            .filter(|value| value.year() >= 0)
+            .map(Self)
+            .ok_or_else(|| invalid("timestamp cannot be represented as UTC RFC3339"))
+    }
+}
+impl Serialize for Timestamp {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        time::serde::rfc3339::serialize(&self.0, serializer)
+    }
+}
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        time::serde::rfc3339::deserialize(deserializer)
+            .and_then(|value| Self::normalized(value).map_err(serde::de::Error::custom))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryDirection {
+    #[default]
+    Forward,
+    Backward,
 }
 
 validated_dto!(HistoryReadRequest, HistoryReadRequestWire, "HistoryReadRequest" {
     cursor: Option<String>, limit: u64,
+    #[serde(default)]
+    direction: HistoryDirection,
 });
 impl HistoryReadRequest {
     pub fn validate(&self) -> Result<(), ValidationError> {
@@ -299,5 +344,44 @@ impl ModelRetryProgress {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod history_contract_tests {
+    use super::*;
+
+    #[test]
+    fn timestamps_compare_instants_and_serialize_in_utc() {
+        let offset: Timestamp = serde_json::from_str("\"2026-11-13T12:00:00.1+02:00\"").unwrap();
+        let utc: Timestamp = serde_json::from_str("\"2026-11-13T10:00:00.100Z\"").unwrap();
+        let later: Timestamp = serde_json::from_str("\"2026-11-13T10:00:00.11Z\"").unwrap();
+        assert_eq!(offset, utc);
+        assert!(offset < later);
+        assert_eq!(
+            serde_json::to_string(&offset).unwrap(),
+            "\"2026-11-13T10:00:00.1Z\""
+        );
+        for invalid in [
+            "2026-13-40T10:00:00Z",
+            "9999-12-31T23:59:59-23:59",
+            "0000-01-01T00:00:00+01:00",
+        ] {
+            assert!(serde_json::from_value::<Timestamp>(serde_json::json!(invalid)).is_err());
+        }
+        assert!(Timestamp::from_unix_milliseconds(-62_167_219_200_001).is_err());
+    }
+
+    #[test]
+    fn history_direction_defaults_forward_and_limit_still_validates() {
+        let request: HistoryReadRequest =
+            serde_json::from_str(r#"{"cursor":null,"limit":10}"#).unwrap();
+        assert_eq!(request.direction, HistoryDirection::Forward);
+        assert!(
+            serde_json::from_str::<HistoryReadRequest>(
+                r#"{"cursor":null,"limit":0,"direction":"backward"}"#
+            )
+            .is_err()
+        );
     }
 }

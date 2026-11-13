@@ -19,6 +19,7 @@ fn marker_fixture() -> (
     let inputs = ["original", "retained"]
         .into_iter()
         .map(|text| HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: TurnId::new().unwrap(),
             message_id: minicore_host_protocol::MessageId::new().unwrap(),
             source: minicore_host_protocol::MessageSource::User,

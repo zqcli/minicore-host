@@ -427,6 +427,8 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
             target.session_id.clone(),
             target.agent_id.clone(),
             SessionData {
+                created_at: minicore_host_protocol::Timestamp::now(),
+                last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
@@ -458,6 +460,7 @@ fn saved_exchange(id: LoopId, content: Vec<AssistantPart>, results: &[&str]) -> 
     };
     let mut entries = vec![
         HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: turn_id.clone(),
             message_id: MessageId::new().unwrap(),
             source: MessageSource::User,
@@ -503,6 +506,10 @@ fn partial_entries() -> Vec<HistoryEntry> {
             },
         },
         HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id,
             outcome: TurnOutcome::Cancelled,
             reason: Some("saved cancellation".into()),

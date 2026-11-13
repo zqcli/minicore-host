@@ -1,15 +1,18 @@
 use super::*;
-use crate::{HistoryItemData, SessionHistorySnapshot};
+use crate::{HistoryItemData, HistoryRecordData, SessionHistorySnapshot, TurnTerminalData};
+use minicore_host_storage::HistoryRecord;
 
 impl HistoryItemData {
     pub(in crate::session) fn from_input(
         user: &minicore_host_runtime::UserHistory,
+        received_at: Option<Timestamp>,
         message_id: &MessageId,
         source: &MessageSource,
         mode: MessageMode,
         in_reply_to: Option<&MessageId>,
     ) -> Self {
         Self::User {
+            received_at,
             text: user.input.as_text().to_owned(),
             message_id: Some(message_id.clone()),
             source: Some(source.clone()),
@@ -20,6 +23,7 @@ impl HistoryItemData {
     pub(in crate::session) fn from_entry(entry: &HistoryEntry) -> Option<Self> {
         match entry {
             HistoryEntry::Input {
+                received_at,
                 user,
                 message_id,
                 source,
@@ -28,6 +32,7 @@ impl HistoryItemData {
                 ..
             } => Some(Self::from_input(
                 user,
+                Some(*received_at),
                 message_id,
                 source,
                 *mode,
@@ -37,12 +42,36 @@ impl HistoryItemData {
             HistoryEntry::Partial { partial, .. } => Some(Self::Partial {
                 partial: partial.into(),
             }),
-            HistoryEntry::Summary { summary } | HistoryEntry::Compaction { summary, .. } => {
-                Some(Self::Summary {
-                    text: summary.content.as_str().to_owned(),
-                })
-            }
-            HistoryEntry::TurnFinished { .. } => None,
+            HistoryEntry::Summary { summary } => Some(Self::Summary {
+                text: summary.content.as_str().to_owned(),
+            }),
+            HistoryEntry::Compaction {
+                source_position,
+                covered_items,
+                summary,
+            } => Some(Self::Compaction {
+                text: summary.content.as_str().to_owned(),
+                source_position: *source_position,
+                covered_items: *covered_items,
+            }),
+            HistoryEntry::TurnFinished {
+                finished_at,
+                requests,
+                tool_rounds,
+                model_attempts,
+                outcome,
+                reason,
+                ..
+            } => Some(Self::TurnFinished {
+                terminal: TurnTerminalData {
+                    finished_at: *finished_at,
+                    requests: *requests,
+                    tool_rounds: *tool_rounds,
+                    model_attempts: model_attempts.clone(),
+                    outcome: *outcome,
+                    reason: reason.clone(),
+                },
+            }),
         }
     }
 }
@@ -57,7 +86,7 @@ impl SessionController {
         request
             .validate()
             .map_err(|e| Fault::new(FaultKind::SessionHistoryCursorInvalid, e.to_string()))?;
-        let start = self.history_cursor(request.cursor.as_deref())?;
+        let window = self.history_cursor(request.cursor.as_deref(), request.direction)?;
         let retained = self.access.read(caller, || {
             self.ensure_visible()?;
             let state = self.state.lock().expect("Session mutex poisoned");
@@ -66,7 +95,7 @@ impl SessionController {
             state
                 .readable_history
                 .as_ref()
-                .map(|history| self.history_page(history, start, request.limit))
+                .map(|history| self.history_page(history, window, request))
                 .transpose()
         })?;
         if let Some(page) = retained {
@@ -110,7 +139,7 @@ impl SessionController {
         diagnostic::emit(record);
         let mut content = cold.and_then(|entries| {
             entries
-                .map(|entries| self.cold_history_page(&entries, start, request.limit))
+                .map(|entries| self.cold_history_page(&entries, window, request))
                 .transpose()
         });
         loop {
@@ -125,7 +154,7 @@ impl SessionController {
                 if let Some(history) = &state.readable_history {
                     // The owner may already have accepted newer, unconfirmed
                     // records. Never replace them with a cold opening snapshot.
-                    return self.history_page(history, start, request.limit).map(Some);
+                    return self.history_page(history, window, request).map(Some);
                 }
                 Self::available(&state)?;
                 match &mut content {
@@ -151,81 +180,153 @@ impl SessionController {
     }
     fn cold_history_page(
         &self,
-        history: &[HistoryEntry],
-        start: usize,
-        limit: u64,
+        history: &[HistoryRecord],
+        window: Option<HistoryWindow>,
+        request: &HistoryReadRequest,
     ) -> Result<SessionHistorySnapshot, Fault> {
-        // The backend has already validated every record, including the suffix
-        // outside this page. Count public positions without projecting bodies.
-        let mut entries = history
+        // The backend validates the whole file. Projection touches only this page.
+        let (start, end, upper_bound, next_cursor) =
+            self.history_range(history.len(), window, request)?;
+        let items = history[start..end]
             .iter()
-            .filter(|entry| !matches!(entry, HistoryEntry::TurnFinished { .. }));
-        if entries.by_ref().take(start).count() < start {
-            return Err(history_cursor_beyond_tail());
-        }
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-        let items = entries
-            .by_ref()
-            .take(limit)
-            .map(|entry| {
-                HistoryItemData::from_entry(entry).expect("content entry has public history data")
-            })
-            .collect::<Vec<_>>();
-        let end = start.saturating_add(items.len());
-        let next_cursor = entries
-            .next()
-            .is_some()
-            .then(|| format!("v1.{}.{}.{}", self.incarnation, self.id, end));
+            .map(HistoryRecordData::from_record)
+            .collect();
         Ok(SessionHistorySnapshot {
             source: self.identity(),
-            data: HistoryPageData { items, next_cursor },
+            data: HistoryPageData {
+                items,
+                next_cursor,
+                upper_bound,
+            },
         })
     }
     fn history_page(
         &self,
-        history: &[HistoryItemData],
-        start: usize,
-        limit: u64,
+        history: &[HistoryRecordData],
+        window: Option<HistoryWindow>,
+        request: &HistoryReadRequest,
     ) -> Result<SessionHistorySnapshot, Fault> {
-        if start > history.len() {
-            return Err(history_cursor_beyond_tail());
-        }
-        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
-        let end = start.saturating_add(limit).min(history.len());
+        let (start, end, upper_bound, next_cursor) =
+            self.history_range(history.len(), window, request)?;
+        // Native positions are contiguous, including terminal and compaction facts.
         let items = history[start..end].to_vec();
-        let next_cursor =
-            (end < history.len()).then(|| format!("v1.{}.{}.{}", self.incarnation, self.id, end));
         Ok(SessionHistorySnapshot {
             source: self.identity(),
-            data: HistoryPageData { items, next_cursor },
+            data: HistoryPageData {
+                items,
+                next_cursor,
+                upper_bound,
+            },
         })
     }
-    fn history_cursor(&self, cursor: Option<&str>) -> Result<usize, Fault> {
+    fn history_range(
+        &self,
+        length: usize,
+        window: Option<HistoryWindow>,
+        request: &HistoryReadRequest,
+    ) -> Result<(usize, usize, u64, Option<String>), Fault> {
+        let upper = window.map_or(length, |window| window.upper);
+        let boundary = window.map_or_else(
+            || match request.direction {
+                HistoryDirection::Forward => 0,
+                HistoryDirection::Backward => upper,
+            },
+            |window| window.boundary,
+        );
+        if boundary > upper || upper > length {
+            return Err(history_cursor_beyond_tail());
+        }
+        let limit = usize::try_from(request.limit).unwrap_or(usize::MAX);
+        let (start, end, next) = match request.direction {
+            HistoryDirection::Forward => {
+                let end = boundary.saturating_add(limit).min(upper);
+                (boundary, end, (end < upper).then_some(end))
+            }
+            HistoryDirection::Backward => {
+                let start = boundary.saturating_sub(limit);
+                (start, boundary, (start > 0).then_some(start))
+            }
+        };
+        let direction = match request.direction {
+            HistoryDirection::Forward => "f",
+            HistoryDirection::Backward => "b",
+        };
+        let cursor = next.map(|next| {
+            format!(
+                "v2.{}.{}.{direction}.{next}.{upper}",
+                self.incarnation, self.id
+            )
+        });
+        Ok((start, end, upper as u64, cursor))
+    }
+    fn history_cursor(
+        &self,
+        cursor: Option<&str>,
+        direction: HistoryDirection,
+    ) -> Result<Option<HistoryWindow>, Fault> {
         let Some(cursor) = cursor else {
-            return Ok(0);
+            return Ok(None);
         };
         let invalid = || {
             Fault::new(
                 FaultKind::SessionHistoryCursorInvalid,
-                "history cursor does not identify this Session and Host run",
+                "history cursor does not identify this Session, Host run, direction and fixed window",
             )
         };
         let mut parts = cursor.split('.');
-        if parts.next() != Some("v1")
+        let expected_direction = match direction {
+            HistoryDirection::Forward => "f",
+            HistoryDirection::Backward => "b",
+        };
+        if parts.next() != Some("v2")
             || parts.next() != Some(self.incarnation.as_str())
             || parts.next() != Some(self.id.as_str())
+            || parts.next() != Some(expected_direction)
         {
             return Err(invalid());
         }
-        let index = parts
+        let boundary = parts
             .next()
             .ok_or_else(invalid)?
             .parse::<usize>()
             .map_err(|_| invalid())?;
-        if parts.next().is_some() {
+        let upper = parts
+            .next()
+            .ok_or_else(invalid)?
+            .parse::<usize>()
+            .map_err(|_| invalid())?;
+        if parts.next().is_some() || boundary > upper {
             return Err(invalid());
         }
-        Ok(index)
+        Ok(Some(HistoryWindow { boundary, upper }))
+    }
+}
+
+#[derive(Clone, Copy)]
+struct HistoryWindow {
+    boundary: usize,
+    upper: usize,
+}
+
+impl HistoryRecordData {
+    pub(in crate::session) fn from_record(record: &HistoryRecord) -> Self {
+        let response_index = match &record.entry {
+            HistoryEntry::Runtime {
+                response_index,
+                item: HistoryItem::Assistant(_) | HistoryItem::ToolResult(_),
+                ..
+            }
+            | HistoryEntry::Partial { response_index, .. } => Some(u64::from(*response_index)),
+            _ => None,
+        };
+        Self {
+            position: record.position,
+            recorded_at: record.recorded_at,
+            turn_id: record.entry.turn_id().cloned(),
+            response_index,
+            item: HistoryItemData::from_entry(&record.entry)
+                .expect("every native record has a public projection"),
+        }
     }
 }
 

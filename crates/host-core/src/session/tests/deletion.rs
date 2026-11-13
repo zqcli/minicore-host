@@ -15,7 +15,7 @@ impl HistoryBackend for DeleteGateJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         Box::pin(async move {
             let result = self.inner.append(entries).await?;
             if self.first.swap(false, Ordering::SeqCst) {
@@ -59,7 +59,12 @@ async fn task051_confirmed_file_bytes_do_not_bypass_save_callback_or_resource_re
     // additionally install its actual persistent object boundary for deletion.
     let record = fixture.store.load().unwrap();
     *fixture.session.store.lock().unwrap() = Some(fixture.store.clone());
-    fixture.session.state.lock().unwrap().record_base = Some(record);
+    {
+        let mut state = fixture.session.state.lock().unwrap();
+        state.info.created_at = record.data.created_at;
+        state.info.last_activity_at = record.data.last_activity_at;
+        state.record_base = Some(record);
+    }
     send(&fixture, "accepted input");
     persisted.acquire().await.unwrap().forget();
     assert!(!records(&fixture).is_empty());

@@ -293,6 +293,7 @@ async fn publication_scenario() {
             &connection.caller(),
             &target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: 100,
             },
@@ -301,7 +302,7 @@ async fn publication_scenario() {
         .unwrap();
     for (id, output) in saved_results {
         assert!(saved.data.items.iter().any(|item| matches!(
-            item,
+            &item.item,
             HistoryItemData::ToolResult { tool_call_id, result, .. }
                 if tool_call_id.0 == id && result.output == output
         )));

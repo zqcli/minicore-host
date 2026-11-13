@@ -265,6 +265,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         let page = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 100,
                 },
@@ -314,6 +315,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         let page = session
             .history(
                 HistoryReadRequest {
+                    direction: minicore_host_protocol::HistoryDirection::Forward,
                     cursor: None,
                     limit: 100,
                 },

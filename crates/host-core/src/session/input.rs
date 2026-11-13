@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Clone)]
 pub(super) struct QueuedInput {
+    pub(super) received_at: Timestamp,
     pub(super) message: MessageInput,
     pub(super) source: MessageSource,
     pub(super) runtime: UserInput,
@@ -52,7 +53,7 @@ impl SessionController {
         Ok(receipt)
     }
     pub(super) fn accept_message(
-        &self,
+        self: &Arc<Self>,
         message: MessageInput,
         runtime: UserInput,
         source: MessageSource,
@@ -61,7 +62,7 @@ impl SessionController {
         self.accept_message_locked(&mut state, message, runtime, source)
     }
     pub(super) fn accept_message_locked(
-        &self,
+        self: &Arc<Self>,
         state: &mut SessionState,
         message: MessageInput,
         runtime: UserInput,
@@ -101,7 +102,10 @@ impl SessionController {
                 "queue order exhausted",
             )
         })?;
+        let received_at = Timestamp::now();
+        state.info.last_activity_at = state.info.last_activity_at.max(received_at);
         let entry = QueuedInput {
+            received_at,
             message: message.clone(),
             source: source.clone(),
             runtime,
@@ -109,6 +113,8 @@ impl SessionController {
             order,
         };
         state.messages.push(MessageRecord {
+            received_at,
+            history_position: None,
             input: message.clone(),
             source,
             queue,
@@ -119,6 +125,9 @@ impl SessionController {
             InputQueue::NextStep => state.next_step.push_back(entry),
             InputQueue::NextTurn => state.next_turn.push_back(entry),
         }
+        // Register the metadata owner before an accepted input can be cleared
+        // by shutdown; acceptance and its timestamp leave no quiescent gap.
+        self.checkpoint_activity_locked(state);
         self.publish(state);
         let record = self.observe_message(
             state,
@@ -237,7 +246,15 @@ pub(super) fn take_batch(
 impl SessionController {
     /// The Session authors the native input and provenance together. There is
     /// no later payload matching or second delivery from an execution report.
-    pub(super) fn accept_bound_inputs(&self, state: &mut SessionState, batch: Vec<QueuedInput>) {
+    pub(super) fn accept_bound_inputs(
+        &self,
+        state: &mut SessionState,
+        batch: Vec<QueuedInput>,
+    ) -> Vec<Record> {
+        let bindings = batch
+            .iter()
+            .map(|input| (input.queue, input.order))
+            .collect::<Vec<_>>();
         let active = state.active.as_ref().expect("owned Turn");
         let turn_id = active.info.id.clone();
         let loop_id = active.loop_id;
@@ -257,6 +274,7 @@ impl SessionController {
                 input: input.runtime,
             };
             let entry = HistoryEntry::Input {
+                received_at: input.received_at,
                 turn_id: turn_id.clone(),
                 message_id: message_id.clone(),
                 source: input.source,
@@ -266,11 +284,26 @@ impl SessionController {
             };
             state.input_provenance.record(state.history.len(), &entry);
             Arc::make_mut(&mut state.history).push(HistoryItem::User(user));
+            let position = state
+                .readable_history
+                .as_ref()
+                .expect("loaded history")
+                .len() as u64;
+            let recorded_at = Timestamp::now();
+            let record = HistoryRecord::at(self.id.clone(), position, recorded_at, entry);
+            state.info.last_activity_at = state.info.last_activity_at.max(recorded_at);
             state
                 .readable_history
                 .as_mut()
                 .expect("loaded history")
-                .extend(HistoryItemData::from_entry(&entry));
+                .push(HistoryRecordData::from_record(&record));
+            if let Some(message) = state
+                .messages
+                .iter_mut()
+                .find(|message| message.queue == input.queue && message.order == input.order)
+            {
+                message.history_position = Some(position);
+            }
             state
                 .active
                 .as_mut()
@@ -279,5 +312,16 @@ impl SessionController {
                 .push(message_id.clone());
             Self::record_delegated_input(state, &turn_id, &message_id);
         }
+        let active = state.active.as_ref().expect("owned Turn");
+        bindings
+            .iter()
+            .filter_map(|(queue, order)| {
+                state
+                    .messages
+                    .iter()
+                    .find(|message| &message.queue == queue && &message.order == order)
+            })
+            .map(|message| self.observe_message(state, message, Some(&active.info)))
+            .collect()
     }
 }

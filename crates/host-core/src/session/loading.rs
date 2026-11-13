@@ -76,6 +76,7 @@ impl SessionController {
                 match result {
                     Ok(()) => {
                         state.history_loaded = true;
+                        owner.checkpoint_activity_locked(&mut state);
                         if state.block_reason.as_ref().is_some_and(|fault| {
                             fault.kind() == Some(FaultKind::SessionHistoryLoadFailed)
                         }) {
@@ -164,7 +165,12 @@ impl SessionController {
                     self.publish(&mut state);
                 }
                 SessionControlKind::Resume => {
-                    if state.history_work.is_some() || state.record_work.is_some() {
+                    if state.history_work.is_some()
+                        || state
+                            .record_work
+                            .as_ref()
+                            .is_some_and(|work| !work.running || !work.activity_only())
+                    {
                         let resume_scheduling =
                             self.access.execution_allowed_owned() && !state.host_stopping;
                         self.start_save_continuations(&mut state, resume_scheduling)?;
@@ -293,11 +299,13 @@ impl SessionController {
 }
 
 impl SessionState {
-    pub(super) fn replace_history(&mut self, entries: &[HistoryEntry]) -> Result<(), Fault> {
+    pub(super) fn replace_history(&mut self, entries: &[HistoryRecord]) -> Result<(), Fault> {
         let mut raw = Vec::new();
         let mut input_provenance = input_provenance::InputProvenance::default();
         let mut projection: Option<minicore_host_storage::CompactionProjection> = None;
-        for (position, entry) in entries.iter().enumerate() {
+        for record in entries {
+            let position = record.position;
+            let entry = &record.entry;
             if let HistoryEntry::Compaction {
                 source_position,
                 covered_items,
@@ -312,7 +320,7 @@ impl SessionState {
                 candidate
                     .validate(
                         &raw,
-                        position as u64,
+                        position,
                         projection.as_ref().map_or(0, |value| value.covered_items),
                     )
                     .map_err(|error| {
@@ -328,12 +336,13 @@ impl SessionState {
         self.input_provenance = input_provenance;
         self.history_position = entries.len() as u64;
         self.projection = projection;
-        self.readable_history = Some(
-            entries
-                .iter()
-                .filter_map(HistoryItemData::from_entry)
-                .collect(),
-        );
+        self.readable_history = Some(entries.iter().map(HistoryRecordData::from_record).collect());
+        for record in entries {
+            self.info.last_activity_at = self.info.last_activity_at.max(record.recorded_at);
+            if let HistoryEntry::Input { received_at, .. } = &record.entry {
+                self.info.last_activity_at = self.info.last_activity_at.max(*received_at);
+            }
+        }
         Ok(())
     }
 }

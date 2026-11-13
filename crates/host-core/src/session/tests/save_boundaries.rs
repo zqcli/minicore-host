@@ -44,8 +44,51 @@ async fn real_files_confirm_response_tool_and_turn_boundaries_before_continuatio
             count: AtomicUsize::new(0),
         })
     });
+    // Install the real metadata owner, then finish the paused-input checkpoint
+    // before binding/model acceptance so it cannot mask a missing history one.
+    let record = fixture.store.load().unwrap();
+    *fixture.session.store.lock().unwrap() = Some(fixture.store.clone());
+    {
+        let mut state = fixture.session.state.lock().unwrap();
+        state.info.created_at = record.data.created_at;
+        state.info.last_activity_at = record.data.last_activity_at;
+        state.record_base = Some(record);
+    }
+    fixture.session.pause(&fixture.connection.caller()).unwrap();
     send(&fixture, "run tool");
+    until(&fixture, |state| state.record_work.is_none()).await;
+    let input_checkpoint = fixture.store.load().unwrap().data.last_activity_at;
+    fixture
+        .session
+        .resume(&fixture.connection.caller())
+        .unwrap();
     assert_eq!(rx.recv().await, Some(0));
+    // The real history backend is gated before append/settlement. Activity for
+    // the newly accepted response already owns metadata work or is confirmed.
+    {
+        let state = fixture.session.state.lock().unwrap();
+        let accepted = state
+            .readable_history
+            .as_ref()
+            .unwrap()
+            .last()
+            .unwrap()
+            .recorded_at;
+        assert!(accepted > input_checkpoint);
+        assert!(
+            state.record_work.is_some()
+                || state.record_base.as_ref().unwrap().data.last_activity_at >= accepted
+        );
+    }
+    until(&fixture, |state| state.record_work.is_none()).await;
+    assert_eq!(
+        fixture.store.load().unwrap().data.last_activity_at,
+        fixture
+            .session
+            .info(&fixture.connection.caller())
+            .unwrap()
+            .last_activity_at
+    );
     assert_eq!(tool_calls.load(Ordering::SeqCst), 0);
     assert!(records(&fixture).is_empty());
     // Receipt/query/queue mutation remains available while actual save work is held.
@@ -278,7 +321,7 @@ async fn partial_and_terminal_acceptance_register_original_saves_before_gated_io
             assert_eq!(active.terminal_accepted, boundary == 2);
             assert_eq!(
                 state.readable_history.as_ref().unwrap().len(),
-                1 + usize::from(boundary >= 1)
+                1 + usize::from(boundary >= 1) + usize::from(boundary == 2)
             );
             assert!(state.completed.is_empty());
         }

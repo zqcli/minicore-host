@@ -52,23 +52,33 @@ pub(super) fn session(
     snapshot: core::SessionSnapshot,
     info: core::SessionInfo,
     include_config: bool,
-    history: Option<HistoryPageData<core::HistoryItemData>>,
+    history: Option<HistoryPageData<core::HistoryRecordData>>,
 ) -> Result<Value, Fault> {
     #[derive(Serialize)]
     struct Data {
         #[serde(flatten)]
         state: core::SessionStateData,
         title: Option<String>,
+        created_at: Timestamp,
+        last_activity_at: Timestamp,
+        workspace: Option<WorkspaceRef>,
+        model: ModelRef,
+        reasoning: ReasoningPreference,
         config_revision: ConfigRevision,
         agent_config_revision: ConfigRevision,
         #[serde(skip_serializing_if = "Option::is_none")]
         config: Option<SessionConfig>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        history: Option<HistoryPageData<core::HistoryItemData>>,
+        history: Option<HistoryPageData<core::HistoryRecordData>>,
     }
     let data = encoded(Data {
         state: snapshot.data,
         title: info.title,
+        created_at: info.created_at,
+        last_activity_at: info.last_activity_at,
+        workspace: info.config.workspace.clone(),
+        model: info.config.model.clone(),
+        reasoning: info.config.reasoning,
         config_revision: info.config_revision,
         agent_config_revision: info.agent_config_revision,
         config: include_config.then_some(info.config),
@@ -86,6 +96,8 @@ pub(super) fn session(
 pub(super) fn turn_result(result: &core::TurnResultSnapshot) -> Result<Value, Fault> {
     #[derive(Serialize)]
     struct Partial<'a> {
+        position: u64,
+        recorded_at: Timestamp,
         response_index: u64,
         #[serde(flatten)]
         partial: &'a core::ModelPartialData,
@@ -113,6 +125,8 @@ pub(super) fn turn_result(result: &core::TurnResultSnapshot) -> Result<Value, Fa
             .partials
             .iter()
             .map(|value| Partial {
+                position: value.position,
+                recorded_at: value.recorded_at,
                 response_index: value.response_index,
                 partial: &value.partial,
             })
@@ -228,6 +242,8 @@ pub(super) fn message(
     }
     #[derive(Serialize)]
     struct Data<'a> {
+        received_at: Timestamp,
+        history_position: Option<u64>,
         input: Input<'a>,
         source: &'a MessageSource,
         queue: InputQueue,
@@ -235,6 +251,8 @@ pub(super) fn message(
         binding: &'a core::MessageBinding,
     }
     let data = encoded(Data {
+        received_at: record.received_at,
+        history_position: record.history_position,
         input: Input {
             mode: record.input.mode,
             text: include_output.then_some(record.input.text.as_str()),

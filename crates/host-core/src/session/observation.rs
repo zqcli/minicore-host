@@ -58,6 +58,7 @@ impl Body {
     }
 }
 pub(super) struct ToolRecord {
+    history_record: Option<(u64, Timestamp)>,
     pub(super) data: ToolCallData,
     pub(super) output: BTreeMap<String, Body>,
     // The same cleanup-scoped admission held by the actual worker. Native
@@ -83,6 +84,9 @@ impl SessionController {
     }
     pub(super) fn turn_state(info: &TurnInfo, revision: u64) -> TurnStateData {
         TurnStateData {
+            history_position: None,
+            recorded_at: None,
+            finished_at: None,
             state: info.state,
             runner_revision: revision,
             config_revision: info.config_revision,
@@ -150,6 +154,15 @@ impl SessionController {
         turn: Option<&TurnInfo>,
     ) -> Record {
         let data = MessageEventData {
+            received_at: record.received_at,
+            history_position: record.history_position,
+            recorded_at: record.history_position.and_then(|position| {
+                state
+                    .readable_history
+                    .as_ref()?
+                    .get(position as usize)
+                    .map(|row| row.recorded_at)
+            }),
             text: record.input.text.clone(),
             mode: record.input.mode,
             source: record.source.clone(),
@@ -187,32 +200,20 @@ impl SessionController {
             turn.is_some(),
         )
     }
-    pub(super) fn observe_bound(&self, state: &SessionState, batch: &[QueuedInput]) -> Vec<Record> {
-        let mut records = Vec::new();
-        if let Some(active) = &state.active {
-            for input in batch {
-                if let Some(record) = state.messages.iter().find(|record| {
-                    record.input.message_id == input.message.message_id
-                        && record.queue == input.queue
-                        && record.order == input.order
-                }) {
-                    records.push(self.observe_message(state, record, Some(&active.info)));
-                }
-            }
-        }
-        records
-    }
     pub(super) fn observe_history(
         &self,
         state: &mut SessionState,
-        items: &[HistoryItem],
+        records: &[HistoryRecord],
     ) -> Vec<Record> {
         let mut diagnostics = Vec::new();
         let active = state.active.as_ref().expect("accepted active Turn");
         let source = self.turn_identity(&active.info);
         let revision = state.runner_revision;
         let observation = state.output.entry(active.info.id.clone()).or_default();
-        for item in items {
+        for native in records {
+            let HistoryEntry::Runtime { item, .. } = &native.entry else {
+                continue;
+            };
             match item {
                 HistoryItem::Assistant(result) => {
                     let response_index = u64::from(result.request_index);
@@ -230,6 +231,7 @@ impl SessionController {
                             AssistantPart::ToolCall(call) => {
                                 let id = ToolCallId(call.tool_call_id().as_str().to_owned());
                                 let record = ToolRecord {
+                                    history_record: None,
                                     data: ToolCallData {
                                         state: ToolCallStateData {
                                             runner_revision: revision,
@@ -271,6 +273,8 @@ impl SessionController {
                                 response_index,
                             },
                             data: ModelFinishedData {
+                                history_position: native.position,
+                                recorded_at: native.recorded_at,
                                 result: result.into(),
                                 output_positions: positions(channels),
                             },
@@ -284,6 +288,7 @@ impl SessionController {
                         // history/save handoff never waits for observer timing
                         // or for a cancelled tool's actual cleanup tail.
                         record.data.result = Some(result.into());
+                        record.history_record = Some((native.position, native.recorded_at));
                         diagnostics.extend(self.publish_tool_finished(
                             ToolCallIdentity {
                                 turn: source.clone(),
@@ -314,6 +319,7 @@ impl SessionController {
             return None;
         }
         let result = record.data.result.clone()?;
+        let (history_position, recorded_at) = record.history_record?;
         record.data.state.state = ToolCallState::Finished;
         record.data.state.outcome = Some(result.outcome);
         record.data.state.runner_revision = revision;
@@ -329,6 +335,8 @@ impl SessionController {
             .publish(ObservationEvent::Activity(ActivityEvent::ToolFinished {
                 source,
                 data: ToolFinishedData {
+                    history_position,
+                    recorded_at,
                     result,
                     output_positions: positions(&record.output),
                 },
@@ -380,6 +388,12 @@ impl SessionController {
         }
         let active = state.active.as_mut().expect("owned Turn");
         active.info.requests += 1;
+        // Admission owns the request even when the driver fails before its first
+        // attempt. Preserve that actual zero until an attempt/report updates it.
+        active
+            .info
+            .model_attempts
+            .resize(request_index as usize + 1, 0);
         active.info.phase = Some(TurnPhase::Model);
         active.info.model_retry = None;
         let loop_id = active.loop_id;
@@ -613,7 +627,16 @@ impl SessionController {
             }
         }
         let source = self.turn_identity(info);
-        let data = Self::turn_state(info, revision);
+        let mut data = Self::turn_state(info, revision);
+        if let Some(row) = state.readable_history.as_ref().and_then(|rows| rows.last())
+            && row.turn_id.as_ref() == Some(&info.id)
+            && let HistoryItemData::TurnFinished { terminal } = &row.item
+        {
+            data.history_position = Some(row.position);
+            data.recorded_at = Some(row.recorded_at);
+            data.finished_at = Some(terminal.finished_at);
+        }
+
         state
             .output
             .entry(info.id.clone())

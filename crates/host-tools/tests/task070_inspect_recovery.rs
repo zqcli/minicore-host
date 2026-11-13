@@ -167,6 +167,16 @@ async fn message_and_toolcall_inspect_preserve_body_selection_and_actual_result_
     let next = f.next(&session).await;
     let full = next.last_tool_result();
     assert_eq!(full["message_id"], json!(message_id));
+    let original = f
+        .host
+        .message(&f.connection.caller(), &session, &message_id)
+        .unwrap();
+    assert_eq!(full["data"]["received_at"], json!(original.received_at));
+    assert_eq!(
+        full["data"]["history_position"],
+        json!(original.history_position)
+    );
+    assert_eq!(original.history_position, Some(0));
     assert_eq!(
         full["data"]["input"],
         json!({
@@ -458,6 +468,16 @@ fn input_row(message: &MessageInput, source: MessageSource) -> Value {
     }
     row
 }
+fn with_record_identity(mut expected: Value, actual: &Value) -> Value {
+    assert!(actual["position"].as_u64().is_some());
+    serde_json::from_value::<Timestamp>(actual["recorded_at"].clone()).unwrap();
+    serde_json::from_value::<Timestamp>(actual["received_at"].clone()).unwrap();
+    serde_json::from_value::<TurnId>(actual["turn_id"].clone()).unwrap();
+    for field in ["position", "recorded_at", "received_at", "turn_id"] {
+        expected[field] = actual[field].clone();
+    }
+    expected
+}
 fn user_rows(items: Value) -> Vec<Value> {
     items
         .as_array()
@@ -474,6 +494,7 @@ async fn history_rows(f: &Fixture, target: &SessionRef) -> Vec<Value> {
             &f.connection.caller(),
             target,
             &HistoryReadRequest {
+                direction: minicore_host_protocol::HistoryDirection::Forward,
                 cursor: None,
                 limit: u64::MAX,
             },
@@ -493,6 +514,12 @@ async fn result_rows(f: &Fixture, source: &TurnSource) -> Vec<Value> {
         .await
         .unwrap();
     user_rows(serde_json::to_value(result.data.history).unwrap())
+        .into_iter()
+        .map(|mut row| {
+            row["turn_id"] = json!(source.turn.turn_id);
+            row
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -532,11 +559,39 @@ async fn identical_inputs_keep_identity_mode_and_reply_in_live_held_and_saved_hi
         f.finished(&call.source).await;
         sources.push(call.source);
     }
-    assert_eq!(history_rows(&f, &target).await, expected);
+    let live = history_rows(&f, &target).await;
+    let expected = expected
+        .into_iter()
+        .zip(&live)
+        .map(|(expected, actual)| with_record_identity(expected, actual))
+        .collect::<Vec<_>>();
+    assert_eq!(live, expected);
+    assert_eq!(
+        live.iter()
+            .map(|row| row["position"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [0, 3]
+    );
     // The first result must still use its original slice after another Turn.
     for (index, source) in sources.iter().enumerate() {
         assert_eq!(result_rows(&f, source).await, vec![expected[index].clone()]);
     }
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let state = f
+                .host
+                .session_state(&f.connection.caller(), &target)
+                .unwrap()
+                .data;
+            if !state.metadata_saving {
+                assert!(state.metadata_fault.is_none());
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     f.host
         .session_unload(
             &f.connection.caller(),
@@ -668,12 +723,16 @@ async fn actual_child_input_and_completion_notification_keep_sources_after_resta
             source: child.clone(),
         },
     );
-    assert_eq!(history_rows(&f, &child).await, vec![child_expected.clone()]);
+    let child_history = history_rows(&f, &child).await;
+    let child_expected = with_record_identity(child_expected, &child_history[0]);
+    let parent_history = history_rows(&f, &parent).await;
+    let notification_expected =
+        with_record_identity(notification_expected, parent_history.last().unwrap());
+    assert_eq!(child_history, vec![child_expected.clone()]);
     assert_eq!(
         result_rows(&f, &child_call.source).await,
         vec![child_expected.clone()]
     );
-    let parent_history = history_rows(&f, &parent).await;
     assert_eq!(parent_history.last(), Some(&notification_expected));
     assert_eq!(
         result_rows(&f, &notification.source).await,

@@ -145,6 +145,7 @@ fn seed_entries(pairs: usize) -> Vec<HistoryEntry> {
         let turn = TurnId::new().unwrap();
         let loop_id = LoopId::new().unwrap();
         entries.push(HistoryEntry::Input {
+            received_at: minicore_host_protocol::Timestamp::now(),
             turn_id: turn.clone(),
             message_id: MessageId::new().unwrap(),
             source: MessageSource::User,
@@ -177,6 +178,10 @@ fn seed_entries(pairs: usize) -> Vec<HistoryEntry> {
             }),
         });
         entries.push(HistoryEntry::TurnFinished {
+            finished_at: minicore_host_protocol::Timestamp::now(),
+            requests: 1,
+            tool_rounds: 0,
+            model_attempts: vec![1],
             turn_id: turn,
             outcome: TurnOutcome::Completed,
             reason: None,
@@ -188,7 +193,15 @@ async fn seed(fixture: &Fixture, automatic: bool) {
     fixture
         .session
         .backend
-        .append(seed_entries(3))
+        .append(
+            seed_entries(3)
+                .into_iter()
+                .enumerate()
+                .map(|(position, entry)| {
+                    HistoryRecord::new(fixture.session.id.clone(), position as u64, entry)
+                })
+                .collect(),
+        )
         .await
         .unwrap();
     {
@@ -583,11 +596,11 @@ impl HistoryBackend for CompactionJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.inner.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         Box::pin(async move {
             if entries
                 .iter()
-                .any(|entry| matches!(entry, HistoryEntry::Compaction { .. }))
+                .any(|entry| matches!(&entry.entry, HistoryEntry::Compaction { .. }))
             {
                 self.appends.fetch_add(1, Ordering::SeqCst);
                 self.entered.add_permits(1);
@@ -709,7 +722,7 @@ impl HistoryBackend for CompactionEndJournal {
     fn load(&self) -> LoadFuture<'_> {
         self.0.load()
     }
-    fn append<'a>(&'a self, entries: Vec<HistoryEntry>) -> SaveFuture<'a> {
+    fn append<'a>(&'a self, entries: Vec<minicore_host_storage::HistoryRecord>) -> SaveFuture<'a> {
         self.0.append(entries)
     }
     fn reconcile(&self) -> SaveFuture<'_> {
@@ -941,7 +954,7 @@ async fn compaction_prompt_cancellation_fences_terminal_handoff_then_resumes_ori
             .as_ref()
             .unwrap()
             .save_cursor,
-        raw.len()
+        raw.len() + 1
     );
     backend.release.add_permits(1);
     until(&fixture, |state| {
@@ -1287,7 +1300,7 @@ async fn compaction_old_missing_result_remains_unknown_and_no_tool_is_replayed()
     fixture
         .session
         .backend
-        .append(entries.clone())
+        .append(test_history_records(&fixture.session.id, entries.clone()))
         .await
         .unwrap();
     fixture
@@ -1474,7 +1487,12 @@ async fn compaction_automatic_old_missing_tail_keeps_unknown_exchange_usable() {
         ));
         assistant.finish_reason = ModelFinishReason::ToolCalls;
     }
-    fixture.session.backend.append(entries).await.unwrap();
+    fixture
+        .session
+        .backend
+        .append(test_history_records(&fixture.session.id, entries))
+        .await
+        .unwrap();
     {
         let mut state = fixture.session.state.lock().unwrap();
         state.info.config.execution.compaction = CompactionSettings {
@@ -1578,5 +1596,291 @@ async fn automatic_and_manual_summary_use_independent_budget_and_one_operation_d
             .collect::<Vec<_>>();
         assert!(!deadlines.is_empty());
         assert!(deadlines.iter().all(|deadline| deadline == &deadlines[0]));
+    }
+}
+
+#[tokio::test]
+async fn automatic_compaction_preserves_bound_input_positions_through_save_and_reconcile() {
+    use crate::{
+        ActivityEvent, HistoryItemData, HistoryRecordData, ObservationEvent,
+        ObservationNotification,
+    };
+
+    for fault in [None, Some(TestAppendFault::FullWrite)] {
+        let fails = fault.is_some();
+        let model = UtilityModel::new(
+            vec![
+                final_events(&"prior result ".repeat(250)),
+                final_events("second reply 🦀"),
+            ],
+            true,
+        );
+        let (fixture, backend) = gated_fixture(model.clone(), fault);
+        let caller = fixture.connection.caller();
+        fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .info
+            .config
+            .execution
+            .compaction
+            .enabled = false;
+        send(&fixture, &"original task ".repeat(80));
+        until(&fixture, |state| {
+            state.completed.len() == 1 && !state.driver_running
+        })
+        .await;
+        assert_eq!(records(&fixture).len(), 3);
+        fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .info
+            .config
+            .execution
+            .compaction = CompactionSettings {
+            enabled: true,
+            trigger_percent: 20,
+            target_percent: 10,
+        };
+        let mut events = fixture
+            .access
+            .observation
+            .register(
+                &caller,
+                &fixture.access,
+                SubscribeRequest {
+                    scope: SubscriptionScope::Session {
+                        agent_id: fixture.session.agent_id.clone(),
+                        session_id: fixture.session.id.clone(),
+                    },
+                    categories: BTreeSet::from([EventCategory::Completion, EventCategory::Message]),
+                },
+            )
+            .unwrap();
+        send(&fixture, "second Turn input 原文");
+        model.entered().await;
+        fixture
+            .session
+            .send(
+                &caller,
+                MessageInput {
+                    message_id: MessageId::new().unwrap(),
+                    mode: MessageMode::Steer,
+                    text: "steering input accepted during compaction 🦀".into(),
+                    in_reply_to: None,
+                },
+            )
+            .unwrap();
+        model.utility_gate.as_ref().unwrap().add_permits(10);
+        backend.entered.acquire().await.unwrap().forget();
+        let original_input = {
+            let state = fixture.session.state.lock().unwrap();
+            let rows = state.readable_history.as_ref().unwrap();
+            assert_eq!(rows.len(), 4);
+            assert_eq!(rows[3].position, 3);
+            assert_eq!(state.history_position, 5);
+            assert_eq!(state.active.as_ref().unwrap().save_cursor, 3);
+            rows[3].clone()
+        };
+        backend.release.add_permits(1);
+        let pending_marker = if fails {
+            until(&fixture, |state| {
+                !state.driver_running
+                    && state
+                        .history_work
+                        .as_ref()
+                        .is_some_and(|work| work.fault.is_some())
+            })
+            .await;
+            let disk = records(&fixture);
+            assert_eq!(disk.len(), 5);
+            assert_eq!(
+                serde_json::to_value(HistoryRecordData::from_record(&disk[3])).unwrap(),
+                serde_json::to_value(&original_input).unwrap()
+            );
+            {
+                let state = fixture.session.state.lock().unwrap();
+                assert_eq!(state.readable_history.as_ref().unwrap().len(), 4);
+                assert_eq!(
+                    state.readable_history.as_ref().unwrap()[3].recorded_at,
+                    original_input.recorded_at
+                );
+            }
+            fixture.session.resume(&caller).unwrap();
+            Some(disk[4].clone())
+        } else {
+            None
+        };
+        let completed = if fails { 3 } else { 2 };
+        until(&fixture, |state| {
+            state.completed.len() == completed && !state.driver_running
+        })
+        .await;
+        assert_eq!(backend.appends.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            backend.reconciles.load(Ordering::SeqCst),
+            usize::from(fails)
+        );
+        assert_eq!(model.utility_calls.load(Ordering::SeqCst), 1);
+
+        let request = HistoryReadRequest {
+            cursor: None,
+            limit: 100,
+            direction: HistoryDirection::Forward,
+        };
+        let rows = fixture
+            .session
+            .history_read(&caller, &request)
+            .await
+            .unwrap()
+            .data
+            .items;
+        let disk = records(&fixture);
+        let projected = disk
+            .iter()
+            .map(HistoryRecordData::from_record)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            serde_json::to_value(&rows).unwrap(),
+            serde_json::to_value(&projected).unwrap()
+        );
+        assert_eq!(
+            rows.iter().map(|row| row.position).collect::<Vec<_>>(),
+            (0..rows.len() as u64).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            serde_json::to_value(&rows[3]).unwrap(),
+            serde_json::to_value(&original_input).unwrap()
+        );
+        assert!(matches!(
+            &rows[4].item,
+            HistoryItemData::Compaction {
+                source_position: 4,
+                covered_items: 2,
+                ..
+            }
+        ));
+        assert_eq!(markers(&fixture), 1);
+        if let Some(marker) = pending_marker {
+            assert_eq!(disk[4], marker);
+        }
+        let turns = fixture
+            .session
+            .state
+            .lock()
+            .unwrap()
+            .completion_order
+            .clone();
+        let mut retained = Vec::new();
+        for turn in &turns {
+            let result = fixture
+                .session
+                .turn_result_snapshot(&caller, turn)
+                .await
+                .unwrap();
+            for item in &result.data.history {
+                assert_eq!(rows[item.position as usize].turn_id.as_ref(), Some(turn));
+                assert_eq!(rows[item.position as usize].recorded_at, item.recorded_at);
+            }
+            retained.push(result);
+        }
+        let mut bound = Vec::new();
+        let mut finished = 0;
+        while finished < completed - 1 {
+            let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            let ObservationNotification::Event(push) = event else {
+                panic!("unexpected resync")
+            };
+            match push.event {
+                ObservationEvent::Activity(ActivityEvent::MessageBound { data, .. }) => {
+                    let position = data.history_position.unwrap();
+                    assert_eq!(data.recorded_at, Some(rows[position as usize].recorded_at));
+                    assert!(
+                        matches!(&rows[position as usize].item, HistoryItemData::User { received_at: Some(received), .. } if *received == data.received_at)
+                    );
+                    bound.push(position);
+                }
+                ObservationEvent::Activity(ActivityEvent::ModelFinished { data, .. }) => {
+                    assert_eq!(
+                        data.recorded_at,
+                        rows[data.history_position as usize].recorded_at
+                    );
+                    assert!(matches!(
+                        rows[data.history_position as usize].item,
+                        HistoryItemData::Assistant { .. }
+                    ));
+                }
+                ObservationEvent::Activity(ActivityEvent::TurnFinished { data, .. }) => {
+                    let row = &rows[data.history_position.unwrap() as usize];
+                    assert_eq!(data.recorded_at, Some(row.recorded_at));
+                    assert!(
+                        matches!(&row.item, HistoryItemData::TurnFinished { terminal } if Some(terminal.finished_at) == data.finished_at)
+                    );
+                    finished += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(bound, [3, if fails { 6 } else { 5 }]);
+
+        let resources = fixture.session.resources_owned().unwrap();
+        let config = fixture.session.info(&caller).unwrap().config;
+        fixture.session.begin_host_shutdown_owned(true);
+        fixture.session.wait_quiescent_owned().await;
+        fixture
+            .session
+            .release_host_resources_owned()
+            .await
+            .unwrap();
+        let incarnation = HostIncarnation::new().unwrap();
+        let access = ConnectionRegistry::new(fixture.session.host_id.clone(), incarnation.clone());
+        let connection = access.connect().unwrap();
+        let cold = SessionController::new(
+            fixture.session.id.clone(),
+            fixture.session.agent_id.clone(),
+            fixture.session.host_id.clone(),
+            incarnation,
+            config,
+            access,
+            resources,
+            Arc::new(JournalHistory::new(fixture.store.clone())),
+            Vec::new(),
+            Arc::new(AtomicBool::new(true)),
+        );
+        let cold_rows = cold
+            .history_read(&connection.caller(), &request)
+            .await
+            .unwrap()
+            .data
+            .items;
+        assert_eq!(
+            serde_json::to_value(cold_rows).unwrap(),
+            serde_json::to_value(&rows).unwrap()
+        );
+        for (turn, original) in turns.iter().zip(retained) {
+            let saved = cold
+                .turn_result_snapshot(&connection.caller(), turn)
+                .await
+                .unwrap();
+            assert!(saved.source.load_id.is_none());
+            assert_eq!(
+                serde_json::to_value(saved.data.history).unwrap(),
+                serde_json::to_value(original.data.history).unwrap()
+            );
+            let terminal = saved.data.saved_terminal.unwrap();
+            let state = original.data.info.unwrap();
+            assert_eq!(state.history_position, Some(terminal.position));
+            assert_eq!(state.recorded_at, Some(terminal.recorded_at));
+            assert_eq!(state.finished_at, Some(terminal.finished_at));
+        }
+        assert!(!cold.state.lock().unwrap().history_loaded);
     }
 }

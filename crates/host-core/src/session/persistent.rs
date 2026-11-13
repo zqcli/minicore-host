@@ -40,6 +40,8 @@ impl SessionController {
         // Edit snapshots are retained observations, not independently durable
         // records. A reopened Session must not claim an empty complete list.
         state.edits_complete = !reopened;
+        state.info.created_at = record.data.created_at;
+        state.info.last_activity_at = record.data.last_activity_at;
         state.info.title = record.data.title.clone();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
