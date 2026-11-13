@@ -667,7 +667,11 @@ async fn persistent_reopen_keeps_native_history_but_not_old_edit_or_process_obse
         )
         .await
         .unwrap();
-    assert!(saved.data.items.iter().any(|item| matches!(item, HistoryItemData::ToolResult { tool_call_id, result, .. } if tool_call_id.0 == "durable-bash" && result.output == native)));
+    assert!(saved.data.items.iter().any(|record| matches!(
+        &record.item,
+        HistoryItemData::ToolResult { tool_call_id, result, .. }
+            if tool_call_id.0 == "durable-bash" && result.output == native
+    )));
     assert_eq!(
         reopened
             .session_changes(
