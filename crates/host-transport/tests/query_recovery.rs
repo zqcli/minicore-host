@@ -235,6 +235,50 @@ async fn persistent_unload_reload_preserves_original_terminal_revision_and_load(
     assert_eq!(finished.data.persistence, PersistenceState::Persisted);
     // Avoid an earlier comparison so the unfixed source specifically exposes
     // its unload/reload query drift, independently of the transition test.
+    let mut states = owner
+        .subscribe(
+            SubscribeRequest {
+                scope: SubscriptionScope::Session {
+                    agent_id: session.target().agent_id.clone(),
+                    session_id: session.target().session_id.clone(),
+                },
+                categories: [EventCategory::State].into_iter().collect(),
+            },
+            options(5000),
+        )
+        .await
+        .unwrap();
+    let mut metadata_saving = states
+        .result()
+        .initial_states
+        .iter()
+        .find_map(|event| match event {
+            StateEvent::Session { data, .. } => Some(data.metadata_saving),
+            _ => None,
+        })
+        .expect("initial Session state");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while metadata_saving {
+            let ObservationNotification::Event(push) = states.recv().await.unwrap().unwrap() else {
+                panic!("Session metadata observer was unexpectedly lost")
+            };
+            if let ObservationEvent::State(StateEvent::Session { data, .. }) = push.event {
+                metadata_saving = data.metadata_saving;
+            }
+        }
+    })
+    .await
+    .expect("terminal activity metadata save completed");
+    owner
+        .unsubscribe(
+            UnsubscribeRequest {
+                subscription_id: states.result().subscription_id.clone(),
+            },
+            options(5000),
+        )
+        .await
+        .unwrap();
+    drop(states);
     session.unload(control(), options(5000)).await.unwrap();
     let unloaded = session.state(options(5000)).await.unwrap();
     assert_eq!(unloaded.data.residency, Residency::Unloaded);

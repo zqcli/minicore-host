@@ -121,8 +121,24 @@ async fn all_transports_compact_real_history_without_turns_and_preserve_paused_q
         let actual_items = after["items"].as_array().unwrap();
         assert_eq!(&actual_items[..original_items.len()], original_items);
         assert_eq!(actual_items.len(), original_items.len() + 1);
-        assert_eq!(actual_items.last().unwrap()["kind"], "summary");
-        assert_eq!(actual_items.last().unwrap()["text"], SUMMARY);
+        let marker = actual_items.last().unwrap();
+        assert_eq!(marker["kind"], "compaction");
+        assert_eq!(marker["text"], SUMMARY);
+        assert_eq!(marker["position"], original_items.len() as u64);
+        assert_eq!(marker["source_position"], marker["position"]);
+        serde_json::from_value::<Timestamp>(marker["recorded_at"].clone()).unwrap();
+        assert!(marker.get("turn_id").is_none());
+        assert!(marker.get("response_index").is_none());
+        let CompactionState::Finished {
+            result: CompactionOutcome::Compacted { change, .. },
+        } = &activity.state
+        else {
+            panic!("actual completed compaction")
+        };
+        assert_eq!(marker["source_position"], change.source_position);
+        assert_eq!(marker["covered_items"], change.covered_items);
+        assert!(change.covered_items > 0);
+        assert_eq!(after["upper_bound"], actual_items.len() as u64);
         retained(&peer.client, &accepted).await;
         let already_done = session
             .cancel_compact(cancel(accepted.operation_id.clone()), options())

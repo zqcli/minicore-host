@@ -85,7 +85,20 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             }
             _ => unreachable!(),
         };
-        let end = turn_finished(&mut selected).await;
+        let mut model_finished = None;
+        let (end, terminal_event) = loop {
+            match next(&mut selected).await {
+                ObservationEvent::Activity(ActivityEvent::ModelFinished { source, data }) => {
+                    model_finished = Some((source, data));
+                }
+                ObservationEvent::Activity(ActivityEvent::TurnFinished { source, data }) => {
+                    break (source, data);
+                }
+                _ => {}
+            }
+        };
+        let (model_source, model_event) = model_finished.expect("actual model completion event");
+        assert_eq!(source, model_source);
         assert_eq!(source.turn, end);
         let snapshot = session
             .turn(end.turn_id.clone(), options(2000))
@@ -157,8 +170,11 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             .await
             .unwrap();
         assert!(
-            matches!(&page.data.items[0].item, HistoryItemData::User { text, .. } if text == "真实输入")
+            matches!(&page.data.items[0].item, HistoryItemData::User { text, received_at: Some(_), .. } if text == "真实输入")
         );
+        assert_eq!(page.data.items[0].position, 0);
+        assert_eq!(page.data.items[0].turn_id.as_ref(), Some(&end.turn_id));
+        assert_eq!(page.data.upper_bound, 3);
         let page = session
             .history(
                 HistoryReadRequest {
@@ -174,6 +190,38 @@ async fn typed_pipes_and_tls_share_real_scoped_push_snapshots_and_history() {
             page.data.items[0].item,
             HistoryItemData::Assistant { .. }
         ));
+        assert_eq!(page.data.items[0].position, model_event.history_position);
+        assert_eq!(page.data.items[0].recorded_at, model_event.recorded_at);
+        assert_eq!(page.data.items[0].turn_id.as_ref(), Some(&end.turn_id));
+        assert_eq!(page.data.items[0].response_index, Some(0));
+        assert_eq!(page.data.upper_bound, 3);
+        let page = session
+            .history(
+                HistoryReadRequest {
+                    direction: HistoryDirection::Forward,
+                    cursor: page.data.next_cursor,
+                    limit: 1,
+                },
+                options(2000),
+            )
+            .await
+            .unwrap();
+        let row = &page.data.items[0];
+        let HistoryItemData::TurnFinished { terminal } = &row.item else {
+            panic!("actual terminal history fact")
+        };
+        assert_eq!(row.position, 2);
+        assert_eq!(row.turn_id.as_ref(), Some(&end.turn_id));
+        assert_eq!(terminal.outcome, TurnOutcome::Completed);
+        assert_eq!(terminal.requests, 1);
+        assert_eq!(terminal.tool_rounds, 0);
+        assert_eq!(terminal.model_attempts, [1]);
+        assert_eq!(terminal_event.history_position, Some(row.position));
+        assert_eq!(terminal_event.recorded_at, Some(row.recorded_at));
+        assert_eq!(terminal_event.finished_at, Some(terminal.finished_at));
+        assert_eq!(snapshot.data.state.recorded_at, terminal_event.recorded_at);
+        assert_eq!(snapshot.data.state.finished_at, terminal_event.finished_at);
+        assert_eq!(page.data.upper_bound, 3);
         assert!(page.data.next_cursor.is_none());
         let old_id = selected.result().subscription_id.clone();
         drop(selected);

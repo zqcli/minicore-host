@@ -50,6 +50,7 @@ impl Model for CaptureModel {
 async fn pages(session: &SessionClient, limit: u64) -> Value {
     let mut items = Vec::new();
     let mut cursor = None;
+    let mut upper_bound = None;
     loop {
         let page = session
             .history(
@@ -63,9 +64,18 @@ async fn pages(session: &SessionClient, limit: u64) -> Value {
             .await
             .unwrap();
         assert!(page.data.items.len() <= limit as usize);
+        if let Some(upper) = upper_bound {
+            assert_eq!(page.data.upper_bound, upper);
+        } else {
+            upper_bound = Some(page.data.upper_bound);
+        }
         items.extend(page.data.items);
         cursor = page.data.next_cursor;
         if cursor.is_none() {
+            assert_eq!(items.len() as u64, upper_bound.unwrap());
+            for (position, row) in items.iter().enumerate() {
+                assert_eq!(row.position, position as u64);
+            }
             return value(items);
         }
     }
@@ -248,8 +258,40 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
         );
         assert_eq!(result.data.partials.len(), 1);
         let accepted = pages(&session, 1).await;
-        assert_eq!(accepted.as_array().unwrap().len(), 2);
+        assert_eq!(accepted.as_array().unwrap().len(), 3);
+        for row in accepted.as_array().unwrap() {
+            assert_eq!(row["turn_id"], value(&original));
+            serde_json::from_value::<Timestamp>(row["recorded_at"].clone()).unwrap();
+        }
         assert_eq!(accepted[1]["kind"], "partial");
+        assert_eq!(accepted[1]["response_index"], 0);
+        assert_eq!(accepted[1]["position"], result.data.partials[0].position);
+        assert_eq!(
+            accepted[1]["recorded_at"],
+            value(result.data.partials[0].recorded_at)
+        );
+        assert_eq!(
+            accepted[1]["partial"],
+            value(&result.data.partials[0].partial)
+        );
+        assert_eq!(accepted[2]["kind"], "turn_finished");
+        assert_eq!(accepted[2]["outcome"], "cancelled");
+        assert_eq!(accepted[2]["requests"], 1);
+        assert_eq!(accepted[2]["tool_rounds"], 0);
+        assert_eq!(accepted[2]["model_attempts"], value(vec![1_u8]));
+        let terminal_state = result.data.info.as_ref().unwrap();
+        assert_eq!(
+            accepted[2]["position"],
+            value(terminal_state.history_position.unwrap())
+        );
+        assert_eq!(
+            accepted[2]["recorded_at"],
+            value(terminal_state.recorded_at.unwrap())
+        );
+        assert_eq!(
+            accepted[2]["finished_at"],
+            value(terminal_state.finished_at.unwrap())
+        );
         let partial = &accepted[1]["partial"];
         assert!(partial.to_string().contains(PARTIAL));
         assert_eq!(
@@ -263,6 +305,18 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
         assert!(partial.get("finish_reason").is_none());
         assert!(partial.get("request_index").is_none());
         assert_eq!(partial["usage"], value(usage));
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let state = session.state(options(3000)).await.unwrap().data;
+                if !state.metadata_saving {
+                    assert!(state.metadata_fault.is_none());
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
         session.unload(control(), options(3000)).await.unwrap();
         assert_eq!(pages(&session, 2).await, accepted);
         assert_eq!(
@@ -291,7 +345,17 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
             .iter()
             .map(|item| item["kind"].as_str().unwrap())
             .collect();
-        assert_eq!(kinds, ["user", "partial", "user", "assistant"]);
+        assert_eq!(
+            kinds,
+            [
+                "user",
+                "partial",
+                "turn_finished",
+                "user",
+                "assistant",
+                "turn_finished"
+            ]
+        );
         for limit in [1, 2, 3] {
             assert_eq!(pages(&session, limit).await, expected);
         }
@@ -345,6 +409,33 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
             value(session.state(options(3000)).await.unwrap().data),
             value(before.data)
         );
+        let saved_result = session
+            .turn_result(original.clone(), options(3000))
+            .await
+            .unwrap();
+        assert!(saved_result.source.load_id.is_none());
+        assert!(saved_result.data.info.is_none());
+        assert_eq!(
+            value(&saved_result.data.history),
+            value(&result.data.history)
+        );
+        assert_eq!(
+            value(&saved_result.data.partials),
+            value(&result.data.partials)
+        );
+        let saved_terminal = saved_result.data.saved_terminal.unwrap();
+        assert_eq!(
+            saved_terminal.position,
+            terminal_state.history_position.unwrap()
+        );
+        assert_eq!(
+            saved_terminal.recorded_at,
+            terminal_state.recorded_at.unwrap()
+        );
+        assert_eq!(
+            saved_terminal.finished_at,
+            terminal_state.finished_at.unwrap()
+        );
         assert!(session.turn(original, options(3000)).await.is_err());
         assert!(session.turns(options(3000)).await.unwrap().data.is_empty());
         assert!(starts.try_recv().is_err());
@@ -367,7 +458,7 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
         session.wait_turn(third, options(3000)).await.unwrap();
         let after = pages(&session, 1).await;
         assert_eq!(
-            &after.as_array().unwrap()[..4],
+            &after.as_array().unwrap()[..expected.as_array().unwrap().len()],
             expected.as_array().unwrap()
         );
         stop(&client).await;

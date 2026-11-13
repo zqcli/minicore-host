@@ -564,6 +564,23 @@ async fn binary_policy_update_is_frozen_through_internal_loops_and_applies_next_
         },
         ..Default::default()
     };
+    tokio::time::timeout(support::WAIT, async {
+        loop {
+            let state = app
+                .process
+                .rpc("session.state", json!({"target":target}))
+                .await;
+            if !state["data"]["metadata_saving"]
+                .as_bool()
+                .expect("Session exposes its metadata owner")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted input activity save completes before the policy update");
     app.process.rpc("session.update", json!({"target":target,"operation_id":OperationId::new().unwrap(),"expected_config_revision":0,"changes":{"config":{"execution":execution}}})).await;
     tokio::time::timeout(support::WAIT, async {
         loop {

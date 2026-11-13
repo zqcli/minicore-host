@@ -263,18 +263,19 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
             binding[0]["load_id"],
             source.load_id.as_ref().unwrap().as_str()
         );
-        assert_eq!(
-            binding[0]["attributes"]["controller_revision"],
-            started[0]["attributes"]["controller_revision"]
-        );
-        assert!(
-            binding[0]["attributes"]["controller_revision"]
-                .as_u64()
-                .unwrap()
-                > input[0]["attributes"]["controller_revision"]
-                    .as_u64()
-                    .unwrap()
-        );
+        // Resource binding starts the Turn; consuming its input publishes the
+        // original native history position at a later owner boundary.
+        let accepted_revision = input[0]["attributes"]["controller_revision"]
+            .as_u64()
+            .unwrap();
+        let started_revision = started[0]["attributes"]["controller_revision"]
+            .as_u64()
+            .unwrap();
+        let bound_revision = binding[0]["attributes"]["controller_revision"]
+            .as_u64()
+            .unwrap();
+        assert!(accepted_revision < started_revision);
+        assert!(started_revision < bound_revision);
     }
     let pending_row = accepted
         .iter()

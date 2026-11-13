@@ -130,15 +130,30 @@ async fn real_cold_load_and_metadata_failures_keep_business_state_and_record_onl
     );
     assert_eq!(http.count(), 2);
 
+    // The terminal history and its activity metadata have independent saves.
+    // Finish the accepted activity checkpoint before breaking the config save.
+    tokio::time::timeout(WAIT, async {
+        loop {
+            let state = session.state(options()).await.unwrap();
+            assert!(state.data.metadata_fault.is_none());
+            if !state.data.metadata_saving {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted activity metadata must settle before the config failure");
     let metadata = session_path.join("session.json");
     let saved = session_path.join("session.original");
     std::fs::rename(&metadata, &saved).unwrap();
     std::fs::create_dir(&metadata).unwrap();
     let before = session.info(options()).await.unwrap();
+    let update_operation = OperationId::new().unwrap();
     session
         .update(
             SessionUpdateRequest {
-                operation_id: OperationId::new().unwrap(),
+                operation_id: update_operation.clone(),
                 expected_config_revision: before.config_revision,
                 changes: SessionUpdateChanges {
                     title: NullablePatch::Set("PRIVATE_NEW_TITLE".into()),
@@ -240,6 +255,8 @@ async fn real_cold_load_and_metadata_failures_keep_business_state_and_record_onl
     assert_eq!(write.len(), 1);
     assert_eq!(write[0]["fault_code"], fault.code());
     assert_eq!(write[0]["level"], "ERROR");
+    assert_eq!(write[0]["session_id"], target.session_id.as_str());
+    assert_eq!(write[0]["operation_id"], update_operation.as_str());
     assert_eq!(
         rows.iter()
             .filter(|row| row["event"] == "session.closed"

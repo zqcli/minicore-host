@@ -5,6 +5,7 @@ mod os_pipe;
 use diagnostic_support::*;
 use minicore_host_diagnostics::{LoggingState, Options, Output, ShutdownOutcome};
 use minicore_host_protocol::*;
+use minicore_host_storage::{HistoryEntry, HistoryRecord};
 use minicore_host_transport::HostClient;
 use serde_json::Value;
 use std::{path::Path, sync::Arc, time::Duration};
@@ -170,6 +171,37 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     .await
     .unwrap();
     stop(&host).await;
+    let saved: Vec<HistoryRecord> = std::fs::read_to_string(&history)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(saved.len(), 2);
+    assert!(matches!(&saved[0].entry, HistoryEntry::Input { turn_id, .. } if turn_id == &turn));
+    assert_eq!(saved[0].position, 0);
+    let terminal = &saved[1];
+    assert_eq!(terminal.position, 1);
+    let HistoryEntry::TurnFinished {
+        turn_id,
+        outcome,
+        finished_at,
+        requests,
+        tool_rounds,
+        model_attempts,
+        ..
+    } = &terminal.entry
+    else {
+        panic!("the original terminal record must be confirmed exactly once");
+    };
+    assert_eq!(turn_id, &turn);
+    assert_eq!(*outcome, TurnOutcome::Failed);
+    assert_eq!(*requests, 1);
+    assert_eq!(*tool_rounds, 0);
+    assert_eq!(model_attempts.as_slice(), &[1]);
+    let info = finished.data.info.as_ref().unwrap();
+    assert_eq!(info.history_position, Some(terminal.position));
+    assert_eq!(info.recorded_at, Some(terminal.recorded_at));
+    assert_eq!(info.finished_at, Some(*finished_at));
     assert_eq!(
         guard.shutdown(Duration::from_secs(2)),
         ShutdownOutcome::Flushed
@@ -211,7 +243,14 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     }
     let resumed: Vec<_> = scheduling
         .iter()
-        .filter(|row| row["attributes"]["reason"] == "save_resume_finished")
+        .filter(|row| {
+            // Either real owner can confirm the last outstanding save. The
+            // scheduling transition must still happen exactly once after both.
+            matches!(
+                row["attributes"]["reason"].as_str(),
+                Some("save_resume_finished" | "metadata_save_finished")
+            ) && row["attributes"]["execution_failure"] == false
+        })
         .collect();
     assert_eq!(resumed.len(), 1);
     assert_eq!(resumed[0]["attributes"]["execution_failure"], false);
@@ -232,6 +271,9 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
         .unwrap();
     assert_eq!(save["level"], "ERROR");
     assert_eq!(save["fault_code"], 3301);
+    // Authentication failed before a response: the original unsaved input
+    // append is repaired first, then the real terminal row can be accepted.
+    assert_eq!(save["attributes"]["phase"], "append");
     let done = rows
         .iter()
         .find(|row| row["event"] == "turn.finished")
@@ -241,6 +283,22 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     assert_eq!(done["attributes"]["outcome"], "failed");
     assert_eq!(done["attributes"]["persistence"], "persisted");
     assert!(done["attributes"]["duration_ms"].is_u64());
+    assert!(
+        resumed[0]["attributes"]["controller_revision"]
+            .as_u64()
+            .unwrap()
+            > done["attributes"]["controller_revision"].as_u64().unwrap()
+    );
+    for row in [primary, save, done] {
+        assert_eq!(row["host_id"], finished.source.session.host_id.as_str());
+        assert_eq!(row["agent_id"], target.agent_id.as_str());
+        assert_eq!(row["session_id"], target.session_id.as_str());
+        assert_eq!(row["turn_id"], turn.as_str());
+        assert_eq!(
+            row["load_id"],
+            finished.source.load_id.as_ref().unwrap().as_str()
+        );
+    }
     assert_eq!(
         rows.iter()
             .filter(|row| row["level"] == "ERROR" && row["fault_code"] == 4204)

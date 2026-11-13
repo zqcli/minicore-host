@@ -206,8 +206,7 @@ async fn real_file_tool_arguments_progress_output_and_result_cross_os_pipes_and_
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_do_not_create_runtime()
- {
+async fn observed_and_unobserved_runs_preserve_native_content_and_cold_rpc_record_identity() {
     let mut saved = Vec::new();
     let message = input("durable input");
     for observe in [false, true] {
@@ -231,7 +230,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
             session_id: created.session_id.unwrap(),
         };
         let session = client.session(target.clone());
-        let observation = if observe {
+        let mut observation = if observe {
             Some(
                 client
                     .subscribe(
@@ -258,7 +257,7 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
             .send(ModelEvent::text_delta("保存🙂完整正文"))
             .unwrap();
         finish(&events[0]);
-        session
+        let retained = session
             .wait_turn(turn.clone(), options(2000))
             .await
             .unwrap();
@@ -273,6 +272,67 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
             )
             .await
             .unwrap();
+        assert_eq!(page.data.upper_bound, 3);
+        assert!(page.data.next_cursor.is_none());
+        assert_eq!(page.data.items.len(), 3);
+        for (position, row) in page.data.items.iter().enumerate() {
+            assert_eq!(row.position, position as u64);
+            assert_eq!(row.turn_id.as_ref(), Some(&turn));
+        }
+        assert!(matches!(
+            &page.data.items[0].item,
+            HistoryItemData::User {
+                received_at: Some(_),
+                ..
+            }
+        ));
+        assert_eq!(page.data.items[1].response_index, Some(0));
+        for item in &retained.data.history {
+            let row = &page.data.items[item.position as usize];
+            assert_eq!(item.recorded_at, row.recorded_at);
+            assert_eq!(item.response_index, row.response_index);
+            assert_eq!(
+                serde_json::to_value(&item.item).unwrap(),
+                serde_json::to_value(&row.item).unwrap()
+            );
+        }
+        let HistoryItemData::TurnFinished { terminal } = &page.data.items[2].item else {
+            panic!("actual terminal record")
+        };
+        assert_eq!(terminal.requests, 1);
+        assert_eq!(terminal.tool_rounds, 0);
+        assert_eq!(terminal.model_attempts, [1]);
+        assert_eq!(terminal.outcome, TurnOutcome::Completed);
+        let terminal_state = retained.data.info.as_ref().unwrap();
+        assert_eq!(terminal_state.history_position, Some(2));
+        assert_eq!(
+            terminal_state.recorded_at,
+            Some(page.data.items[2].recorded_at)
+        );
+        assert_eq!(terminal_state.finished_at, Some(terminal.finished_at));
+        if let Some(observation) = observation.as_mut() {
+            let mut model_finished = false;
+            loop {
+                match next(observation).await {
+                    ObservationEvent::Activity(ActivityEvent::ModelFinished { source, data }) => {
+                        assert_eq!(source.turn.turn_id, turn);
+                        assert_eq!(source.response_index, 0);
+                        assert_eq!(data.history_position, 1);
+                        assert_eq!(data.recorded_at, page.data.items[1].recorded_at);
+                        model_finished = true;
+                    }
+                    ObservationEvent::Activity(ActivityEvent::TurnFinished { source, data }) => {
+                        assert!(model_finished);
+                        assert_eq!(source, retained.source);
+                        assert_eq!(data.history_position, terminal_state.history_position);
+                        assert_eq!(data.recorded_at, terminal_state.recorded_at);
+                        assert_eq!(data.finished_at, terminal_state.finished_at);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
         saved.push(serde_json::to_value(&page.data.items).unwrap());
         client
             .shutdown(
@@ -331,6 +391,29 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
             session.state(options(2000)).await.unwrap().data.residency,
             Residency::Unloaded
         );
+        let cold_result = session
+            .turn_result(turn.clone(), options(2000))
+            .await
+            .unwrap();
+        assert!(cold_result.source.load_id.is_none());
+        assert!(cold_result.data.info.is_none());
+        assert_eq!(
+            serde_json::to_value(&cold_result.data.history).unwrap(),
+            serde_json::to_value(&retained.data.history).unwrap()
+        );
+        let cold_terminal = cold_result.data.saved_terminal.unwrap();
+        assert_eq!(
+            cold_terminal.position,
+            terminal_state.history_position.unwrap()
+        );
+        assert_eq!(
+            cold_terminal.recorded_at,
+            terminal_state.recorded_at.unwrap()
+        );
+        assert_eq!(
+            cold_terminal.finished_at,
+            terminal_state.finished_at.unwrap()
+        );
         assert!(session.turn(turn.clone(), options(2000)).await.is_err());
         assert!(
             session
@@ -357,5 +440,42 @@ async fn observed_and_unobserved_runs_save_identical_history_and_cold_rpc_reads_
         drop(client);
         drop(reopened);
     }
-    assert_eq!(saved[0], saved[1]);
+    // These are independent executions. Preserve exact comparisons above for
+    // each execution's retained/events/cold views; only its original TurnId and
+    // owner-captured times differ in the comparison of observed/unobserved work.
+    let normalized = saved
+        .into_iter()
+        .map(|mut rows| {
+            for row in rows.as_array_mut().unwrap() {
+                let object = row.as_object_mut().unwrap();
+                serde_json::from_value::<TurnId>(
+                    object.remove("turn_id").expect("original Turn identity"),
+                )
+                .unwrap();
+                serde_json::from_value::<Timestamp>(
+                    object.remove("recorded_at").expect("original record time"),
+                )
+                .unwrap();
+                match object["kind"].as_str().unwrap() {
+                    "user" => {
+                        serde_json::from_value::<Timestamp>(
+                            object.remove("received_at").expect("original receipt time"),
+                        )
+                        .unwrap();
+                    }
+                    "turn_finished" => {
+                        serde_json::from_value::<Timestamp>(
+                            object
+                                .remove("finished_at")
+                                .expect("original terminal time"),
+                        )
+                        .unwrap();
+                    }
+                    _ => {}
+                }
+            }
+            rows
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(normalized[0], normalized[1]);
 }

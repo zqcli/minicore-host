@@ -71,6 +71,14 @@ async fn restored_model_resumes(mode: StorageMode) {
     // Also cover the persistent explicit history-load route after a failed
     // preparation. It must revalidate history before consuming the same queue.
     if mode == StorageMode::Persistent {
+        let mut states = host.session_states(&caller, &target).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while states.snapshot().unwrap().data.metadata_saving {
+                states.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("accepted input activity metadata save completed");
         host.session_unload(&caller, &target, control()).unwrap();
     }
     host.session_resume(&caller, &target, control()).unwrap();

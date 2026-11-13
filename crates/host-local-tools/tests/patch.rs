@@ -384,13 +384,13 @@ async fn patch_requires_an_existing_text_file_and_rejects_unsafe_targets() {
     fs::create_dir(root.path().join(".git")).unwrap();
     fs::write(root.path().join(".git/config"), "old\n").unwrap();
     fs::write(root.path().join("binary"), [0xff, 0xfe]).unwrap();
-    fs::write(root.path().join("nul"), b"old\0\n").unwrap();
+    fs::write(root.path().join("embedded-nul.bin"), b"old\0\n").unwrap();
     let patch = "@@ -1 +1 @@\n-old\n+new\n";
     for path in [
         "missing",
         "directory",
         "binary",
-        "nul",
+        "embedded-nul.bin",
         "../escape",
         "/absolute",
         ".git/config",
@@ -403,7 +403,10 @@ async fn patch_requires_an_existing_text_file_and_rejects_unsafe_targets() {
     }
     assert!(!root.path().join("missing").exists());
     assert_eq!(fs::read(root.path().join("binary")).unwrap(), [0xff, 0xfe]);
-    assert_eq!(fs::read(root.path().join("nul")).unwrap(), b"old\0\n");
+    assert_eq!(
+        fs::read(root.path().join("embedded-nul.bin")).unwrap(),
+        b"old\0\n"
+    );
     assert_eq!(fs::read(root.path().join(".git/config")).unwrap(), b"old\n");
     tools.finish().await;
 }

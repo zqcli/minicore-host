@@ -1116,6 +1116,20 @@ async fn compaction_long_public_turn_covers_its_own_saved_tool_batches_without_r
         };
     }
     send(&fixture, &"long original input ".repeat(80));
+    // Each next request is admitted only after the preceding response/tool saves
+    // and any automatic compaction settle. Bound those real phases separately:
+    // this long Turn performs several durable appends on the Windows filesystem.
+    // Early completion still reaches the exact outcome/count assertions below.
+    for expected in 1..=4 {
+        until(&fixture, |state| {
+            !state.completed.is_empty()
+                || state
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| active.info.requests >= expected)
+        })
+        .await;
+    }
     until(&fixture, |state| state.completed.len() == 1).await;
     let state = fixture.session.state.lock().unwrap();
     let result = state.completed.values().next().unwrap();

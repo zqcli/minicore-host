@@ -157,6 +157,10 @@ async fn emitted_for_session(
 }
 
 async fn enable_automatic(session: &SessionClient) {
+    // Seed Turn completion confirms its history; its accepted activity save
+    // must also finish before this separate configuration candidate is admitted.
+    let settled = state_where(session, |state| !state.data.metadata_saving).await;
+    assert!(settled.data.metadata_fault.is_none());
     let mut execution = session.info(options()).await.unwrap().config.execution;
     execution.compaction.enabled = true;
     session
