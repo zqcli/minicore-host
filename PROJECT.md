@@ -15,8 +15,13 @@ recheck ran after publication: all 48 process outputs match, all 24 paired mean
 costs decrease, large-argument memory decreases, and small-case RSS increases
 remain reported. [Results and limits](tasks/108-provider-assembly/REPORT.md)
 distinguish this local stream-processing evidence from complete Host latency.
-[Native CI](https://github.com/zqcli/minicore-host/actions/runs/43348681669) tracks
-the measured implementation; result documentation changes no executable source.
+The [first native CI](https://github.com/zqcli/minicore-host/actions/runs/43348681669)
+exposed an existing Windows shutdown-test synchronization race. The isolated
+test fix waits for real queued storage work before Force and strengthens the
+shutdown assertions; 14 target cases and 100 independent repeats pass locally.
+Production source and dependencies remain identical to the measured version.
+Follow-up [dev CI](https://github.com/zqcli/minicore-host/actions?query=branch%3Adev)
+validates the fix across the supported native platforms and package targets.
 
 ## Previous checkpoint: execution overhead (Task 107)
 

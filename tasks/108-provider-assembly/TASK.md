@@ -83,12 +83,27 @@ requested configuration, not independently attested effective model settings.
 - See the [result report](REPORT.md). Production Rust grows by 46 physical lines
   including comments/blank lines; repeated runtime work decreases, not total
   source size. Raw samples/build/environment records are delivered separately.
+- The first native CI exposed an existing shutdown-test race on Windows:
+  an admission receipt did not prove that the accepted creation owner had
+  submitted its actual save. Force could legally cancel it before that point.
+  The test now reuses the existing creation-save gate, waits for actual queued
+  storage work before Force, and strictly checks Stopping, a held root lease,
+  and unfinished creation until release. Afterwards it requires successful
+  Agent save, no initial-message execution, and clean final shutdown.
+- The shutdown target passes all 14 cases; the formerly failing case passes
+  100 independent process runs. An independent read-only review confirms the
+  ownership reasoning and stronger assertions. This is solely a test fix;
+  production source, dependencies and workflow configuration remain identical
+  to the published source used for the formal performance comparison.
 
 ## Evidence and publication
 
 Only source, documentation and reproducible measurement code belong in the
 publication. [Publication mapping](publication.json) records tested/published
-trees and exact sources. [Native CI run 43348681669](https://github.com/zqcli/minicore-host/actions/runs/43348681669)
+trees and exact sources. [Initial native CI run 43348681669](https://github.com/zqcli/minicore-host/actions/runs/43348681669)
+retains the Windows test failure; it is not recorded as a successful gate.
+The follow-up publication contains the result documentation and the isolated
+test synchronization fix. Its [dev CI](https://github.com/zqcli/minicore-host/actions?query=branch%3Adev)
 tracks Linux quality, Linux/macOS ARM64/macOS x64/Windows tests and all four
-native packages for the measured implementation. Subsequent result documentation
-does not change production code, dependencies, tests or workflow configuration.
+native packages. Exact final publication and CI outcomes are also retained in
+the separately delivered evidence, without publishing raw environment records.

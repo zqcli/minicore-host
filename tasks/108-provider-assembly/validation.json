@@ -62,6 +62,18 @@
     {
       "name": "108-test-list.log",
       "sha256": "84fc67e1ac6f2caedeab4a50e47eb5a3b9fbc47be12f412bd37d1b9226c1464c"
+    },
+    {
+      "name": "108-host-shutdown-ci-fix.log",
+      "sha256": "5ee3ae13da34b5d7fb1c60234313bf124fd1cb884582c200806a97e297a14825"
+    },
+    {
+      "name": "108-host-shutdown-ci-fix-stress.log",
+      "sha256": "a0994a5c89c09c070bd21133bd2e29cdb5558afc3b40b832fb50b5fd1f194f92"
+    },
+    {
+      "name": "108-host-shutdown-ci-fix-clippy.log",
+      "sha256": "520602ef9b320d31edcc49d428ba036f2186494c48fa5029eb7e0918e837d82d"
     }
   ],
   "limits": [
@@ -69,5 +81,27 @@
     "Named scripted loopback/byte fixtures are not live provider validation.",
     "Formal benchmark execution starts only after verified dev publication.",
     "Raw local measurements and environment records are delivered separately, not published to the repository."
-  ]
+  ],
+  "ci_followup": {
+    "initial_run_id": 43348681669,
+    "initial_windows_job_id": 131634149853,
+    "initial_windows_outcome": "failure",
+    "failing_test": "shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_message",
+    "observed_assertion": "Expected Stopping; observed Stopped before actual creation storage work had been submitted.",
+    "root_cause": "The old test synchronized on acceptance only. Force could legitimately stop the accepted owner before its first poll submitted storage work.",
+    "modified_path": "crates/host-core/tests/host_shutdown.rs",
+    "fix": "Reuse the existing creation-save gate to wait for actual queued save before Force, then wait for shutdown idle and retain stronger pending/root-lease/final-save assertions.",
+    "production_source_matches_measured_revision": "37295d788e76929a47c400899c91b152c83604f5",
+    "production_dependencies_and_workflow_unchanged": true,
+    "focused_command": "cargo test -p minicore-host-core --test host_shutdown --locked",
+    "focused_passed": 14,
+    "repeat_method": "100 independent compiled test processes, each selecting the previously failing case by --exact, with four concurrent workers; no retry of failures.",
+    "repeat_processes": 100,
+    "repeat_passed": 100,
+    "independent_review": "Provider contributor independently checked the test diff, creation/shutdown owners and existing gate semantics; no blocking finding.",
+    "native_outcome": "Follow the CI run attached to the follow-up dev publication; the initial failure is not treated as success.",
+    "formatting": "passed",
+    "strict_core_clippy": "passed",
+    "whitespace": "passed"
+  }
 }

@@ -39,5 +39,12 @@
   "measurement_order": "Published and verified dev before any benchmark executable ran.",
   "implementation_ci_run_id": 43348681669,
   "implementation_ci_url": "https://github.com/zqcli/minicore-host/actions/runs/43348681669",
-  "scope": "Source, documentation and reproducible measurement tooling only. Raw local measurement and environment records are separate."
+  "scope": "Source, documentation and reproducible measurement tooling only. Raw local measurement and environment records are separate.",
+  "implementation_ci_windows_result": "failure in existing creation/shutdown test synchronization",
+  "followup_scope": {
+    "documentation": "Complete measured result report and validation evidence.",
+    "test_fix": "crates/host-core/tests/host_shutdown.rs",
+    "production_source_and_dependencies": "Unchanged from the measured published implementation.",
+    "final_mapping": "Included with separately delivered evidence after the follow-up publication."
+  }
 }

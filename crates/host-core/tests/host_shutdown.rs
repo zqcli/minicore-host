@@ -434,15 +434,10 @@ async fn shutdown_force_cancels_runtime_and_does_not_stop_another_host() {
 
 #[test]
 fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_message() {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .max_blocking_threads(1)
-        .build()
-        .unwrap();
+    let (runtime, resources, release, calls) = creation_save_gate(1);
     runtime.block_on(async {
         let dir = tempfile::tempdir().unwrap();
-        let (resources, _, _, calls) = resources();
-        let host = Host::open_persistent(dir.path(), settings(), resources)
+        let host = Host::open_persistent(dir.path(), settings(), resources.clone())
             .await
             .unwrap();
         let connection = host.connect().unwrap();
@@ -450,45 +445,38 @@ fn shutdown_force_waits_accepted_creation_io_but_does_not_deliver_initial_messag
         let mut request = request(StorageMode::Persistent);
         request.initial_message = Some(input("must not start after force"));
         let operation = request.operation_id.clone();
-        let mut creating = Box::pin({
+        let worker = tokio::spawn({
             let host = host.clone();
             let caller = caller.clone();
             async move { host.create_agent_async(&caller, request).await }
         });
-        // Queue pure preparation before occupying the one blocking worker.
-        // No owner task can run until this current-thread test yields, so the
-        // blocker still precedes accepted creation's actual storage I/O.
-        assert!(futures_util::poll!(&mut creating).is_pending());
-        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let blocker = tokio::task::spawn_blocking(move || {
-            entered_tx.send(()).unwrap();
-            release_rx.recv().unwrap();
-        });
-        entered_rx.await.unwrap();
-        let worker = tokio::spawn(creating);
-        until(|| {
-            (!host
-                .creation_receipts(&caller, &operation)
-                .unwrap()
-                .is_empty())
-            .then_some(())
-        })
-        .await;
+        // An acceptance receipt alone can precede the creation owner's first
+        // poll. Wait until that owner has queued its actual save behind the gate.
+        resources.wait_for_save().await;
+        let receipts = host.creation_receipts(&caller, &operation).unwrap();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].result.steps.agent, CreateStep::Running);
+        assert!(receipts[0].agent_id.is_none());
         let receipt = shutdown(&host, &caller, HostShutdownStrategy::Force);
         assert_eq!(receipt.result.lifecycle, HostLifecycle::Stopping);
-        for _ in 0..100 {
-            tokio::task::yield_now().await;
-        }
+        // Let the shutdown owner inspect the pending creation while its real
+        // storage work remains blocked, without depending on a yield count.
+        resources.wait_for_idle().await;
         assert_eq!(
             host.info(&caller).unwrap().lifecycle,
             HostLifecycle::Stopping
         );
-        release_tx.send(()).unwrap();
-        blocker.await.unwrap();
-        let creation = worker.await.unwrap().unwrap();
+        assert!(!worker.is_finished());
+        assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_err());
+        release.send(()).unwrap();
+        let creation = tokio::time::timeout(Duration::from_secs(3), worker)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(creation.result.steps.agent.succeeded(), "{creation:?}");
         assert!(!creation.result.steps.message.as_ref().unwrap().succeeded());
-        stopped(&host, &caller).await;
+        stopped_after_creation(&host, &caller).await;
         assert_eq!(calls.load(Ordering::SeqCst), 0);
         assert!(minicore_host_storage::DataRoot::acquire(dir.path()).is_ok());
     });
@@ -531,9 +519,13 @@ impl CreationSaveGate {
             .unwrap()
             .unwrap()
             .forget();
-        self.park_armed.store(true, Ordering::SeqCst);
         // At idle, the runnable creation has resumed from validation and queued
         // its real save behind the blocker. No fixed sleep/yield count is needed.
+        self.wait_for_idle().await;
+    }
+
+    async fn wait_for_idle(&self) {
+        self.park_armed.store(true, Ordering::SeqCst);
         tokio::time::timeout(Duration::from_secs(3), self.parked.acquire())
             .await
             .unwrap()
