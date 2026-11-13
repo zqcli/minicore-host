@@ -1093,6 +1093,17 @@ async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate()
     send(&f, &parent);
     let cap = recv(&mut f.bindings).await.capability();
     recv(&mut f.starts).await;
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &parent)
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while states.snapshot().unwrap().data.metadata_saving {
+            states.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("accepted input activity metadata must settle before config update");
     let session = cap.session_snapshot(&parent).unwrap();
     let mut config = session.config;
     config.role.instructions = "persisted role".into();

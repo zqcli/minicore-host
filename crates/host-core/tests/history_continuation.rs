@@ -264,6 +264,11 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
         "stale resume must not duplicate records"
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving).then_some(())
+    })
+    .await;
     host.unload(&caller, &target).unwrap();
     host.send(
         &caller,
@@ -422,6 +427,13 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
             .cloned()
     })
     .await;
+    // Turn completion and accepted activity metadata have separate owners.
+    // Settle the activity checkpoint before failing the intended config save.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        (!state.metadata_saving).then_some(())
+    })
+    .await;
     let metadata = directory.join("session.json");
     let original = host.session_info(&caller, &target).unwrap();
     std::fs::rename(&metadata, metadata.with_extension("original")).unwrap();
@@ -431,7 +443,7 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         description: String::new(),
         instructions: "new config only after confirmation".into(),
     };
-    assert!(
+    assert_eq!(
         host.update_session_async(
             &caller,
             &target,
@@ -442,7 +454,9 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
             }
         )
         .await
-        .is_err()
+        .unwrap_err()
+        .kind(),
+        Some(FaultKind::SessionHistoryWriteFailed)
     );
     std::fs::remove_file(&history).unwrap();
     std::fs::rename(history.with_extension("original"), &history).unwrap();

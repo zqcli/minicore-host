@@ -940,6 +940,7 @@ async fn durable_config_versions_defaults_and_reload_preserve_real_history() {
     )
     .unwrap();
     completed(&host, &caller, &target).await;
+    wait_state(&host, &caller, &target, |state| !state.metadata_saving).await;
     host.unload(&caller, &target).unwrap();
     host.load_session(&caller, &target).unwrap();
     wait_state(&host, &caller, &target, |state| {
@@ -2742,6 +2743,7 @@ async fn review_meta_check_confirmed_update_does_not_rebind_active_turn() {
         .unwrap()
         .clone();
     assert_eq!(first.config_revision, 4);
+    wait_state(&host, &caller, &target, |state| !state.metadata_saving).await;
     let updated = host
         .update_session_async(
             &caller,
