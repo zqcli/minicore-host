@@ -1,0 +1,43 @@
+{
+  "baseline": "913b736bd4e3d72ef5f9a9a7d9d0b381925a6a7a",
+  "published_implementation": "37295d788e76929a47c400899c91b152c83604f5",
+  "tested_tree": "0292d4fda117c179fe58e6b4511a93f2e5da3040",
+  "commits": [
+    {
+      "local": "5e6bf3a58e3ec9fdc2f46eb7546a1d2a1e992999",
+      "remote": "9118fa498000e8adf2b5ac169a28d168e6aea6b7",
+      "tree": "85b892c9a0f449859f8038853ee91461c24fc1ad",
+      "parent": "913b736bd4e3d72ef5f9a9a7d9d0b381925a6a7a",
+      "message": "docs(provider): define single-owner stream assembly"
+    },
+    {
+      "local": "5bf49cf9ce8d4b2d2e9e10dfc98daafa11040e96",
+      "remote": "789251a0f15cd6017d62d7aef92189047879c575",
+      "tree": "e6c12e8901cbbc9bc7c84699ae48a539ab61d843",
+      "parent": "9118fa498000e8adf2b5ac169a28d168e6aea6b7",
+      "message": "perf(provider): decode frames and assemble tool arguments once"
+    },
+    {
+      "local": "89cd068c758db7e480f9c4552dd2a69c04e8dd07",
+      "remote": "d94fd3bbf6455ae8abc4baf8e5c40eb84615ea46",
+      "tree": "05bd102b62e50aa1b55af1265bc0167366219186",
+      "parent": "789251a0f15cd6017d62d7aef92189047879c575",
+      "message": "test(provider): add reproducible stream assembly benchmarks"
+    },
+    {
+      "local": "03ece0f158e1f82cbbe8bb0235bb7f3a9d4b7266",
+      "remote": "37295d788e76929a47c400899c91b152c83604f5",
+      "tree": "0292d4fda117c179fe58e6b4511a93f2e5da3040",
+      "parent": "d94fd3bbf6455ae8abc4baf8e5c40eb84615ea46",
+      "message": "docs(provider): record assembly validation and measurement scope"
+    }
+  ],
+  "force": false,
+  "remote_topic_branches_created": 0,
+  "host_version": "0.10.1",
+  "spec_version": "4.10.1",
+  "measurement_order": "Published and verified dev before any benchmark executable ran.",
+  "implementation_ci_run_id": 43348681669,
+  "implementation_ci_url": "https://github.com/zqcli/minicore-host/actions/runs/43348681669",
+  "scope": "Source, documentation and reproducible measurement tooling only. Raw local measurement and environment records are separate."
+}

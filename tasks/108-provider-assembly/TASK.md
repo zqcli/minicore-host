@@ -69,14 +69,26 @@ requested configuration, not independently attested effective model settings.
   checks, formatting, strict Clippy/rustdoc and whitespace. Test counts come from
   the separate all-targets listing, not nested subprocess output. All 225 external
   locked packages are unchanged. See [validation.json](validation.json).
-- The identical release probe compiles against the untouched dev baseline; it
-  has not been executed. The [measurement source](performance/README.md) records
-  four fixed workloads and six balanced AB/BA rounds. Publication and formal
-  measurement are next; no performance result is claimed at this checkpoint.
+- Published the four scoped commits by a leased fast-forward to dev, ending at
+  `37295d788e76929a47c400899c91b152c83604f5`. Every remote tree matches its tested
+  local tree; prior history is preserved and no remote topic branch was created.
+- After publication, built the exact published candidate and executed six
+  balanced AB/BA pairs with the identical release probe. All 48 processes,
+  6,360 measured calls and 48 warmups are retained; complete outputs match.
+  Independent verification recomputed source identities, checks and statistics.
+- Local stream-processing median costs decrease 23.5%, 38.2%, 42.5% and 29.5%
+  for text, small tools, large arguments and many tools respectively. Large and
+  many-tool process peak RSS decrease 36.9% and 21.7%; text/small-tool RSS increase
+  42/44 KiB. Individual spikes remain, so no tail-latency improvement is claimed.
+- See the [result report](REPORT.md). Production Rust grows by 46 physical lines
+  including comments/blank lines; repeated runtime work decreases, not total
+  source size. Raw samples/build/environment records are delivered separately.
 
 ## Evidence and publication
 
 Only source, documentation and reproducible measurement code belong in the
-publication. Local raw measurement records are retained separately. Record
-exact validation commands, source identities, CI outcome and performance
-limitations here as work completes.
+publication. [Publication mapping](publication.json) records tested/published
+trees and exact sources. [Native CI run 43348681669](https://github.com/zqcli/minicore-host/actions/runs/43348681669)
+tracks Linux quality, Linux/macOS ARM64/macOS x64/Windows tests and all four
+native packages for the measured implementation. Subsequent result documentation
+does not change production code, dependencies, tests or workflow configuration.

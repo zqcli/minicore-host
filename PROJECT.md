@@ -9,8 +9,14 @@ assembly and parsing. The SPEC clarifies original argument preservation,
 protocol metadata in partial results and unchanged execution/retry boundaries.
 Host remains 0.10.1; external dependencies and the durable format are unchanged.
 The full local gate passes 1,126 unique Rust cases, 6 doctests and 28 Python
-checks, formatting and strict Clippy/rustdoc. Publication to dev precedes the
-requested six-pair performance recheck using the committed measurement source.
+checks, formatting and strict Clippy/rustdoc. Implementation is published as
+`37295d788e76929a47c400899c91b152c83604f5`. The requested six-pair performance
+recheck ran after publication: all 48 process outputs match, all 24 paired mean
+costs decrease, large-argument memory decreases, and small-case RSS increases
+remain reported. [Results and limits](tasks/108-provider-assembly/REPORT.md)
+distinguish this local stream-processing evidence from complete Host latency.
+[Native CI](https://github.com/zqcli/minicore-host/actions/runs/43348681669) tracks
+the measured implementation; result documentation changes no executable source.
 
 ## Previous checkpoint: execution overhead (Task 107)
 
