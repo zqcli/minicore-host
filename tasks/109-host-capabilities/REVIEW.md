@@ -46,6 +46,14 @@ the successful settlement registers the next candidate before exposing
 quiescence. Failed saves remain retained and are not automatically retried.
 The patch reviewer rechecked both load paths and the coalescing/failure boundary.
 
+A final review of the control-action tests identified the same registration
+requirement at history/partial/terminal acceptance. Those boundaries now register
+the activity save under their existing lock before publishing accepted history;
+settlement does not defer registration to a later lock acquisition. The direct
+gated-append regression confirms metadata is owned and can settle while the
+history append remains gated. The independent Responses reviewer rechecked this
+fix and root's bounded owner waits in `cf4bd05`.
+
 ### Activity-only metadata saves cleared resource faults
 
 The existing configuration-save completion also cleared resource/configuration
@@ -78,7 +86,8 @@ The request admission boundary reserves a zero-attempt slot so a local failure
 before an observed attempt remains truthful. Validation does not fabricate
 unrecorded attempts or require wall-clock ordering between history records.
 Fixtures must carry coherent counters, and invalid load/save cases retain the
-original bytes. Targeted re-review and tests remain part of the final gate.
+original bytes. Targeted source re-review found no remaining issue; the final
+integrated gate records executed test coverage.
 
 ### Integration fixture correction
 

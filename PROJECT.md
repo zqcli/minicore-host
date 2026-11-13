@@ -4,11 +4,15 @@
 
 [Task 109](tasks/109-host-capabilities/TASK.md) implements the approved Host-only
 capability work against dev `7a1881c85e57a97c85724c1a90a87852a1930bd8`.
-SPEC is updated first to 4.10.2. The target Host workspace release is 0.11.0:
+SPEC was updated first to 4.10.2. All 13 Host workspace packages use 0.11.0:
 Responses, single-file apply_patch, positioned fixed-window history, and actual
 Session/history activity metadata. Tool argument generation observation, TUI/Web
-changes and old-data migration are excluded. Implementation and validation are
-pending; this checkpoint is a design change, not a runtime completion claim.
+changes and old-data migration are excluded. The implementation is integrated
+at local `83e3d8acca1a92cf8acd19167284f6bf37a6da7d`; independent source review
+findings are resolved. Full workspace validation, native CI and publication
+remain in progress. Object schema 2 and history schema 3 explicitly reject older
+envelopes without migration or rewriting. No live-provider or TUI validation is
+claimed.
 
 ## Previous checkpoint: provider decoding and assembly (Task 108)
 
