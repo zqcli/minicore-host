@@ -111,6 +111,15 @@ async fn corrected_workspace_continues(mode: StorageMode) {
     );
     assert_eq!(state.data.next_turn[0].message_id, id);
     assert!(host.turns(&caller, &target).unwrap().is_empty());
+    // Input acceptance owns an activity checkpoint independently of preparation.
+    let mut states = host.session_states(&caller, &target).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while states.snapshot().unwrap().data.metadata_saving {
+            states.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("accepted input activity metadata save completed");
     host.update_session_async(
         &caller,
         &target,
