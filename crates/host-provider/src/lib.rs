@@ -10,10 +10,12 @@ mod config;
 mod diagnostics;
 mod error;
 mod request;
+mod responses;
 mod sse;
 mod stream;
 
-pub use config::{OpenAiChatConfig, ProviderConfigError, SecretApiKey};
+pub use config::{OpenAiChatConfig, OpenAiResponsesConfig, ProviderConfigError, SecretApiKey};
+pub use responses::OpenAiResponsesModel;
 
 use std::{fmt, time::Instant};
 
@@ -94,6 +96,30 @@ impl OpenAiChatModel {
             return Err(error::local(ModelErrorKind::Timeout));
         }
         let body = request::encode(&self.provider_model, &self.descriptor, &request)?;
+        let response = self.send(body, &context, diagnostic).await?;
+        let deadline = TokioInstant::from_std(context.deadline);
+        let state = stream::State::new(response, context.cancellation, deadline);
+        // Initial explicit SSE rejections must reach start(), before Runtime
+        // consumes a model event. Never retry a partially observed generation.
+        let (first, state) = stream::next(state)
+            .await
+            .ok_or_else(|| error::unknown(ModelErrorKind::IncompleteResponse))?;
+        let first = first?;
+        Ok(Box::pin(
+            futures_stream::once(async move { Ok(first) })
+                .chain(futures_stream::unfold(state, stream::next)),
+        ))
+    }
+
+    // Both wire protocols share exactly the same HTTP policy, credentials,
+    // classification and cancellation/deadline boundary. Encoding and SSE
+    // event interpretation remain protocol-specific.
+    async fn send(
+        &self,
+        body: Vec<u8>,
+        context: &ModelCallContext,
+        diagnostic: &mut diagnostics::Request,
+    ) -> Result<reqwest::Response, ModelError> {
         let http_request = self
             .client
             .post(self.endpoint.clone())
@@ -112,7 +138,7 @@ impl OpenAiChatModel {
         };
         diagnostic.response(response.status().as_u16());
         if !response.status().is_success() {
-            return Err(error::http(response, &context, deadline).await);
+            return Err(error::http(response, context, deadline).await);
         }
         let is_sse = response
             .headers()
@@ -123,17 +149,7 @@ impl OpenAiChatModel {
         if !is_sse {
             return Err(error::unknown(ModelErrorKind::InvalidProviderResponse));
         }
-        let state = stream::State::new(response, context.cancellation, deadline);
-        // Initial explicit SSE rejections must reach start(), before Runtime
-        // consumes a model event. Never retry a partially observed generation.
-        let (first, state) = stream::next(state)
-            .await
-            .ok_or_else(|| error::unknown(ModelErrorKind::IncompleteResponse))?;
-        let first = first?;
-        Ok(Box::pin(
-            futures_stream::once(async move { Ok(first) })
-                .chain(futures_stream::unfold(state, stream::next)),
-        ))
+        Ok(response)
     }
 }
 

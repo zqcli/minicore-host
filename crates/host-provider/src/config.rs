@@ -16,6 +16,49 @@ pub struct OpenAiChatConfig {
     pub request_timeout: Option<Duration>,
 }
 
+/// Host-private settings for a stateless OpenAI Responses endpoint.
+/// The endpoint is exact; this type never appends or guesses a URL path.
+#[derive(Clone)]
+pub struct OpenAiResponsesConfig {
+    pub endpoint: String,
+    pub provider_model: String,
+    pub descriptor: ModelDescriptor,
+    pub request_timeout: Option<Duration>,
+}
+
+impl OpenAiResponsesConfig {
+    pub fn new(
+        endpoint: impl Into<String>,
+        provider_model: impl Into<String>,
+        descriptor: ModelDescriptor,
+    ) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            provider_model: provider_model.into(),
+            descriptor,
+            request_timeout: None,
+        }
+    }
+
+    pub(crate) fn into_connection(self) -> OpenAiChatConfig {
+        OpenAiChatConfig {
+            endpoint: self.endpoint,
+            provider_model: self.provider_model,
+            descriptor: self.descriptor,
+            request_timeout: self.request_timeout,
+        }
+    }
+}
+
+impl fmt::Debug for OpenAiResponsesConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpenAiResponsesConfig")
+            .field("descriptor", &self.descriptor)
+            .field("request_timeout", &self.request_timeout)
+            .finish_non_exhaustive()
+    }
+}
+
 impl fmt::Debug for OpenAiChatConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenAiChatConfig")
