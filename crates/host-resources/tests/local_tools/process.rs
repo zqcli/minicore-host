@@ -594,6 +594,14 @@ async fn persistent_reopen_keeps_native_history_but_not_old_edit_or_process_obse
     let history = host.history(&caller, &target).unwrap();
     let native = native_result(&history, "durable-bash").output.clone();
     let mut states = host.session_states(&caller, &target).unwrap();
+    // Turn history confirmation precedes its owned activity metadata checkpoint.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while states.snapshot().unwrap().data.metadata_saving {
+            states.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("terminal activity metadata save completed");
     host.unload(&caller, &target).unwrap();
     tokio::time::timeout(Duration::from_secs(10), async {
         while states.snapshot().unwrap().data.residency != Residency::Unloaded {
