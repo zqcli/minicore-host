@@ -1,0 +1,629 @@
+{
+  "schema_version": 1,
+  "task": "109-host-capabilities",
+  "repository": "https://github.com/zqcli/minicore-host",
+  "source": {
+    "verified_commit": "aae95883bf03114ec19525c72bf8169ecc095295",
+    "verified_tree": "94021940b08cc49e383a49135dcfe7ed48c92669",
+    "source_identical_local_commit": "aae31329b3014e5cb9ea11e6787eca6fd3ad7ec6",
+    "host_version": "0.11.0",
+    "workspace_packages": 13,
+    "spec": {
+      "version": "4.10.2",
+      "sha256": "55476e6d2c6c9ec5b857f2b9235834a162b3ad85ce56a8e2a295135f7dc370c7"
+    },
+    "cargo_lock_sha256": "7e660f28925aaead5305c2e7f470a99a928ae896c7f3ed755ddda1b97185f2c5",
+    "workflow_sha256": "403f7e32a712d04dd495dde81b1bae49a278bcc58a685c59329c8c70d488b2fa"
+  },
+  "workflow": {
+    "run_id": 43400316403,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403",
+    "event": "push",
+    "head_branch": "dev",
+    "head_sha": "aae95883bf03114ec19525c72bf8169ecc095295",
+    "attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "started_at": "2026-11-13T09:19:15Z",
+    "toolchain": "1.90.0",
+    "successful_jobs": 9,
+    "completed_at": "2026-11-13T09:35:48Z"
+  },
+  "quality": {
+    "job_id": 131801246473,
+    "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246473",
+    "command": "./scripts/check.sh",
+    "conclusion": "success",
+    "python_checks": 28,
+    "checks": [
+      "whitespace",
+      "28 Python regression checks",
+      "rustfmt",
+      "strict workspace/all-targets Clippy",
+      "workspace/all-targets tests",
+      "seven doctests",
+      "strict rustdoc"
+    ]
+  },
+  "native_commands": [
+    "cargo clippy --workspace --all-targets --locked --keep-going -- -D warnings",
+    "cargo test --workspace --all-targets --locked --no-fail-fast",
+    "cargo test --workspace --doc --locked",
+    "cargo test --workspace --all-targets --locked -- --list"
+  ],
+  "counting": {
+    "identity": "target executable path plus case name from each native --list",
+    "method": "Pair sequential Cargo target-header order with stdout case groups terminated by each target summary; validate every group count and require unique target/case pairs.",
+    "targets_per_platform": 141,
+    "exclude": [
+      "nested subprocess probe output",
+      "standard-user re-executions"
+    ],
+    "aggregate_across_platforms": false
+  },
+  "platforms": [
+    {
+      "name": "Linux x64",
+      "runner": "ubuntu-24.04",
+      "target": "x86_64-unknown-linux-gnu",
+      "native_job": 131801246836,
+      "package_job": 131806560134,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246836",
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560134",
+      "native_conclusion": "success",
+      "cases": 1178,
+      "test_targets": 141,
+      "doctests": 7,
+      "package_conclusion": "success",
+      "package": {
+        "filename": "minicore-host-0.11.0-x86_64-unknown-linux-gnu.tar.gz",
+        "archive_files": 20,
+        "archive_sha256": "ac13c46be47b48b10f7acafbcfb5aa68e0ade5f6e81fc197c5e36b06d294db9a",
+        "host_sha256": "604b1a31924c8c606eab5eecb84cb2e9fa26096f9426393b204423033e156116",
+        "smoke": "passed",
+        "archive_verification": "passed on native CI runner",
+        "artifact_id": 14025132720,
+        "artifact_name": "minicore-host-0.11.0-x86_64-unknown-linux-gnu",
+        "artifact_outer_zip_sha256": "6c77dc2820d47783f7df796ed085cbfd1c23de72fbb6a95878d452d8202f8307",
+        "artifact_outer_zip_bytes": 8046656,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/artifacts/14025132720",
+        "created_at": "2026-11-13T09:33:26Z",
+        "expires_at": "2027-02-11T09:19:15Z",
+        "downloaded_archive_independently_verified": false
+      }
+    },
+    {
+      "name": "macOS ARM64",
+      "runner": "macos-15",
+      "target": "aarch64-apple-darwin",
+      "native_job": 131801246921,
+      "package_job": 131806560132,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246921",
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560132",
+      "native_conclusion": "success",
+      "cases": 1171,
+      "test_targets": 141,
+      "doctests": 7,
+      "package_conclusion": "success",
+      "package": {
+        "filename": "minicore-host-0.11.0-aarch64-apple-darwin.tar.gz",
+        "archive_files": 20,
+        "archive_sha256": "74e04e8c37787fe3a19545227931972d389499194fdf204c6b93653bbc16d6cf",
+        "host_sha256": "0ddfee7af5c63e972e03ce087968852defecf04915dd081702000fa6a3632334",
+        "smoke": "passed",
+        "archive_verification": "passed on native CI runner",
+        "artifact_id": 14025247629,
+        "artifact_name": "minicore-host-0.11.0-aarch64-apple-darwin",
+        "artifact_outer_zip_sha256": "3cf3dcbbfa2591540c529a7d99a2f2773d7ad9dd8e1f72887c480a385dbb4212",
+        "artifact_outer_zip_bytes": 7470962,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/artifacts/14025247629",
+        "created_at": "2026-11-13T09:32:59Z",
+        "expires_at": "2027-02-11T09:19:15Z",
+        "downloaded_archive_independently_verified": false
+      }
+    },
+    {
+      "name": "macOS x64",
+      "runner": "macos-15-intel",
+      "target": "x86_64-apple-darwin",
+      "native_job": 131801246912,
+      "package_job": 131806560159,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246912",
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560159",
+      "native_conclusion": "success",
+      "cases": 1171,
+      "test_targets": 141,
+      "doctests": 7,
+      "package_conclusion": "success",
+      "package": {
+        "filename": "minicore-host-0.11.0-x86_64-apple-darwin.tar.gz",
+        "archive_files": 20,
+        "archive_sha256": "bbd3a8be3f32434e4030eb435e695e1d3fe682722110283c9139dfaf4bc434d1",
+        "host_sha256": "79120dff4a072d672108af0b1d8f5ae46750c737f8d57b77b305a37c6b6e343a",
+        "smoke": "passed",
+        "archive_verification": "passed on native CI runner",
+        "artifact_id": 14026410112,
+        "artifact_name": "minicore-host-0.11.0-x86_64-apple-darwin",
+        "artifact_outer_zip_sha256": "1624de08f4f337326aecd07f547b27ac2da90e544f5beb21565d8709c01ceb5e",
+        "artifact_outer_zip_bytes": 7793562,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/artifacts/14026410112",
+        "created_at": "2026-11-13T09:35:09Z",
+        "expires_at": "2027-02-11T09:19:15Z",
+        "downloaded_archive_independently_verified": false
+      }
+    },
+    {
+      "name": "Windows x64",
+      "runner": "windows-2025",
+      "target": "x86_64-pc-windows-msvc",
+      "native_job": 131801246909,
+      "package_job": 131806560096,
+      "native_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246909",
+      "package_job_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560096",
+      "native_conclusion": "success",
+      "cases": 1157,
+      "test_targets": 141,
+      "doctests": 7,
+      "package_conclusion": "success",
+      "package": {
+        "filename": "minicore-host-0.11.0-x86_64-pc-windows-msvc.zip",
+        "archive_files": 20,
+        "archive_sha256": "4fdd1edb6666cb6b61968e04f365086c69ada527d6ab0c1467bdd24429caef6f",
+        "host_sha256": "3531143c3ffb9581f41f7fd741478a1afa7a7b4a94544fdbbd24df2e4962a265",
+        "smoke": "passed",
+        "archive_verification": "passed on native CI runner",
+        "artifact_id": 14025652135,
+        "artifact_name": "minicore-host-0.11.0-x86_64-pc-windows-msvc",
+        "artifact_outer_zip_sha256": "d67cb8ea2e83576b14fbf6812c37cf497eaea844584bd4e5303e34b4f2ba87c9",
+        "artifact_outer_zip_bytes": 7154072,
+        "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/artifacts/14025652135",
+        "created_at": "2026-11-13T09:35:44Z",
+        "expires_at": "2027-02-11T09:19:15Z",
+        "downloaded_archive_independently_verified": false
+      }
+    }
+  ],
+  "windows_standard_user": {
+    "job_id": 131801246909,
+    "command": ".\\scripts\\windows-user-tests.ps1",
+    "is_administrator": false,
+    "profile_loaded": true,
+    "executable_write_access": "denied",
+    "passed_existing_cases": 5,
+    "additional_unique_cases": 0,
+    "exit_code": 0,
+    "temporary_account_removed": true,
+    "cases": [
+      "stable_identity_discovery_and_atomic_object_roundtrip",
+      "writes_confirm_exact_boundaries_and_reopen_native_content",
+      "close_is_stable_and_explicit_delete_never_recurses",
+      "actual_identity_is_saved_new_incarnation_is_generated_and_root_is_exclusive",
+      "stdio_message_executes_production_http_adapter_and_persists_real_output"
+    ],
+    "case_exit_codes": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "packaging": {
+    "build_command": "cargo build --package minicore-host --release --locked --target \"$TARGET\"",
+    "package_command": "python scripts/package-release.py \"$TARGET\"",
+    "requires": [
+      "quality",
+      "complete native platform matrix"
+    ],
+    "smoke": "The package helper executes the actual staged native Host --help; requires exit 0, empty stdout and usage on stderr.",
+    "archive_verification": [
+      "exact staged regular-file set without duplicate entries",
+      "one Host executable and no separate Runtime executable",
+      "archived Host SHA-256 equals the smoke-tested release binary",
+      "Unix Host mode 0755 and no other executable files or links"
+    ],
+    "independent_download_verification": false,
+    "artifact_digest_note": "GitHub's outer artifact ZIP digest is distinct from the contained distribution archive SHA-256."
+  },
+  "limits": [
+    "Only the four declared native runner configurations are validated.",
+    "HTTP/SSE fixtures exercise actual Host/Runtime/provider ownership but are not live upstream model or TUI validation.",
+    "Native release binaries are smoke-tested and their package archives verified on the CI runners. This record does not claim an additional local download/readback of those CI artifacts.",
+    "Filesystem contract checks are not power-loss testing.",
+    "No raw logs, temporary account identities, signed download URLs or binary artifacts are committed in this record.",
+    "The record identifies this exact code CI run; later evidence-only documentation and tag workflows are distinct."
+  ],
+  "recorded_at": "2026-11-13T09:36:57.691Z",
+  "evidence": [
+    {
+      "job_id": 131801246473,
+      "name": "Quality gate (Linux, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246473",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:19:18Z",
+      "completed_at": "2026-11-13T09:23:32Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run the full foundation quality gate",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131801246836,
+      "name": "Clippy and tests (ubuntu-24.04, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246836",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:19:18Z",
+      "completed_at": "2026-11-13T09:22:45Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint native platform code",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test native platform contracts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test documentation examples",
+          "conclusion": "success"
+        },
+        {
+          "name": "List unique native test cases",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131801246909,
+      "name": "Clippy and tests (windows-2025, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246909",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:19:18Z",
+      "completed_at": "2026-11-13T09:30:40Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint native platform code",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test native platform contracts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test documentation examples",
+          "conclusion": "success"
+        },
+        {
+          "name": "List unique native test cases",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test storage and Host as a standard Windows user",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131801246912,
+      "name": "Clippy and tests (macos-15-intel, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246912",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:19:19Z",
+      "completed_at": "2026-11-13T09:30:33Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint native platform code",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test native platform contracts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test documentation examples",
+          "conclusion": "success"
+        },
+        {
+          "name": "List unique native test cases",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131801246921,
+      "name": "Clippy and tests (macos-15, Rust 1.90.0)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131801246921",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:19:19Z",
+      "completed_at": "2026-11-13T09:27:17Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain",
+          "conclusion": "success"
+        },
+        {
+          "name": "Lint native platform code",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test native platform contracts",
+          "conclusion": "success"
+        },
+        {
+          "name": "Test documentation examples",
+          "conclusion": "success"
+        },
+        {
+          "name": "List unique native test cases",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131806560096,
+      "name": "Package (x86_64-pc-windows-msvc)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560096",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:30:42Z",
+      "completed_at": "2026-11-13T09:35:48Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain and target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Host with its internal Runtime package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Smoke test and package native release",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131806560132,
+      "name": "Package (aarch64-apple-darwin)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560132",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:30:44Z",
+      "completed_at": "2026-11-13T09:33:02Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain and target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Host with its internal Runtime package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Smoke test and package native release",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131806560134,
+      "name": "Package (x86_64-unknown-linux-gnu)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560134",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:30:43Z",
+      "completed_at": "2026-11-13T09:33:29Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain and target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Host with its internal Runtime package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Smoke test and package native release",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job_id": 131806560159,
+      "name": "Package (x86_64-apple-darwin)",
+      "url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403/job/131806560159",
+      "conclusion": "success",
+      "started_at": "2026-11-13T09:30:43Z",
+      "completed_at": "2026-11-13T09:35:11Z",
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success"
+        },
+        {
+          "name": "Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Install pinned Rust toolchain and target",
+          "conclusion": "success"
+        },
+        {
+          "name": "Build Host with its internal Runtime package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Smoke test and package native release",
+          "conclusion": "success"
+        },
+        {
+          "name": "Upload package",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Check out source",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

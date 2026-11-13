@@ -1,0 +1,129 @@
+{
+  "host_version": "0.11.0",
+  "workspace_packages": 13,
+  "spec_version": "4.10.2",
+  "spec_sha256": "55476e6d2c6c9ec5b857f2b9235834a162b3ad85ce56a8e2a295135f7dc370c7",
+  "baseline": "7a1881c85e57a97c85724c1a90a87852a1930bd8",
+  "validated_local_commit": "aae31329b3014e5cb9ea11e6787eca6fd3ad7ec6",
+  "identical_published_commit": "aae95883bf03114ec19525c72bf8169ecc095295",
+  "identical_tree": "94021940b08cc49e383a49135dcfe7ed48c92669",
+  "platform": "Linux x86_64",
+  "rust_toolchain": "1.90.0",
+  "full_gate": {
+    "command": "CARGO_BUILD_JOBS=4 ./scripts/check.sh",
+    "status": "passed",
+    "checks": [
+      "whitespace",
+      "28 Python checks",
+      "cargo fmt --all -- --check",
+      "cargo clippy --workspace --all-targets --locked -- -D warnings",
+      "cargo test --workspace --all-targets --locked",
+      "cargo test --workspace --doc --locked",
+      "RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked"
+    ]
+  },
+  "counts": {
+    "unique_rust_cases": 1178,
+    "rust_test_targets": 141,
+    "doctests": 7,
+    "python_checks": 28,
+    "unique_case_command": "cargo test --workspace --all-targets --locked -- --list",
+    "nested_storage_probes_counted_as_extra_cases": false
+  },
+  "dependencies": {
+    "external_locked_packages": 225,
+    "external_versions_sources_checksums_changed": false
+  },
+  "local_package": {
+    "source_commit": "eb44a5f48d662bb17031a348c35de8dc9c26be18",
+    "source_tree": "f9d10375bb9eac93941611e9d429a6dbce9c9e6b",
+    "target": "x86_64-unknown-linux-gnu",
+    "archive_name": "minicore-host-0.11.0-x86_64-unknown-linux-gnu.tar.gz",
+    "archive_bytes": 8047882,
+    "archive_sha256": "ea001f0beb84e139aed7576149e7e8c111268a7f6dcb45f68bf09d4bfff7a1ac",
+    "binary_sha256": "808055de975723845f9d7835a3a4d443ae3ef997a5cc8465ebc178995d9f83e6",
+    "files": 20,
+    "executables": 1,
+    "smoke": "passed",
+    "archive_readback": "passed",
+    "source_relation_to_final_code": "Subsequent implementation differences are test fixtures; production code is unchanged. This package contains its earlier documentation checkpoint, not the later evidence-only documents."
+  },
+  "resolved_gate_failures": [
+    {
+      "stage": "initial workspace Clippy",
+      "issue": "A resource fixture matched a history item directly instead of the native record envelope.",
+      "fix": "8ad940e"
+    },
+    {
+      "stage": "resource integration tests",
+      "issue": "Unload/config-update fixtures raced accepted activity metadata saves.",
+      "fixes": [
+        "89e2173",
+        "1518f3b",
+        "aae3132"
+      ]
+    },
+    {
+      "stage": "full no-fail-fast and first native CI",
+      "issue": "Transport fixtures expected collapsed compaction or missing terminal rows, cross-run timestamps/TurnIds were compared as equal, and diagnostics assumed one final save owner.",
+      "fix": "aae3132"
+    },
+    {
+      "stage": "first Windows CI",
+      "issue": "The embedded-NUL fixture used Windows reserved device name nul.",
+      "fix": "aae3132"
+    },
+    {
+      "stage": "first Windows CI",
+      "issue": "Long-Turn fixture used one three-second budget for four requests, tools, compaction and real journal syncs.",
+      "fix": "aae3132",
+      "limit": "The old generic timeout did not identify its slow phase. The fixture now bounds each actual request-admission phase and final completion; all functional assertions remain. The native Windows rerun passed."
+    }
+  ],
+  "native_ci": {
+    "first_run": 43397957444,
+    "first_source": "16a9561ef1fde410f853e1b986e93a342e73e176",
+    "first_result": "failed; test fixture follow-ups recorded above",
+    "verification_run": 43400316403,
+    "verification_source": "aae95883bf03114ec19525c72bf8169ecc095295",
+    "verification_url": "https://github.com/zqcli/minicore-host/actions/runs/43400316403",
+    "verification_status": "completed",
+    "verification_conclusion": "success",
+    "successful_jobs": 9,
+    "evidence": "ci-source.json",
+    "platform_cases": [
+      {
+        "platform": "Linux x64",
+        "cases": 1178,
+        "test_targets": 141,
+        "doctests": 7
+      },
+      {
+        "platform": "macOS ARM64",
+        "cases": 1171,
+        "test_targets": 141,
+        "doctests": 7
+      },
+      {
+        "platform": "macOS x64",
+        "cases": 1171,
+        "test_targets": 141,
+        "doctests": 7
+      },
+      {
+        "platform": "Windows x64",
+        "cases": 1157,
+        "test_targets": 141,
+        "doctests": 7
+      }
+    ],
+    "packages": 4
+  },
+  "limits": [
+    "HTTP/SSE fixtures exercise real Host/Runtime/provider ownership but are not live upstream model validation.",
+    "TUI and Web were not changed or validated.",
+    "Object schema 2 and history schema 3 explicitly reject earlier envelopes; no migration or invented metadata.",
+    "Tool-argument generation observation is excluded.",
+    "A local tag or branch publication is not evidence of a remote tag."
+  ]
+}

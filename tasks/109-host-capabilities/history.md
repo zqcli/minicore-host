@@ -62,7 +62,8 @@ findings. Review did not substitute for executed tests.
 
 ## Validation evidence
 
-All commands used `/home/agent/.cargo/bin` on PATH and at most `-j 2`.
+All worker commands in the component checks below used `/home/agent/.cargo/bin`
+on PATH and at most `-j 2`. The later root workspace gate used four build jobs.
 
 - `cargo fmt --all --check` and `git diff --check`: passed.
 - `cargo test -p minicore-host-core --lib automatic_compaction_preserves_bound_input_positions_through_save_and_reconcile -j 2 --locked`: passed. It executes actual first/second Turns with a named scripted model, steering during compaction, successful append and FullWrite failure followed by explicit continuation; compares events, retained/cold history and Turn results with original envelopes.
@@ -81,5 +82,10 @@ fixed backward windows with later appends, UTF-8 and duplicate MessageIds,
 Memory result/partial/terminal identity, and missing/invalid timestamp/counter
 rejection without file rewriting.
 
-Full integrated workspace lint/tests/docs, unique test listing, package checks
-and native CI are root gates. This worker claims no live provider or TUI validation.
+The final protocol timestamp/direction filter passed both cases. Root's
+integrated full workspace gate subsequently passed all 1,178 unique Rust cases,
+seven doctests and 28 Python checks, plus formatting and strict Clippy/rustdoc.
+[Validation evidence](validation.json) records its exact published source,
+package checks and native CI status. These root gates include the corrected
+history projections and owner-wait fixtures. This worker claims no live provider
+or TUI validation.

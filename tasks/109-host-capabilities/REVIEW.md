@@ -106,9 +106,38 @@ added. Provider tests include multibyte and split-CRLF replay.
 
 ## Verification boundary
 
+The first full integration runs and native CI exposed stale fixture assumptions:
+terminal rows and explicit compaction markers were omitted, independent
+executions were compared with identical TurnIds/times, and configuration/unload
+actions raced already-owned activity saves. The follow-up tests preserve exact
+envelopes across event, retained and cold views of the same execution. Only
+inherently different accepted identities/times are normalized when comparing
+two distinct executions. Bounded observation waits settle the original owner
+before one control action; they do not retry mutations.
+
+Windows required renaming an embedded-NUL-content fixture from the reserved
+device name `nul` to `embedded-nul.bin`; all rejection and unchanged-byte checks
+remain. Its long-Turn fixture now separately bounds actual request admission
+and final completion while retaining all four-request, three-tool-round and
+native-history assertions. The previous generic aggregate timeout did not
+identify a slow phase and is not evidence of a production root cause.
+
+The final integrated Linux gate passes 1,178 unique Rust cases, seven doctests
+and 28 Python checks plus formatting, strict Clippy and strict rustdoc.
+[Validation evidence](validation.json) identifies the exact matching local and
+published source trees and distinguishes native CI from local execution.
+
+An independent evidence review checked all 15 local-to-remote source commit
+mappings against the fetched Git objects, including trees, parents, authors and
+messages. It recomputed the local test counts, checked the SPEC hash, workspace
+versions and unchanged external dependencies, and opened the actual local Linux
+archive to verify its file count and archive/executable hashes. The earlier
+package documentation checkpoint remains distinct from the final source CI.
+
 The component notes record passing provider and patch gates. Root's resource
 tests exercise real Host, Runtime, provider, workspace and edit owners with
-explicit loopback model replies. Native Windows permission behavior requires
-Windows CI; Linux source review and local results are not presented as that
-execution. No live external model or TUI validation is claimed. The task log
-records the integrated source checkpoint, full gate, CI and publication status.
+explicit loopback model replies. The Windows native job and five standard-user
+cases passed; their execution evidence is recorded separately from Linux
+results in the [CI record](ci-source.json). No live external model or TUI
+validation is claimed. The task log records the integrated source checkpoint,
+full gate, CI and publication status.

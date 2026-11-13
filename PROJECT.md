@@ -7,12 +7,26 @@ capability work against dev `7a1881c85e57a97c85724c1a90a87852a1930bd8`.
 SPEC was updated first to 4.10.2. All 13 Host workspace packages use 0.11.0:
 Responses, single-file apply_patch, positioned fixed-window history, and actual
 Session/history activity metadata. Tool argument generation observation, TUI/Web
-changes and old-data migration are excluded. The implementation is integrated
-at local `83e3d8acca1a92cf8acd19167284f6bf37a6da7d`; independent source review
-findings are resolved. Full workspace validation, native CI and publication
-remain in progress. Object schema 2 and history schema 3 explicitly reject older
-envelopes without migration or rewriting. No live-provider or TUI validation is
-claimed.
+changes and old-data migration are excluded. The implementation and fixture
+follow-ups are published on dev as
+[`aae9588`](https://github.com/zqcli/minicore-host/commit/aae95883bf03114ec19525c72bf8169ecc095295),
+with the exact locally validated tree. Independent source review findings are
+resolved. The full local gate passes **1,178 unique Rust cases, 7 doctests and
+28 Python checks**, formatting and strict Clippy/rustdoc. The Linux release
+package contains 20 files and one executable; smoke and archive readback pass.
+All 225 external locked package versions, sources and checksums are unchanged.
+[Native CI](https://github.com/zqcli/minicore-host/actions/runs/43400316403)
+passed all nine jobs: quality, native checks on Linux x64, macOS ARM64/x64 and
+Windows x64, and four release packages. Windows standard-user checks passed;
+every native package passed its actual executable smoke test and archive
+verification with 20 files and one Host executable. The
+[CI record](tasks/109-host-capabilities/ci-source.json),
+[validation record](tasks/109-host-capabilities/validation.json) and
+[publication record](tasks/109-host-capabilities/publication.json) retain exact
+checkpoints, commands, results and limits. The requested remote `v0.11.0` tag
+still requires an authenticated tag writer; branch publication does not create
+that tag. Object schema 2 and history schema 3 explicitly reject older envelopes
+without migration or rewriting. No live-provider or TUI validation is claimed.
 
 ## Previous checkpoint: provider decoding and assembly (Task 108)
 

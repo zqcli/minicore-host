@@ -1,0 +1,135 @@
+{
+  "repository": "https://github.com/zqcli/minicore-host",
+  "destination_branch": "dev",
+  "original_dev": "7a1881c85e57a97c85724c1a90a87852a1930bd8",
+  "published_code_head": "aae95883bf03114ec19525c72bf8169ecc095295",
+  "published_code_tree": "94021940b08cc49e383a49135dcfe7ed48c92669",
+  "method": "Create exact Git trees and commits through the repository connector, verify tree and author/parent identities, then fast-forward dev with expected_sha and force=false. Fetch and verify the resulting tree.",
+  "spec_first": true,
+  "author": "zqcli",
+  "coauthor_trailers": false,
+  "history_rewritten": false,
+  "remote_topic_branches_created": 0,
+  "publication_order": "The owner explicitly requested an immediate remote push during validation. Source was published while validation continued; the published test-only follow-ups and completed local gate are recorded separately.",
+  "mappings": [
+    {
+      "local": "32ea194ff2269aa8fb2bebff79355b600d404b45",
+      "remote": "b9ffacf2f89afe5fa76b76be33fcac4b71e21978",
+      "tree": "91b23734e25e19c6a08e715c868f354bef2b9367",
+      "parent": "7a1881c85e57a97c85724c1a90a87852a1930bd8",
+      "message": "docs(spec): define host 0.11.0 client capabilities"
+    },
+    {
+      "local": "c85b2e2e888899db412477069dcd77efe3e1b596",
+      "remote": "381cae8e7623ff9134c1bc37068e3db7ce85d0a7",
+      "tree": "7aa876f0bc7e3c46e949a260feb7f21f1a4cd0c7",
+      "parent": "b9ffacf2f89afe5fa76b76be33fcac4b71e21978",
+      "message": "feat(local-tools): add exact single-file patch execution"
+    },
+    {
+      "local": "c6d84a797019713447a12c92a8e06c3a6cb71c7f",
+      "remote": "cf97c2f651b797f6da4f9f76e386a42f8c5f337e",
+      "tree": "df8549112c55f7dc91e0e27a64bfbdd402d7a83c",
+      "parent": "381cae8e7623ff9134c1bc37068e3db7ce85d0a7",
+      "message": "docs(tasks): record patch execution verification"
+    },
+    {
+      "local": "259926c27278bb94249a88f8225ee7e16322caa8",
+      "remote": "af87b037a3fa0644e61a6dc54eec7b8accac3c7a",
+      "tree": "542ebb07e1315514b8785029e410ec680b06e00f",
+      "parent": "cf97c2f651b797f6da4f9f76e386a42f8c5f337e",
+      "message": "feat(provider): add stateless OpenAI Responses transport"
+    },
+    {
+      "local": "01b9ddf6293366f60dee88b5ead75867ca7eaa60",
+      "remote": "5dcbfdcd47531073a6af65db671a3785a502d784",
+      "tree": "8cf1b2fd70ea5981d9f3aee4d3e62b0e0df87000",
+      "parent": "af87b037a3fa0644e61a6dc54eec7b8accac3c7a",
+      "message": "test(provider): cover Responses replay and failure boundaries"
+    },
+    {
+      "local": "5054375d90679848c476c31637bdd1d29ef2720b",
+      "remote": "4ac0025a81eecbee8e87019275cbcc72ef5ecc0d",
+      "tree": "7e000bc745f93e84d985b64a4b09be2a3d34ecb3",
+      "parent": "5dcbfdcd47531073a6af65db671a3785a502d784",
+      "message": "docs(provider): record Responses contract and validation"
+    },
+    {
+      "local": "56fc0a0047f2cbc93a9cc6841fd1db0cc1217a54",
+      "remote": "da8578189e790d46cdcdfc4f8ddf2dc4d7285ba5",
+      "tree": "700fd52a83b502ba4b1bb44880289f538e998bcd",
+      "parent": "4ac0025a81eecbee8e87019275cbcc72ef5ecc0d",
+      "message": "feat(host): integrate client capabilities for 0.11.0"
+    },
+    {
+      "local": "7541c9eaa7aee6ee9ae765a64675b7fbfc1a6a3f",
+      "remote": "bb3f4f23f90d590f79ba99e0903175407a6d1b49",
+      "tree": "d02cd83a7b5db6b62bf27207b1ada4d755172aa3",
+      "parent": "da8578189e790d46cdcdfc4f8ddf2dc4d7285ba5",
+      "message": "docs(review): record host capability findings and resolutions"
+    },
+    {
+      "local": "cf4bd05ba6f632ff18473b3725c3d9355dc7ef29",
+      "remote": "58bb0b74c6fca03dda6a450b8ee43e38ce658820",
+      "tree": "6fab9a0bc0e8f104328c1b2a614bff626d5ebc79",
+      "parent": "bb3f4f23f90d590f79ba99e0903175407a6d1b49",
+      "message": "test(core): wait for accepted activity metadata before control actions"
+    },
+    {
+      "local": "83e3d8acca1a92cf8acd19167284f6bf37a6da7d",
+      "remote": "99963423587dabbdcf6c20e564a42162c402c00f",
+      "tree": "8c58f76fbb94237b23d207c461a39f6a56be6125",
+      "parent": "58bb0b74c6fca03dda6a450b8ee43e38ce658820",
+      "message": "feat(history): preserve native records and owner activity across views"
+    },
+    {
+      "local": "8ad940ea709cf8c23b9e9a661b171062b1c2b5de",
+      "remote": "ee56560a45ecb6838bb147272e8fd9bdf53f8f60",
+      "tree": "7ef23d513361ace8fbba5f05758a12df79e669ca",
+      "parent": "99963423587dabbdcf6c20e564a42162c402c00f",
+      "message": "test(resources): inspect durable tool results through history records"
+    },
+    {
+      "local": "eb44a5f48d662bb17031a348c35de8dc9c26be18",
+      "remote": "8afe95bfed84f409b425e80d03cea6c42e9a2f2b",
+      "tree": "f9d10375bb9eac93941611e9d429a6dbce9c9e6b",
+      "parent": "ee56560a45ecb6838bb147272e8fd9bdf53f8f60",
+      "message": "docs(tasks): record integrated host capability checkpoint"
+    },
+    {
+      "local": "89e21730aa7a319d9a283c9e494a72f4feaae4a3",
+      "remote": "16a9561ef1fde410f853e1b986e93a342e73e176",
+      "tree": "83e088dd5677a6b961fbd5a4eb704fe258343b27",
+      "parent": "8afe95bfed84f409b425e80d03cea6c42e9a2f2b",
+      "message": "test(resources): wait for activity checkpoint before unload"
+    },
+    {
+      "local": "1518f3b98bb82186bab5037a7b1b607090cc2a80",
+      "remote": "cdde83efb738013f7a383cbb85f9ed7f171306e7",
+      "tree": "0103b578cd7ef6eac918ade1a771fde73348b597",
+      "parent": "16a9561ef1fde410f853e1b986e93a342e73e176",
+      "message": "test(resources): await activity save before workspace correction"
+    },
+    {
+      "local": "aae31329b3014e5cb9ea11e6787eca6fd3ad7ec6",
+      "remote": "aae95883bf03114ec19525c72bf8169ecc095295",
+      "tree": "94021940b08cc49e383a49135dcfe7ed48c92669",
+      "parent": "cdde83efb738013f7a383cbb85f9ed7f171306e7",
+      "message": "test(host): align client fixtures with native history and activity owners"
+    }
+  ],
+  "requested_tag": {
+    "name": "v0.11.0",
+    "authorization": "Explicit owner request; no further approval required.",
+    "status": "Remote tag not created; awaiting a supported authenticated Git tag push.",
+    "intended_target": "Final dev checkpoint after evidence-only documentation publication.",
+    "blocker": "The available GitHub connector has branch update operations but no tag creation operation. Terminal HTTPS Git has no stored push credentials; no usable SSH authentication agent is available."
+  },
+  "evidence_only_followup": {
+    "paths": [
+      "PROJECT.md",
+      "tasks/109-host-capabilities/"
+    ],
+    "production_tests_dependencies_workflows_unchanged": true
+  }
+}

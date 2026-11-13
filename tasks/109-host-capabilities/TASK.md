@@ -71,12 +71,47 @@ new public RPC methods, quotas, implicit retries or execution recovery.
 - Object schema 2/history schema 3 and required model `api` are intentional
   configuration/data changes. Earlier envelopes are explicitly rejected; no
   timestamps, counters or execution identity are backfilled.
-- Full workspace validation and native CI: pending. No live provider or TUI
-  validation is claimed.
-- Publication and tag: pending.
+- The owner's follow-up requested immediate remote publication. Source was
+  pushed to dev as `16a9561ef1fde410f853e1b986e93a342e73e176`, followed by fixture
+  corrections at `aae95883bf03114ec19525c72bf8169ecc095295`. Both publications
+  preserved remote history with leased fast-forwards. Git tree equality was
+  checked after API publication and Git fetch; the
+  [publication record](publication.json) maps local and remote commit identities.
+- Full local `CARGO_BUILD_JOBS=4 ./scripts/check.sh`: passed on local
+  `aae31329b3014e5cb9ea11e6787eca6fd3ad7ec6`, whose tree
+  `94021940b08cc49e383a49135dcfe7ed48c92669` is identical to published `aae9588`.
+  This includes formatting, strict Clippy/rustdoc, all workspace/all-target
+  tests, seven doctests and 28 Python checks. The independent
+  `cargo test --workspace --all-targets --locked -- --list` counts 1,178 unique
+  Rust cases across 141 test targets; nested storage subprocess output is not
+  counted again. [Validation evidence](validation.json) retains the commands,
+  exact source, earlier failures and their corrections.
+- The local Linux release build, actual staged-binary smoke test and archive
+  readback pass: 20 files, one executable, both model configuration templates.
+  Its exact documentation checkpoint, archive size and hashes are recorded
+  separately from the final CI packages.
+- The first native CI exposed fixture assumptions about native terminal and
+  compaction records, accepted activity saves, and independent-run metadata.
+  Windows also exposed a reserved-device filename and an aggregate long-Turn
+  timeout. The test-only follow-up keeps exact same-execution identity and
+  functional assertions. It waits for actual owner settlement and bounds each
+  request-admission phase; it does not add production retries or quotas.
+- Final [native CI](https://github.com/zqcli/minicore-host/actions/runs/43400316403)
+  passed all nine jobs on published `aae9588`: quality, four native validation
+  jobs and four release packages. Exact native case counts are Linux 1,178,
+  macOS ARM64/x64 1,171 each, and Windows 1,157; each platform has 141 test
+  targets and seven passing doctests. Windows also passed five existing cases
+  under a standard user; these are not counted again. Every package passed the
+  native staged-binary smoke check and archive readback with 20 files and one
+  Host executable. [CI evidence](ci-source.json) records job and artifact IDs,
+  distribution archive and executable hashes, and GitHub outer-artifact hashes.
+  Those CI archives were checked by the native package helper; this record does
+  not claim another local download/readback. No live provider or TUI validation
+  is claimed.
+- Remote tag: pending; source publication is complete.
 - Publication capability check: authenticated terminal Git is unavailable
   (`git push --dry-run` cannot read a username; `gh auth status` reports no
   account). The available GitHub connector supports branch updates but no tag
   creation. The browser repository page is also signed out. No remote tag is
-  claimed; finish implementation, checks and branch publication before asking
-  for the final authentication step.
+  claimed. The final evidence-only dev checkpoint is the intended tag target;
+  the remaining action is an authenticated push of the authorized `v0.11.0` tag.
