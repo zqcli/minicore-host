@@ -124,12 +124,15 @@ impl<'a> Assembler<'a> {
                 tool_call_id,
                 delta,
             } => {
-                let delta = normalize_model_text(delta.as_str());
                 let tool = self.tool_mut(&tool_call_id)?;
                 if tool.call.is_some() {
                     return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
                 }
-                tool.arguments_text.push_str(&delta);
+                if tool.arguments_text.is_empty() {
+                    tool.arguments_text = delta;
+                } else {
+                    tool.arguments_text.push_str(&delta);
+                }
                 Ok(None)
             }
             ModelEvent::ToolCallEnd { tool_call_id } => {
@@ -148,6 +151,8 @@ impl<'a> Assembler<'a> {
                     )
                     .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))?,
                 );
+                // Keep failed arguments verbatim, but release a completed call's raw allocation.
+                tool.arguments_text = String::new();
                 Ok(None)
             }
             ModelEvent::Usage { usage } => {
@@ -327,4 +332,46 @@ fn assembler_error(kind: ModelErrorKind) -> ModelError {
     )
     .expect("valid diagnostic text");
     ModelError::started(kind, diagnostic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn completed_tool_releases_raw_buffer_and_remains_in_partial() {
+        let tools =
+            [ToolSpec::new("echo".parse().unwrap(), "echo", json!({"type": "object"})).unwrap()];
+        let mut assembler = Assembler::new(&tools);
+        let id: ToolCallId = "completed-call".parse().unwrap();
+        let expected = json!({"value": "🐈".repeat(8_192)});
+        assembler
+            .push(ModelEvent::ToolCallStart {
+                tool_call_id: id.clone(),
+                tool_name: tools[0].name().clone(),
+            })
+            .unwrap();
+        assembler
+            .push(ModelEvent::tool_call_arguments_delta(
+                id.clone(),
+                expected.to_string(),
+            ))
+            .unwrap();
+        assert!(assembler.tools[0].arguments_text.capacity() > 0);
+        assembler
+            .push(ModelEvent::ToolCallEnd { tool_call_id: id })
+            .unwrap();
+        assert_eq!(assembler.tools[0].arguments_text.capacity(), 0);
+
+        // A later interruption retains the validated call without its old raw buffer.
+        let partial = assembler.into_partial(7).unwrap();
+        assert_eq!(partial.request_index, 7);
+        assert!(partial.incomplete_tool_calls.is_empty());
+        assert_eq!(partial.content.len(), 1);
+        assert_eq!(
+            partial.content[0].as_tool_call().unwrap().arguments(),
+            &expected
+        );
+    }
 }

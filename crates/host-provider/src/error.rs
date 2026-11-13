@@ -64,8 +64,7 @@ fn diagnostic(kind: ModelErrorKind, status: Option<u16>) -> DiagnosticSummary {
         .expect("static diagnostic is valid")
 }
 
-fn structured_kind(value: &Value) -> Option<ModelErrorKind> {
-    let error = value.get("error").unwrap_or(value);
+fn structured_kind(error: &Value) -> Option<ModelErrorKind> {
     let codes: Vec<_> = ["code", "type"]
         .into_iter()
         .filter_map(|key| error.get(key).and_then(Value::as_str))
@@ -172,7 +171,7 @@ pub(crate) async fn http(
     let recognized = serde_json::from_slice::<Value>(&body)
         .ok()
         .as_ref()
-        .and_then(structured_kind);
+        .and_then(|value| structured_kind(value.get("error").unwrap_or(value)));
     let (kind, delivery, retry) = match (status, recognized) {
         (_, Some(ModelErrorKind::QuotaExceeded)) => (
             ModelErrorKind::QuotaExceeded,

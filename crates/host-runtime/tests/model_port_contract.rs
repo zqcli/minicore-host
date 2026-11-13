@@ -267,13 +267,14 @@ fn stream_events_are_typed_bounded_complete_and_redacted() {
             delta: Text::new(&payload),
         },
     ] {
-        let delta = match event {
-            ModelEvent::TextDelta { delta }
-            | ModelEvent::ReasoningDelta { delta }
-            | ModelEvent::ToolCallArgumentsDelta { delta, .. } => delta,
+        let delta = match &event {
+            ModelEvent::TextDelta { delta } | ModelEvent::ReasoningDelta { delta } => {
+                delta.as_str()
+            }
+            ModelEvent::ToolCallArgumentsDelta { delta, .. } => delta.as_str(),
             _ => unreachable!(),
         };
-        assert_eq!(delta.as_str(), payload);
+        assert_eq!(delta, payload);
     }
     assert!(
         matches!(ModelEvent::reasoning_delta(""), ModelEvent::ReasoningDelta { delta } if delta.is_empty())

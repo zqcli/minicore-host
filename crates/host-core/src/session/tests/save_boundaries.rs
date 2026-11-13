@@ -131,6 +131,109 @@ async fn real_partial_is_saved_as_partial_without_fabricated_assistant() {
 }
 
 #[tokio::test]
+async fn protocol_complete_metadata_does_not_execute_or_reload_failed_tool_calls() {
+    use minicore_host_runtime::model::ProviderReplay;
+
+    let first_id = "valid-call".parse().unwrap();
+    let second_id = "invalid-call".parse().unwrap();
+    let invalid_arguments = "{\"value\":\"bad\u{1b}text\"}";
+    let replay = ProviderReplay::new(
+        "minicore-host.openai-chat.v1",
+        serde_json::json!({"finish_reason": "tool_calls"}),
+    )
+    .unwrap();
+    let events = vec![
+        ModelEvent::ToolCallStart {
+            tool_call_id: first_id,
+            tool_name: "count".parse().unwrap(),
+        },
+        ModelEvent::tool_call_arguments_delta("valid-call".parse().unwrap(), "{}"),
+        ModelEvent::ToolCallStart {
+            tool_call_id: second_id,
+            tool_name: "count".parse().unwrap(),
+        },
+        ModelEvent::tool_call_arguments_delta("invalid-call".parse().unwrap(), invalid_arguments),
+        ModelEvent::ProviderReplay {
+            replay: replay.clone(),
+        },
+        ModelEvent::ToolCallEnd {
+            tool_call_id: "valid-call".parse().unwrap(),
+        },
+        ModelEvent::ToolCallEnd {
+            tool_call_id: "invalid-call".parse().unwrap(),
+        },
+        ModelEvent::Finish {
+            reason: ModelFinishReason::ToolCalls,
+        },
+    ];
+    let model = model(vec![events, final_events("unexpected continuation")]);
+    let tool_calls = Arc::new(AtomicUsize::new(0));
+    let mut builder = ToolSet::builder();
+    builder.register(CountTool {
+        spec: ToolSpec::new(
+            "count".parse().unwrap(),
+            "count fixture calls",
+            serde_json::json!({}),
+        )
+        .unwrap(),
+        calls: tool_calls.clone(),
+    });
+    let fixture = setup(
+        Arc::new(Resources {
+            model: model.clone(),
+            tools: builder.build().unwrap(),
+        }),
+        |inner| inner,
+    );
+    send(&fixture, "preserve the failed response");
+    until(&fixture, |state| state.completed.len() == 1).await;
+    assert_eq!(tool_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    let expected = {
+        let state = fixture.session.state.lock().unwrap();
+        let result = state.completed.values().next().unwrap();
+        assert_eq!(result.info.outcome, Some(TurnOutcome::Failed));
+        assert_eq!(result.info.persistence, PersistenceState::Persisted);
+        assert_eq!(result.partials.len(), 1);
+        let partial = &result.partials[0].partial;
+        assert_eq!(partial.provider_replay.as_ref(), Some(&replay));
+        assert_eq!(partial.content.len(), 1);
+        assert_eq!(
+            partial.content[0]
+                .as_tool_call()
+                .unwrap()
+                .tool_call_id()
+                .as_str(),
+            "valid-call"
+        );
+        assert_eq!(partial.incomplete_tool_calls.len(), 1);
+        assert_eq!(
+            partial.incomplete_tool_calls[0].arguments_text,
+            invalid_arguments
+        );
+        assert!(matches!(&state.history[..], [HistoryItem::User(_)]));
+        partial.clone()
+    };
+    fixture.session.begin_host_shutdown_owned(false);
+    fixture
+        .session
+        .release_host_resources_owned()
+        .await
+        .unwrap();
+    let loaded = fixture.store.read_history().unwrap();
+    assert_eq!(loaded.records.len(), 3);
+    assert!(matches!(
+        &loaded.records[1].entry,
+        HistoryEntry::Partial { partial, .. } if partial == &expected
+    ));
+    assert!(matches!(
+        &loaded.runtime_history()[..],
+        [HistoryItem::User(_)]
+    ));
+    assert_eq!(tool_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn partial_and_terminal_acceptance_register_original_saves_before_gated_io() {
     let model = model(vec![vec![ModelEvent::text_delta("unfinished actual text")]]);
     let gates = (0..3)

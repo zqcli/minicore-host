@@ -9,10 +9,10 @@ use minicore_host_runtime::model::{
     AssistantPart, DeliveryState, Model, ModelCallContext, ModelCallEvent, ModelCallParams,
     ModelDescriptor, ModelDriver, ModelDriverConfig, ModelError, ModelErrorKind, ModelEvent,
     ModelFinishReason, ModelLimits, ModelMessage, ModelPartial, ModelRequest, ModelStartFuture,
-    ModelStream, ProviderReplay, ReasoningPreference, Usage,
+    ModelStream, ProviderReplay, ReasoningPreference, RetryHint, Usage,
 };
 use minicore_host_runtime::tools::ToolSpec;
-use minicore_host_runtime::{DeadlineSource, LoopId};
+use minicore_host_runtime::{DeadlineSource, LoopId, ToolCallId};
 use serde_json::json;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -178,6 +178,103 @@ async fn failure_returns_assembled_partial_and_unfinished_tool_arguments_without
         *partial
     );
     assert!(!format!("{partial:?}").contains("secret"));
+}
+
+#[tokio::test]
+async fn invalid_tool_json_preserves_raw_fragments_without_retry_or_repair() {
+    for arguments in [
+        "{\"value\":\"before\x1bafter\"}",
+        "{\"value\":\"before\0after\"}",
+        "{\r\n\"value\":",
+        " \r\n[0]\r\n",
+    ] {
+        let split = arguments
+            .find('\r')
+            .map_or(arguments.len() / 2, |at| at + 1);
+        let id: ToolCallId = "raw-arguments".parse().unwrap();
+        let model = TestModel::new(vec![
+            Behavior::Events(vec![
+                Ok(ModelEvent::ToolCallStart {
+                    tool_call_id: id.clone(),
+                    tool_name: "echo".parse().unwrap(),
+                }),
+                Ok(ModelEvent::tool_call_arguments_delta(
+                    id.clone(),
+                    &arguments[..split],
+                )),
+                Ok(ModelEvent::ToolCallArgumentsDelta {
+                    tool_call_id: id.clone(),
+                    delta: arguments[split..].to_owned(),
+                }),
+                Ok(ModelEvent::ToolCallEnd { tool_call_id: id }),
+                Ok(ModelEvent::Finish {
+                    reason: ModelFinishReason::ToolCalls,
+                }),
+            ]),
+            text_success(),
+        ]);
+        let report = driver(&model)
+            .call(
+                request(),
+                context(0, CancellationToken::new(), Duration::from_secs(120)),
+                &mut |_| {},
+            )
+            .await;
+        assert_eq!(report.attempts, 1);
+        let failure = report.outcome.unwrap_err();
+        assert_eq!(
+            failure.error().kind(),
+            ModelErrorKind::InvalidProviderResponse
+        );
+        assert_eq!(failure.error().delivery(), DeliveryState::Started);
+        assert_eq!(failure.error().retry_hint(), &RetryHint::Never);
+        let partial = failure.partial.unwrap();
+        assert!(partial.content.is_empty());
+        assert_eq!(partial.incomplete_tool_calls.len(), 1);
+        assert_eq!(partial.incomplete_tool_calls[0].arguments_text, arguments);
+        assert_eq!(model.starts.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
+async fn valid_tool_json_preserves_escaped_controls_unicode_and_split_whitespace() {
+    let id: ToolCallId = "escaped-arguments".parse().unwrap();
+    let mut events = vec![Ok(ModelEvent::ToolCallStart {
+        tool_call_id: id.clone(),
+        tool_name: "echo".parse().unwrap(),
+    })];
+    for fragment in [
+        "{\r",
+        "",
+        "\n\"value\":\"\\u00",
+        "1b\\u0000\\r\\n🐈\u{85}\",\"number\":1",
+        "\r\n}",
+    ] {
+        events.push(Ok(ModelEvent::tool_call_arguments_delta(
+            id.clone(),
+            fragment,
+        )));
+    }
+    events.extend([
+        Ok(ModelEvent::ToolCallEnd { tool_call_id: id }),
+        Ok(ModelEvent::Finish {
+            reason: ModelFinishReason::ToolCalls,
+        }),
+    ]);
+    let model = TestModel::new(vec![Behavior::Events(events)]);
+    let response = driver(&model)
+        .call(
+            request(),
+            context(0, CancellationToken::new(), Duration::from_secs(120)),
+            &mut |_| {},
+        )
+        .await
+        .outcome
+        .unwrap();
+    assert_eq!(
+        response.parts()[0].as_tool_call().unwrap().arguments(),
+        &json!({"value": "\x1b\0\r\n🐈\u{85}", "number": 1})
+    );
 }
 
 #[tokio::test]

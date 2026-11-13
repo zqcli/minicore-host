@@ -2,15 +2,16 @@
 
 The unit suite retains the original model-driver protocol, retry, cancellation,
 deadline, panic, port-settlement, text normalization, JSON nesting and tool-value
-coverage. Test-only channels observe direct driver calls without introducing a
-production runner task.
+coverage. Tool arguments remain raw JSON until validation; completed calls release
+their raw buffers and remain available in partial results. Test-only channels observe
+direct driver calls without introducing a production runner task.
 
 The integration targets cover:
 
 | Target | Contract |
 | --- | --- |
 | `execution_contract.rs` | Native history formats, shared views, execution budgets, capability snapshots and prompt projection |
-| `model_partial_contract.rs` | Direct model-call partials, request identity, usage without content, ambiguous usage, actual retry facts and observation isolation |
+| `model_partial_contract.rs` | Direct model-call partials, raw invalid arguments, exact escaped controls and Unicode, request identity, usage without content, ambiguous usage, actual retry facts and observation isolation |
 | `tool_batch_contract.rs` | Ordered tools, ordinary failures, policy denial, approval and input, cancellation, deadline scopes and accepted-answer retention |
 | `model_port_contract.rs` | Provider-facing request, response and context contract |
 | `model_error_contract.rs` | Delivery state and retry-hint construction |

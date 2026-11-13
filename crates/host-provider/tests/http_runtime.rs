@@ -545,6 +545,121 @@ async fn sse_error_retry_requires_no_prior_provider_choice_even_role_only() {
 }
 
 #[tokio::test]
+async fn typed_stream_decoding_preserves_structured_error_priority() {
+    for (payload, kind, delivery, retryable) in [
+        (
+            r#"{"choices":"bad","error":{"code":"rate_limit_exceeded"}}"#,
+            ModelErrorKind::RateLimited,
+            DeliveryState::NotStarted,
+            true,
+        ),
+        (
+            r#"{"error":{"type":"overloaded_error"},"choices":[{"delta":false}]}"#,
+            ModelErrorKind::ProviderUnavailable,
+            DeliveryState::NotStarted,
+            true,
+        ),
+        (
+            r#"{"error":{"type":"rate_limit_error","code":"insufficient_quota"},"choices":null}"#,
+            ModelErrorKind::QuotaExceeded,
+            DeliveryState::NotStarted,
+            false,
+        ),
+        (
+            r#"{"error":{"error":{"code":"rate_limit_exceeded"}}}"#,
+            ModelErrorKind::ProviderUnavailable,
+            DeliveryState::Unknown,
+            false,
+        ),
+        (
+            r#"{"error":false,"choices":"bad"}"#,
+            ModelErrorKind::ProviderUnavailable,
+            DeliveryState::Unknown,
+            false,
+        ),
+        (
+            r#"{"error":null,"choices":"bad"}"#,
+            ModelErrorKind::InvalidProviderResponse,
+            DeliveryState::Unknown,
+            false,
+        ),
+    ] {
+        let fixture = Fixture::start(vec![Reply::Full {
+            status: 200,
+            content_type: "text/event-stream",
+            headers: "Retry-After-ms: 2500\r\n".to_owned(),
+            body: format!("data: {payload}\n\n"),
+            fragment: 7,
+        }])
+        .await;
+        let error = match provider(&fixture.endpoint)
+            .start(request(), context(CancellationToken::new()))
+            .await
+        {
+            Ok(_) => panic!("expected rejection for {payload}"),
+            Err(error) => error,
+        };
+        assert_eq!(error.kind(), kind, "{payload}");
+        assert_eq!(error.delivery(), delivery, "{payload}");
+        if retryable {
+            assert!(
+                matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(1)),
+                "{payload}"
+            );
+        } else {
+            assert_eq!(*error.retry_hint(), RetryHint::Never, "{payload}");
+        }
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+
+    // A present but null error is an ordinary frame; a non-null error still
+    // wins when all normal fields could have decoded successfully.
+    let payload = r#"{"error":null,"choices":[{"index":0,"delta":{"content":"kept"},"finish_reason":"stop"}]}"#;
+    let fixture = Fixture::start(vec![Reply::sse(format!(
+        "data: {payload}\n\ndata: [DONE]\n\n"
+    ))])
+    .await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert!(
+        matches!(&assistant(&report).parts()[0], AssistantPart::Text(text) if text.as_ref() == "kept")
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
+
+    let payload = r#"{"error":{"code":"insufficient_quota"},"choices":[{"index":0,"delta":{"content":"must not escape"}}]}"#;
+    let fixture = Fixture::start(vec![Reply::sse(format!("data: {payload}\n\n"))]).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    assert_eq!(failure(&report).kind(), ModelErrorKind::QuotaExceeded);
+    assert_eq!(failure(&report).delivery(), DeliveryState::NotStarted);
+    assert!(model_partial(&report).is_none());
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn typed_stream_decoding_rejects_duplicate_recognized_fields() {
+    for payload in [
+        r#"{"id":"a","id":"b","choices":[{"index":0,"delta":{"content":"bad"}}]}"#,
+        r#"{"choices":[],"choices":[{"index":0,"delta":{"content":"bad"}}]}"#,
+        r#"{"choices":[{"index":0,"index":0,"delta":{"content":"bad"}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{"content":"first","content":"second"}}]}"#,
+        r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call","function":{"name":"echo","arguments":"{}","arguments":"{}"}}]}}]}"#,
+        r#"{"choices":[],"usage":{"total_tokens":1,"total_tokens":2}}"#,
+        r#"{"error":null,"error":{"code":"rate_limit_exceeded"},"choices":[]}"#,
+        r#"{"id":"a","id":"b","error":{"code":"rate_limit_exceeded"}}"#,
+    ] {
+        let fixture = Fixture::start(vec![Reply::sse(format!("data: {payload}\n\n"))]).await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        assert_eq!(
+            failure(&report).kind(),
+            ModelErrorKind::InvalidProviderResponse,
+            "{payload}"
+        );
+        assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
+        assert!(model_partial(&report).is_none());
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn cancellation_after_partial_output_closes_transport_and_has_no_assistant_success() {
     let written = Arc::new(Notify::new());
     let disconnected = Arc::new(Notify::new());
@@ -1551,6 +1666,103 @@ async fn invalid_large_or_deep_tool_arguments_remain_exact_nonexecutable_partial
         assert_eq!(partial.incomplete_tool_calls[0].arguments_text, arguments);
         assert_eq!(fixture.finish().await.len(), 1);
     }
+}
+
+#[tokio::test]
+async fn raw_tool_arguments_reach_runtime_without_text_character_repair() {
+    for arguments in [
+        "{\"value\":\"a\0b\"}",
+        "{\"value\":\"a\u{1b}b\"}",
+        "{\"value\":\"a\rb\"}",
+    ] {
+        let body = frame(
+            json!({"tool_calls":[{"index":0,"id":"raw-call","function":{"name":"echo","arguments":arguments}}]}),
+            None,
+        ) + &frame(json!({}), Some("tool_calls"))
+            + "data: [DONE]\n\n";
+        let fixture = Fixture::start(vec![Reply::sse(body)]).await;
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let report = call(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
+        assert_eq!(
+            failure(&report).kind(),
+            ModelErrorKind::InvalidProviderResponse
+        );
+        assert_eq!(failure(&report).delivery(), DeliveryState::Started);
+        assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
+        assert!(calls.lock().unwrap().is_empty());
+        let partial = model_partial(&report).unwrap();
+        assert_eq!(partial.incomplete_tool_calls[0].arguments_text, arguments);
+        assert_eq!(
+            partial.provider_replay.as_ref().unwrap().format(),
+            "minicore-host.openai-chat.v1"
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+
+    let arguments = "{\r\n\"value\":\"\\u0000\\u001b\u{7f}\u{85}\"}";
+    let body = frame(
+        json!({"tool_calls":[{"index":0,"id":"valid-controls","function":{"name":"echo","arguments":arguments}}]}),
+        None,
+    ) + &frame(json!({}), Some("tool_calls"))
+        + "data: [DONE]\n\n";
+    let fixture = Fixture::start(vec![Reply::sse(body)]).await;
+    let report = call(
+        provider(&fixture.endpoint),
+        echo_fixture(Arc::new(Mutex::new(Vec::new()))),
+    )
+    .await;
+    let call = assistant(&report).parts()[0].as_tool_call().unwrap();
+    assert_eq!(call.arguments(), &json!({"value":"\0\u{1b}\u{7f}\u{85}"}));
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn later_invalid_tool_preserves_verified_call_and_protocol_metadata() {
+    let bad_arguments = "{\"value\":\"unfinished";
+    let usage = json!({"prompt_tokens":5,"completion_tokens":3,"total_tokens":8});
+    let body = frame(
+        json!({"tool_calls":[
+            {"index":0,"id":"verified-call","function":{"name":"echo","arguments":"{\"value\":1}"}},
+            {"index":1,"id":"invalid-call","function":{"name":"echo","arguments":bad_arguments}}
+        ]}),
+        None,
+    ) + &frame(json!({}), Some("tool_calls"))
+        + &format!("data: {}\n\n", json!({"choices":[],"usage":usage}))
+        + "data: [DONE]\n\n";
+    let fixture = Fixture::start(vec![Reply::sse(body)]).await;
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let report = call(provider(&fixture.endpoint), echo_fixture(calls.clone())).await;
+    assert_eq!(
+        failure(&report).kind(),
+        ModelErrorKind::InvalidProviderResponse
+    );
+    assert_eq!(*failure(&report).retry_hint(), RetryHint::Never);
+    assert!(calls.lock().unwrap().is_empty());
+    let partial = model_partial(&report).unwrap();
+    assert_eq!(partial.content.len(), 1);
+    let verified = partial.content[0].as_tool_call().unwrap();
+    assert_eq!(verified.tool_call_id().as_str(), "verified-call");
+    assert_eq!(verified.call_index(), 0);
+    assert_eq!(verified.arguments(), &json!({"value":1}));
+    assert_eq!(partial.incomplete_tool_calls.len(), 1);
+    assert_eq!(
+        partial.incomplete_tool_calls[0].tool_call_id.as_str(),
+        "invalid-call"
+    );
+    assert_eq!(partial.incomplete_tool_calls[0].call_index, 1);
+    assert_eq!(partial.incomplete_tool_calls[0].part_index, 1);
+    assert_eq!(
+        partial.incomplete_tool_calls[0].arguments_text,
+        bad_arguments
+    );
+    assert_eq!(partial.usage.unwrap().provider_total_tokens(), Some(8));
+    let replay = partial.provider_replay.as_ref().unwrap();
+    assert_eq!(replay.format(), "minicore-host.openai-chat.v1");
+    assert_eq!(
+        replay.payload(),
+        &json!({"finish_reason":"tool_calls","usage":usage})
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
 }
 
 #[tokio::test]

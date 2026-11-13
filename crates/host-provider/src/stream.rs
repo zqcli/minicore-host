@@ -7,7 +7,7 @@ use minicore_host_runtime::{
     model::{ModelError, ModelErrorKind, ModelEvent, ModelFinishReason, ProviderReplay, Usage},
     tools::ToolName,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::IgnoredAny};
 use serde_json::{Value, json};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -42,7 +42,9 @@ pub(crate) struct State {
 struct Tool {
     id: String,
     name: String,
-    arguments: String,
+    // Only retained when the first argument fragment cannot form a valid start.
+    // Started calls hand every fragment directly to Runtime's sole assembler.
+    arguments: Option<String>,
     started: bool,
 }
 
@@ -90,8 +92,8 @@ impl State {
         // Preserve provider fragments that cannot form one in its existing
         // opaque partial metadata, never by inventing an executable call.
         let headers: Vec<_> = self.tools.iter().enumerate()
-            .filter(|(_, tool)| !tool.started && (!tool.id.is_empty() || !tool.name.is_empty() || !tool.arguments.is_empty()))
-            .map(|(index, tool)| json!({"index":index, "id_fragment":tool.id, "name_fragment":tool.name, "arguments_fragment":tool.arguments}))
+            .filter(|(_, tool)| !tool.started && (!tool.id.is_empty() || !tool.name.is_empty() || tool.arguments.is_some()))
+            .map(|(index, tool)| json!({"index":index, "id_fragment":tool.id, "name_fragment":tool.name, "arguments_fragment":tool.arguments.as_deref().unwrap_or_default()}))
             .collect();
         if headers.is_empty() && self.finish.is_none() && self.raw_usage.is_none() {
             return Err(error);
@@ -120,8 +122,24 @@ impl State {
         if frame == b"[DONE]" {
             return self.complete();
         }
-        let value: Value = serde_json::from_slice(frame).map_err(|_| self.malformed())?;
-        if value.get("error").is_some_and(|error| !error.is_null()) {
+        // Ignored extension fields skip string decoding. Validate the entire
+        // SSE payload's UTF-8 before the typed decoder skips those fields.
+        let frame = std::str::from_utf8(frame).map_err(|_| self.malformed())?;
+        let chunk = match serde_json::from_str::<Chunk>(frame) {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                // A structured rejection takes precedence over malformed normal
+                // fields. Decode only its envelope on this exceptional path;
+                // never retry the normal chunk through a permissive Value tree.
+                let envelope: ErrorEnvelope =
+                    serde_json::from_str(frame).map_err(|_| self.malformed())?;
+                return Err(match envelope.error {
+                    Some(value) => error::provider(&value, self.seen, self.status, self.retry_at),
+                    None => self.malformed(),
+                });
+            }
+        };
+        if let Some(value) = chunk.error {
             return Err(error::provider(
                 &value,
                 self.seen,
@@ -129,7 +147,6 @@ impl State {
                 self.retry_at,
             ));
         }
-        let chunk: Chunk = serde_json::from_value(value).map_err(|_| self.malformed())?;
         // Receiving a provider choice, including its role-only header, proves
         // the generation has started even before text reaches Runtime.
         self.seen = true;
@@ -220,11 +237,16 @@ impl State {
             self.tools.push(Tool {
                 id: String::new(),
                 name: String::new(),
-                arguments: String::new(),
+                arguments: None,
                 started: false,
             });
         }
         let tool = &mut self.tools[index];
+        let function = delta.function.unwrap_or_default();
+        let mut arguments = function.arguments;
+        if !tool.started {
+            tool.arguments = arguments.take();
+        }
         if let Some(id) = delta.id {
             if tool.started {
                 if id != tool.id {
@@ -234,7 +256,6 @@ impl State {
                 tool.id.push_str(&id);
             }
         }
-        let function = delta.function.unwrap_or_default();
         if let Some(name) = function.name {
             if tool.started {
                 if name != tool.name {
@@ -249,27 +270,6 @@ impl State {
         if tool.id.len() > 256 || tool.name.len() > 64 {
             return Err(self.malformed());
         }
-        if let Some(arguments) = function.arguments {
-            tool.arguments.push_str(&arguments);
-            if !tool.started {
-                let id = ToolCallId::new(&tool.id)
-                    .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
-                let name: ToolName = tool
-                    .name
-                    .parse()
-                    .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
-                tool.started = true;
-                self.has_output = true;
-                self.pending.push_back(ModelEvent::ToolCallStart {
-                    tool_call_id: id,
-                    tool_name: name,
-                });
-            }
-            let id = ToolCallId::new(&tool.id)
-                .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
-            self.pending
-                .push_back(ModelEvent::tool_call_arguments_delta(id, arguments));
-        }
         if self.tools.iter().enumerate().any(|(other, tool)| {
             other != index && tool.id == self.tools[index].id && !tool.id.is_empty()
         }) {
@@ -277,8 +277,32 @@ impl State {
         }
         // Runtime assigns call_index by ToolCallStart order. Do not silently
         // reorder a provider's incomplete metadata across parallel calls.
-        if self.tools[index].started && self.tools[..index].iter().any(|tool| !tool.started) {
+        if self.tools[index].arguments.is_some()
+            && self.tools[..index].iter().any(|tool| !tool.started)
+        {
             return Err(self.malformed());
+        }
+        let tool = &mut self.tools[index];
+        if tool.arguments.is_some() {
+            let id = ToolCallId::new(&tool.id)
+                .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
+            let name: ToolName = tool
+                .name
+                .parse()
+                .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
+            tool.started = true;
+            self.has_output = true;
+            self.pending.push_back(ModelEvent::ToolCallStart {
+                tool_call_id: id,
+                tool_name: name,
+            });
+            arguments = tool.arguments.take();
+        }
+        if let Some(arguments) = arguments {
+            let id = ToolCallId::new(&tool.id)
+                .map_err(|_| error::stream(ModelErrorKind::InvalidProviderResponse, true))?;
+            self.pending
+                .push_back(ModelEvent::tool_call_arguments_delta(id, arguments));
         }
         Ok(())
     }
@@ -304,16 +328,8 @@ impl State {
         {
             return Err(self.malformed());
         }
-        for tool in &self.tools {
-            if !tool.started
-                || !serde_json::from_str::<Value>(&tool.arguments)
-                    .is_ok_and(|value| value.is_object())
-            {
-                return Err(self.malformed());
-            }
-            self.pending.push_back(ModelEvent::ToolCallEnd {
-                tool_call_id: ToolCallId::new(&tool.id).map_err(|_| self.malformed())?,
-            });
+        if self.tools.iter().any(|tool| !tool.started) {
+            return Err(self.malformed());
         }
         // Preserve the provider's exact finish reason, including future reasons
         // that map to Runtime's Unknown. No endpoint or secret belongs here.
@@ -324,6 +340,13 @@ impl State {
         let replay = ProviderReplay::new(REPLAY_FORMAT, metadata).map_err(|_| self.malformed())?;
         self.pending
             .push_back(ModelEvent::ProviderReplay { replay });
+        // Protocol metadata is already known, even if Runtime rejects an
+        // argument object at End. Only the Driver can confirm a full response.
+        for tool in &self.tools {
+            self.pending.push_back(ModelEvent::ToolCallEnd {
+                tool_call_id: ToolCallId::new(&tool.id).map_err(|_| self.malformed())?,
+            });
+        }
         self.pending.push_back(ModelEvent::Finish { reason });
         self.done = true;
         Ok(())
@@ -401,10 +424,25 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
 #[derive(Deserialize)]
 struct Chunk {
     #[serde(default)]
+    error: Option<Value>,
+    #[serde(default)]
     id: Option<String>,
     choices: Vec<Choice>,
     #[serde(default)]
     usage: Option<ProviderUsage>,
+}
+#[derive(Deserialize)]
+struct ErrorEnvelope {
+    #[serde(default)]
+    error: Option<Value>,
+    // These fields are irrelevant to a rejection, but repeated envelope fields
+    // are still malformed. Their nested normal-response types are not decoded.
+    #[serde(default, rename = "id")]
+    _id: Option<IgnoredAny>,
+    #[serde(default, rename = "choices")]
+    _choices: Option<IgnoredAny>,
+    #[serde(default, rename = "usage")]
+    _usage: Option<IgnoredAny>,
 }
 #[derive(Deserialize)]
 struct Choice {
@@ -498,5 +536,46 @@ impl ProviderUsage {
         Ok(Usage::from_optional(input, output, reasoning)
             .with_cache_read_tokens(cached)
             .with_provider_total_tokens(self.total_tokens))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minicore_host_runtime::model::{DeliveryState, RetryHint};
+
+    #[test]
+    fn ignored_extensions_cannot_hide_invalid_utf8() {
+        for frame in [
+            b"{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"text\"}}],\"extension\":\"\xff\"}".as_slice(),
+            b"{\"choices\":false,\"error\":{\"code\":\"rate_limit_exceeded\"},\"extension\":\"\xff\"}".as_slice(),
+        ] {
+            let mut state = State {
+                bytes: Box::pin(futures_util::stream::empty()),
+                status: 200,
+                retry_at: None,
+                chunk: Bytes::new(),
+                offset: 0,
+                parser: Parser::new(),
+                pending: VecDeque::new(),
+                pending_error: None,
+                cancellation: CancellationToken::new(),
+                deadline: Instant::now(),
+                done: false,
+                seen: false,
+                has_output: false,
+                tools: Vec::new(),
+                finish: None,
+                usage: None,
+                raw_usage: None,
+                response_id: None,
+            };
+            let error = state.handle(frame).unwrap_err();
+            assert_eq!(error.kind(), ModelErrorKind::InvalidProviderResponse);
+            assert_eq!(error.delivery(), DeliveryState::Unknown);
+            assert_eq!(*error.retry_hint(), RetryHint::Never);
+            assert!(state.pending.is_empty());
+            assert!(!state.seen);
+        }
     }
 }

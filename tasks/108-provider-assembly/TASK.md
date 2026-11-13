@@ -48,8 +48,26 @@ requested configuration, not independently attested effective model settings.
   detached baseline worktree are clean copies of that exact source.
 - Added SPEC clauses for typed decoding, single raw-argument ownership,
   partial metadata and unchanged execution/retry boundaries.
-- Implementation, validation, publication and formal performance comparison
-  are pending. No benchmark result or live provider validation is claimed.
+- Implemented typed provider decoding and single Runtime argument assembly.
+  Argument deltas transfer owned strings, the first fragment is adopted without
+  copying, successful native call validation releases the raw buffer, and failures
+  keep original JSON text. Protocol metadata precedes individual tool ends.
+- Preserved provider error priority, first-event delivery and retry behavior.
+  Direct decoding also validates whole-frame UTF-8 before typed deserialization;
+  ignored extensions use the JSON library's skip semantics rather than a general
+  validation tree. Duplicate typed-message/error-envelope fields are rejected;
+  the error payload's existing classification behavior remains unchanged.
+- Provider focused checks pass 8 unit cases, 1 diagnostics case, 42 real loopback
+  HTTP cases, 1 doctest and strict Clippy. Runtime passes 143 cases, 2 doctests
+  and strict Clippy. The additional Session regression proves that a partial
+  with protocol-complete replay and an earlier valid tool never executes tools,
+  survives real persistence/readback and stays out of full model history.
+- Provider and Runtime contributors independently reviewed each other's changes;
+  the measurement contributor also reviewed Runtime ownership and partial paths.
+  No remaining blocking issue was identified within the approved scope.
+- The release baseline probe is compiled from the untouched dev source. It has
+  not been executed. Full workspace validation, publication and the formal
+  performance comparison remain pending; no performance result is claimed.
 
 ## Evidence and publication
 

@@ -152,7 +152,7 @@ impl<'de> Deserialize<'de> for ModelResponse {
     }
 }
 
-/// Deltas retain raw text; assembly normalizes text and reasoning across events.
+/// Text and reasoning are normalized during assembly; tool arguments retain their raw JSON text.
 #[derive(Clone, Eq, PartialEq)]
 pub enum ModelEvent {
     TextDelta {
@@ -167,8 +167,9 @@ pub enum ModelEvent {
     },
     ToolCallArgumentsDelta {
         tool_call_id: ToolCallId,
-        delta: Text,
+        delta: String,
     },
+    /// Ends one argument stream for Runtime validation, not the complete model response.
     ToolCallEnd {
         tool_call_id: ToolCallId,
     },
@@ -176,6 +177,7 @@ pub enum ModelEvent {
         usage: Usage,
     },
     /// Opaque metadata, accepted once before Finish; never emitted as display progress.
+    /// Its presence does not establish a complete response and it may remain in a partial.
     ProviderReplay {
         replay: ProviderReplay,
     },
@@ -197,10 +199,10 @@ impl ModelEvent {
         }
     }
 
-    pub fn tool_call_arguments_delta(tool_call_id: ToolCallId, delta: impl AsRef<str>) -> Self {
+    pub fn tool_call_arguments_delta(tool_call_id: ToolCallId, delta: impl Into<String>) -> Self {
         Self::ToolCallArgumentsDelta {
             tool_call_id,
-            delta: Text::new(delta),
+            delta: delta.into(),
         }
     }
 }
@@ -230,7 +232,7 @@ impl fmt::Debug for ModelEvent {
             } => formatter
                 .debug_struct("ToolCallArgumentsDelta")
                 .field("tool_call_id", tool_call_id)
-                .field("delta_bytes", &delta.byte_len())
+                .field("delta_bytes", &delta.len())
                 .finish(),
             Self::ToolCallEnd { tool_call_id } => formatter
                 .debug_struct("ToolCallEnd")

@@ -39,16 +39,35 @@ refusal text, parallel function calls with original provider IDs, assistant/tool
 history, explicit reasoning effort, request-supplied output token limit, usage
 and finish metadata. Usage categories are normalized to Runtime's disjoint
 input/output/reasoning/cache counts; missing details remain unknown. Raw
-provider numeric counts and the exact finish reason are retained in bounded replay
+provider numeric counts and the exact finish reason are retained in replay
 metadata, including unknown future finish reasons.
 
+Ordinary frames decode directly to typed provider fields. A separate error
+envelope is read only when normal decoding fails, so a structured rejection
+still takes precedence over malformed normal fields. Duplicate recognized
+typed-message and error-envelope fields are rejected rather than repaired
+through a generic JSON object; error payload classification keeps its existing rules.
+The whole frame must be valid UTF-8. Unused extension fields follow serde's
+skip behavior; fields used by the adapter keep their typed validation.
+
 The adapter requires both a provider `finish_reason` and SSE `[DONE]`. EOF,
-malformed frames, incomplete tool arguments, mismatched indices and unsupported
-content fail explicitly. It never synthesizes empty success or missing tool
-arguments. Fully received frames produce partial progress before later failure. Tool
+malformed frames, mismatched indices and unsupported content fail explicitly.
+Runtime alone accumulates raw tool arguments and parses their JSON object at
+tool end; it does not repair control characters or incomplete JSON. The adapter
+never retains a second cumulative argument buffer after a tool starts, and never
+synthesizes empty success or missing arguments. Fully received frames produce
+partial progress before later failure. Tool
 ID/name fragments that are not yet a valid Runtime ToolCallStart are retained
 in ModelPartial.provider_replay under `minicore-host.openai-chat.partial.v1` on
 failure, never made executable. An unknown finish cannot authorize tools.
+
+At the provider's valid protocol endpoint, finish/usage replay metadata is
+delivered before tool ends. Its `minicore-host.openai-chat.v1` format can therefore
+appear in a failed ModelPartial when Runtime rejects arguments; the format is
+not a successful-response marker. If one tool validates before a later tool
+fails, the partial retains that verified call and the remaining raw arguments.
+The whole model call still fails, and none of its tools may execute. Only the
+ModelDriver result distinguishes a complete response from a partial.
 
 Runtime alone retries a model call. The adapter sends exactly one request per
 `start`; only verified connection-before-send failure or recognized pre-start
