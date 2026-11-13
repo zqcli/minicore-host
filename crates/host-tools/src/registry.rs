@@ -35,14 +35,17 @@ pub struct ToolRegistry {
     entries: BTreeMap<String, RegisteredTool>,
 }
 enum RegisteredTool {
-    Factory(Arc<dyn ToolFactory>),
+    Factory {
+        factory: Arc<dyn ToolFactory>,
+        spec: ToolSpec,
+    },
     BuiltinAgent(AgentToolFactory),
     Local(ToolSpec),
 }
 impl RegisteredTool {
     fn spec(&self) -> &ToolSpec {
         match self {
-            Self::Factory(factory) => factory.spec(),
+            Self::Factory { spec, .. } => spec,
             Self::BuiltinAgent(factory) => factory.spec(),
             Self::Local(spec) => spec,
         }
@@ -54,7 +57,8 @@ impl ToolRegistry {
     }
     /// Register an external factory. A built-in name does not change its source.
     pub fn register(&mut self, factory: Arc<dyn ToolFactory>) -> Result<(), Fault> {
-        self.insert(RegisteredTool::Factory(factory))
+        let spec = factory.spec().clone();
+        self.insert(RegisteredTool::Factory { factory, spec })
     }
     /// Register the actual compiled agent implementation, retaining that fact
     /// separately from arbitrary factories with the same public name.
@@ -149,7 +153,7 @@ impl ToolRegistry {
                 )
             })?;
             let tool = match entry {
-                RegisteredTool::Factory(factory) => factory.bind(Arc::clone(&port))?,
+                RegisteredTool::Factory { factory, .. } => factory.bind(Arc::clone(&port))?,
                 RegisteredTool::BuiltinAgent(factory) => factory.bind(Arc::clone(&port))?,
                 RegisteredTool::Local(_) => local
                     .and_then(|local| local.tool(&selection.name))
@@ -163,13 +167,9 @@ impl ToolRegistry {
                         )
                     })?,
             };
-            if tool.spec() != entry.spec() {
-                return Err(Fault::new(
-                    FaultKind::SessionConfigInvalid,
-                    "bound tool declaration differs from its registered declaration",
-                ));
-            }
-            builder.register_arc(tool);
+            builder
+                .register_arc_checked(tool, entry.spec())
+                .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
         }
         builder
             .build()
@@ -181,6 +181,7 @@ impl ToolRegistry {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ExternalFixture(ToolSpec);
     impl ToolFactory for ExternalFixture {
@@ -200,6 +201,36 @@ mod tests {
             )
             .unwrap(),
         ))
+    }
+
+    #[test]
+    fn registration_freezes_external_factory_declarations_once() {
+        struct ChangingFactory {
+            specs: [ToolSpec; 2],
+            reads: AtomicUsize,
+        }
+        impl ToolFactory for ChangingFactory {
+            fn spec(&self) -> &ToolSpec {
+                &self.specs[self.reads.fetch_add(1, Ordering::SeqCst).min(1)]
+            }
+            fn bind(&self, _: Arc<dyn TurnPort>) -> Result<Arc<dyn Tool>, Fault> {
+                unreachable!("declaration lookup does not bind tools")
+            }
+        }
+        let factory = Arc::new(ChangingFactory {
+            specs: ["registered", "changed"].map(|description| {
+                ToolSpec::new("external".parse().unwrap(), description, json!({})).unwrap()
+            }),
+            reads: AtomicUsize::new(0),
+        });
+        let mut registry = ToolRegistry::new();
+        registry.register(factory.clone()).unwrap();
+        assert_eq!(
+            registry.spec("external").unwrap().description().as_str(),
+            "registered"
+        );
+        assert_eq!(registry.specs(), vec![factory.specs[0].clone()]);
+        assert_eq!(factory.reads.load(Ordering::SeqCst), 1);
     }
 
     #[test]

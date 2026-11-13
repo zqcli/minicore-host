@@ -82,6 +82,47 @@ fn request_payload_clones_share_storage_and_output_constructors_normalize_text()
     assert_json_round_trip(&response);
 }
 
+#[test]
+fn replacing_request_messages_preserves_selection_and_checks_new_exchanges() {
+    use minicore_host_runtime::model::{ModelValueError, ReasoningPreference};
+    let spec = ToolSpec::new("read".parse().unwrap(), "Read", json!({"type":"object"})).unwrap();
+    let request = ModelRequest::new(
+        vec![ModelMessage::user("original").unwrap()],
+        vec![spec],
+        ModelLimits::default(),
+        ReasoningPreference::Auto,
+    )
+    .unwrap();
+    let updated = request
+        .with_messages(vec![ModelMessage::user("projected").unwrap()])
+        .unwrap();
+    assert_eq!(updated.tools(), request.tools());
+    assert_eq!(updated.limits(), request.limits());
+    assert_eq!(updated.reasoning(), request.reasoning());
+    assert_eq!(
+        updated.messages(),
+        &[ModelMessage::user("projected").unwrap()]
+    );
+    assert_eq!(
+        request.messages(),
+        &[ModelMessage::user("original").unwrap()]
+    );
+    assert_eq!(
+        request.with_messages(vec![]).unwrap_err(),
+        ModelValueError::EmptyMessages
+    );
+    let orphan = ModelMessage::tool_with_outcome(
+        "call_orphan".parse().unwrap(),
+        ToolOutput::new("result").unwrap(),
+        ToolResultOutcome::Success,
+    )
+    .unwrap();
+    assert_eq!(
+        request.with_messages(vec![orphan]).unwrap_err(),
+        ModelValueError::OrphanToolResult
+    );
+}
+
 fn assert_json_round_trip<T>(value: &T)
 where
     T: serde::Serialize + serde::de::DeserializeOwned + Eq + Debug,

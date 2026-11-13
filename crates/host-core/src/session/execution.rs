@@ -393,7 +393,7 @@ impl SessionController {
             AssistantPart, ModelCallParams, ModelDriver, ModelDriverConfig, ModelFinishReason,
         };
         use minicore_host_runtime::tools::{ToolBatchContext, ToolBatchStop, run_tool_batch};
-        let execution = match self.resources_owned().and_then(|resolver| {
+        let execution = match self.resources_owned().map(|resolver| {
             let execution = resolver.bind_tool_output(
                 &resources.execution,
                 ToolOutputBinding::new(self, turn_id.clone()),

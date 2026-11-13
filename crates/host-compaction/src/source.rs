@@ -65,6 +65,18 @@ pub(crate) fn group_data(
     if items.len() != messages.len() {
         return Err(CompactionError::InvalidHistory);
     }
+    let results: BTreeSet<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            HistoryItem::ToolResult(result) => Some((
+                result.loop_id,
+                result.request_index,
+                &result.call_id,
+                &result.tool_name,
+            )),
+            _ => None,
+        })
+        .collect();
     let records: Result<Vec<_>, _> = items
         .iter()
         .zip(messages)
@@ -85,12 +97,12 @@ pub(crate) fn group_data(
                 let parts: Vec<_> = value.content.iter().map(|part| match part {
                     AssistantPart::Text(text) => json!({"type": "text", "text": text}),
                     AssistantPart::ToolCall(call) => {
-                        let has_result = items.iter().any(|item| matches!(item,
-                            HistoryItem::ToolResult(result)
-                            if result.loop_id == value.loop_id
-                                && result.request_index == value.request_index
-                                && &result.call_id == call.tool_call_id()
-                                && &result.tool_name == call.name()));
+                        let has_result = results.contains(&(
+                            value.loop_id,
+                            value.request_index,
+                            call.tool_call_id(),
+                            call.name(),
+                        ));
                         json!({"type": "tool_call", "call": call,
                             "result_record": if has_result { "present" } else { "missing; execution and outcome are unknown" }})
                     }

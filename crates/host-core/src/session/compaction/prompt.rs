@@ -5,6 +5,7 @@ use minicore_host_runtime::{
     model::{ModelLimits, ModelRequest},
     prompt::{PreparedPrompt, PromptError, PromptRequest},
 };
+use std::collections::BTreeSet;
 
 /// Sharing the native buffer avoids copying full history bodies. Input metadata
 /// is copied for this view; only actual compaction flattens the selected native
@@ -170,11 +171,30 @@ fn incomplete_tail(raw: &[HistoryItem]) -> Option<usize> {
     let HistoryItem::Assistant(assistant) = &raw[start] else {
         return None;
     };
-    assistant.content.iter().filter_map(minicore_host_runtime::model::AssistantPart::as_tool_call)
-        .any(|call| !raw[start + 1..].iter().any(|item| matches!(item,
-            HistoryItem::ToolResult(result) if result.loop_id == assistant.loop_id
-                && result.request_index == assistant.request_index && &result.call_id == call.tool_call_id()
-                && &result.tool_name == call.name())))
+    let results: BTreeSet<_> = raw[start + 1..]
+        .iter()
+        .filter_map(|item| match item {
+            HistoryItem::ToolResult(result) => Some((
+                result.loop_id,
+                result.request_index,
+                &result.call_id,
+                &result.tool_name,
+            )),
+            _ => None,
+        })
+        .collect();
+    assistant
+        .content
+        .iter()
+        .filter_map(minicore_host_runtime::model::AssistantPart::as_tool_call)
+        .any(|call| {
+            !results.contains(&(
+                assistant.loop_id,
+                assistant.request_index,
+                call.tool_call_id(),
+                call.name(),
+            ))
+        })
         .then_some(start)
 }
 
@@ -237,16 +257,11 @@ impl SessionController {
         let request = execution
             .request(prompt.messages)
             .map_err(|error| prompt_fault(error.to_string()))?;
-        if !settings.enabled
-            || !engine::estimate_context(execution.descriptor(), &settings, &request)
-                .map_err(|error| failure(error.to_string()))?
-                .automatic_due
-        {
+        if !settings.enabled {
             return Ok(request);
         }
-        let source = history.snapshot();
-        let Some(plan) = engine::prepare(
-            source.clone(),
+        let Some(plan) = engine::prepare_automatic(
+            || history.snapshot(),
             history.preserve_from,
             execution.descriptor(),
             &settings,
@@ -259,6 +274,7 @@ impl SessionController {
         if plan.covered().end <= usize::from(history.previous_coverage > 0) {
             return Ok(request);
         }
+        let source = plan.source().clone();
         let binding = CompactionBinding::Automatic {
             turn_id: turn_id.clone(),
             load_id,
@@ -322,3 +338,7 @@ fn prompt_fault(message: impl Into<String>) -> Fault {
 #[cfg(test)]
 #[path = "../input_provenance_tests.rs"]
 mod input_provenance_tests;
+
+#[cfg(test)]
+#[path = "prompt_tests.rs"]
+mod tests;

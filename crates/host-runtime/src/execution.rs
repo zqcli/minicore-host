@@ -10,7 +10,7 @@ use crate::model::{
     ReasoningPreference,
 };
 use crate::prompt::PromptProvider;
-use crate::tools::{ToolPolicy, ToolSet};
+use crate::tools::{Tool, ToolPolicy, ToolSet, ToolSpec};
 use crate::value::Text;
 
 /// Errors constructing user input.
@@ -160,6 +160,27 @@ impl ExecutionConfig {
             ModelLimits::default(),
             self.reasoning,
         )
+    }
+
+    /// Wraps the bound model while retaining its already validated descriptor
+    /// and the rest of this Turn's frozen configuration.
+    pub fn map_model(
+        &self,
+        map: impl FnOnce(Arc<dyn Model>, &ModelDescriptor) -> Arc<dyn Model>,
+    ) -> Self {
+        Self {
+            model: map(Arc::clone(&self.model), &self.descriptor),
+            ..self.clone()
+        }
+    }
+
+    /// Wraps only selected tools, retaining their frozen declarations and all
+    /// other validated execution resources.
+    pub fn map_tools(&self, map: impl FnMut(Arc<dyn Tool>, &ToolSpec) -> Arc<dyn Tool>) -> Self {
+        Self {
+            tools: self.tools.map_tools(map),
+            ..self.clone()
+        }
     }
 
     pub fn model(&self) -> &Arc<dyn Model> {

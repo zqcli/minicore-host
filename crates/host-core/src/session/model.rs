@@ -67,19 +67,14 @@ impl SessionController {
         self: &Arc<Self>,
         turn_id: &TurnId,
         execution: &ExecutionConfig,
-    ) -> Result<ExecutionConfig, Fault> {
-        ExecutionConfig::new(
+    ) -> ExecutionConfig {
+        execution.map_model(|inner, descriptor| {
             Arc::new(TurnModel {
                 session: Arc::downgrade(self),
                 turn_id: turn_id.clone(),
-                inner: Arc::clone(execution.model()),
-                descriptor: execution.descriptor().clone(),
-            }),
-            execution.reasoning(),
-            execution.tools().clone(),
-            execution.policy().cloned(),
-            Arc::clone(execution.prompt()),
-        )
-        .map_err(|error| Fault::new(FaultKind::TurnInternalUnexpected, error.to_string()))
+                inner,
+                descriptor: descriptor.clone(),
+            })
+        })
     }
 }

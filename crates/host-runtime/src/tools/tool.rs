@@ -16,7 +16,8 @@ use super::context::ToolContext;
 use super::input::ToolInputRequest;
 use super::types::{ToolError, ToolName, ToolValueError};
 
-/// Immutable tool metadata, checked by construction and deserialization.
+/// Immutable, shared tool metadata, checked by construction and deserialization.
+/// Cloning a specification retains the same checked declaration and schema.
 ///
 /// ```compile_fail
 /// use minicore_host_runtime::tools::ToolSpec;
@@ -24,33 +25,30 @@ use super::types::{ToolError, ToolName, ToolValueError};
 /// spec.input_schema = serde_json::json!([]);
 /// ```
 #[derive(Clone, Eq, PartialEq, Serialize)]
-pub struct ToolSpec {
-    name: ToolName,
-    description: Text,
-    input_schema: Value,
-}
+#[serde(transparent)]
+pub struct ToolSpec(Arc<ToolSpecData>);
 
 impl fmt::Debug for ToolSpec {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let schema_bytes = crate::value::json_bytes(&self.input_schema);
+        let schema_bytes = crate::value::json_bytes(self.input_schema());
         let schema_object_keys = self
-            .input_schema
+            .input_schema()
             .as_object()
             .expect("validated tool schema is an object")
             .len();
         formatter
             .debug_struct("ToolSpec")
-            .field("name", &self.name)
-            .field("description_bytes", &self.description.byte_len())
+            .field("name", self.name())
+            .field("description_bytes", &self.description().byte_len())
             .field("schema_object_keys", &schema_object_keys)
             .field("schema_bytes", &schema_bytes)
             .finish()
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ToolSpecWire {
+struct ToolSpecData {
     name: ToolName,
     description: Text,
     input_schema: Value,
@@ -63,35 +61,35 @@ impl ToolSpec {
         input_schema: Value,
     ) -> Result<Self, ToolValueError> {
         let description = Text::new(description);
-        let spec = Self {
+        let spec = Self(Arc::new(ToolSpecData {
             name,
             description,
             input_schema,
-        };
+        }));
         spec.validate()?;
         Ok(spec)
     }
 
     pub fn validate(&self) -> Result<(), ToolValueError> {
-        if !valid_text(self.description.as_str(), false) {
+        if !valid_text(self.description().as_str(), false) {
             return Err(ToolValueError::InvalidText);
         }
-        if !self.input_schema.is_object() || validate_json_nesting(&self.input_schema).is_err() {
+        if !self.input_schema().is_object() || validate_json_nesting(self.input_schema()).is_err() {
             return Err(ToolValueError::InvalidSchema);
         }
         Ok(())
     }
 
-    pub const fn name(&self) -> &ToolName {
-        &self.name
+    pub fn name(&self) -> &ToolName {
+        &self.0.name
     }
 
-    pub const fn description(&self) -> &Text {
-        &self.description
+    pub fn description(&self) -> &Text {
+        &self.0.description
     }
 
-    pub const fn input_schema(&self) -> &Value {
-        &self.input_schema
+    pub fn input_schema(&self) -> &Value {
+        &self.0.input_schema
     }
 }
 
@@ -100,7 +98,7 @@ impl<'de> Deserialize<'de> for ToolSpec {
     where
         D: Deserializer<'de>,
     {
-        let value = ToolSpecWire::deserialize(deserializer)?;
+        let value = ToolSpecData::deserialize(deserializer)?;
         Self::new(value.name, value.description, value.input_schema)
             .map_err(serde::de::Error::custom)
     }

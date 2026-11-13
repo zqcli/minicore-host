@@ -1,5 +1,14 @@
 # MiniCore Host
 
+## In progress: execution overhead (Task 107)
+
+[Task 107](tasks/107-execution-overhead/TASK.md) implements the owner's approved
+review items 1–4: lighter tool-output capabilities, one model-output buffer,
+shared frozen tool declarations, and less repeated compaction work. Its exact
+baseline is dev `5911d56a64bb2302e075b11cd44d667643999f07`. Host 0.10.1,
+SPEC 4.10.1 and the provider decoder remain unchanged. Results will distinguish
+verified correctness, paired local measurements and native CI evidence.
+
 ## Current checkpoint: integrated execution layer (0.10.1)
 
 [Task 106](tasks/106-host-runtime/TASK.md) implements the owner's approved

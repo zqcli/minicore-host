@@ -7,8 +7,24 @@ use minicore_host_runtime::{
 use serde_json::{Value, json};
 use std::time::Duration;
 
-fn request(name: &str, arguments: Value) -> ToolPolicyRequest {
-    ToolPolicyRequest {
+struct PolicyFixture {
+    invocation: ToolInvocation,
+    spec: ToolSpec,
+}
+
+impl PolicyFixture {
+    fn request(&self) -> ToolPolicyRequest<'_> {
+        ToolPolicyRequest {
+            invocation: &self.invocation,
+            spec: &self.spec,
+            cancellation: Default::default(),
+            deadline: Instant::now() + Duration::from_secs(5),
+        }
+    }
+}
+
+fn request(name: &str, arguments: Value) -> PolicyFixture {
+    PolicyFixture {
         invocation: ToolInvocation::new(
             ToolCallId::new("policy-fixture-call").unwrap(),
             name.parse().unwrap(),
@@ -21,8 +37,6 @@ fn request(name: &str, arguments: Value) -> ToolPolicyRequest {
             json!({"type":"object"}),
         )
         .unwrap(),
-        cancellation: Default::default(),
-        deadline: Instant::now() + Duration::from_secs(5),
     }
 }
 
@@ -51,7 +65,10 @@ async fn ordinary_and_external_tools_follow_the_three_mode_table() {
         for name in ["read", "write", "edit", "bash", "registered_external"] {
             assert_mode_decision(
                 mode,
-                policy.decide(request(name, json!({}))).await.unwrap(),
+                policy
+                    .decide(request(name, json!({})).request())
+                    .await
+                    .unwrap(),
                 name == "read",
             );
         }
@@ -140,7 +157,7 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
             assert_mode_decision(
                 mode,
                 policy
-                    .decide(request("agent", arguments.clone()))
+                    .decide(request("agent", arguments.clone()).request())
                     .await
                     .unwrap(),
                 *read_only,
@@ -165,14 +182,17 @@ async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
             json!({"action":"inspect","target":{"kind":"session","agent_id":"invalid","session_id":"invalid"}}),
         ] {
             assert!(matches!(
-                policy.decide(request("agent", arguments)).await.unwrap(),
+                policy
+                    .decide(request("agent", arguments).request())
+                    .await
+                    .unwrap(),
                 ToolDecision::Deny { .. }
             ));
         }
         let mut mismatched = request("read", json!({}));
         mismatched.spec = request("write", json!({})).spec;
         assert!(matches!(
-            policy.decide(mismatched).await.unwrap(),
+            policy.decide(mismatched.request()).await.unwrap(),
             ToolDecision::Deny { .. }
         ));
     }
@@ -181,14 +201,15 @@ async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
 #[tokio::test]
 async fn cancellation_and_deadline_are_checked_without_waiting_or_approving() {
     let policy = Policy::new(ApprovalMode::Auto, true, true);
-    let mut cancelled = request("read", json!({}));
+    let fixture = request("read", json!({}));
+    let mut cancelled = fixture.request();
     cancelled.cancellation.cancel();
     cancelled.deadline = Instant::now() - Duration::from_millis(1);
     assert_eq!(
         policy.decide(cancelled).await,
         Err(ToolPolicyError::Cancelled)
     );
-    let mut expired = request("read", json!({}));
+    let mut expired = fixture.request();
     expired.deadline = Instant::now() - Duration::from_millis(1);
     assert_eq!(policy.decide(expired).await, Err(ToolPolicyError::Failed));
 }
@@ -199,10 +220,13 @@ async fn approvals_do_not_cache_or_copy_arguments_into_prompts() {
         let policy = Policy::new(ApprovalMode::Ask, true, true);
         for _ in 0..2 {
             let decision = policy
-                .decide(request(
-                    "write",
-                    json!({"path":"private-path","content":"secret-fixture-content"}),
-                ))
+                .decide(
+                    request(
+                        "write",
+                        json!({"path":"private-path","content":"secret-fixture-content"}),
+                    )
+                    .request(),
+                )
                 .await
                 .unwrap();
             let ToolDecision::RequireApproval { request } = decision else {
@@ -233,7 +257,10 @@ async fn external_names_cannot_claim_either_builtin_read_only_exemption() {
         ] {
             assert_mode_decision(
                 mode,
-                policy.decide(request(name, arguments)).await.unwrap(),
+                policy
+                    .decide(request(name, arguments).request())
+                    .await
+                    .unwrap(),
                 false,
             );
         }

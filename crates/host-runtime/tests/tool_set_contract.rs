@@ -115,6 +115,12 @@ fn tool_spec_and_output_use_checked_bounded_content() {
     assert_eq!(tool_spec.name().as_str(), "read_file");
     assert_eq!(tool_spec.input_schema(), &json!({"type": "object"}));
     assert_eq!(tool_spec.description().as_str(), "Read one file");
+    let shared = tool_spec.clone();
+    assert!(std::ptr::eq(tool_spec.name(), shared.name()));
+    assert!(std::ptr::eq(
+        tool_spec.input_schema(),
+        shared.input_schema()
+    ));
     assert!(serde_json::to_value(&tool_spec).unwrap()["description"] == "Read one file");
     assert!(ToolSpec::new("read_file".parse().unwrap(), "", json!({})).is_err());
     assert!(ToolSpec::new("read_file".parse().unwrap(), "x\u{0001}", json!({})).is_err());
@@ -393,6 +399,40 @@ fn tool_set_freezes_registration_spec_while_tool_spec_can_change_later() {
     assert_eq!(live.spec().description().as_str(), "spec B");
     assert_eq!(live.spec().input_schema(), &json!({"version": "B"}));
     assert_eq!(set.specs_for(&enabled)[0].description().as_str(), "spec A");
+
+    let mut wrapped = 0;
+    let mapped = set.map_tools(|tool, spec| {
+        wrapped += 1;
+        assert!(Arc::ptr_eq(&tool, &live));
+        assert_eq!(spec.description().as_str(), "spec A");
+        Arc::new(PanicSpecTool)
+    });
+    assert_eq!(wrapped, 1);
+    assert!(std::ptr::eq(set.specs(), mapped.specs()));
+    assert_eq!(mapped.specs_for(&enabled)[0], frozen[0]);
+}
+
+#[test]
+fn checked_tool_binding_compares_and_freezes_one_specification_read() {
+    let tool = Arc::new(MutableSpecTool::new());
+    let expected = tool.specs[0].clone();
+    let mut builder = ToolSet::builder();
+    builder
+        .register_arc_checked(tool.clone(), &expected)
+        .unwrap();
+    let set = builder.build().unwrap();
+    assert_eq!(tool.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(set.specs(), std::slice::from_ref(&expected));
+
+    let mut mismatched = ToolSet::builder();
+    assert!(matches!(
+        mismatched.register_arc_checked(tool, &expected),
+        Err(ToolSetError::SpecMismatch)
+    ));
+    assert!(matches!(
+        mismatched.build(),
+        Err(ToolSetError::SpecMismatch)
+    ));
 }
 
 #[tokio::test]

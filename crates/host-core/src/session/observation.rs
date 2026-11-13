@@ -38,15 +38,23 @@ impl TurnObservation {
 }
 #[derive(Default)]
 pub(super) struct Body {
-    pub(super) live: String,
+    pub(super) text: String,
     // A binary channel has only a real contiguous UTF-8 prefix. Never imply
     // that a request crossing its end returned the complete process stream.
     pub(super) non_utf8: bool,
-    pub(super) complete: Option<String>,
+    // Completion is an independent fact: even an empty/tool-only response is
+    // complete, while readable streaming text may belong to a partial result.
+    pub(super) completed: bool,
 }
 impl Body {
     pub(super) fn text(&self) -> &str {
-        self.complete.as_deref().unwrap_or(&self.live)
+        &self.text
+    }
+    fn complete(&mut self, text: String) {
+        // Replace and drop the streaming allocation, including its capacity.
+        // The returned model response is the authoritative final projection.
+        self.text = text;
+        self.completed = true;
     }
 }
 pub(super) struct ToolRecord {
@@ -251,8 +259,11 @@ impl SessionController {
                             }
                         }
                     }
-                    channels.entry("text".into()).or_default().complete = Some(text);
-                    channels.entry("reasoning".into()).or_default().complete = Some(reasoning);
+                    channels.entry("text".into()).or_default().complete(text);
+                    channels
+                        .entry("reasoning".into())
+                        .or_default()
+                        .complete(reasoning);
                     self.access.observation.publish(ObservationEvent::Activity(
                         ActivityEvent::ModelFinished {
                             source: ModelOutputIdentity {
@@ -465,8 +476,8 @@ impl SessionController {
                     .or_default()
                     .entry(channel.into())
                     .or_default();
-                let start = body.live.len() as u64;
-                body.live.push_str(delta.as_str());
+                let start = body.text.len() as u64;
+                body.text.push_str(delta.as_str());
                 self.access.observation.publish(ObservationEvent::Activity(
                     ActivityEvent::ModelOutput {
                         source: ModelOutputIdentity {
@@ -476,7 +487,7 @@ impl SessionController {
                         data: OutputDelta {
                             channel: channel.into(),
                             start,
-                            end: body.live.len() as u64,
+                            end: body.text.len() as u64,
                             text: delta.as_str().to_owned(),
                         },
                     },

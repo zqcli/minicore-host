@@ -1,11 +1,15 @@
 use minicore_host_runtime::tools::ToolSpec;
 use serde_json::{Map, Value, json};
+use std::sync::LazyLock;
 
 /// One declaration is reused for discovery and the selected Runtime ToolSet.
 pub fn agent_tool_spec() -> ToolSpec {
-    ToolSpec::new("agent".parse().expect("static tool name"),
+    static SPEC: LazyLock<ToolSpec> = LazyLock::new(|| {
+        ToolSpec::new("agent".parse().expect("static tool name"),
         "Create, send to, inspect, update or control Agents and Sessions in this Host. Creation with text and send with delegate:true start independent work and return acceptance; completion arrives as a new message. wait waits for consumable input in this Session, not a particular child.",
         schema()).expect("static agent tool declaration is valid")
+    });
+    SPEC.clone()
 }
 fn object(properties: Value, required: &[&str]) -> Value {
     json!({"type":"object", "properties":properties, "required":required, "additionalProperties":false})

@@ -94,20 +94,7 @@ impl ResourceResolver for ProductionResources {
         execution: &ExecutionConfig,
         output: ToolOutputBinding,
     ) -> ExecutionConfig {
-        let mut selected = ToolSet::builder();
-        for spec in self.tools.specs() {
-            if let Some(tool) = execution.tools().get(spec.name()) {
-                selected.register_arc(output.wrap(tool));
-            }
-        }
-        ExecutionConfig::new(
-            execution.model().clone(),
-            execution.reasoning(),
-            selected.build().expect("unique frozen tool declarations"),
-            execution.policy().cloned(),
-            execution.prompt().clone(),
-        )
-        .expect("unchanged validated execution configuration")
+        execution.map_tools(|tool, spec| output.wrap(tool, spec.clone()))
     }
     fn resolve_for_compaction(self: Arc<Self>, config: SessionConfig) -> CompactionResourceFuture {
         Box::pin(async move {

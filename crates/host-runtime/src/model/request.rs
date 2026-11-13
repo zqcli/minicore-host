@@ -108,7 +108,18 @@ impl ModelRequest {
         Self::with_validated_tools(messages, tools, limits, reasoning)
     }
 
-    /// Reuses a checked catalog (the runner's frozen ToolSet), while validating
+    /// Replaces messages while sharing this request's already checked tool
+    /// declarations, limits and reasoning. The new exchanges are validated.
+    pub fn with_messages(&self, messages: Vec<ModelMessage>) -> Result<Self, ModelValueError> {
+        Self::with_validated_tools(
+            messages,
+            Arc::clone(&self.tools),
+            self.limits,
+            self.reasoning,
+        )
+    }
+
+    /// Reuses a checked catalog (the Turn's frozen ToolSet), while validating
     /// messages produced by the host prompt provider on every request.
     pub(crate) fn with_validated_tools(
         messages: Vec<ModelMessage>,

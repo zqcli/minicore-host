@@ -56,13 +56,9 @@ impl CompactionPlan {
         messages.push(summary_message(summary)?);
         messages
             .extend_from_slice(&self.original.messages()[self.message_offset + self.covered_end..]);
-        ModelRequest::new(
-            messages,
-            self.original.tools().to_vec(),
-            *self.original.limits(),
-            self.original.reasoning(),
-        )
-        .map_err(|_| CompactionError::InvalidHistory)
+        self.original
+            .with_messages(messages)
+            .map_err(|_| CompactionError::InvalidHistory)
     }
 }
 
@@ -125,6 +121,34 @@ pub fn prepare(
     request: ModelRequest,
 ) -> Result<Option<CompactionPlan>, CompactionError> {
     let estimate = estimate_context(descriptor, settings, &request)?;
+    prepare_estimated(source, preserve_from, descriptor, request, estimate)
+}
+
+/// Estimate and plan the same automatic request once. The snapshot is only
+/// obtained when the soft trigger is due; it must describe this request's
+/// immutable history with the same contract as [`prepare`]. Manual callers
+/// continue to use [`prepare`] regardless of the automatic trigger.
+pub fn prepare_automatic(
+    source: impl FnOnce() -> HistorySnapshot,
+    preserve_from: usize,
+    descriptor: &ModelDescriptor,
+    settings: &CompactionSettings,
+    request: ModelRequest,
+) -> Result<Option<CompactionPlan>, CompactionError> {
+    let estimate = estimate_context(descriptor, settings, &request)?;
+    if !estimate.automatic_due {
+        return Ok(None);
+    }
+    prepare_estimated(source(), preserve_from, descriptor, request, estimate)
+}
+
+fn prepare_estimated(
+    source: HistorySnapshot,
+    preserve_from: usize,
+    descriptor: &ModelDescriptor,
+    request: ModelRequest,
+    estimate: ContextEstimate,
+) -> Result<Option<CompactionPlan>, CompactionError> {
     let length = source.items.len();
     if preserve_from > length || request.messages().len() < length {
         return Err(CompactionError::InvalidHistory);

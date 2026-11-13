@@ -55,9 +55,7 @@ impl LocalTools {
 
     /// Returns only a named implementation. The caller selects the actual ToolSet.
     pub fn tool(&self, name: &str) -> Option<Arc<dyn Tool>> {
-        let spec = local_tool_specs()
-            .into_iter()
-            .find(|spec| spec.name().as_str() == name)?;
+        let spec = schema::local_tool_spec(name)?;
         Some(Arc::new(LocalTool {
             binding: Arc::clone(&self.binding),
             scope: Arc::clone(&self.scope),
@@ -86,12 +84,17 @@ impl Tool for LocalTool {
 
     fn execute<'a>(&'a self, invocation: ToolInvocation, context: ToolContext) -> ToolFuture<'a> {
         Box::pin(async move {
+            let ToolInvocation {
+                tool_call_id: id,
+                tool_name,
+                arguments,
+            } = invocation;
             let prepared = (|| {
-                if invocation.tool_name() != self.spec.name() {
+                if &tool_name != self.spec.name() {
                     return Err(ToolError::InvalidInvocation);
                 }
                 check(&context)?;
-                Action::parse(self.spec.name().as_str(), invocation.arguments().clone())
+                Action::parse(self.spec.name().as_str(), arguments)
             })();
             let action = match prepared {
                 Ok(action) => action,
@@ -99,15 +102,15 @@ impl Tool for LocalTool {
                     // Rejection happened before an actual worker was started.
                     self.binding
                         .sink
-                        .complete(invocation.tool_call_id(), true)
+                        .complete(&id, true)
                         .map_err(|_| ToolError::Internal)?;
                     return Err(error);
                 }
             };
             let binding = Arc::clone(&self.binding);
             let sink = Arc::clone(&binding.sink);
-            let id = invocation.tool_call_id().clone();
             let completed_id = id.clone();
+            let rejected_id = id.clone();
             let completion = self.scope.start(id.clone(), async move {
                 let mut outcome = match action {
                     Action::Read(input) => {
@@ -136,7 +139,7 @@ impl Tool for LocalTool {
                 Err(error) => {
                     self.binding
                         .sink
-                        .complete(invocation.tool_call_id(), true)
+                        .complete(&rejected_id, true)
                         .map_err(|_| ToolError::Internal)?;
                     return Err(error);
                 }

@@ -12,15 +12,17 @@ control/input queue, retry service or durable operation state.
    limits, tools and instructions. Its final messages must correspond one for
    one to the snapshot's history items. Use the existing Host prompt-history
    adapter for incomplete old tools; complete native calls/results stay native.
-2. Use `estimate_context` to inspect estimated input and the configured soft
-   trigger/target. `prepare` selects an older prefix, retaining at least the last
-   whole exchange and the caller's protected suffix. An automatic boundary must
+2. Use `estimate_context` for inspection, `prepare` for manual work, or
+   `prepare_automatic` to check the trigger and select a prefix with one estimate.
+   The automatic entry obtains its source snapshot lazily, only when due. Both
+   preparation paths retain at least the last whole exchange and the caller's
+   protected suffix. An automatic boundary must
    protect newly appended inputs not yet handed to the Session owner; this
    is not a permanent fence at the public Turn's first input. Older accepted
    inputs and completed exchanges within a long Turn remain eligible. Manual
    callers can pass the history length.
-   `None` means no eligible prefix. It neither changes history nor claims that
-   context now fits the model.
+   `None` means no eligible prefix, or an automatic request that is not due.
+   It neither changes history nor claims that context now fits the model.
 3. Await `generate` outside owner locks with the bound `Model` and a real Runtime
    `ModelCallContext`. The shared `ModelDriver` assembles each summary response
    using one attempt, with no tools. The supplied token and deadline reach each actual utility
@@ -60,6 +62,11 @@ cap, group-count quota, provider-overflow retry, recovery ticket or application
 admission limit is added. Explicit Runtime output limits are forwarded unchanged;
 soft targets never become injected output caps. A candidate must reduce the
 estimated request, but need not meet the soft target or fit the context window.
+
+Each historical group is encoded and validated once. A group deferred at a
+chunk boundary keeps that encoding for the next chunk; exact outer JSON escaping
+and rounding still determine the same boundary. Reprojecting the final request
+reuses frozen tool declarations while validating the new message exchanges.
 
 `utility_usage` is a per-call list of actual optional Runtime `Usage` values.
 Missing values and missing token categories remain unknown. Failed/cancelled

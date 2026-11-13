@@ -1,0 +1,81 @@
+{
+  "production_checkpoint": "946b3c0d35d20ff7468211df18b600a21a576232",
+  "baseline": "5911d56a64bb2302e075b11cd44d667643999f07",
+  "host_version": "0.10.1",
+  "spec_version": "4.10.1",
+  "spec_sha256": "b1426061eb63478f392e8f5638792df1c7d8a1bad08d80c80f3203288816182b",
+  "cargo_lock_sha256": "37f022017139aa6b008b6e6e901bf7ba48c9eca09816946d713a9c2484115837",
+  "external_locked_packages_unchanged": 225,
+  "production_changes_after_checkpoint": false,
+  "post_checkpoint_test_fix": "Remove unused ToolSet import from host-tools/tests/local_binding.rs; no release code change.",
+  "rustc": "1.90.0",
+  "cargo_build_jobs": 4,
+  "cargo_incremental": false,
+  "dev_debug": 0,
+  "test_debug": 0,
+  "full_gate": {
+    "command": "./scripts/check.sh",
+    "exit_code": 0,
+    "unique_rust_cases": 1117,
+    "listed_targets": 138,
+    "unique_count_command": "cargo test --workspace --all-targets --locked -- --list",
+    "doctests": 6,
+    "python_checks": 28,
+    "formatting": "passed",
+    "strict_clippy": "passed",
+    "strict_rustdoc": "passed",
+    "whitespace": "passed"
+  },
+  "integration_corrections": [
+    "Adapt shared transport observation fixture to ExecutionConfig::map_tools and frozen ToolSpec.",
+    "Remove one obsolete fixture import caught by strict Clippy."
+  ],
+  "logs": [
+    {
+      "name": "107-full-gate.log",
+      "sha256": "8f2fd82ca40a49d896a440e6524947acf8d0c7578e0d6b549020ca86333158e0"
+    },
+    {
+      "name": "107-full-gate-final.log",
+      "sha256": "c9231e534a9abd0da79cf33b4209684392a4a934173c2091b067785013c24055"
+    },
+    {
+      "name": "107-full-gate-complete.log",
+      "sha256": "27e313d73bde1f9ea714018e64fe447353cde0eaa4de6a6ce1507273d886d23e"
+    },
+    {
+      "name": "107-test-list.log",
+      "sha256": "254337936d69989e9679df1861cb15862f0fe034702149c020246849033a1fbf"
+    },
+    {
+      "name": "107-output-tests.log",
+      "sha256": "e801a2b656b24359e2e923c76338656ac4370b2033eb79614ee052c57e1e3c93"
+    },
+    {
+      "name": "107-output-query-partial.log",
+      "sha256": "bcb06cf5433ec9e2e228b7db91b2c73f6e418271479dc615d8e862f0451efb45"
+    },
+    {
+      "name": "107-compaction-tests.log",
+      "sha256": "cf1850e6b148778ad2b5640ea7add0815935217e8ffd7ce00183196e59c302ec"
+    },
+    {
+      "name": "107-compaction-prompt-tests.log",
+      "sha256": "e214bb7d3b0dfbac8d18b3d1bbb7c677ba8b567cbe4b5a241710b7d1f199f528"
+    },
+    {
+      "name": "107-baseline-release.log",
+      "sha256": "faa3776d70e3fc1dc6fba8496b2c8a08ff5d85c8d734436b3111ffd77b7bcc68"
+    },
+    {
+      "name": "107-candidate-release.log",
+      "sha256": "eeef81a4dc34574733761257c8507914019f2136d0f83d23db9671db45a86ba7"
+    }
+  ],
+  "limits": [
+    "Local native validation is Linux x86_64 only.",
+    "No live provider, TUI, saturation or capacity validation.",
+    "Performance uses fixed release sources and a separate no-build window.",
+    "Native CI is recorded after publication."
+  ]
+}

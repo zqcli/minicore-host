@@ -331,14 +331,14 @@ impl Tool for AgentTool {
             if Instant::now() >= context.deadline {
                 return Err(ToolError::TimedOut);
             }
-            let action = AgentAction::parse(invocation.arguments().clone())
-                .map_err(|_| ToolError::InvalidInvocation)?;
             let origin = ToolCallRef {
                 turn_id: self.port.source().turn.turn_id.clone(),
                 tool_call_id: minicore_host_protocol::ToolCallId(
                     invocation.tool_call_id().as_str().to_owned(),
                 ),
             };
+            let action = AgentAction::parse(invocation.arguments)
+                .map_err(|_| ToolError::InvalidInvocation)?;
             let startup = matches!(
                 &action,
                 AgentAction::Create(

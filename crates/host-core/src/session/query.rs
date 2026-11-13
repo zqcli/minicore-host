@@ -335,7 +335,7 @@ fn project_history(
         output
             .models
             .iter()
-            .filter(|(_, channels)| channels.values().any(|body| body.complete.is_some()))
+            .filter(|(_, channels)| channels.values().any(|body| body.completed))
             .map(|(index, _)| *index)
     });
     let mut responses = BTreeMap::new();

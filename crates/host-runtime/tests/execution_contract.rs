@@ -441,6 +441,57 @@ fn execution_config_accepts_tool_capable_model_with_tools() {
 }
 
 #[test]
+fn execution_wrappers_reuse_frozen_resources_without_reentering_the_model() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct OnceDescriptor {
+        model: Arc<dyn Model>,
+        calls: AtomicUsize,
+    }
+    impl Model for OnceDescriptor {
+        fn descriptor(&self) -> &ModelDescriptor {
+            assert_eq!(self.calls.fetch_add(1, Ordering::SeqCst), 0);
+            self.model.descriptor()
+        }
+        fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+            panic!("configuration mapping does not execute the model")
+        }
+    }
+
+    let model = Arc::new(OnceDescriptor {
+        model: text_model(&[ReasoningPreference::High], true),
+        calls: AtomicUsize::new(0),
+    });
+    let config = ExecutionConfig::new(
+        model.clone(),
+        ReasoningPreference::High,
+        fake_tools(),
+        None,
+        Arc::new(CapturingPrompt { system: None }),
+    )
+    .unwrap();
+    let mapped = config
+        .map_tools(|tool, spec| {
+            assert_eq!(spec, &config.tools().specs()[0]);
+            tool
+        })
+        .map_model(|inner, descriptor| {
+            assert!(Arc::ptr_eq(&inner, config.model()));
+            assert_eq!(descriptor, config.descriptor());
+            inner
+        });
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(mapped.descriptor(), config.descriptor());
+    assert_eq!(mapped.reasoning(), config.reasoning());
+    assert!(Arc::ptr_eq(mapped.prompt(), config.prompt()));
+    assert!(std::ptr::eq(mapped.tools().specs(), config.tools().specs()));
+    let request = mapped
+        .request(vec![ModelMessage::user("frozen config").unwrap()])
+        .unwrap();
+    assert!(std::ptr::eq(request.tools(), config.tools().specs()));
+}
+
+#[test]
 fn execution_config_rejects_untrusted_reasoning() {
     let model = text_model(&[ReasoningPreference::Auto], false);
     let error = ExecutionConfig::new(

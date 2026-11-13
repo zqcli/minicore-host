@@ -269,9 +269,11 @@ async fn trigger_target_and_model_limits_are_soft_not_history_admission_caps() {
         trigger_percent: 90,
         target_percent: 40,
     };
-    let prepared = prepare(source, 1, model.descriptor(), &settings, normal)
+    let estimate = estimate_context(model.descriptor(), &settings, &normal).unwrap();
+    let prepared = prepare_automatic(|| source, 1, model.descriptor(), &settings, normal)
         .unwrap()
         .unwrap();
+    assert_eq!(prepared.estimate(), estimate);
     assert_eq!(prepared.estimate().context_window, 800);
     assert_eq!(prepared.estimate().trigger_tokens, 720);
     assert_eq!(prepared.estimate().target_tokens, 320);
@@ -297,11 +299,25 @@ async fn manual_plan_does_not_depend_on_automatic_trigger_or_enabled_flag() {
     let model = ScriptedModel::summary(10000);
     let source = snapshot(vec![user("old ".repeat(4000)), user("keep")]);
     let normal = request(&source.items, model.descriptor()).await;
-    for enabled in [false, true] {
-        let settings = CompactionSettings {
-            enabled,
-            ..CompactionSettings::default()
-        };
+    for settings in [
+        CompactionSettings::default(),
+        CompactionSettings {
+            enabled: false,
+            trigger_percent: 20,
+            target_percent: 10,
+        },
+    ] {
+        assert!(
+            prepare_automatic(
+                || panic!("an automatic request that is not due must not take a snapshot"),
+                1,
+                model.descriptor(),
+                &settings,
+                normal.clone(),
+            )
+            .unwrap()
+            .is_none()
+        );
         let prepared = prepare(
             source.clone(),
             1,

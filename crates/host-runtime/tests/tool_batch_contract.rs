@@ -93,7 +93,7 @@ impl Tool for TestTool {
 }
 struct FixedPolicy(ToolDecision);
 impl ToolPolicy for FixedPolicy {
-    fn decide<'a>(&'a self, _: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
+    fn decide<'a>(&'a self, _: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         Box::pin(async { Ok(self.0.clone()) })
     }
 }

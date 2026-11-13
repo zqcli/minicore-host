@@ -8,6 +8,7 @@ use minicore_host_runtime::{
     },
     tools::{ToolOutput, ToolResultOutcome},
 };
+use serde_json::json;
 use std::{collections::BTreeSet, sync::Mutex, time::Duration};
 use tokio_util::sync::CancellationToken;
 
@@ -64,6 +65,33 @@ fn descriptor(reasoning: ReasoningPreference, window: u64) -> ModelDescriptor {
     .unwrap()
 }
 
+/// The former Value-based encoding is an independent wire-format oracle.
+fn full_request(
+    plan: &CompactionPlan,
+    previous: Option<&SummaryHistory>,
+    records: &[Value],
+) -> Result<ModelRequest, CompactionError> {
+    let data = json!({
+        "previous_summary": previous.map(|summary| summary.content.as_str()),
+        "historical_exchanges": records,
+    });
+    let user = format!(
+        "Aim for approximately {} tokens if the facts permit; this is a soft goal.\n\
+         Historical data follows as JSON:\n{data}",
+        plan.summary_target.max(1)
+    );
+    ModelRequest::new(
+        vec![
+            ModelMessage::system(SYSTEM).map_err(|_| CompactionError::InvalidResponse)?,
+            ModelMessage::user(user).map_err(|_| CompactionError::Serialization)?,
+        ],
+        vec![],
+        *plan.original.limits(),
+        plan.original.reasoning(),
+    )
+    .map_err(|_| CompactionError::InvalidResponse)
+}
+
 #[test]
 fn incremental_size_matches_serialized_requests_with_escaping_and_runtime_options() {
     let records = [
@@ -91,14 +119,24 @@ fn incremental_size_matches_serialized_requests_with_escaping_and_runtime_option
         ] {
             let plan = plan(reasoning, limits);
             for previous in [None, Some(&previous)] {
+                let mut encoded_records = String::new();
                 let mut bytes =
-                    serialized_request_bytes(&utility_request(&plan, previous, &[]).unwrap())
+                    serialized_request_bytes(&utility_request(&plan, previous, "").unwrap())
                         .unwrap();
                 for (index, record) in records.iter().enumerate() {
+                    let encoded = EncodedGroup::new(record.clone()).unwrap();
                     bytes = bytes
-                        .saturating_add(utility_record_bytes(record).unwrap())
+                        .saturating_add(encoded.request_bytes)
                         .saturating_add(u64::from(index > 0));
-                    let request = utility_request(&plan, previous, &records[..=index]).unwrap();
+                    if index > 0 {
+                        encoded_records.push(',');
+                    }
+                    encoded_records.push_str(&encoded.text);
+                    let request = utility_request(&plan, previous, &encoded_records).unwrap();
+                    assert_eq!(
+                        request,
+                        full_request(&plan, previous, &records[..=index]).unwrap()
+                    );
                     assert_eq!(bytes, serde_json::to_vec(&request).unwrap().len() as u64);
                     assert_eq!(
                         bytes.div_ceil(4),
@@ -175,13 +213,13 @@ fn full_request_chunks(plan: &CompactionPlan, records: &[Value]) -> Vec<Vec<u8>>
     while position < records.len() {
         let mut end = position;
         while end < records.len() {
-            let proposed = utility_request(plan, previous, &records[position..=end]).unwrap();
+            let proposed = full_request(plan, previous, &records[position..=end]).unwrap();
             if end > position && estimate_request_tokens(&proposed).unwrap() > goal {
                 break;
             }
             end += 1;
         }
-        let request = utility_request(plan, previous, &records[position..end]).unwrap();
+        let request = full_request(plan, previous, &records[position..end]).unwrap();
         requests.push(serde_json::to_vec(&request).unwrap());
         previous = Some(&summary);
         position = end;
@@ -199,7 +237,7 @@ async fn chunk_boundaries_and_requests_match_full_estimation_including_oversized
     );
     let records = records(&plan);
     let boundary =
-        estimate_request_tokens(&utility_request(&plan, None, &records[..2]).unwrap()).unwrap();
+        estimate_request_tokens(&full_request(&plan, None, &records[..2]).unwrap()).unwrap();
     // Exact threshold, one token below it, and an indivisible oversized group.
     for goal in [boundary, boundary - 1, 1] {
         let window = goal + plan.summary_target;
@@ -292,7 +330,7 @@ async fn invalid_next_group_is_rejected_before_finishing_an_oversized_chunk() {
     };
     let source = records(&plan);
     assert!(matches!(
-        utility_request(&plan, None, &source[..2]),
+        full_request(&plan, None, &source[..2]),
         Err(CompactionError::Serialization)
     ));
     let failure = generate(&plan, &fixture, context()).await.unwrap_err();

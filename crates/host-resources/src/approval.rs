@@ -34,7 +34,7 @@ impl Policy {
         }
     }
 
-    fn decide_now(&self, request: &ToolPolicyRequest) -> Result<ToolDecision, ToolPolicyError> {
+    fn decide_now(&self, request: &ToolPolicyRequest<'_>) -> Result<ToolDecision, ToolPolicyError> {
         if request.cancellation.is_cancelled() {
             return Err(ToolPolicyError::Cancelled);
         }
@@ -61,7 +61,7 @@ impl Policy {
             }
         }
     }
-    fn classify(&self, request: &ToolPolicyRequest) -> Option<ToolClass> {
+    fn classify(&self, request: &ToolPolicyRequest<'_>) -> Option<ToolClass> {
         match request.invocation.tool_name().as_str() {
             "read" if self.builtin_read => Some(ToolClass::ReadOnly),
             "write" | "edit" | "bash" => Some(ToolClass::Mutating),
@@ -85,7 +85,7 @@ impl Policy {
 }
 
 impl ToolPolicy for Policy {
-    fn decide(&self, request: ToolPolicyRequest) -> ToolPolicyFuture<'_> {
+    fn decide<'a>(&'a self, request: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         Box::pin(std::future::ready(self.decide_now(&request)))
     }
 }

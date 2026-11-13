@@ -326,7 +326,8 @@ impl ResourceResolver for Resources {
     ) -> ExecutionConfig {
         let mut tools = ToolSet::builder();
         if let Some(tool) = execution.tools().get(&"process_fixture".parse().unwrap()) {
-            tools.register_arc(output.wrap(tool));
+            let spec = tool.spec().clone();
+            tools.register_arc(output.wrap(tool, spec));
         }
         ExecutionConfig::new(
             execution.model().clone(),
@@ -883,6 +884,8 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
     let turn = bundle.capability.source().turn.turn_id.clone();
     let regular = bundle.ordinary_output.lock().unwrap()[0].clone();
     let owned = bundle.owned_output.lock().unwrap()[0].clone();
+    let cloned_owned = owned.clone();
+    assert_eq!(owned.source(), cloned_owned.source());
     assert_eq!(owned.source().turn.turn_id, turn);
     assert_eq!(owned.source().turn.session.session_id, target.session_id);
     assert!(owned.source().turn.load_id.is_some());
@@ -891,7 +894,7 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
     until(|| (bundle.finish_calls.load(Ordering::SeqCst) == 1).then_some(())).await;
     assert!(!regular.emit("stdout", "expired"));
     assert!(regular.retain_owned().is_err());
-    assert!(owned.emit("stdout", "真实 child cleanup"));
+    assert!(cloned_owned.emit("stdout", "真实 child cleanup"));
     let call = ToolCallRef {
         turn_id: turn.clone(),
         tool_call_id: owned.source().tool_call_id.clone(),
@@ -922,6 +925,9 @@ async fn owned_output_survives_cancelled_future_only_until_actual_cleanup() {
     bundle.release.add_permits(1);
     terminal(&host, &caller, &target, &turn).await;
     assert!(!owned.emit("stdout", "after confirmed cleanup"));
+    assert!(!cloned_owned.emit("stdout", "after confirmed cleanup clone"));
+    assert!(!cloned_owned.mark_non_utf8("stdout"));
+    assert!(cloned_owned.confirm_cleanup().is_err());
     assert_eq!(
         host.toolcall_get(&caller, &target, &call)
             .unwrap()

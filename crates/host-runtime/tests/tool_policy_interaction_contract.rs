@@ -52,7 +52,7 @@ struct FixedPolicy {
 }
 
 impl ToolPolicy for FixedPolicy {
-    fn decide<'a>(&'a self, _request: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
+    fn decide<'a>(&'a self, _request: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         let decision = self.decision.clone();
         Box::pin(async move { Ok(decision) })
     }
@@ -65,19 +65,27 @@ struct InspectPolicy {
 }
 
 impl ToolPolicy for InspectPolicy {
-    fn decide<'a>(&'a self, request: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
-        assert_eq!(request.invocation, self.invocation);
-        assert_eq!(request.spec, self.spec);
-        assert!(request.cancellation.is_cancelled());
-        assert_eq!(request.deadline, self.deadline);
-        Box::pin(async { Ok(ToolDecision::Allow) })
+    fn decide<'a>(&'a self, request: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
+        Box::pin(async move {
+            tokio::task::yield_now().await;
+            assert_eq!(request.invocation, &self.invocation);
+            assert_eq!(request.spec, &self.spec);
+            assert!(request.cancellation.is_cancelled());
+            assert_eq!(request.deadline, self.deadline);
+            Ok(ToolDecision::Allow)
+        })
     }
 }
 
-fn policy_request(cancellation: CancellationToken, deadline: Instant) -> ToolPolicyRequest {
+fn policy_request<'a>(
+    invocation: &'a ToolInvocation,
+    spec: &'a ToolSpec,
+    cancellation: CancellationToken,
+    deadline: Instant,
+) -> ToolPolicyRequest<'a> {
     ToolPolicyRequest {
-        invocation: invocation("deploy", json!({"target": "production"})),
-        spec: spec("deploy", "deploy one release"),
+        invocation,
+        spec,
         cancellation,
         deadline,
     }
@@ -91,6 +99,8 @@ async fn policy_port_is_async_send_sync_and_returns_only_typed_decisions() {
     }
 
     assert_policy::<FixedPolicy>();
+    let invocation = invocation("deploy", json!({"target": "production"}));
+    let spec = spec("deploy", "deploy one release");
     let deadline = Instant::now() + Duration::from_secs(30);
     let approval = ApprovalRequest::new("approve deployment", ApprovalRisk::High).unwrap();
     let decisions = [
@@ -103,8 +113,12 @@ async fn policy_port_is_async_send_sync_and_returns_only_typed_decisions() {
         let policy = FixedPolicy {
             decision: expected.clone(),
         };
-        let future =
-            assert_future_send(policy.decide(policy_request(CancellationToken::new(), deadline)));
+        let future = assert_future_send(policy.decide(policy_request(
+            &invocation,
+            &spec,
+            CancellationToken::new(),
+            deadline,
+        )));
         assert_eq!(future.await.unwrap(), expected);
     }
 
@@ -130,10 +144,14 @@ async fn policy_port_is_async_send_sync_and_returns_only_typed_decisions() {
 }
 
 #[tokio::test]
-async fn policy_request_carries_exact_owned_invocation_spec_cancellation_and_deadline() {
+async fn policy_request_borrows_exact_invocation_and_spec_across_async_work() {
     let cancellation = CancellationToken::new();
     let deadline = Instant::now() + Duration::from_secs(17);
-    let request = policy_request(cancellation.clone(), deadline);
+    let invocation = invocation("deploy", json!({"target": "production"}));
+    let spec = spec("deploy", "deploy one release");
+    let request = policy_request(&invocation, &spec, cancellation.clone(), deadline);
+    assert!(std::ptr::eq(request.invocation, &invocation));
+    assert!(std::ptr::eq(request.spec, &spec));
     let expected_invocation = request.invocation.clone();
     let expected_spec = request.spec.clone();
     cancellation.cancel();
@@ -183,7 +201,11 @@ fn policy_text_is_checked_at_the_exact_boundary_and_debug_is_redacted() {
 
     let denial = ToolDecision::deny("private denial reason").unwrap();
     let approval = ApprovalRequest::new("private approval prompt", ApprovalRisk::Medium).unwrap();
+    let invocation = invocation("deploy", json!({"target": "production"}));
+    let spec = spec("deploy", "deploy one release");
     let request = policy_request(
+        &invocation,
+        &spec,
         CancellationToken::new(),
         Instant::now() + Duration::from_secs(30),
     );

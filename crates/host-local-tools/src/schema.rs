@@ -1,9 +1,21 @@
 use minicore_host_runtime::tools::ToolSpec;
 use serde_json::{Value, json};
+use std::sync::LazyLock;
 
 /// The declaration used both by registration and by each bound implementation.
 pub fn local_tool_specs() -> Vec<ToolSpec> {
-    vec![
+    LOCAL_TOOL_SPECS.to_vec()
+}
+
+pub(crate) fn local_tool_spec(name: &str) -> Option<ToolSpec> {
+    LOCAL_TOOL_SPECS
+        .iter()
+        .find(|spec| spec.name().as_str() == name)
+        .cloned()
+}
+
+static LOCAL_TOOL_SPECS: LazyLock<[ToolSpec; 4]> = LazyLock::new(|| {
+    [
         spec(
             "read",
             "Read an explicit line range from a UTF-8 workspace file, or an explicit sorted range of directory entries. No hidden output truncation.",
@@ -45,7 +57,7 @@ pub fn local_tool_specs() -> Vec<ToolSpec> {
             &["command"],
         ),
     ]
-}
+});
 fn spec(name: &str, description: &str, properties: Value, required: &[&str]) -> ToolSpec {
     ToolSpec::new(
         name.parse().expect("static tool name"),

@@ -25,6 +25,13 @@ frozen execution snapshot. The Session registers and settles its interactions
 through `ToolBatchHost`. The batch returns ordered results and any stop reason;
 the concrete tool owners still confirm actual cleanup before the Session finishes.
 
+`ToolSpec` shares immutable, checked declarations. A selected `ToolSet` freezes
+the exact declaration read from each implementation; checked factory binding
+compares that same value with its registration. Execution wrappers map the bound
+model or tools while retaining those declarations and the validated selection.
+Policy requests borrow read-only invocation data, and execution consumes the
+owned arguments. These internal changes preserve the serialized value formats.
+
 There is no spawned loop, independent control plane, input/history callback, or
 accumulated history report. `LoopId` remains a native correlation value so existing
 history records keep their format. See [SPEC 4.10.1](../../SPEC.md) and

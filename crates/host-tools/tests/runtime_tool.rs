@@ -77,6 +77,16 @@ async fn runtime_pairs_agent_acceptance_with_actual_upstream_call_id() {
             port.port(),
         )
         .unwrap();
+    let declaration = registry.spec("agent").unwrap();
+    let bound_tool = selected.get(declaration.name()).unwrap();
+    assert!(std::ptr::eq(
+        declaration.input_schema(),
+        bound_tool.spec().input_schema()
+    ));
+    assert!(std::ptr::eq(
+        declaration.input_schema(),
+        selected.specs()[0].input_schema()
+    ));
     let call = "provider-call-42".parse().unwrap();
     let arguments = json!({"action":"create","resource":"session","target":{"host_id":port.source.host_id,"agent_id":port.source.session.agent_id},"text":"review"});
     let model = Arc::new(FixtureModel {

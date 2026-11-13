@@ -27,14 +27,14 @@ pub enum ToolPolicyError {
 }
 
 #[derive(Clone)]
-pub struct ToolPolicyRequest {
-    pub invocation: ToolInvocation,
-    pub spec: ToolSpec,
+pub struct ToolPolicyRequest<'a> {
+    pub invocation: &'a ToolInvocation,
+    pub spec: &'a ToolSpec,
     pub cancellation: CancellationToken,
     pub deadline: Instant,
 }
 
-impl fmt::Debug for ToolPolicyRequest {
+impl fmt::Debug for ToolPolicyRequest<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ToolPolicyRequest")
@@ -141,11 +141,11 @@ pub type ToolPolicyFuture<'a> =
     Pin<Box<dyn Future<Output = Result<ToolDecision, ToolPolicyError>> + Send + 'a>>;
 
 pub trait ToolPolicy: Send + Sync + 'static {
-    fn decide<'a>(&'a self, request: ToolPolicyRequest) -> ToolPolicyFuture<'a>;
+    fn decide<'a>(&'a self, request: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a>;
 }
 
 impl<T: ToolPolicy + ?Sized> ToolPolicy for Arc<T> {
-    fn decide<'a>(&'a self, request: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
+    fn decide<'a>(&'a self, request: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         (**self).decide(request)
     }
 }

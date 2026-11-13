@@ -10,8 +10,11 @@ use minicore_host_runtime::{
         ModelErrorKind, ModelFinishReason, ModelMessage, ModelRequest, Usage,
     },
 };
-use serde_json::{Value, json};
-use std::time::{Duration, Instant};
+use serde_json::Value;
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const SYSTEM: &str = "Summarize historical conversation data for continued work. \
 Preserve the user's goals, decisions, constraints, concrete facts, unresolved work, \
@@ -79,13 +82,14 @@ async fn generate_inner(
     }
     let mut position = 0;
     let mut previous: Option<SummaryHistory> = None;
+    let mut pending = None;
     while position < plan.groups.len() {
         check_active(&context)?;
-        let mut records = Vec::new();
+        let mut records = String::new();
         // The empty request supplies the actual Runtime envelope, instructions,
         // prior summary, limits and reasoning. Only the array's contents grow.
         let mut request_bytes =
-            serialized_request_bytes(&utility_request(plan, previous.as_ref(), &[])?)?;
+            serialized_request_bytes(&utility_request(plan, previous.as_ref(), &records)?)?;
         let mut end = position;
         // Leave the desired summary room when possible; this is a chunking
         // signal, not a hard token ceiling or an application capacity quota.
@@ -96,21 +100,30 @@ async fn generate_inner(
             .max(1);
         loop {
             check_active(&context)?;
-            let group = &plan.groups[end];
-            let record = group_data(
-                &plan.source.items[group.clone()],
-                &plan.original.messages()
-                    [plan.message_offset + group.start..plan.message_offset + group.end],
-            )?;
+            let record = match pending.take() {
+                Some(record) => record,
+                None => {
+                    let group = &plan.groups[end];
+                    EncodedGroup::new(group_data(
+                        &plan.source.items[group.clone()],
+                        &plan.original.messages()
+                            [plan.message_offset + group.start..plan.message_offset + group.end],
+                    )?)?
+                }
+            };
             let proposed_bytes = request_bytes
-                .saturating_add(utility_record_bytes(&record)?)
+                .saturating_add(record.request_bytes)
                 .saturating_add(u64::from(!records.is_empty()));
             // Round once for the complete request. A first oversized exchange
             // remains indivisible and is still sent to the actual provider.
             if end > position && proposed_bytes.div_ceil(4) > chunk_goal {
+                pending = Some(record);
                 break;
             }
-            records.push(record);
+            if !records.is_empty() {
+                records.push(',');
+            }
+            records.push_str(&record.text);
             request_bytes = proposed_bytes;
             end += 1;
             if end == plan.groups.len() {
@@ -163,31 +176,42 @@ async fn generate_inner(
     })
 }
 
-fn utility_record_bytes(record: &Value) -> Result<u64, CompactionError> {
-    let text = serde_json::to_string(record).map_err(|_| CompactionError::Serialization)?;
-    // Validate before the size decision, including a rejected next exchange.
-    // JSON escapes C0 controls, but can still contain other invalid user text.
-    // The same Runtime constructor validates the fully materialized request.
-    let ModelMessage::User(text) =
-        ModelMessage::user(text).map_err(|_| CompactionError::Serialization)?
-    else {
-        unreachable!("Runtime's user constructor returns a user message")
-    };
-    serialized_string_content_bytes(&text)
+/// The exact validated JSON is counted inside the outer request string and
+/// then copied verbatim into its historical data. A group rejected by one
+/// chunk retains this encoding for the next chunk.
+struct EncodedGroup {
+    text: Arc<str>,
+    request_bytes: u64,
+}
+impl EncodedGroup {
+    fn new(record: Value) -> Result<Self, CompactionError> {
+        let text = serde_json::to_string(&record).map_err(|_| CompactionError::Serialization)?;
+        // Validate before the size decision, including a rejected next exchange.
+        // JSON escapes C0 controls, but can still contain other invalid user text.
+        let ModelMessage::User(text) =
+            ModelMessage::user(text).map_err(|_| CompactionError::Serialization)?
+        else {
+            unreachable!("Runtime's user constructor returns a user message")
+        };
+        let request_bytes = serialized_string_content_bytes(&text)?;
+        Ok(Self {
+            text,
+            request_bytes,
+        })
+    }
 }
 
 fn utility_request(
     plan: &CompactionPlan,
     previous: Option<&SummaryHistory>,
-    records: &[Value],
+    records: &str,
 ) -> Result<ModelRequest, CompactionError> {
-    let data = json!({
-        "previous_summary": previous.map(|summary| summary.content.as_str()),
-        "historical_exchanges": records,
-    });
+    let previous = serde_json::to_string(&previous.map(|summary| summary.content.as_str()))
+        .map_err(|_| CompactionError::Serialization)?;
     let user = format!(
         "Aim for approximately {} tokens if the facts permit; this is a soft goal.\n\
-         Historical data follows as JSON:\n{data}",
+         Historical data follows as JSON:\n\
+         {{\"historical_exchanges\":[{records}],\"previous_summary\":{previous}}}",
         plan.summary_target.max(1)
     );
     ModelRequest::new(

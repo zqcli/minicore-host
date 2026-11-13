@@ -87,7 +87,11 @@ impl ResourceResolver for Resources {
             return execution.clone();
         };
         let mut tools = ToolSet::builder();
-        tools.register_arc(output.wrap(Arc::clone(tool)));
+        // Probe the trusted output boundary with altered invocations before
+        // forwarding the real Runtime call to the file-reading fixture.
+        tools.register_arc(Arc::new(InvocationIdentityProbe {
+            inner: output.wrap(Arc::clone(tool), tool.spec().clone()),
+        }));
         ExecutionConfig::new(
             Arc::clone(execution.model()),
             execution.reasoning(),
@@ -464,6 +468,36 @@ async fn response_indices_continue_across_internal_loops_in_one_turn() {
     );
 }
 
+struct InvocationIdentityProbe {
+    inner: Arc<dyn minicore_host_runtime::tools::Tool>,
+}
+impl minicore_host_runtime::tools::Tool for InvocationIdentityProbe {
+    fn spec(&self) -> &minicore_host_runtime::tools::ToolSpec {
+        self.inner.spec()
+    }
+    fn execute<'a>(
+        &'a self,
+        invocation: minicore_host_runtime::tools::ToolInvocation,
+        context: minicore_host_runtime::tools::ToolContext,
+    ) -> minicore_host_runtime::tools::ToolFuture<'a> {
+        Box::pin(async move {
+            for field in ["call", "name", "arguments"] {
+                let mut altered = invocation.clone();
+                match field {
+                    "call" => altered.tool_call_id = "unregistered-call".parse().unwrap(),
+                    "name" => altered.tool_name = "unregistered_tool".parse().unwrap(),
+                    "arguments" => altered.arguments["unexpected"] = serde_json::json!(true),
+                    _ => unreachable!(),
+                }
+                assert!(matches!(
+                    self.inner.execute(altered, context.clone()).await,
+                    Err(minicore_host_runtime::tools::ToolError::Internal)
+                ));
+            }
+            self.inner.execute(invocation, context).await
+        })
+    }
+}
 struct GatedFileTool {
     spec: minicore_host_runtime::tools::ToolSpec,
     entered: mpsc::UnboundedSender<()>,
@@ -561,6 +595,7 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
         ],
     );
     let mut turns = Vec::new();
+    let mut previous_sink: Option<ToolOutputSink> = None;
     for round in 0..2 {
         send(&host, &caller, &target, MessageMode::FollowUp);
         starts.recv().await.unwrap();
@@ -581,6 +616,12 @@ async fn real_tool_process_output_and_complete_results_have_separate_owners() {
         );
         call_file(&events[round * 2], &path);
         arrivals.recv().await.unwrap();
+        if let Some(previous) = &previous_sink {
+            // The same ToolCallId in a later Turn cannot revive an old sink.
+            assert!(!previous.emit("stdout", "wrong Turn"));
+            assert!(previous.retain_owned().is_err());
+        }
+        previous_sink = retained_sink.lock().unwrap().clone();
         let (source, data) = loop {
             if let ObservationEvent::Activity(ActivityEvent::ToolOutput { source, data }) =
                 next(&mut sub).await

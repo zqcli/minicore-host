@@ -36,6 +36,8 @@ pub enum ToolSetError {
     DuplicateTool,
     #[error("tool specification panicked")]
     Panicked,
+    #[error("bound tool declaration differs from its registered declaration")]
+    SpecMismatch,
 }
 
 impl ToolSet {
@@ -60,6 +62,31 @@ impl ToolSet {
         &self.specs
     }
 
+    /// Wraps the selected implementations without reading their declarations
+    /// again. The original names, ordering and frozen specifications remain.
+    pub fn map_tools(
+        &self,
+        mut map: impl FnMut(Arc<dyn Tool>, &ToolSpec) -> Arc<dyn Tool>,
+    ) -> Self {
+        let entries = self
+            .entries
+            .iter()
+            .map(|(name, tool)| {
+                (
+                    name.clone(),
+                    EnabledTool {
+                        implementation: map(Arc::clone(&tool.implementation), &tool.spec),
+                        spec: tool.spec.clone(),
+                    },
+                )
+            })
+            .collect();
+        Self {
+            specs: Arc::clone(&self.specs),
+            entries: Arc::new(entries),
+        }
+    }
+
     pub(crate) fn shared_specs(&self) -> Arc<[ToolSpec]> {
         Arc::clone(&self.specs)
     }
@@ -78,6 +105,23 @@ impl ToolSetBuilder {
     }
 
     pub fn register_arc(&mut self, tool: Arc<dyn Tool>) -> &mut Self {
+        self.register_tool(tool, None)
+    }
+
+    /// Checks and freezes the same declaration returned by the bound tool.
+    pub fn register_arc_checked(
+        &mut self,
+        tool: Arc<dyn Tool>,
+        expected: &ToolSpec,
+    ) -> Result<&mut Self, ToolSetError> {
+        self.register_tool(tool, Some(expected));
+        match self.error {
+            Some(error) => Err(error),
+            None => Ok(self),
+        }
+    }
+
+    fn register_tool(&mut self, tool: Arc<dyn Tool>, expected: Option<&ToolSpec>) -> &mut Self {
         if self.error.is_some() {
             return self;
         }
@@ -88,6 +132,10 @@ impl ToolSetBuilder {
                 return self;
             }
         };
+        if expected.is_some_and(|expected| expected != &spec) {
+            self.error = Some(ToolSetError::SpecMismatch);
+            return self;
+        }
         let name = spec.name().clone();
         if self.tools.contains_key(&name) {
             self.error = Some(ToolSetError::DuplicateTool);

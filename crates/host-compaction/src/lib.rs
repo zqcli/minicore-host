@@ -12,7 +12,7 @@ mod utility;
 
 pub use plan::{
     CompactionCandidate, CompactionPlan, ContextEstimate, HistorySnapshot, estimate_context,
-    estimate_request_tokens, prepare,
+    estimate_request_tokens, prepare, prepare_automatic,
 };
 pub use utility::{GenerationFailure, UtilityUsage, generate};
 

@@ -15,7 +15,7 @@ use minicore_host_runtime::{
         ModelStartFuture, ModelStream, ReasoningPreference,
     },
     prompt::DefaultPromptProvider,
-    tools::{ToolContext, ToolError, ToolInvocation, ToolSet},
+    tools::{ToolContext, ToolError, ToolInvocation},
 };
 use minicore_host_tools::*;
 use minicore_host_workspace::{FileSnapshot, Workspace};
@@ -290,20 +290,7 @@ impl ResourceResolver for Resources {
         execution: &ExecutionConfig,
         output: ToolOutputBinding,
     ) -> ExecutionConfig {
-        let mut tools = ToolSet::builder();
-        for spec in self.registry.specs() {
-            if let Some(tool) = execution.tools().get(spec.name()) {
-                tools.register_arc(output.wrap(tool));
-            }
-        }
-        ExecutionConfig::new(
-            execution.model().clone(),
-            execution.reasoning(),
-            tools.build().unwrap(),
-            execution.policy().cloned(),
-            execution.prompt().clone(),
-        )
-        .unwrap()
+        execution.map_tools(|tool, spec| output.wrap(tool, spec.clone()))
     }
 }
 fn resources(calls: Vec<Option<Call>>, reject: bool, fail_command_record: bool) -> Arc<Resources> {

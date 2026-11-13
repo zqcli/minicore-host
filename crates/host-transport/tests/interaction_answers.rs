@@ -433,7 +433,7 @@ fn answer_payload_reuses_strict_runtime_types_and_rejects_unregistered_shapes() 
 
 struct ApprovalPolicy;
 impl ToolPolicy for ApprovalPolicy {
-    fn decide<'a>(&'a self, _: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
+    fn decide<'a>(&'a self, _: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         Box::pin(async {
             ToolDecision::require_approval(
                 ApprovalRequest::new("permit actual fixture tool", ApprovalRisk::Low).unwrap(),

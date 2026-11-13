@@ -392,6 +392,27 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
     assert_eq!(result.data.partials.len(), 1);
     assert_eq!(result.data.partials[0].response_index, 2);
     assert_eq!(result.data.history.len(), raw.history.len());
+    // Empty complete projections remain complete, while the readable body of
+    // the failed request remains a partial and never adds an Assistant item.
+    for (response_index, expected) in [(0, ""), (1, ""), (2, "unfinished second Loop")] {
+        let output = fixture
+            .session
+            .output_read(
+                &caller,
+                &first,
+                Some(response_index),
+                None,
+                &TextReadRequest {
+                    channel: "text".into(),
+                    start: 0,
+                    end: 1000,
+                    max_bytes: 1000,
+                },
+            )
+            .unwrap();
+        assert_eq!(output.text, expected);
+        assert_eq!(output.end, expected.len() as u64);
+    }
     assert!(
         !result
             .data

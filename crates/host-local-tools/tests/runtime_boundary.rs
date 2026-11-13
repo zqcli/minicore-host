@@ -11,6 +11,26 @@ use std::{fs, sync::Arc};
 use support::*;
 
 #[tokio::test]
+async fn selected_local_tools_share_the_registered_static_declarations() {
+    let (_root, tools, _records) = fixture().await;
+    for declared in minicore_host_local_tools::local_tool_specs() {
+        let first = tools.tool(declared.name().as_str()).unwrap();
+        let second = tools.tool(declared.name().as_str()).unwrap();
+        assert_eq!(first.spec(), &declared);
+        assert!(std::ptr::eq(
+            first.spec().input_schema(),
+            declared.input_schema()
+        ));
+        assert!(std::ptr::eq(
+            first.spec().input_schema(),
+            second.spec().input_schema()
+        ));
+    }
+    assert!(tools.tool("not-registered").is_none());
+    assert!(tools.finish().await.is_empty());
+}
+
+#[tokio::test]
 async fn binding_survives_successive_tool_batches_until_public_turn_finish() {
     let (root, tools, records) = fixture().await;
     let first = vec![(
@@ -38,7 +58,7 @@ async fn binding_survives_successive_tool_batches_until_public_turn_finish() {
 
 struct Deny;
 impl ToolPolicy for Deny {
-    fn decide<'a>(&'a self, _: ToolPolicyRequest) -> ToolPolicyFuture<'a> {
+    fn decide<'a>(&'a self, _: ToolPolicyRequest<'a>) -> ToolPolicyFuture<'a> {
         Box::pin(async { ToolDecision::deny("explicit Runtime policy fixture") })
     }
 }

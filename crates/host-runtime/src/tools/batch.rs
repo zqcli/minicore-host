@@ -113,11 +113,6 @@ pub async fn run_tool_batch(
                 .tools()
                 .entry(call.name())
                 .expect("model assembly accepts only this request's frozen tools");
-            let invocation = ToolInvocation {
-                tool_call_id: call.tool_call_id().clone(),
-                tool_name: call.name().clone(),
-                arguments: call.arguments().clone(),
-            };
             ctx.observe(ToolBatchEvent::Started {
                 call_id: call.tool_call_id().clone(),
                 tool_name: call.name().clone(),
@@ -125,7 +120,7 @@ pub async fn run_tool_batch(
             run_tool_call(
                 &ctx,
                 ctx.context.request_index,
-                &invocation,
+                call,
                 enabled,
                 snapshot.policy().cloned(),
             )
@@ -196,15 +191,20 @@ fn interaction_failure() -> ToolBatchStop {
 async fn run_tool_call(
     ctx: &Batch,
     request_index: u32,
-    invocation: &ToolInvocation,
+    call: &ToolCall,
     enabled: &EnabledTool,
     policy: Option<Arc<dyn ToolPolicy>>,
 ) -> ToolStep {
     let cancellation = ctx.context.cancellation.clone();
+    let invocation = ToolInvocation {
+        tool_call_id: call.tool_call_id().clone(),
+        tool_name: call.name().clone(),
+        arguments: call.arguments().clone(),
+    };
 
     let decision = match decide_policy(
         policy,
-        invocation,
+        &invocation,
         &enabled.spec,
         ctx.context.deadline,
         &cancellation,
@@ -217,7 +217,7 @@ async fn run_tool_call(
             return ToolStep::Result(denied_result(
                 ctx.context.loop_id,
                 request_index,
-                invocation,
+                call,
                 reason,
             ));
         }
@@ -235,7 +235,7 @@ async fn run_tool_call(
         let (reply, receiver) = oneshot::channel();
         let answer = match wait_interaction(
             ctx,
-            invocation,
+            call,
             interaction_id,
             InteractionKind::Approval(request),
             reply,
@@ -252,7 +252,7 @@ async fn run_tool_call(
                 return ToolStep::Result(denied_result(
                     ctx.context.loop_id,
                     request_index,
-                    invocation,
+                    call,
                     None,
                 ));
             }
@@ -271,7 +271,7 @@ async fn run_tool_call(
         ToolPort::Completed(output) => ToolStep::Result(completed_result(
             ctx.context.loop_id,
             request_index,
-            invocation,
+            call,
             output,
         )),
         ToolPort::RequestInput(request) => {
@@ -282,7 +282,7 @@ async fn run_tool_call(
             let (reply, receiver) = oneshot::channel();
             let answer = match wait_interaction(
                 ctx,
-                invocation,
+                call,
                 interaction_id,
                 InteractionKind::ToolInput(request.clone()),
                 reply,
@@ -299,7 +299,7 @@ async fn run_tool_call(
                     ToolStep::Result(provided_input_result(
                         ctx.context.loop_id,
                         request_index,
-                        invocation,
+                        call,
                         content,
                     ))
                 }
@@ -309,8 +309,8 @@ async fn run_tool_call(
         ToolPort::Failed => ToolStep::Result(terminal_tool_result(
             ctx.context.loop_id,
             request_index,
-            invocation.tool_call_id(),
-            invocation.tool_name(),
+            call.tool_call_id(),
+            call.name(),
             ToolResultOutcome::Failed,
             "tool failed",
         )),
@@ -345,8 +345,8 @@ async fn decide_policy(
         policy_timeout,
         |child, deadline| {
             let request = ToolPolicyRequest {
-                invocation: invocation.clone(),
-                spec: spec.clone(),
+                invocation,
+                spec,
                 cancellation: child,
                 deadline,
             };
@@ -385,7 +385,7 @@ enum ToolPort {
 
 async fn run_tool_port(
     ctx: &Batch,
-    invocation: &ToolInvocation,
+    invocation: ToolInvocation,
     implementation: Arc<dyn crate::tools::Tool>,
     turn_deadline: Option<Instant>,
 ) -> ToolPort {
@@ -402,7 +402,7 @@ async fn run_tool_port(
                     host: Arc::clone(&ctx.host),
                 }),
             };
-            implementation.execute(invocation.clone(), context)
+            implementation.execute(invocation, context)
         },
     )
     .await;
@@ -445,7 +445,7 @@ impl ToolProgressEmitter for BatchProgress {
 
 async fn wait_interaction(
     ctx: &Batch,
-    invocation: &ToolInvocation,
+    call: &ToolCall,
     interaction_id: InteractionId,
     kind: InteractionKind,
     reply: oneshot::Sender<InteractionAnswer>,
@@ -453,8 +453,8 @@ async fn wait_interaction(
 ) -> Result<InteractionAnswer, ToolBatchStop> {
     let pending = PendingInteraction {
         interaction_id,
-        tool_call_id: invocation.tool_call_id().clone(),
-        tool_name: invocation.tool_name().clone(),
+        tool_call_id: call.tool_call_id().clone(),
+        tool_name: call.name().clone(),
         kind,
     };
     catch_unwind(AssertUnwindSafe(|| {
@@ -483,14 +483,14 @@ async fn wait_interaction(
 fn completed_result(
     id: LoopId,
     request_index: u32,
-    invocation: &ToolInvocation,
+    call: &ToolCall,
     output: ToolOutput,
 ) -> ToolResultHistory {
     ToolResultHistory {
         loop_id: id,
         request_index,
-        call_id: invocation.tool_call_id().clone(),
-        tool_name: invocation.tool_name().clone(),
+        call_id: call.tool_call_id().clone(),
+        tool_name: call.name().clone(),
         outcome: ToolResultOutcome::Success,
         output,
     }
@@ -499,14 +499,14 @@ fn completed_result(
 fn provided_input_result(
     id: LoopId,
     request_index: u32,
-    invocation: &ToolInvocation,
+    call: &ToolCall,
     content: String,
 ) -> ToolResultHistory {
     ToolResultHistory {
         loop_id: id,
         request_index,
-        call_id: invocation.tool_call_id().clone(),
-        tool_name: invocation.tool_name().clone(),
+        call_id: call.tool_call_id().clone(),
+        tool_name: call.name().clone(),
         outcome: ToolResultOutcome::InputProvided,
         output: ToolOutput::new(content).expect("validated answer has valid JSON text"),
     }
@@ -515,14 +515,14 @@ fn provided_input_result(
 fn denied_result(
     id: LoopId,
     request_index: u32,
-    invocation: &ToolInvocation,
+    call: &ToolCall,
     reason: Option<Text>,
 ) -> ToolResultHistory {
     ToolResultHistory {
         loop_id: id,
         request_index,
-        call_id: invocation.tool_call_id().clone(),
-        tool_name: invocation.tool_name().clone(),
+        call_id: call.tool_call_id().clone(),
+        tool_name: call.name().clone(),
         outcome: ToolResultOutcome::Denied,
         output: ToolOutput::new(reason.as_ref().map_or("tool denied", Text::as_str))
             .expect("validated denial reason has valid text"),

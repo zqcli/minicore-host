@@ -84,19 +84,7 @@ impl ResourceResolver for Resources {
         execution: &ExecutionConfig,
         output: ToolOutputBinding,
     ) -> ExecutionConfig {
-        let Some(tool) = &self.tool else {
-            return execution.clone();
-        };
-        let mut tools = ToolSet::builder();
-        tools.register_arc(output.wrap(Arc::clone(tool)));
-        ExecutionConfig::new(
-            Arc::clone(execution.model()),
-            execution.reasoning(),
-            tools.build().unwrap(),
-            execution.policy().cloned(),
-            Arc::clone(execution.prompt()),
-        )
-        .unwrap()
+        execution.map_tools(|tool, spec| output.wrap(tool, spec.clone()))
     }
 }
 pub fn resources(
