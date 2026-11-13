@@ -1,6 +1,6 @@
 # Engineering instructions
 
-- The complete design baseline is `SPEC.md` (v4.10.1, SHA-256 `32442b29207bde46bd2199e5dbf7a10b4d0c9ac74240819b9076497733d10135`). Implement its ownership, execution, and acceptance contracts.
+- The complete design baseline is `SPEC.md` (v4.10.2, SHA-256 `55476e6d2c6c9ec5b857f2b9235834a162b3ad85ce56a8e2a295135f7dc370c7`). Implement its ownership, execution, and acceptance contracts.
 - Develop on `dev` and short-lived topic branches/worktrees. Do not merge into `main` before independent review and required tests pass.
 - Follow the repository owner's current explicit publication authorization and applicable permissions. Confirm the exact destination and source checkpoint, preserve remote history, and never force-push.
 - Use descriptive English commit subjects in the exact `type(scope): summary` form, for example `feat(core): bind execution resources`. A scope is required. Do not add co-author trailers. Preserve already published commit history.

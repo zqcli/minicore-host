@@ -1,6 +1,16 @@
 # MiniCore Host
 
-## Current checkpoint: provider decoding and assembly (Task 108)
+## Current work: Host client capabilities (Task 109)
+
+[Task 109](tasks/109-host-capabilities/TASK.md) implements the approved Host-only
+capability work against dev `7a1881c85e57a97c85724c1a90a87852a1930bd8`.
+SPEC is updated first to 4.10.2. The target Host workspace release is 0.11.0:
+Responses, single-file apply_patch, positioned fixed-window history, and actual
+Session/history activity metadata. Tool argument generation observation, TUI/Web
+changes and old-data migration are excluded. Implementation and validation are
+pending; this checkpoint is a design change, not a runtime completion claim.
+
+## Previous checkpoint: provider decoding and assembly (Task 108)
 
 [Task 108](tasks/108-provider-assembly/TASK.md) implements the approved review
 item 5 against dev `913b736bd4e3d72ef5f9a9a7d9d0b381925a6a7a`: directly decode
