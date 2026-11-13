@@ -100,12 +100,21 @@ impl HostConfig {
     }
 }
 
+/// Explicit provider wire protocol. Endpoint paths do not select or negotiate it.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiModelApi {
+    ChatCompletions,
+    Responses,
+}
+
 /// Explicit OpenAI-compatible configuration. Capability values are declarations
 /// from the user's model configuration, not discovered or guessed capabilities.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpenAiModelSettings {
     pub model: ModelRef,
+    pub api: OpenAiModelApi,
     pub endpoint: String,
     pub provider_model: String,
     pub api_key_env: String,
@@ -118,6 +127,7 @@ impl fmt::Debug for OpenAiModelSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpenAiModelSettings")
             .field("model", &self.model)
+            .field("api", &self.api)
             .field("context_window", &self.context_window)
             .field("supported_reasoning", &self.supported_reasoning)
             .field("supports_tools", &self.supports_tools)
@@ -164,6 +174,7 @@ pub enum LogOutput {
 #[serde(deny_unknown_fields)]
 pub struct ModelDescription {
     pub model: ModelRef,
+    pub api: OpenAiModelApi,
     pub context_window: u64,
     pub supported_reasoning: Vec<ReasoningPreference>,
     pub supports_tools: bool,
@@ -172,6 +183,7 @@ impl From<&OpenAiModelSettings> for ModelDescription {
     fn from(value: &OpenAiModelSettings) -> Self {
         Self {
             model: value.model.clone(),
+            api: value.api,
             context_window: value.context_window,
             supported_reasoning: value.supported_reasoning.clone(),
             supports_tools: value.supports_tools,
@@ -464,6 +476,8 @@ fn environment_name(name: &str) -> Result<(), Fault> {
 
 #[cfg(test)]
 mod credential_environment_tests;
+#[cfg(test)]
+mod protocol_tests;
 #[cfg(test)]
 mod reload_tests;
 #[cfg(test)]

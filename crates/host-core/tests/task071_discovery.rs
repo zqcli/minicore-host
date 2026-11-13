@@ -105,6 +105,7 @@ async fn actual_host_facilities_and_query_values_do_not_retain_resources() {
     let config = HostConfig {
         name: "owner discovery".into(),
         models: vec![OpenAiModelSettings {
+            api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "configured/model".parse().unwrap(),
             endpoint: "https://example.invalid/v1".into(),
             provider_model: "provider-model".into(),

@@ -64,7 +64,7 @@ impl Policy {
     fn classify(&self, request: &ToolPolicyRequest<'_>) -> Option<ToolClass> {
         match request.invocation.tool_name().as_str() {
             "read" if self.builtin_read => Some(ToolClass::ReadOnly),
-            "write" | "edit" | "bash" => Some(ToolClass::Mutating),
+            "write" | "edit" | "apply_patch" | "bash" => Some(ToolClass::Mutating),
             // Use the same parser and validation as dispatch, not an unchecked
             // action string that might conceal a mutating or invalid branch.
             "agent" if self.builtin_agent => {

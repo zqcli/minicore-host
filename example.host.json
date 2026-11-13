@@ -3,6 +3,7 @@
   "framework_instructions": "",
   "models": [{
     "model": "provider/chat",
+    "api": "chat_completions",
     "endpoint": "https://provider.example.invalid/v1/chat/completions",
     "provider_model": "replace-with-provider-model",
     "api_key_env": "MINICORE_MODEL_KEY",

@@ -63,6 +63,7 @@ pub(crate) fn config(endpoint: &str) -> HostConfig {
         name: "Production local tools fixture".into(),
         framework_instructions: "FRAMEWORK A".into(),
         models: vec![OpenAiModelSettings {
+            api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "custom/provider/chat".parse().unwrap(),
             endpoint: endpoint.into(),
             provider_model: "provider-A".into(),

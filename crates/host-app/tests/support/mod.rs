@@ -28,6 +28,7 @@ pub fn config(endpoint: Option<String>, network: bool) -> HostConfig {
     };
     if let Some(endpoint) = endpoint {
         config.models.push(OpenAiModelSettings {
+            api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: MODEL.parse().unwrap(),
             endpoint,
             provider_model: "local-http-fixture".into(),

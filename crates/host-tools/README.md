@@ -1,7 +1,7 @@
 # Host tools
 
 The statically compiled `agent` tool reuses Runtime `ToolSpec`, `Tool`, and
-`ToolSet`. Its model inputs expose only the six actions in SPEC v4.10.1 §7.
+`ToolSet`. Its model inputs expose only the six actions in SPEC v4.10.2 §7.
 Identity, operation/message ID generation, source capabilities, and configuration
 revision selection are backend responsibilities, never model-supplied authority.
 

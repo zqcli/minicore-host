@@ -28,7 +28,7 @@ Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for for
 Shared package metadata and dependency pins are declared in the root
 [Cargo.toml](Cargo.toml); members retain their own feature selections. The
 committed lockfile fixes the resolved graph. Runtime is now maintained directly
-in `crates/host-runtime`, at the same 0.10.1 workspace version. Its imported source
+in `crates/host-runtime`, at the same 0.11.0 workspace version. Its imported source
 checkpoint and the integrated validation are recorded in [Task106](tasks/106-host-runtime/TASK.md).
 
 ## Components

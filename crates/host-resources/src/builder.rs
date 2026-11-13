@@ -6,10 +6,13 @@ use crate::{
     workspaces::WorkspaceBindings,
 };
 use minicore_host_core::{
-    HostConfig, HostConfigurationFuture, HostConfigurationPreparer, PreparedHostConfiguration,
+    HostConfig, HostConfigurationFuture, HostConfigurationPreparer, OpenAiModelApi,
+    PreparedHostConfiguration,
 };
 use minicore_host_protocol::{Fault, FaultKind};
-use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
+use minicore_host_provider::{
+    OpenAiChatConfig, OpenAiChatModel, OpenAiResponsesConfig, OpenAiResponsesModel, SecretApiKey,
+};
 use minicore_host_runtime::model::{Model, ModelDescriptor};
 use minicore_host_tools::{ScopeManager, ToolRegistry};
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
@@ -117,23 +120,37 @@ impl HostResourceBuilder {
                     settings.supports_tools,
                 )
                 .map_err(|_| invalid("model capabilities are invalid"))?;
-                let mut connection = OpenAiChatConfig::new(
-                    settings.endpoint.clone(),
-                    settings.provider_model.clone(),
-                    descriptor,
-                );
-                connection.request_timeout = settings.request_timeout_ms.map(Duration::from_millis);
-                let model = OpenAiChatModel::new(
-                    connection,
-                    credentials
-                        .model_keys
-                        .remove(&settings.model)
-                        .ok_or_else(|| {
-                            invalid(format!("model {} credential is missing", settings.model))
-                        })?,
-                )
+                let key = credentials
+                    .model_keys
+                    .remove(&settings.model)
+                    .ok_or_else(|| {
+                        invalid(format!("model {} credential is missing", settings.model))
+                    })?;
+                let timeout = settings.request_timeout_ms.map(Duration::from_millis);
+                let model = match settings.api {
+                    OpenAiModelApi::ChatCompletions => {
+                        let mut connection = OpenAiChatConfig::new(
+                            settings.endpoint.clone(),
+                            settings.provider_model.clone(),
+                            descriptor,
+                        );
+                        connection.request_timeout = timeout;
+                        OpenAiChatModel::new(connection, key)
+                            .map(|model| Arc::new(model) as Arc<dyn Model>)
+                    }
+                    OpenAiModelApi::Responses => {
+                        let mut connection = OpenAiResponsesConfig::new(
+                            settings.endpoint.clone(),
+                            settings.provider_model.clone(),
+                            descriptor,
+                        );
+                        connection.request_timeout = timeout;
+                        OpenAiResponsesModel::new(connection, key)
+                            .map(|model| Arc::new(model) as Arc<dyn Model>)
+                    }
+                }
                 .map_err(|error| invalid(format!("model {}: {error}", settings.model)))?;
-                models.insert(settings.model.clone(), Arc::new(model) as Arc<dyn Model>);
+                models.insert(settings.model.clone(), model);
             }
             if !credentials.model_keys.is_empty() {
                 return Err(invalid(

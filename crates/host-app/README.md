@@ -30,6 +30,7 @@ For example, this **template** declares one OpenAI-compatible provider:
   "framework_instructions": "",
   "models": [{
     "model": "provider/chat",
+    "api": "chat_completions",
     "endpoint": "https://provider.example.invalid/v1/chat/completions",
     "provider_model": "replace-with-provider-model",
     "api_key_env": "MINICORE_MODEL_KEY",
@@ -50,12 +51,22 @@ are private preparation inputs, not saved Host JSON. The process does not scan
 arbitrary environment variables, call a model at startup, or install tools.
 Selected tools must exist in the compiled production registry.
 
-The builtins are `read`, `write`, `edit`, `bash`, and the six-action `agent`
-tool. `apply_patch` is not registered. Registration does not enable tools:
+`api` is required and accepts `"chat_completions"` or `"responses"`. To use
+Responses, select `"api":"responses"` and the provider's full Responses endpoint.
+The Host does not infer a protocol from the endpoint or fall back to another
+protocol. Both ordinary Turns and compaction use the configured selection.
+Responses sends complete input with `store:false`; provider-side conversation
+state is not required. See [the Responses template](../../example.responses.host.json).
+
+The builtins are `read`, `write`, `edit`, `apply_patch`, `bash`, and the six-action
+`agent` tool. Registration does not enable tools:
 `HostConfig.tools` selects available definitions and each Session's `tools`
 selects its bound set, both using entries such as `{"name":"read"}`. The
 template's empty list intentionally enables none. Local tools require a bound
 workspace; they do not use the process's current directory as a fallback.
+`apply_patch` accepts `{ "path": "relative/file", "patch": "..." }` for one
+existing UTF-8 file, using unified diff or a single Codex Update File patch.
+It follows the same approval, mutation guard and edit-journal path as `edit`.
 
 Session `execution.approval` defaults to `"ask"`, including when omitted.
 Mutating calls request approval with `allow_once`/`deny` answers; builtin

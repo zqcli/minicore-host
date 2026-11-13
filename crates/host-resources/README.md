@@ -1,6 +1,6 @@
 # Production Host resource assembly
 
-`HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and one frozen framework/Role prompt per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
+`HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and one frozen framework/Role prompt per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, `apply_patch`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
 
 The source follows those existing preparation boundaries:
 
@@ -16,6 +16,13 @@ Host candidate selection and compaction use the registry's exact ToolSpec lookup
 Each caller keeps its own existing error contract: invalid Host configuration
 is distinct from missing Session resources. Shared prompt construction does not
 bind executable tools or create activation authority for compaction.
+
+Each configured model requires an explicit `api`: `chat_completions` or
+`responses`. The builder constructs that exact provider without endpoint
+guessing, network probes or fallback. Model discovery includes the selected
+protocol without private endpoint, provider-model or credential-source fields.
+Ordinary and compaction bindings select the same configured provider. Existing
+Turns retain their bound protocol and credentials across a configuration reload.
 
 Keep one builder (or its clones) across reloads, so the agent tool's independently owned delegation scopes and concurrent Turns' actual Workspace mutation binding remain shared. `prepare` reads only explicitly named environment variables. `prepare_with_credentials` supports explicit private embedding inputs, including isolated fixture credentials. Neither path sends model requests or executes tools to test availability.
 

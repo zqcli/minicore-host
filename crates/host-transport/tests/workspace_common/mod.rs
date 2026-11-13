@@ -22,6 +22,7 @@ pub async fn candidate(http: &HttpFixture, tools: Vec<ToolBinding>) -> PreparedH
     let config = HostConfig {
         framework_instructions: "Workspace query fixture".into(),
         models: vec![OpenAiModelSettings {
+            api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "workspace/chat".parse().unwrap(),
             endpoint: http.endpoint.clone(),
             provider_model: "local-fixture".into(),

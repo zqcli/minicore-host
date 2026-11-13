@@ -171,6 +171,7 @@ impl Resources {
             models: ["provider-b/chat", MODEL]
                 .into_iter()
                 .map(|name| OpenAiModelSettings {
+                    api: minicore_host_core::OpenAiModelApi::ChatCompletions,
                     model: name.parse().unwrap(),
                     endpoint: provider.endpoint.clone(),
                     provider_model: "configured-chat".into(),

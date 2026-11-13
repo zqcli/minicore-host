@@ -21,6 +21,7 @@ fn config(models: &[&str], network: Option<&str>) -> HostConfig {
             .iter()
             .enumerate()
             .map(|(index, name)| OpenAiModelSettings {
+                api: OpenAiModelApi::ChatCompletions,
                 model: format!("custom/provider/model{index}").parse().unwrap(),
                 endpoint: "http://127.0.0.1:1/v1/chat/completions".into(),
                 provider_model: "test-model".into(),

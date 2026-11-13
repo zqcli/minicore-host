@@ -156,6 +156,7 @@ pub async fn host(http: &HttpFixture) -> Arc<Host> {
     let config = HostConfig {
         framework_instructions: "Transport framework".into(),
         models: vec![OpenAiModelSettings {
+            api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "custom/provider/chat".parse().unwrap(),
             endpoint: http.endpoint.clone(),
             provider_model: "loopback-fixture".into(),

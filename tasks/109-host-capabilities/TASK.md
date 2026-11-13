@@ -40,6 +40,32 @@ new public RPC methods, quotas, implicit retries or execution recovery.
 ## Progress
 
 - 2026-11-13: baseline inspected; SPEC updated before implementation.
-- Implementation: pending.
-- Validation: pending. No live provider or TUI validation is claimed.
+- SPEC-first commit: `32ea194ff2269aa8fb2bebff79355b600d404b45`.
+- Responses implementation and tests integrated as `259926c` and `01b9ddf`;
+  [provider evidence](responses.md) records 71 passing provider cases, including
+  20 new Responses cases, and two compiling doctests.
+- Patch implementation integrated as `c85b2e2`; [patch evidence](patch.md)
+  records 48 passing local-tool cases, including 16 new patch cases.
+- Root integration adds required `OpenAiModelApi`, safe model discovery,
+  exhaustive provider construction, mutating patch policy, configuration
+  templates and package inclusion. A separate worker reviewed these changes;
+  its test-fixture correction was applied, with no unresolved source findings.
+- Root focused checks: two configuration tests, 15 resource/local-tool tests
+  and two real Host Responses/compaction/reload tests pass on Linux. The actual
+  Host binary's read-only policy matrix also passes with a valid patch call.
+- All 13 workspace packages and internal pins are prepared at 0.11.0. The 225
+  external locked package versions, sources and checksums remain unchanged;
+  provider reuses the existing workspace-pinned sha2 dependency.
+- History implementation and independent review continue. Automatic compaction
+  must save the already-bound input prefix before its marker, preserving public
+  positions/times. Metadata checkpoint publication/retirement races are being
+  covered by deterministic owner tests before integration.
+- Full workspace validation and native CI: pending. No live provider or TUI
+  validation is claimed.
 - Publication and tag: pending.
+- Publication capability check: authenticated terminal Git is unavailable
+  (`git push --dry-run` cannot read a username; `gh auth status` reports no
+  account). The available GitHub connector supports branch updates but no tag
+  creation. The browser repository page is also signed out. No remote tag is
+  claimed; finish implementation, checks and branch publication before asking
+  for the final authentication step.

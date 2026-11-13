@@ -266,7 +266,7 @@ async fn binary_omitted_approval_is_ask_and_allow_once_does_not_approve_the_next
 #[tokio::test]
 async fn binary_read_only_blocks_local_and_agent_mutations_but_reads_inspects_and_waits() {
     let mut provider = Provider::start().await;
-    let tools = ["read", "write", "edit", "bash", "agent"];
+    let tools = ["read", "write", "edit", "apply_patch", "bash", "agent"];
     let mut app = App::start(&provider, &tools).await;
     let workspace = tempfile::tempdir().unwrap();
     fs::write(workspace.path().join("input"), "original").unwrap();
@@ -308,6 +308,11 @@ async fn binary_read_only_blocks_local_and_agent_mutations_but_reads_inspects_an
             "edit",
             "edit",
             json!({"path":"input","old_text":"original","new_text":"changed"}),
+        ),
+        (
+            "patch",
+            "apply_patch",
+            json!({"path":"input","patch":"*** Begin Patch\n*** Update File: input\n@@\n-original\n+changed\n*** End Patch\n"}),
         ),
         (
             "bash",

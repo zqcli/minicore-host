@@ -171,6 +171,7 @@ pub fn configuration(endpoint: &str) -> HostConfig {
         ..Default::default()
     };
     config.models.push(OpenAiModelSettings {
+        api: minicore_host_core::OpenAiModelApi::ChatCompletions,
         model: MODEL.parse().unwrap(),
         endpoint: endpoint.into(),
         provider_model: PROVIDER_MODEL.into(),

@@ -10,7 +10,7 @@ description = "Owner-scoped durable storage for MiniCore Host"
 test-support = []
 
 [dependencies]
-minicore-host-protocol = { path = "../host-protocol", version = "=0.10.1" }
+minicore-host-protocol = { path = "../host-protocol", version = "=0.11.0" }
 minicore-host-runtime.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["arbitrary_precision", "raw_value"] }

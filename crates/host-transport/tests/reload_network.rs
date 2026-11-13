@@ -145,6 +145,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     let mut original = config();
     original.framework_instructions = "FRAMEWORK A".into();
     original.models = vec![OpenAiModelSettings {
+        api: minicore_host_core::OpenAiModelApi::ChatCompletions,
         model: "fixture/chat".parse().unwrap(),
         endpoint: provider_a.endpoint.clone(),
         provider_model: "provider-A".into(),

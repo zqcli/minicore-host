@@ -62,7 +62,14 @@ async fn ordinary_and_external_tools_follow_the_three_mode_table() {
         ApprovalMode::ReadOnly,
     ] {
         let policy = Policy::new(mode, true, true);
-        for name in ["read", "write", "edit", "bash", "registered_external"] {
+        for name in [
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "bash",
+            "registered_external",
+        ] {
             assert_mode_decision(
                 mode,
                 policy

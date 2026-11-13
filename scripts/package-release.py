@@ -115,7 +115,8 @@ def main():
         if not executable.endswith(".exe"):
             installed.chmod(0o755)
         documents = [root / filename for filename in (
-            "README.md", "SPEC.md", "PROJECT.md", "example.host.json", "docs/tool-approval.md",
+            "README.md", "SPEC.md", "PROJECT.md", "example.host.json",
+            "example.responses.host.json", "docs/tool-approval.md",
         )]
         documents.extend(sorted((root / "crates").glob("*/README.md")))
         included = set(documents)

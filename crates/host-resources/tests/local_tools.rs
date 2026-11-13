@@ -4,6 +4,8 @@
 #[cfg(target_os = "linux")]
 #[path = "local_tools/completion.rs"]
 mod completion;
+#[path = "local_tools/patch.rs"]
+mod patch;
 #[path = "local_tools/process.rs"]
 mod process;
 #[path = "support/production.rs"]
