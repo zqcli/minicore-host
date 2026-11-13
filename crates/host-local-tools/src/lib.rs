@@ -4,6 +4,7 @@
 mod command;
 mod environment;
 mod files;
+mod patch;
 mod records;
 mod schema;
 mod scope;
@@ -122,6 +123,9 @@ impl Tool for LocalTool {
                     Action::Write(input) => scope::OwnedOutcome::settled(
                         files::write(binding, id, input, context).await,
                     ),
+                    Action::Patch(input) => scope::OwnedOutcome::settled(
+                        files::apply_patch(binding, id, input, context).await,
+                    ),
                     Action::Bash(input) => command::run(binding, id, input, context).await,
                 };
                 // Actual I/O and all its output/observations are settled here,
@@ -153,6 +157,7 @@ enum Action {
     Read(files::ReadInput),
     Edit(files::EditInput),
     Write(files::WriteInput),
+    Patch(files::PatchInput),
     Bash(command::BashInput),
 }
 
@@ -168,6 +173,9 @@ impl Action {
                 .map_err(invalid),
             "write" => serde_json::from_value(value)
                 .map(Self::Write)
+                .map_err(invalid),
+            "apply_patch" => serde_json::from_value(value)
+                .map(Self::Patch)
                 .map_err(invalid),
             "bash" => serde_json::from_value(value)
                 .map(Self::Bash)

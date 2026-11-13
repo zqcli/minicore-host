@@ -14,7 +14,7 @@ pub(crate) fn local_tool_spec(name: &str) -> Option<ToolSpec> {
         .cloned()
 }
 
-static LOCAL_TOOL_SPECS: LazyLock<[ToolSpec; 4]> = LazyLock::new(|| {
+static LOCAL_TOOL_SPECS: LazyLock<[ToolSpec; 5]> = LazyLock::new(|| {
     [
         spec(
             "read",
@@ -45,6 +45,15 @@ static LOCAL_TOOL_SPECS: LazyLock<[ToolSpec; 4]> = LazyLock::new(|| {
                 "content":{"type":"string"}
             }),
             &["path", "content"],
+        ),
+        spec(
+            "apply_patch",
+            "Apply a complete exact patch to one existing UTF-8 workspace file. Accepts a single-file unified diff (with optional matching headers) or one Codex *** Begin Patch / *** Update File / *** End Patch envelope. Preserves source newline semantics. Rejects Add File, Delete File, Move to, multifile patches and ambiguous matches; no fuzzy matching. All hunks must validate before atomic replacement.",
+            json!({
+                "path":{"type":"string","minLength":1,"description":"Workspace-relative path of the existing file; patch headers must match."},
+                "patch":{"type":"string","minLength":1,"description":"Exact unified diff or single Update File envelope. Example: *** Begin Patch\n*** Update File: value.txt\n@@\n-old\n+new\n*** End Patch"}
+            }),
+            &["path", "patch"],
         ),
         spec(
             "bash",

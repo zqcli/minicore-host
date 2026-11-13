@@ -120,6 +120,18 @@ async fn replacements_preserve_private_dacl_and_existing_inheritance_behavior() 
     assert_eq!(everyone_rights(&private), private_rights);
     assert!(protected(&private));
 
+    let patched = invoke(
+        &tools,
+        "apply_patch",
+        json!({"path":"private.txt","patch":"*** Begin Patch\n*** Update File: private.txt\n@@\n-private edited\n+private patched\n*** End Patch\n"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(patched["status"], "applied", "{patched}");
+    assert_eq!(fs::read_to_string(&private).unwrap(), "private patched");
+    assert_eq!(everyone_rights(&private), private_rights);
+    assert!(protected(&private));
+
     // A new file follows the parent policy. Replacing it must retain its
     // unprotected inheritance setting, not freeze the current effective ACL.
     let public = root.path().join("public.txt");
@@ -142,6 +154,18 @@ async fn replacements_preserve_private_dacl_and_existing_inheritance_behavior() 
     .await
     .unwrap();
     assert_eq!(edited["status"], "applied", "{edited}");
+    assert_eq!(everyone_rights(&public), public_rights);
+    assert!(!protected(&public));
+
+    let patched = invoke(
+        &tools,
+        "apply_patch",
+        json!({"path":"public.txt","patch":"*** Begin Patch\n*** Update File: public.txt\n@@\n-public after\n+public patched\n*** End Patch\n"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(patched["status"], "applied", "{patched}");
+    assert_eq!(fs::read_to_string(&public).unwrap(), "public patched");
     assert_eq!(everyone_rights(&public), public_rights);
     assert!(!protected(&public));
 

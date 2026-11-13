@@ -1,6 +1,6 @@
 # Standard local tools
 
-Workspace-bound `read`, `edit`, `write`, and native `bash` implementations of the
+Workspace-bound `read`, `edit`, `write`, `apply_patch`, and native `bash` implementations of the
 internal `host-runtime` `Tool` interface. No UI or Host object is required.
 The immutable Workspace, a narrow, trusted Turn-bound `LocalToolSink` and a
 name-only `CommandEnvironment` are constructor capabilities. Tool JSON contains
@@ -110,4 +110,47 @@ actual Workspace bindings through its owner-held weak map across Turns and
 resource publications, without retaining unused roots. Shell writes, external
 path/permission races and cross-process locking are outside this boundary.
 Parent-directory creation is not an atomic multi-directory transaction.
-`apply_patch` and other tools are absent.
+
+`apply_patch` requires `{ "path": "workspace-relative-file", "patch": "..." }`
+and patches exactly one existing UTF-8 text file. It accepts exact unified hunks,
+optionally preceded by matching `---`/`+++` headers and Git informational headers,
+or one Codex `*** Begin Patch` / `*** Update File: path` / `*** End Patch`
+envelope. The paths in `---`/`+++` and Codex Update File headers must identify
+the declared target; Git informational metadata does not select another file.
+For example:
+
+```json
+{
+  "path": "value.txt",
+  "patch": "*** Begin Patch\n*** Update File: value.txt\n@@\n-old\n+new\n*** End Patch\n"
+}
+```
+
+Unified ranges apply at their declared positions. Codex anchors and text hunks
+must resolve without ambiguity; matching never repairs whitespace or guesses a
+different occurrence. All hunks are parsed, matched and assembled before the
+existing atomic replacement path runs. A failed later hunk cannot publish earlier
+hunks. Add File, Delete File, Move to, multifile patches, binary or NUL-containing
+content, malformed ranges, overlapping hunks and invalid headers are rejected.
+An empty existing text file can be patched using a valid zero-start unified
+insertion. New files are created through `write`.
+
+Unchanged lines retain their actual LF/CRLF endings and whitespace. Added lines
+use the existing file's majority ending (first ending breaks a tie; LF for an
+empty file). Unified `\ No newline at end of file` markers apply to their
+specified old/new side. Codex updates preserve the original final-newline state
+when updating the file's end, including when appending after a final line that
+had no newline. No byte, hunk-count or matching-work quota is imposed.
+
+The parser and newline assembly reuse the mature single-file implementation from
+minicore-agent `f36a87366d8e2fe0a1c8216463887902e471c739`, adapted to Host's native
+Runtime types, explicit cancellation/deadline checks and actual mutation worker.
+No external patch subprocess or second file owner is introduced. Successful
+results use the existing `status: applied`, path and byte count. Exact source or
+position conflicts return `status: failed`, `write_outcome: not_applied` and a
+conflict error; malformed or ambiguous patches return `InvalidInvocation`.
+Once an existing source has been captured, rejected patches retain real unchanged
+before/after edit records. Cancellation and deadlines retain their native errors,
+and any necessary after-capture and cleanup complete before the worker ends.
+File replacement or recording errors follow the same truthful applied/unknown
+and cleanup rules as `edit` and `write`; no rollback or retry is claimed.

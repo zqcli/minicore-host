@@ -149,7 +149,7 @@ async fn exact_edit_conflicts_are_not_success_and_do_not_normalize_newlines() {
 #[tokio::test]
 async fn model_cannot_supply_owner_identity_and_unknown_tool_is_absent() {
     let (_, tools, _) = fixture().await;
-    assert!(tools.tool("apply_patch").is_none());
+    assert!(tools.tool("unknown-local-tool").is_none());
     assert_eq!(
         invoke(
             &tools,

@@ -45,6 +45,12 @@ pub(crate) struct WriteInput {
     path: String,
     content: String,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PatchInput {
+    path: String,
+    patch: String,
+}
 
 enum Failure {
     Io(io::Error),
@@ -256,15 +262,28 @@ pub(crate) async fn write(
     }
     mutate(binding, id, Mutation::Write(input), context).await
 }
+pub(crate) async fn apply_patch(
+    binding: Arc<Binding>,
+    id: ToolCallId,
+    input: PatchInput,
+    context: ToolContext,
+) -> Result<ToolExecutionOutcome, ToolError> {
+    if input.patch.is_empty() || input.patch.contains('\0') {
+        return Err(ToolError::InvalidInvocation);
+    }
+    mutate(binding, id, Mutation::Patch(input), context).await
+}
 enum Mutation {
     Edit(EditInput),
     Write(WriteInput),
+    Patch(PatchInput),
 }
 impl Mutation {
     fn path(&self) -> &str {
         match self {
             Self::Edit(input) => &input.path,
             Self::Write(input) => &input.path,
+            Self::Patch(input) => &input.path,
         }
     }
 }
@@ -416,6 +435,29 @@ fn mutate_sync(
                     .replace(&input.old_text, &input.new_text)
                     .into_bytes();
                 (bytes, Some(count))
+            }
+            Mutation::Patch(input) => {
+                let FileSnapshot::Content(bytes) = &before else {
+                    return Err(Failure::Invalid("patch target does not exist"));
+                };
+                let source = std::str::from_utf8(bytes)
+                    .map_err(|_| Failure::Invalid("patch target is not UTF-8"))?;
+                if source.contains('\0') {
+                    return Err(Failure::Invalid("patch target is binary"));
+                }
+                let replacement = crate::patch::apply_single_file_patch(
+                    &input.path,
+                    source,
+                    &input.patch,
+                    context,
+                )
+                .map_err(|error| match error {
+                    ToolError::Failed => Failure::Conflict(
+                        "patch contents or positions do not match the existing file",
+                    ),
+                    other => Failure::Control(other),
+                })?;
+                (replacement.into_bytes(), None)
             }
         };
         check(context)?;
