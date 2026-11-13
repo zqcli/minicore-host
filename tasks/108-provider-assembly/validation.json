@@ -1,0 +1,73 @@
+{
+  "baseline": "913b736bd4e3d72ef5f9a9a7d9d0b381925a6a7a",
+  "production_checkpoint": "5bf49cf9ce8d4b2d2e9e10dfc98daafa11040e96",
+  "source_and_probe_checkpoint": "89cd068c758db7e480f9c4552dd2a69c04e8dd07",
+  "host_version": "0.10.1",
+  "spec_version": "4.10.1",
+  "spec_sha256": "32442b29207bde46bd2199e5dbf7a10b4d0c9ac74240819b9076497733d10135",
+  "cargo_lock_sha256": "37f022017139aa6b008b6e6e901bf7ba48c9eca09816946d713a9c2484115837",
+  "external_locked_packages_unchanged": 225,
+  "rustc": "1.90.0",
+  "cargo_build_jobs": 4,
+  "cargo_incremental": false,
+  "dev_debug": 0,
+  "test_debug": 0,
+  "full_gate": {
+    "command": "./scripts/check.sh",
+    "exit_code": 0,
+    "unique_rust_cases": 1126,
+    "listed_targets": 138,
+    "unique_count_command": "cargo test --workspace --all-targets --locked -- --list",
+    "doctests": 6,
+    "python_checks": 28,
+    "formatting": "passed",
+    "strict_clippy": "passed",
+    "strict_rustdoc": "passed",
+    "whitespace": "passed"
+  },
+  "independent_review": [
+    "Provider contributor reviewed Runtime ownership, raw preservation, release, errors and partial boundaries.",
+    "Runtime contributor reviewed Provider typed/error decoding, UTF-8, protocol state and handoff ordering.",
+    "Measurement contributor independently reviewed Runtime assembly and flagged the documented unknown-extension skip semantics."
+  ],
+  "logs": [
+    {
+      "name": "108-runtime-tests.log",
+      "sha256": "5a58cc2a4bf3ffa6657683df4d6de7726406dc82e434e2a18a7ddb365a1afd23"
+    },
+    {
+      "name": "108-runtime-doc-tests.log",
+      "sha256": "ce60a64d22a385d2fc394903b7191c1437e5ba051b47c6008ca9015c1aa8f2d3"
+    },
+    {
+      "name": "108-runtime-clippy.log",
+      "sha256": "3245d3179b6bcf6b0d01983017e97d7d678f41520406a23a61fa41137b5ea388"
+    },
+    {
+      "name": "108-runtime-core-partial-regression.log",
+      "sha256": "6fa50652a694c00245466584022395b3525d858762c9eee1983f4e6761f0d304"
+    },
+    {
+      "name": "108-provider-test.log",
+      "sha256": "2bf91ded28668d3df1b4c6a5a6ef2587f34caad2ed4482ac6f87327f16516aca"
+    },
+    {
+      "name": "108-provider-clippy.log",
+      "sha256": "0e6b6c7d5c74c975ff5b12429b4f4d75582baf0fce6ff38ee0a6931204002602"
+    },
+    {
+      "name": "108-full-gate.log",
+      "sha256": "9aabb7a6b3424106c575c1221fbe724502cca5835ad48b2c772042275b5c8177"
+    },
+    {
+      "name": "108-test-list.log",
+      "sha256": "84fc67e1ac6f2caedeab4a50e47eb5a3b9fbc47be12f412bd37d1b9226c1464c"
+    }
+  ],
+  "limits": [
+    "Local native validation is Linux x86_64 only; native CI is followed after publication.",
+    "Named scripted loopback/byte fixtures are not live provider validation.",
+    "Formal benchmark execution starts only after verified dev publication.",
+    "Raw local measurements and environment records are delivered separately, not published to the repository."
+  ]
+}

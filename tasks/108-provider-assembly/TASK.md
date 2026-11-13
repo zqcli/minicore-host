@@ -65,9 +65,14 @@ requested configuration, not independently attested effective model settings.
 - Provider and Runtime contributors independently reviewed each other's changes;
   the measurement contributor also reviewed Runtime ownership and partial paths.
   No remaining blocking issue was identified within the approved scope.
-- The release baseline probe is compiled from the untouched dev source. It has
-  not been executed. Full workspace validation, publication and the formal
-  performance comparison remain pending; no performance result is claimed.
+- The full repository gate passes 1,126 unique Rust cases, 6 doctests and 28 Python
+  checks, formatting, strict Clippy/rustdoc and whitespace. Test counts come from
+  the separate all-targets listing, not nested subprocess output. All 225 external
+  locked packages are unchanged. See [validation.json](validation.json).
+- The identical release probe compiles against the untouched dev baseline; it
+  has not been executed. The [measurement source](performance/README.md) records
+  four fixed workloads and six balanced AB/BA rounds. Publication and formal
+  measurement are next; no performance result is claimed at this checkpoint.
 
 ## Evidence and publication
 

@@ -7,8 +7,10 @@ item 5 against dev `913b736bd4e3d72ef5f9a9a7d9d0b381925a6a7a`: directly decode
 ordinary provider frames and make Runtime the single owner of raw tool argument
 assembly and parsing. The SPEC clarifies original argument preservation,
 protocol metadata in partial results and unchanged execution/retry boundaries.
-Host remains 0.10.1; no external dependency or durable format change is planned.
-Validation and dev publication precede the requested paired performance recheck.
+Host remains 0.10.1; external dependencies and the durable format are unchanged.
+The full local gate passes 1,126 unique Rust cases, 6 doctests and 28 Python
+checks, formatting and strict Clippy/rustdoc. Publication to dev precedes the
+requested six-pair performance recheck using the committed measurement source.
 
 ## Previous checkpoint: execution overhead (Task 107)
 
