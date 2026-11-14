@@ -166,8 +166,98 @@ was run. No macOS/Windows runtime validation or Session persistence integration
 is claimed: these tests prove the provider/Runtime partial handoff, not a new
 storage acceptance test.
 
-Remaining parent work: integrate this implementation and task record alongside
+Original handoff: integrate this implementation and task record alongside
 the separately owned replay/error fixes, update PROJECT.md, review the combined
 test-file changes, and run integrated acceptance. Because remote worktrees share
 a Cargo target, invalidate the provider package artifacts under the runner lock
 when switching source checkpoints; do not accept stale test names as evidence.
+
+## Independent-review follow-up — R4 reasoning, 2026-11-14
+
+The owner reports the previous commits were integrated into main at `5215f33`,
+alongside separately owned request/error changes. This follow-up stays on the
+original topic worktree at `14104926fe972b42ba50915fd2d01a06f92c70ae`; it does not
+merge main or those unrelated changes. The original R4 repair covered only
+message/function-call items and missed reasoning item closure.
+
+Follow-up implementation commit:
+`b7b1ef1346187e6856515244dc3c2601cb2fc28f`
+(`fix(provider): retain incomplete Responses reasoning items`).
+This task update is a separate new documentation commit; neither commit amends
+or rewrites the already integrated history.
+
+### Minimal repair
+
+- `responses/wire.rs` splits reasoning structure validation from the existing
+  strict complete-replay validator. `validate_reasoning` still accepts only
+  absent/completed status and delegates unchanged structural checks. Its
+  signature and `request.rs` call site are unchanged.
+- `responses/stream.rs` explicitly permits absent/completed/incomplete status
+  at reasoning item closure. Summary and reasoning-content snapshots may lack
+  subordinate done frames only for an incomplete item; identity, part counts,
+  kinds and received-text fingerprints are still checked. The native item is
+  retained through the existing partial replay path.
+- `response.completed` still uses strict validation and the existing
+  `output.incomplete` guard. Keeping or rewriting the final item status cannot
+  convert known incomplete reasoning into success. No Runtime/core, R1/R2,
+  request/error, PROJECT.md, dependency, real configuration or session changes.
+
+Four appended integration tests and one fixture helper cover:
+
+1. Empty summary, streamed summary with done frames, and streamed summary
+   without text/part done frames. Each reaches the real `IncompleteResponse`,
+   retains actual usage, `incomplete_details`, and the exact native reasoning
+   item (including incomplete status and encrypted content). Driver attempts
+   and fixture request counts prove no retry. Direct provider-stream inspection
+   verifies replay/usage/error and no ToolCallEnd/Finish even with a sibling
+   protocol-closed function call; Runtime keeps that call non-executable.
+2. For each summary shape, a subsequent `response.completed` is rejected both
+   when the final item remains incomplete and when it changes to completed;
+   partial replay retains the original incomplete native item.
+3. Identity, text, content-kind and invalid-status conflicts plus duplicate
+   item.done still fail without replacing actual streamed reasoning text.
+4. An incomplete reasoning item inserted into complete replay is rejected
+   before network dispatch; complete-history policy was not globally relaxed.
+
+### Red/green and full validation
+
+All Rust commands used the same remote runner invocation and evidence directory
+documented above. The updated runner now touches all `host-provider` Rust source
+files inside the shared lock before each command, preventing reuse of another
+worktree's stale provider artifact. Each run below visibly compiled this source.
+
+`reasoning-r4-red-01` (before production edits):
+
+```sh
+cargo test --locked -p minicore-host-provider --test responses_runtime responses_incomplete_reasoning_
+```
+
+Exit 101: 2 failed, 2 passed. The positive partial test received
+`InvalidProviderResponse` instead of `IncompleteResponse`; the completed-disguise
+test found no retained native incomplete item. Structural/replay guard tests
+passed. This is an actual regression red, not a compilation failure.
+
+`reasoning-r4-green-01`:
+
+```sh
+cargo fmt --all && cargo test --locked -p minicore-host-provider --test responses_runtime responses_incomplete_reasoning_
+```
+
+Exit 0: all 4 tests passed, including every summary/status matrix branch.
+
+`reasoning-r4-provider-01`:
+
+```sh
+cargo fmt --all -- --check && cargo test --locked -p minicore-host-provider && cargo clippy --locked -p minicore-host-provider --all-targets -- -D warnings && RUSTDOCFLAGS="-D warnings" cargo doc --locked -p minicore-host-provider --no-deps
+```
+
+Exit 0: formatting passed; 8 provider unit, 1 diagnostics, 42 HTTP/Runtime,
+30 Responses/Runtime tests and 2 doctests passed; all-target provider Clippy
+and provider rustdoc with warnings denied passed. The staged diff whitespace
+check and local full-history whitespace checks also passed. No local Cargo,
+compilation, tests or rustfmt was used. No new workspace-wide count or
+workspace-wide/native-platform/live-model/TUI/storage acceptance is claimed.
+
+Parent next step: integrate only the two follow-up commits and perform combined
+review/acceptance with main's request/error fixes. This follow-up needs no
+request.rs signature adjustment. No push or publication was performed.
