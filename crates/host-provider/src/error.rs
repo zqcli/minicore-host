@@ -109,7 +109,9 @@ fn structured_kind(error: &Value) -> Option<ModelErrorKind> {
             Some(ModelErrorKind::ContextOverflow)
         }
         "rate_limit_exceeded" | "rate_limit_error" => Some(ModelErrorKind::RateLimited),
-        "overloaded_error" | "server_overloaded" | "model_overloaded" => {
+        // Match the specific overload identifier, not the broader
+        // service_unavailable_error type: that alone does not prove safe delivery.
+        "overloaded_error" | "server_overloaded" | "server_is_overloaded" | "model_overloaded" => {
             Some(ModelErrorKind::ProviderUnavailable)
         }
         "invalid_api_key" | "authentication_error" => Some(ModelErrorKind::AuthRejected),
@@ -249,6 +251,33 @@ pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Instan
 mod tests {
     use super::*;
     use reqwest::header::HeaderMap;
+
+    #[test]
+    fn official_overload_preserves_started_delivery_and_quota_priority() {
+        use minicore_host_runtime::model::RetryHint;
+        use serde_json::json;
+
+        let overload = json!({"type":"service_unavailable_error","code":"server_is_overloaded"});
+        let started = provider(&overload, true, 200, None);
+        assert_eq!(started.kind(), ModelErrorKind::ProviderUnavailable);
+        assert_eq!(started.delivery(), DeliveryState::Started);
+        assert_eq!(*started.retry_hint(), RetryHint::Never);
+
+        // Keep the existing code/type compatibility and hard-quota precedence.
+        assert_eq!(
+            structured_kind(&json!({"type":"server_is_overloaded"})),
+            Some(ModelErrorKind::ProviderUnavailable)
+        );
+        for error in [
+            json!({"type":"insufficient_quota","code":"server_is_overloaded"}),
+            json!({"type":"server_is_overloaded","code":"insufficient_quota"}),
+        ] {
+            let error = provider(&error, false, 200, None);
+            assert_eq!(error.kind(), ModelErrorKind::QuotaExceeded);
+            assert_eq!(error.delivery(), DeliveryState::NotStarted);
+            assert_eq!(*error.retry_hint(), RetryHint::Never);
+        }
+    }
 
     #[test]
     fn retry_after_honors_milliseconds_seconds_and_http_dates() {

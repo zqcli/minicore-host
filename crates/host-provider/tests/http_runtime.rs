@@ -496,6 +496,134 @@ async fn runtime_is_the_only_retry_owner_and_only_recognized_rejections_retry() 
 }
 
 #[tokio::test]
+async fn official_overload_http_retries_with_existing_wait_lower_bounds() {
+    for (error, headers, base, minimum) in [
+        (
+            json!({"type":"service_unavailable_error","code":"server_is_overloaded"}),
+            "Retry-After: 0.08\r\n",
+            1,
+            80,
+        ),
+        (
+            json!({"code":"server_is_overloaded"}),
+            "Retry-After-ms: 80\r\n",
+            1,
+            80,
+        ),
+        (
+            json!({"type":"compatible_server_error","code":"server_is_overloaded"}),
+            "Retry-After: 0.001\r\n",
+            80,
+            80,
+        ),
+    ] {
+        let fixture = Fixture::start(vec![
+            Reply::Full {
+                status: 503,
+                content_type: "application/json",
+                headers: headers.to_owned(),
+                body: json!({"error":error}).to_string(),
+                fragment: 0,
+            },
+            Reply::sse(final_text("overload recovered")),
+        ])
+        .await;
+        let options = ExecutionOptions {
+            model_retry_base_delay: Duration::from_millis(base),
+            ..call_options()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
+        let requests = fixture.finish().await;
+        assert!(report.outcome.is_ok(), "{error}: {:?}", report.outcome);
+        assert_eq!(report.attempts, 2);
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].body, requests[1].body);
+        assert!(
+            requests[1]
+                .received_at
+                .duration_since(requests[0].received_at)
+                >= Duration::from_millis(minimum),
+            "{headers:?}: retry must respect both header and backoff lower bounds"
+        );
+    }
+}
+
+#[tokio::test]
+async fn official_overload_http_still_requires_attempt_and_time_budget() {
+    // Attempt exhaustion, remaining deadline, and the 30s wait cap are
+    // independent reasons not to send the otherwise safe second request.
+    for (attempts, timeout, retry_after) in [(1, 3, 0), (2, 3, 10), (2, 120, 60)] {
+        let fixture = Fixture::start(vec![
+            Reply::Full {
+                status: 503,
+                content_type: "application/json",
+                headers: format!("Retry-After: {retry_after}\r\n"),
+                body: json!({"error":{"type":"service_unavailable_error","code":"server_is_overloaded"}}).to_string(),
+                fragment: 0,
+            },
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let options = ExecutionOptions {
+            model_retry_attempts: attempts,
+            model_timeout: Duration::from_secs(timeout),
+            ..call_options()
+        };
+        let report = tokio::time::timeout(
+            Duration::from_secs(5),
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options),
+        )
+        .await
+        .unwrap();
+        let error = failure(&report);
+        assert_eq!(error.kind(), ModelErrorKind::ProviderUnavailable);
+        assert_eq!(error.delivery(), DeliveryState::NotStarted);
+        assert!(matches!(error.retry_hint(), RetryHint::Retryable { .. }));
+        if retry_after > 0 {
+            assert!(
+                matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) }
+                if *delay > Duration::from_secs(retry_after - 1))
+            );
+        }
+        assert_eq!(report.attempts, 1);
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn official_overload_http_does_not_authorize_unknown_delivery() {
+    for (status, error) in [
+        (503, json!({"type":"service_unavailable_error"})),
+        (
+            503,
+            json!({"type":"service_unavailable_error","code":"future_error"}),
+        ),
+        (
+            503,
+            json!({"type":"future_error","code":"future_error","message":"server_is_overloaded"}),
+        ),
+        (
+            500,
+            json!({"type":"service_unavailable_error","code":"server_is_overloaded"}),
+        ),
+    ] {
+        let fixture = Fixture::start(vec![
+            Reply::error(status, json!({"error":error}).to_string()),
+            Reply::sse(final_text("must not happen")),
+        ])
+        .await;
+        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        let failure = failure(&report);
+        assert_eq!(failure.kind(), ModelErrorKind::ProviderUnavailable);
+        assert_eq!(failure.delivery(), DeliveryState::Unknown, "{error}");
+        assert_eq!(*failure.retry_hint(), RetryHint::Never, "{error}");
+        assert_eq!(report.attempts, 1);
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn a_model_start_alone_never_retries() {
     let fixture = Fixture::start(vec![
         Reply::error(
