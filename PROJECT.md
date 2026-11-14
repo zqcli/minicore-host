@@ -1,6 +1,15 @@
 # MiniCore Host
 
-## Current checkpoint: Host 0.11.1 directory picker (Task 110)
+## Current work: JSON configuration directories (Task 111)
+
+[Task 111](tasks/111-config-directory/TASK.md) implements the approved shared
+configuration directory, file-declared Agents, Role references and three optional
+instruction layers. SPEC 4.11.0 is committed before implementation. Host and TUI
+target 0.12.0. The TUI reads tui.json itself; Web remains independently configured.
+Three workers were requested with gpt-6-astra / max. Implementation, integrated
+review, validation and publication are in progress; no new test result is claimed.
+
+## Previous checkpoint: Host 0.11.1 directory picker (Task 110)
 
 [Task 110](tasks/110-workspace-directory-picker/TASK.md) implements authenticated
 Host-level `workspace.roots/list/mkdir` for the independent minicore-web client.
