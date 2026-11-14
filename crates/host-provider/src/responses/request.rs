@@ -279,8 +279,8 @@ fn project<'a>(
     parts: &'a [AssistantPart],
     replay: Replay,
 ) -> Result<Vec<Input<'a>>, ModelError> {
-    if replay.model != model
-        || replay.status.as_deref() != Some("completed")
+    let same_model = replay.model == model;
+    if replay.status.as_deref() != Some("completed")
         || replay
             .response_id
             .as_deref()
@@ -390,6 +390,24 @@ fn project<'a>(
     }
     if end != text.fingerprint.bytes || call_index != calls.len() {
         return Err(invalid());
+    }
+    // Validate the original native replay against canonical history before
+    // dropping model-bound metadata. Model identity is only the configured
+    // provider model string; do not infer a provider from it or the endpoint.
+    if !same_model {
+        input.retain_mut(|item| match item {
+            Input::Reasoning(_) => false,
+            Input::Message(message) => {
+                message.id = None;
+                message.phase = None;
+                true
+            }
+            Input::Call(call) => {
+                call.id = None;
+                true
+            }
+            Input::Output(_) => true,
+        });
     }
     Ok(input)
 }

@@ -27,6 +27,10 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 fn provider(endpoint: &str) -> Arc<OpenAiResponsesModel> {
+    provider_for_model(endpoint, "fixture-responses-model")
+}
+
+fn provider_for_model(endpoint: &str, model: &str) -> Arc<OpenAiResponsesModel> {
     let descriptor = ModelDescriptor::new(
         "fixture/responses".parse().unwrap(),
         128_000,
@@ -42,7 +46,7 @@ fn provider(endpoint: &str) -> Arc<OpenAiResponsesModel> {
         OpenAiResponsesModel::new(
             OpenAiResponsesConfig::new(
                 endpoint.replace("/chat/completions", "/responses"),
-                "fixture-responses-model",
+                model,
                 descriptor,
             ),
             SecretApiKey::new("fixture-not-a-real-key").unwrap(),
@@ -920,6 +924,7 @@ async fn responses_encrypted_only_reasoning_round_trips_without_fake_text() {
     let fixture = Fixture::start(vec![
         Reply::sse(script.body()),
         Reply::sse(final_text("next")),
+        Reply::sse(final_text("switched")),
     ])
     .await;
     let model = provider(&fixture.endpoint);
@@ -936,9 +941,18 @@ async fn responses_encrypted_only_reasoning_round_trips_without_fake_text() {
         ReasoningPreference::Auto,
     )
     .unwrap();
-    assert!(call(model.as_ref(), request).await.outcome.is_ok());
+    assert!(call(model.as_ref(), request.clone()).await.outcome.is_ok());
+    let target = provider_for_model(&fixture.endpoint, "different-model");
+    assert!(call(target.as_ref(), request).await.outcome.is_ok());
     let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 3);
     assert_eq!(requests[1].body["input"][0], item);
+    assert_eq!(
+        requests[2].body["input"],
+        json!([
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}
+        ])
+    );
 }
 
 #[tokio::test]
@@ -962,42 +976,185 @@ async fn responses_empty_completion_and_wrong_terminal_status_never_succeed() {
 }
 
 #[tokio::test]
-async fn responses_replay_rejects_mismatched_model_canonical_text_and_ranges() {
-    let fixture = Fixture::start(vec![Reply::sse(final_text("saved"))]).await;
-    let model = provider(&fixture.endpoint);
-    let report = call(model.as_ref(), request(false)).await;
+async fn responses_cross_model_replay_keeps_text_without_native_identity() {
+    let fixture = Fixture::start(vec![
+        Reply::sse(final_text("saved 🐈")),
+        Reply::sse(final_text("next")),
+    ])
+    .await;
+    let source = provider(&fixture.endpoint);
+    let target = provider_for_model(&fixture.endpoint, "different-model");
+    let report = call(source.as_ref(), request(false)).await;
+    let message = replay_message(answer(&report));
+    let saved = serde_json::to_value(&message).unwrap();
+    let next = ModelRequest::new(
+        vec![message.clone(), ModelMessage::user("continue").unwrap()],
+        vec![],
+        ModelLimits::default(),
+        ReasoningPreference::Auto,
+    )
+    .unwrap();
+    assert!(call(target.as_ref(), next).await.outcome.is_ok());
+    assert_eq!(serde_json::to_value(&message).unwrap(), saved);
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].body["model"], "fixture-responses-model");
+    assert_eq!(requests[1].body["model"], "different-model");
+    assert_eq!(
+        requests[1].body["input"],
+        json!([
+            {"type":"message","role":"assistant","status":"completed",
+             "content":[{"type":"output_text","text":"saved 🐈","annotations":[]}]},
+            {"type":"message","role":"user","content":[{"type":"input_text","text":"continue"}]}
+        ])
+    );
+}
+
+#[tokio::test]
+async fn responses_cross_model_replay_drops_reasoning_and_keeps_tool_pairs() {
+    let mut script = Script::new();
+    script.reasoning(true);
+    script.message("msg_old", Some("commentary"), &["Checking"]);
+    for (id, call_id, arguments) in [
+        ("fc_old_a", "call_a", "{\"value\":\"🐈\"}"),
+        ("fc_old_b", "call_b", "{\"value\":\"second\"}"),
+    ] {
+        let index = script.add_call(id, call_id);
+        script.arguments(index, arguments);
+        script.end_call(index);
+    }
+    script.finish(None);
+    let fixture = Fixture::start(vec![
+        Reply::sse(script.body()),
+        Reply::sse(final_text("next")),
+    ])
+    .await;
+    let source = provider(&fixture.endpoint);
+    let target = provider_for_model(&fixture.endpoint, "different-model");
+    let report = call(source.as_ref(), request(true)).await;
     let response = answer(&report);
-    for problem in ["model", "status", "text", "ranges"] {
-        let mut payload = response.provider_replay().unwrap().payload().clone();
-        let mut parts = response.parts().to_vec();
-        match problem {
-            "model" => payload["model"] = json!("different-model"),
-            "status" => payload["status"] = json!("incomplete"),
-            "text" => parts = vec![AssistantPart::Text("other".into())],
-            _ => {
-                payload["items"][0]["content"][0]["ranges"] =
-                    json!([{"start":0,"end":5},{"start":0,"end":5}])
-            }
-        }
-        let replay =
-            ProviderReplay::new(response.provider_replay().unwrap().format(), payload).unwrap();
-        let message = ModelMessage::assistant_with_provider_replay(parts, Some(replay)).unwrap();
-        let request = ModelRequest::new(
-            vec![message, ModelMessage::user("next").unwrap()],
-            vec![],
-            ModelLimits::default(),
-            ReasoningPreference::Auto,
-        )
-        .unwrap();
-        assert_eq!(
-            call(model.as_ref(), request)
-                .await
-                .outcome
-                .unwrap_err()
-                .error()
-                .kind(),
-            ModelErrorKind::InvalidRequest
+    let message = replay_message(response);
+    let saved = serde_json::to_value(&message).unwrap();
+    let mut messages = vec![message.clone()];
+    for (id, output) in [
+        ("call_a", "first actual result"),
+        ("call_b", "second actual result"),
+    ] {
+        messages.push(
+            ModelMessage::tool_with_outcome(
+                id.parse().unwrap(),
+                ToolOutput::new(output).unwrap(),
+                ToolResultOutcome::Success,
+            )
+            .unwrap(),
         );
+    }
+    let next = ModelRequest::new(
+        messages,
+        specs(),
+        ModelLimits::default(),
+        ReasoningPreference::Auto,
+    )
+    .unwrap();
+    assert!(call(target.as_ref(), next).await.outcome.is_ok());
+    assert_eq!(serde_json::to_value(&message).unwrap(), saved);
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1].body["input"],
+        json!([
+            {"type":"message","role":"assistant","status":"completed",
+             "content":[{"type":"output_text","text":"Checking","annotations":[]}]},
+            {"type":"function_call","status":"completed","call_id":"call_a","name":"echo","arguments":"{\"value\":\"🐈\"}"},
+            {"type":"function_call","status":"completed","call_id":"call_b","name":"echo","arguments":"{\"value\":\"second\"}"},
+            {"type":"function_call_output","call_id":"call_a","output":"first actual result"},
+            {"type":"function_call_output","call_id":"call_b","output":"second actual result"}
+        ])
+    );
+}
+
+#[tokio::test]
+async fn responses_replay_rejects_invalid_metadata_canonical_text_and_ranges() {
+    let mut script = Script::new();
+    script.reasoning(true);
+    script.message("msg_saved", Some("final_answer"), &["saved"]);
+    let index = script.add_call("fc_saved", "call_saved");
+    script.arguments(index, "{}");
+    script.end_call(index);
+    script.finish(None);
+    let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+    let source = provider(&fixture.endpoint);
+    let report = call(source.as_ref(), request(true)).await;
+    let response = answer(&report);
+    for target in ["fixture-responses-model", "different-model"] {
+        let model = provider_for_model(&fixture.endpoint, target);
+        for problem in [
+            "status",
+            "text",
+            "ranges",
+            "reasoning",
+            "reasoning_id",
+            "duplicate_id",
+            "phase",
+            "call_id",
+            "call_name",
+            "missing_call",
+            "response_id",
+            "unknown_field",
+        ] {
+            let mut payload = response.provider_replay().unwrap().payload().clone();
+            let mut parts = response.parts().to_vec();
+            match problem {
+                "status" => payload["status"] = json!("incomplete"),
+                "text" => parts[1] = AssistantPart::Text("other".into()),
+                "ranges" => {
+                    payload["items"][1]["content"][0]["ranges"] =
+                        json!([{"start":0,"end":5},{"start":0,"end":5}])
+                }
+                "reasoning" => payload["reasoning"]["bytes"] = json!(0),
+                "reasoning_id" => payload["items"][0]["item"]["id"] = json!(""),
+                "duplicate_id" => payload["items"][1]["id"] = json!("rs_original"),
+                "phase" => payload["items"][1]["phase"] = json!("invalid"),
+                "call_id" => payload["items"][2]["call_id"] = json!("different_call"),
+                "call_name" => payload["items"][2]["name"] = json!("different_name"),
+                "missing_call" => {
+                    payload["items"].as_array_mut().unwrap().pop();
+                }
+                "response_id" => payload["response_id"] = json!(""),
+                "unknown_field" => payload["unknown"] = json!(true),
+                _ => unreachable!(),
+            }
+            let replay =
+                ProviderReplay::new(response.provider_replay().unwrap().format(), payload).unwrap();
+            let message =
+                ModelMessage::assistant_with_provider_replay(parts, Some(replay)).unwrap();
+            let request = ModelRequest::new(
+                vec![
+                    message,
+                    ModelMessage::tool_with_outcome(
+                        "call_saved".parse().unwrap(),
+                        ToolOutput::new("recorded result").unwrap(),
+                        ToolResultOutcome::Success,
+                    )
+                    .unwrap(),
+                    ModelMessage::user("next").unwrap(),
+                ],
+                vec![],
+                ModelLimits::default(),
+                ReasoningPreference::Auto,
+            )
+            .unwrap();
+            assert_eq!(
+                call(model.as_ref(), request)
+                    .await
+                    .outcome
+                    .unwrap_err()
+                    .error()
+                    .kind(),
+                ModelErrorKind::InvalidRequest,
+                "{target}: {problem}"
+            );
+        }
     }
     assert_eq!(fixture.finish().await.len(), 1);
 }
