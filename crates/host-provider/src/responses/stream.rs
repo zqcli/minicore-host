@@ -51,6 +51,7 @@ pub(super) struct State {
 struct Output {
     id: String,
     done: bool,
+    incomplete: bool,
     body: Body,
 }
 
@@ -391,6 +392,7 @@ impl State {
         self.items.push(Output {
             id: item.id,
             done: false,
+            incomplete: false,
             body,
         });
         Ok(())
@@ -561,6 +563,7 @@ impl State {
     fn arguments_done(&mut self, event: &Event) -> Result<(), ()> {
         let index = self.reference(event)?;
         let Body::Tool {
+            call_id,
             arguments,
             arguments_done,
             ..
@@ -568,19 +571,35 @@ impl State {
         else {
             return Err(());
         };
-        if *arguments_done || !arguments.matches(event.arguments.as_deref().ok_or(())?) {
+        let complete = event.arguments.as_deref().ok_or(())?;
+        // Validate the received prefix without keeping a second argument buffer.
+        // get() also rejects shorter snapshots and non-UTF-8 byte boundaries.
+        let prefix = complete.get(..arguments.bytes).ok_or(())?;
+        if *arguments_done || !arguments.matches(prefix) {
             return Err(());
+        }
+        let suffix = &complete[arguments.bytes..];
+        if !suffix.is_empty() {
+            arguments.push(suffix)?;
+            self.pending
+                .push_back(ModelEvent::tool_call_arguments_delta(
+                    call_id.clone(),
+                    suffix,
+                ));
         }
         *arguments_done = true;
         Ok(())
     }
 
-    fn check_parts(parts: &[Part], snapshots: &[Content]) -> Result<(), ()> {
+    fn check_parts(parts: &[Part], snapshots: &[Content], incomplete: bool) -> Result<(), ()> {
         if parts.len() != snapshots.len() {
             return Err(());
         }
         for (part, snapshot) in parts.iter().zip(snapshots) {
-            if !part.done || part.kind != snapshot.kind || !part.raw.matches(snapshot.text()?) {
+            if (!incomplete && !part.done)
+                || part.kind != snapshot.kind
+                || !part.raw.matches(snapshot.text()?)
+            {
                 return Err(());
             }
         }
@@ -589,15 +608,16 @@ impl State {
 
     fn check_item(&self, index: usize, item: &Item, terminal: bool) -> Result<(), ()> {
         let output = self.items.get(index).ok_or(())?;
-        if output.id != item.id || output.done != terminal {
+        if output.id != item.id || output.done != terminal || (terminal && output.incomplete) {
             return Err(());
         }
+        let incomplete = !terminal && item.status.as_deref() == Some("incomplete");
         match &output.body {
             Body::Message { phase, content } => {
-                if content.is_empty()
+                if (!incomplete && content.is_empty())
                     || item.kind != "message"
                     || item.role.as_deref() != Some("assistant")
-                    || item.status.as_deref() != Some("completed")
+                    || (!incomplete && item.status.as_deref() != Some("completed"))
                     || !wire::valid_phase(item.phase.as_deref())
                     || (phase.is_some() && phase != &item.phase)
                     || (terminal && phase != &item.phase)
@@ -609,7 +629,7 @@ impl State {
                 {
                     return Err(());
                 }
-                Self::check_parts(content, item.content.as_deref().ok_or(())?)
+                Self::check_parts(content, item.content.as_deref().ok_or(())?, incomplete)
             }
             Body::Tool {
                 call_id,
@@ -618,10 +638,10 @@ impl State {
                 arguments_done,
             } => {
                 if item.kind != "function_call"
-                    || item.status.as_deref() != Some("completed")
+                    || (!incomplete && item.status.as_deref() != Some("completed"))
                     || item.call_id.as_deref() != Some(call_id.as_str())
                     || item.name.as_deref() != Some(name.as_str())
-                    || !arguments_done
+                    || (!incomplete && !arguments_done)
                     || !arguments.matches(item.arguments.as_deref().ok_or(())?)
                     || item.role.is_some()
                     || item.phase.is_some()
@@ -639,10 +659,16 @@ impl State {
                 native,
             } => {
                 wire::validate_reasoning(item)?;
-                Self::check_parts(summary, item.summary.as_deref().ok_or(())?)?;
-                Self::check_parts(content, item.content.as_deref().unwrap_or_default())?;
-                if terminal && native.as_ref() != Some(item) {
-                    return Err(());
+                Self::check_parts(summary, item.summary.as_deref().ok_or(())?, false)?;
+                Self::check_parts(content, item.content.as_deref().unwrap_or_default(), false)?;
+                if terminal {
+                    let mut expected = native.as_ref().ok_or(())?.clone();
+                    if expected.encrypted_content.is_none() {
+                        expected.encrypted_content = item.encrypted_content.clone();
+                    }
+                    if expected != *item {
+                        return Err(());
+                    }
                 }
                 Ok(())
             }
@@ -680,6 +706,7 @@ impl State {
         }
         self.check_item(index, &item, false)?;
         let output = &mut self.items[index];
+        output.incomplete = item.status.as_deref() == Some("incomplete");
         match &mut output.body {
             Body::Message { phase, .. } => *phase = item.phase,
             Body::Reasoning { native, .. } => *native = Some(item),
@@ -719,6 +746,12 @@ impl State {
         self.terminal_metadata(&response, "completed")?;
         for (index, item) in response.output.iter().enumerate() {
             self.check_item(index, item, true)?;
+        }
+        // All identities and snapshots are verified before retaining enrichment.
+        for (output, item) in self.items.iter_mut().zip(response.output) {
+            if let Body::Reasoning { native, .. } = &mut output.body {
+                *native = Some(item);
+            }
         }
         let tool_ids: Vec<_> = self
             .items

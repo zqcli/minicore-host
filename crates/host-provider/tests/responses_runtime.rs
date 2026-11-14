@@ -1001,3 +1001,342 @@ async fn responses_replay_rejects_mismatched_model_canonical_text_and_ranges() {
     }
     assert_eq!(fixture.finish().await.len(), 1);
 }
+
+#[tokio::test]
+async fn responses_stream_fix_arguments_done_emits_only_missing_suffix() {
+    for (initial, delta) in [
+        ("", ""),
+        ("{", "\"value\":\""),
+        ("", "{\"value\":\"🐈"),
+        ("{\"value\":\"🐈\"}", ""),
+    ] {
+        let full = "{\"value\":\"🐈\"}";
+        let mut script = Script::new();
+        let index = script.add_call("fc_suffix", "call_suffix");
+        script.events.last_mut().unwrap()["item"]["arguments"] = json!(initial);
+        script.output[index]["arguments"] = json!(initial);
+        if !delta.is_empty() {
+            script.arguments(index, delta);
+        }
+        script.output[index]["arguments"] = json!(full);
+        script.end_call(index);
+        script.finish(None);
+        let fixture =
+            Fixture::start(vec![Reply::sse(script.body()), Reply::sse(script.body())]).await;
+        let model = provider(&fixture.endpoint);
+        let mut stream = model
+            .start(
+                request(true),
+                ModelCallContext::new(
+                    LoopId::new().unwrap(),
+                    0,
+                    CancellationToken::new(),
+                    Instant::now() + Duration::from_secs(5),
+                ),
+            )
+            .await
+            .unwrap();
+        let mut fragments = Vec::new();
+        let mut ends = 0;
+        while let Some(event) = stream.next().await {
+            match event.unwrap() {
+                ModelEvent::ToolCallArgumentsDelta { delta, .. } => fragments.push(delta),
+                ModelEvent::ToolCallEnd { .. } => ends += 1,
+                _ => {}
+            }
+        }
+        let mut expected: Vec<String> = [initial, delta]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let suffix = &full[initial.len() + delta.len()..];
+        if !suffix.is_empty() {
+            expected.push(suffix.to_owned());
+        }
+        assert_eq!(fragments, expected);
+        assert_eq!(ends, 1);
+        let report = call(model.as_ref(), request(true)).await;
+        assert_eq!(
+            answer(&report).parts()[0]
+                .as_tool_call()
+                .unwrap()
+                .arguments(),
+            &json!({"value":"🐈"})
+        );
+        assert_eq!(fixture.finish().await.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn responses_stream_fix_arguments_guards_and_json_validation() {
+    for problem in [
+        "conflict",
+        "shorter",
+        "utf8",
+        "identity",
+        "index",
+        "duplicate",
+        "late_delta",
+        "sequence",
+        "item_snapshot",
+        "terminal_snapshot",
+        "eof",
+        "json",
+    ] {
+        let mut script = Script::new();
+        let index = script.add_call("fc_guard", "call_guard");
+        let prefix = if problem == "utf8" { "a" } else { "{" };
+        script.arguments(index, prefix);
+        let full = match problem {
+            "conflict" => "[]",
+            "shorter" => "",
+            "utf8" => "🐈",
+            "json" => "{invalid",
+            _ => "{}",
+        };
+        script.output[index]["arguments"] = json!(full);
+        script.end_call(index);
+        let done = script.events.len() - 2;
+        match problem {
+            "identity" => script.events[done]["item_id"] = json!("wrong"),
+            "index" => script.events[done]["output_index"] = json!(1),
+            "duplicate" => script.events.insert(done + 1, script.events[done].clone()),
+            "late_delta" => script.events.insert(done + 1, json!({"type":"response.function_call_arguments.delta","output_index":0,"item_id":"fc_guard","delta":" "})),
+            "item_snapshot" => script.events[done + 1]["item"]["arguments"] = json!("{ }"),
+            _ => {}
+        }
+        if problem == "terminal_snapshot" {
+            script.output[index]["arguments"] = json!("{ }");
+        }
+        if problem != "eof" {
+            script.finish(None);
+        }
+        let mut text = script.body();
+        if problem == "sequence" {
+            text = text.replace("\"sequence_number\":3", "\"sequence_number\":2");
+        }
+        let fixture = Fixture::start(vec![Reply::sse(text)]).await;
+        let report = call(provider(&fixture.endpoint).as_ref(), request(true)).await;
+        assert_eq!(report.attempts, 1, "{problem}");
+        let failure = report.outcome.unwrap_err();
+        assert_eq!(
+            failure.error().kind(),
+            if problem == "eof" {
+                ModelErrorKind::IncompleteResponse
+            } else {
+                ModelErrorKind::InvalidProviderResponse
+            },
+            "{problem}"
+        );
+        let partial = failure.partial.unwrap();
+        assert!(
+            !partial.content.iter().any(|p| p.as_tool_call().is_some()),
+            "{problem}"
+        );
+        let expected = if matches!(
+            problem,
+            "duplicate" | "late_delta" | "item_snapshot" | "terminal_snapshot" | "eof" | "json"
+        ) {
+            full
+        } else {
+            prefix
+        };
+        assert_eq!(
+            partial.incomplete_tool_calls[0].arguments_text, expected,
+            "{problem}"
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn responses_stream_fix_terminal_reasoning_enrichment_replays() {
+    for summary in [false, true] {
+        let mut script = Script::new();
+        script.reasoning(summary);
+        let done = script.events.last_mut().unwrap();
+        done["item"]
+            .as_object_mut()
+            .unwrap()
+            .remove("encrypted_content");
+        if !summary {
+            done["item"]["summary"] = json!([]);
+            script.output[0]["summary"] = json!([]);
+        }
+        script.finish(None);
+        let fixture = Fixture::start(vec![
+            Reply::sse(script.body()),
+            Reply::sse(final_text("next")),
+        ])
+        .await;
+        let model = provider(&fixture.endpoint);
+        let report = call(model.as_ref(), request(false)).await;
+        let response = answer(&report);
+        if !summary {
+            assert!(response.parts().is_empty());
+        }
+        assert_eq!(
+            response.provider_replay().unwrap().payload()["items"][0]["item"]["encrypted_content"],
+            "final-cipher"
+        );
+        let next = ModelRequest::new(
+            vec![
+                replay_message(response),
+                ModelMessage::user("next").unwrap(),
+            ],
+            vec![],
+            ModelLimits::default(),
+            ReasoningPreference::Auto,
+        )
+        .unwrap();
+        assert!(call(model.as_ref(), next).await.outcome.is_ok());
+        let requests = fixture.finish().await;
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].body["input"][0], script.output[0]);
+    }
+}
+
+#[tokio::test]
+async fn responses_stream_fix_terminal_reasoning_enrichment_rejects_changes() {
+    for problem in [
+        "conflict", "removed", "empty", "identity", "summary", "status",
+    ] {
+        let mut script = Script::new();
+        script.reasoning(true);
+        match problem {
+            "conflict" => script.output[0]["encrypted_content"] = json!("other"),
+            "removed" => {
+                script.output[0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("encrypted_content");
+            }
+            _ => {
+                script.events.last_mut().unwrap()["item"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("encrypted_content");
+                match problem {
+                    "empty" => script.output[0]["encrypted_content"] = json!(""),
+                    "identity" => script.output[0]["id"] = json!("other"),
+                    "summary" => script.output[0]["summary"][0]["text"] = json!("changed"),
+                    _ => {
+                        script.output[0].as_object_mut().unwrap().remove("status");
+                    }
+                }
+            }
+        }
+        script.finish(None);
+        let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+        let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+        let failure = report.outcome.unwrap_err();
+        assert_eq!(
+            failure.error().kind(),
+            ModelErrorKind::InvalidProviderResponse,
+            "{problem}"
+        );
+        let replay = failure.partial.unwrap().provider_replay.unwrap();
+        assert_eq!(
+            replay.payload()["items"][0]["item"]["encrypted_content"],
+            if matches!(problem, "conflict" | "removed") {
+                json!("final-cipher")
+            } else {
+                Value::Null
+            }
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn responses_stream_fix_incomplete_items_keep_terminal_facts() {
+    for tool in [false, true] {
+        for closed_parts in [false, true] {
+            let mut script = Script::new();
+            if tool {
+                let index = script.add_call("fc_cut", "call_cut");
+                script.arguments(index, "{\"value\":");
+                script.end_call(index);
+                if !closed_parts {
+                    script
+                        .events
+                        .retain(|e| e["type"] != "response.function_call_arguments.done");
+                }
+            } else {
+                script.message("msg_cut", Some("commentary"), &["actual partial"]);
+                if !closed_parts {
+                    script.events.retain(|e| {
+                        e["type"] != "response.output_text.done"
+                            && e["type"] != "response.content_part.done"
+                    });
+                }
+            }
+            script.events.last_mut().unwrap()["item"]["status"] = json!("incomplete");
+            script.output[0]["status"] = json!("incomplete");
+            let usage = json!({"input_tokens":3,"output_tokens":1,"total_tokens":4});
+            script.events.push(json!({"type":"response.incomplete","response":{"id":"resp_fixture","status":"incomplete","output":script.output,"usage":usage,"incomplete_details":{"reason":"max_output_tokens"}}}));
+            let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+            let report = call(provider(&fixture.endpoint).as_ref(), request(tool)).await;
+            assert_eq!(report.attempts, 1);
+            let failure = report.outcome.unwrap_err();
+            assert_eq!(failure.error().kind(), ModelErrorKind::IncompleteResponse);
+            let partial = failure.partial.unwrap();
+            assert_eq!(partial.usage.unwrap().provider_total_tokens(), Some(4));
+            assert!(!partial.content.iter().any(|p| p.as_tool_call().is_some()));
+            if tool {
+                assert_eq!(
+                    partial.incomplete_tool_calls[0].arguments_text,
+                    "{\"value\":"
+                );
+            } else {
+                assert!(
+                    matches!(&partial.content[0], AssistantPart::Text(text) if text.as_ref() == "actual partial")
+                );
+            }
+            let replay = partial.provider_replay.unwrap();
+            assert_eq!(replay.format(), "minicore-host.openai-responses.partial.v1");
+            assert_eq!(replay.payload()["status"], "incomplete");
+            assert_eq!(replay.payload()["usage"], usage);
+            assert_eq!(
+                replay.payload()["incomplete_details"]["reason"],
+                "max_output_tokens"
+            );
+            assert_eq!(fixture.finish().await.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_stream_fix_incomplete_items_cannot_become_completed() {
+    for tool in [false, true] {
+        for rewrite_status in [false, true] {
+            let mut script = Script::new();
+            if tool {
+                let index = script.add_call("fc_cut", "call_cut");
+                script.arguments(index, "{}");
+                script.end_call(index);
+            } else {
+                script.message("msg_cut", None, &["partial"]);
+            }
+            script.events.last_mut().unwrap()["item"]["status"] = json!("incomplete");
+            if !rewrite_status {
+                script.output[0]["status"] = json!("incomplete");
+            }
+            script.finish(None);
+            let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+            let report = call(provider(&fixture.endpoint).as_ref(), request(tool)).await;
+            let failure = report.outcome.unwrap_err();
+            assert_eq!(
+                failure.error().kind(),
+                ModelErrorKind::InvalidProviderResponse
+            );
+            let partial = failure.partial.unwrap();
+            assert!(!partial.content.iter().any(|p| p.as_tool_call().is_some()));
+            if tool {
+                assert_eq!(partial.incomplete_tool_calls[0].arguments_text, "{}");
+            }
+            assert_eq!(fixture.finish().await.len(), 1);
+        }
+    }
+}
