@@ -1223,6 +1223,7 @@ async fn compaction_memory_keeps_projection_through_unload_without_creating_file
     let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
     let connection = access.connect().unwrap();
     let mut config = SessionConfig {
+        instructions: String::new(),
         model: "test/model".parse().unwrap(),
         ..SessionConfig::default()
     };

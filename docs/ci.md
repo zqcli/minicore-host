@@ -56,7 +56,7 @@ cargo build --package minicore-host --release --locked --target <target>
 Cargo compiles the Runtime library through Host's existing dependencies and
 links it into `minicore-host` (`minicore-host.exe` on Windows). Runtime is now
 the internal `crates/host-runtime` package; all workspace packages use version
-**0.11.0**. Its source was imported from the previously pinned Runtime commit
+**0.12.0**. Its source was imported from the previously pinned Runtime commit
 `3aa47629929906832dcb309afb7d242c1ae3e53f`, then refactored under SPEC 4.10.1.
 Session owns the complete Turn and calls model/tool primitives directly.
 CI builds that same workspace; no separate Runtime repository or process is needed.
@@ -70,10 +70,10 @@ successfully, leave stdout empty and write usage to stderr, preserving stdout
 for protocol frames.
 
 Each archive has one `minicore-host-<version>-<target>` directory containing
-the binary under `bin/`, the [Chat Completions](../example.host.json) and
-[Responses](../example.responses.host.json) configuration templates, executable
-and component guides, the tool-approval guide and the project/specification
-documents. Unix executables retain mode `0755` inside the tar archive. Links to
+the binary under `bin/`, the complete [JSON configuration example](../example-config/host.json)
+with its separate Agent and Role files, executable and component guides,
+the [configuration guide](configuration.md), the tool-approval guide and the
+project/specification documents. Unix executables retain mode `0755` inside the tar archive. Links to
 source and historical records not included in the package point to that build's
 exact Git commit; links between bundled documents remain relative.
 

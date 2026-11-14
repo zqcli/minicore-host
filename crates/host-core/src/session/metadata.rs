@@ -577,6 +577,7 @@ mod activity_tests {
                 agent_id.clone(),
                 host_id.clone(),
                 AgentData {
+                    configuration_source: None,
                     name: "activity metadata fixture".into(),
                     mode: StorageMode::Persistent,
                     config: AgentConfig::default(),

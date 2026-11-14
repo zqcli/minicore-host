@@ -68,6 +68,15 @@ Agent default; omission on update retains the current independent Session value.
 Candidate construction does not mutate the original, and invalid in-process
 configurations fail serialization too.
 
+`AgentConfig.instructions` and `SessionConfig.instructions` are optional text
+(default empty), alongside `Role.instructions`. They use the same name in
+creation overrides and update patches; omission retains/selects the owner value,
+empty text clears it and null is rejected. Directory loading resolves the Role
+reference before owners receive native configurations. Agent declaration keys
+are optional owner `configuration_source` metadata, never configuration fields.
+`HostReloadRequest` contains only `operation_id` and `expected_revision`; its
+result preserves per-Agent facts and an explicit `partially_applied` state.
+
 The `default` model in `Default` implementations is an unresolved selection
 reference, not evidence of a configured provider. `ConfigResources` validates
 actual Host references without sending model requests, executing tools, replacing

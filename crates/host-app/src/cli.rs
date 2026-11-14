@@ -1,13 +1,13 @@
-use minicore_host_core::HostConfig;
+use minicore_host_config::resolve_config_paths;
 use std::{ffi::OsString, path::PathBuf};
 
 pub const HELP: &str = "MiniCore Host
-Usage: minicore-host --data-root PATH [--config PATH] [--stdio]
+Usage: minicore-host [--config-dir PATH] [--data-root PATH] [--stdio]
                      [--tls-cert PATH --tls-key PATH]
        minicore-host --help
 
---data-root PATH  Exclusive persistent Host data directory (required).
---config PATH     Initial HostConfig JSON for a new root. Saved config wins on reopen.
+--config-dir PATH JSON configuration directory (default: executable directory/config).
+--data-root PATH  Exclusive persistent Host data directory (default: config-dir/data).
 --stdio           Serve trusted newline-delimited JSON-RPC on stdin/stdout.
 --tls-cert PATH   PEM certificate chain for the configured network.listen address.
 --tls-key PATH    PEM private key for that certificate (required with --tls-cert).
@@ -15,6 +15,8 @@ Usage: minicore-host --data-root PATH [--config PATH] [--stdio]
 At least --stdio or a configured network listener is required. WSS requires
 network.access_key_env and both TLS files. Credential values are read only from
 the configured environment sources. TLS paths are process inputs, not Host config.
+host.json is required. agents/*.json and roles/*.json declare Agents and Roles.
+Startup and host.reload read this directory; existing identities and history remain.
 
 SIGINT/SIGTERM request graceful shutdown, without a drain deadline or automatic
 force escalation. Explicit host.shutdown RPC may choose force. Stdio EOF closes
@@ -23,7 +25,7 @@ All help and diagnostics go to stderr or the configured log file, never stdout."
 
 pub struct Options {
     pub data_root: PathBuf,
-    pub config: Option<PathBuf>,
+    pub config_dir: PathBuf,
     pub stdio: bool,
     pub tls: Option<(PathBuf, PathBuf)>,
 }
@@ -48,7 +50,7 @@ impl Options {
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--data-root") => set_path(&mut root, &mut args)?,
-                Some("--config") => set_path(&mut config, &mut args)?,
+                Some("--config-dir") => set_path(&mut config, &mut args)?,
                 Some("--tls-cert") => set_path(&mut cert, &mut args)?,
                 Some("--tls-key") => set_path(&mut key, &mut args)?,
                 Some("--stdio") if !stdio => stdio = true,
@@ -60,22 +62,14 @@ impl Options {
             (None, None) => None,
             _ => return Err("--tls-cert and --tls-key must be supplied together"),
         };
+        let paths = resolve_config_paths(config.as_deref(), root.as_deref())
+            .map_err(|_| "cannot resolve configuration and data directories")?;
         Ok(Some(Self {
-            data_root: root.ok_or("--data-root is required; use --help")?,
-            config,
+            data_root: paths.data_root,
+            config_dir: paths.config_dir,
             stdio,
             tls,
         }))
-    }
-
-    pub fn initial_config(&self) -> Result<HostConfig, &'static str> {
-        match &self.config {
-            None => Ok(HostConfig::default()),
-            Some(path) => {
-                let bytes = std::fs::read(path).map_err(|_| "cannot read initial Host config")?;
-                serde_json::from_slice(&bytes).map_err(|_| "invalid initial HostConfig JSON")
-            }
-        }
     }
 }
 fn set_path(
@@ -91,4 +85,48 @@ fn set_path(
     }
     *target = Some(value.into());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(args: &[&str]) -> Result<Option<Options>, &'static str> {
+        Options::parse(args.iter().map(OsString::from))
+    }
+
+    #[test]
+    fn paths_use_shared_resolution_and_data_override() {
+        let options = parse(&["--config-dir", "settings", "--stdio"])
+            .unwrap()
+            .unwrap();
+        let expected = std::path::absolute("settings").unwrap();
+        assert_eq!(options.config_dir, expected);
+        assert_eq!(options.data_root, expected.join("data"));
+        let options = parse(&["--config-dir", "settings", "--data-root", "state"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(options.data_root, std::path::absolute("state").unwrap());
+        let options = parse(&[]).unwrap().unwrap();
+        assert_eq!(
+            options.config_dir,
+            std::env::current_exe()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .join("config")
+        );
+    }
+
+    #[test]
+    fn old_and_ambiguous_inputs_are_rejected() {
+        for args in [
+            vec!["--config", "host.json"],
+            vec!["--config-dir"],
+            vec!["--config-dir", "a", "--config-dir", "b"],
+            vec!["--tls-cert", "cert.pem"],
+        ] {
+            assert!(parse(&args).is_err(), "{args:?}");
+        }
+    }
 }

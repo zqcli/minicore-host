@@ -10,6 +10,7 @@ use minicore_host_storage::{HostRecord, HostStore};
 
 mod collaboration;
 mod configuration;
+mod configuration_directory;
 mod controls;
 mod create;
 mod deletion;
@@ -34,6 +35,7 @@ pub use workspace::WorkspaceSnapshot;
 /// share the same direct owners, input queues and Runtime execution path.
 pub struct Host {
     self_weak: Weak<Self>,
+    pub(crate) configuration_directory: std::sync::OnceLock<std::path::PathBuf>,
     id: HostId,
     incarnation: HostIncarnation,
     // Construction mode remains factual after shutdown releases the store.
@@ -67,6 +69,7 @@ struct HostState {
     delete_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
     load_failures: BTreeMap<AgentId, Fault>,
     create_tasks: BTreeMap<AgentId, tokio::task::JoinHandle<()>>,
+    configuration_creation_failures: BTreeMap<String, Fault>,
 }
 impl Host {
     pub fn memory(resources: Arc<dyn ResourceResolver>) -> Result<Arc<Self>, Fault> {
@@ -101,6 +104,7 @@ impl Host {
         let resources: Arc<dyn ResourceResolver> = configuration.clone();
         let owner = Arc::new_cyclic(|weak| Self {
             self_weak: weak.clone(),
+            configuration_directory: std::sync::OnceLock::new(),
             id,
             incarnation,
             mode: if store.is_some() {
@@ -133,6 +137,7 @@ impl Host {
                 delete_tasks: BTreeMap::new(),
                 load_failures: BTreeMap::new(),
                 create_tasks: BTreeMap::new(),
+                configuration_creation_failures: BTreeMap::new(),
             }),
         });
         owner.access.attach_host(&owner);

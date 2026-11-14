@@ -411,6 +411,7 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
             target.agent_id.clone(),
             host_id,
             AgentData {
+                configuration_source: None,
                 name: "saved fixture agent".into(),
                 mode: StorageMode::Persistent,
                 config: config.clone(),

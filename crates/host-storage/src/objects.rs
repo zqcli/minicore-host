@@ -183,6 +183,13 @@ impl AgentStore {
         if record.data.mode != self.mode {
             return Err(StorageError::InvalidStorageMode);
         }
+        if let Some(source) = &record.data.configuration_source {
+            source
+                .validate()
+                .map_err(|error| StorageError::InvalidObject {
+                    reason: error.to_string(),
+                })?;
+        }
         record
             .data
             .config
@@ -219,7 +226,9 @@ impl AgentStore {
             self.validate(&old)?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
             if old.data.config_revision == record.data.config_revision
-                && (old.data.config != record.data.config || old.data.name != record.data.name)
+                && (old.data.config != record.data.config
+                    || old.data.name != record.data.name
+                    || old.data.configuration_source != record.data.configuration_source)
             {
                 return Err(StorageError::InvalidObject {
                     reason: "configuration changed without a new revision".into(),

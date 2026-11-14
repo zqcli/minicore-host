@@ -1,4 +1,4 @@
-//! Frozen framework, Role and canonical Workspace context for model prompts.
+//! Frozen Host, Role, Agent and canonical Workspace context for model prompts.
 //! History preparation continues through core's existing provenance adapter.
 use minicore_host_runtime::{
     Text,
@@ -14,13 +14,20 @@ use std::sync::Arc;
 pub(super) struct BoundPrompt {
     framework: Text,
     role: Text,
+    instructions: Text,
     workspace: Option<Arc<Workspace>>,
 }
 impl BoundPrompt {
-    pub(super) fn new(framework: &str, role: &str, workspace: Option<Arc<Workspace>>) -> Self {
+    pub(super) fn new(
+        framework: &str,
+        role: &str,
+        instructions: &str,
+        workspace: Option<Arc<Workspace>>,
+    ) -> Self {
         Self {
             framework: Text::new(framework),
             role: Text::new(role),
+            instructions: Text::new(instructions),
             workspace,
         }
     }
@@ -35,6 +42,9 @@ impl PromptProvider for BoundPrompt {
             }
             if !self.role.is_empty() {
                 prefix.push(ModelMessage::System(Arc::from(self.role.as_str())));
+            }
+            if !self.instructions.is_empty() {
+                prefix.push(ModelMessage::System(Arc::from(self.instructions.as_str())));
             }
             if let Some(workspace) = &self.workspace {
                 prefix.push(ModelMessage::System(Arc::from(format!(

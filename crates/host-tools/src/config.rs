@@ -101,6 +101,7 @@ pub fn agent_config_from_settings(
         .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
     Ok(AgentConfig {
         role: session.role,
+        instructions: session.instructions,
         session_defaults: SessionDefaults {
             model: session.model,
             reasoning: session.reasoning,

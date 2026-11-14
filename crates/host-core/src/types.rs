@@ -22,6 +22,8 @@ pub struct HostInfo {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AgentInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration_source: Option<AgentConfigurationSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deletion: Option<AgentDeletionState>,
     pub id: AgentId,
     pub host_id: HostId,

@@ -249,7 +249,10 @@ async fn published_root_changes_apply_to_new_directory_requests() {
         host.reload_configuration(&operator.caller(), 0, prepared(replacement.path()))
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            ..
+        }
     ));
     assert_eq!(
         host.workspace_list(&operator.caller(), query(original.path()))

@@ -1,10 +1,10 @@
 //! One typed operation table drives direct calls and RPC dispatch.
 use minicore_host_core::{
-    AgentDetails, AgentListPage, AgentListRequest, CallerContext, Host, HostConfig,
-    HostConfigSnapshot, HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription,
-    ModelTextSnapshot, SessionContextSnapshot, SessionHistorySnapshot, SessionInfo,
-    SessionListPage, SessionListRequest, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot,
-    TurnDetailsSnapshot, TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
+    AgentDetails, AgentListPage, AgentListRequest, CallerContext, Host, HostConfigSnapshot,
+    HostInfo, InteractionAnswerData, MessageSnapshot, ModelDescription, ModelTextSnapshot,
+    SessionContextSnapshot, SessionHistorySnapshot, SessionInfo, SessionListPage,
+    SessionListRequest, SessionSnapshot, ToolCallSnapshot, ToolTextSnapshot, TurnDetailsSnapshot,
+    TurnListSnapshot, TurnResultSnapshot, WorkspaceSnapshot,
 };
 use minicore_host_protocol::*;
 use minicore_host_runtime::tools::ToolSpec;
@@ -226,7 +226,7 @@ macro_rules! operations {
 operations! {
     Info, HostInfo, Empty => HostInfo, |h, c, _p| { h.info(&c) };
     GetConfig, HostConfigGet, Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
-    Reload, HostReload, HostReloadRequest<HostConfig> => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
+    Reload, HostReload, HostReloadRequest => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
     ListModels, ModelList, Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
     WorkspaceRoots, WorkspaceRoots, Empty => DirectoryRoots, |h, c, _p| { h.workspace_roots(&c) };
     WorkspaceList, WorkspaceList, DirectoryListRequest => DirectoryListResult, |h, c, p| { h.workspace_list(&c, p).await };

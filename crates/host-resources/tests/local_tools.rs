@@ -433,7 +433,10 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
         host.reload_configuration(&caller, 0, prepare(&builder, candidate).await)
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     host.update_session_async(
         &caller,

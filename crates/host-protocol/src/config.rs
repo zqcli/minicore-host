@@ -71,6 +71,7 @@ pub enum ApprovalMode {
 validated_dto!(Role, RoleWire, "RoleWire" {
     name: String,
     description: String,
+    #[serde(default)]
     instructions: String,
 });
 impl Role {
@@ -230,6 +231,8 @@ fn validate_session_fields(
 
 validated_dto!(#[derive(Default)] AgentConfig, AgentConfigWire, "AgentConfigWire" {
     role: Role,
+    #[serde(default)]
+    instructions: String,
     session_defaults: SessionDefaults,
 });
 impl AgentConfig {
@@ -242,6 +245,10 @@ impl AgentConfig {
     pub fn apply_patch(&self, patch: &AgentConfigPatch) -> Result<Self, ValidationError> {
         let candidate = Self {
             role: patch.role.clone().unwrap_or_else(|| self.role.clone()),
+            instructions: patch
+                .instructions
+                .clone()
+                .unwrap_or_else(|| self.instructions.clone()),
             session_defaults: patch
                 .session_defaults
                 .clone()
@@ -254,6 +261,8 @@ impl AgentConfig {
 
 validated_dto!(SessionConfig, SessionConfigWire, "SessionConfigWire" {
     role: Role,
+    #[serde(default)]
+    instructions: String,
     model: ModelRef,
     reasoning: ReasoningPreference,
     tools: Vec<ToolBinding>,
@@ -280,6 +289,7 @@ impl SessionConfig {
         let defaults = &agent.session_defaults;
         Self {
             role: agent.role.clone(),
+            instructions: agent.instructions.clone(),
             model: defaults.model.clone(),
             reasoning: defaults.reasoning,
             tools: defaults.tools.clone(),
@@ -292,6 +302,9 @@ impl SessionConfig {
         let mut candidate = self.clone();
         if let Some(value) = &patch.role {
             candidate.role = value.clone();
+        }
+        if let Some(value) = &patch.instructions {
+            candidate.instructions = value.clone();
         }
         if let Some(value) = &patch.model {
             candidate.model = value.clone();
@@ -389,6 +402,12 @@ pub struct SessionConfigPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub instructions: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub model: Option<ModelRef>,
     #[serde(
         default,
@@ -414,6 +433,7 @@ pub struct SessionConfigPatch {
 impl SessionConfigPatch {
     pub fn is_empty(&self) -> bool {
         self.role.is_none()
+            && self.instructions.is_none()
             && self.model.is_none()
             && self.reasoning.is_none()
             && self.tools.is_none()
@@ -442,11 +462,17 @@ pub struct AgentConfigPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub instructions: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub session_defaults: Option<SessionDefaults>,
 }
 impl AgentConfigPatch {
     pub fn is_empty(&self) -> bool {
-        self.role.is_none() && self.session_defaults.is_none()
+        self.role.is_none() && self.instructions.is_none() && self.session_defaults.is_none()
     }
 }
 

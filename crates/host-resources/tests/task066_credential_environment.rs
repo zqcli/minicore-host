@@ -177,7 +177,10 @@ async fn publication_scenario() {
         host.reload_configuration(&caller, 0, prepared)
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert!(host.info(&network.caller()).is_err());
     assert!(
@@ -223,7 +226,10 @@ async fn publication_scenario() {
         host.reload_configuration(&caller, 1, builder.prepare(next).await.unwrap())
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 2 }
+        HostReloadResult::Applied {
+            config_revision: 2,
+            agents: Vec::new()
+        }
     );
     assert!(
         host.connect_network("synthetic-TASK066_NEW_NETWORK-value")

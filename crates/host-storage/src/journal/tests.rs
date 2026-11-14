@@ -19,6 +19,7 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
             agent.id().clone(),
             host.id().clone(),
             AgentData {
+                configuration_source: None,
                 name: "test".into(),
                 mode: StorageMode::Persistent,
                 config: AgentConfig::default(),

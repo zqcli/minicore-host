@@ -58,6 +58,7 @@ impl ProductionResources {
         let prompt = Arc::new(BoundPrompt::new(
             &self.framework,
             &config.role.instructions,
+            &config.instructions,
             workspace,
         ));
         let execution = ExecutionConfig::new(
@@ -124,6 +125,7 @@ impl ResourceResolver for ProductionResources {
                 prompt: Arc::new(BoundPrompt::new(
                     &self.framework,
                     &config.role.instructions,
+                    &config.instructions,
                     workspace.map(Arc::new),
                 )),
             })

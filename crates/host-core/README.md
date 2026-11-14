@@ -29,7 +29,7 @@ assertions use the workspace's `tests/support/input_context.rs`.
 
 ## Persistent initialization
 
-`Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. The name-only `HostSettings` is an embedding construction convenience, converted to the single complete `HostConfig` disk shape. Production composition uses `Host::open_configured` and the `minicore-host-resources` builder. Config queries, immutable resource catalogs, and accepted reload publication belong to Host; raw keys and execution handles are never stored in the record.
+`Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. The name-only `HostSettings` is an embedding construction convenience, converted to the single complete `HostConfig` disk shape. Directory composition uses `Host::open_directory_configured(data_root, config_dir, prepare)` and the `minicore-host-resources` builder. It reads current directory values on every startup; `open_configured` remains the separate programmatic embedding entry. Config queries, immutable resource catalogs, and accepted reload publication belong to Host; raw keys and execution handles are never stored in the record.
 
 The Host reads direct Agents. Each Agent reads its own metadata and initializes its direct Session metadata independently. History remains unloaded until the Session's load/resume/execution path validates it. Stored execution handles, queues, pauses, Load IDs, active Turns and tool processes are never reconstructed. Closed Sessions remain closed.
 
@@ -198,3 +198,24 @@ Session. Read access and current-operation admission use the existing connection
 registry; mkdir keeps its actual blocking worker and receipt under the Host until
 completion, and Host shutdown waits for accepted directory writes. Its receipts
 reuse `host.receipt.get`; configured roots publish with the existing Host snapshot.
+
+## Declared configuration ownership
+
+`host-config` owns pure Host values, path selection and JSON/Role loading. Host
+re-exports its values and owns resource preparation, stable identities, durable
+publication and reload receipts. Directory startup preserves saved identities
+and history while preparing this startup's source configuration, including
+logging and network. It never starts with saved defaults and reloads afterward.
+
+Declared Agent keys live in optional `configuration_source` owner metadata,
+separate from native `AgentConfig`. The first Agent save binds the key. Later
+startup/reload reuses that identity and does not recreate its default Session.
+Removal releases file management while retaining source key, Sessions and
+history. File-managed Agents reject ordinary configuration/name updates and
+deletion; owner controls and independent Session updates keep their semantics.
+
+`host.reload` owns directory parsing, full validation, Host publication and
+sequential direct Agent updates until the real work finishes. Individual Agent
+failure produces `partially_applied`, not a rollback or automatic retry. Its
+accepted worker remains part of shutdown ownership after a caller disconnects.
+See [the configuration guide](../../docs/configuration.md) for the public layout.

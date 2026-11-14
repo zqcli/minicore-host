@@ -187,7 +187,10 @@ async fn reload_selects_responses_for_new_bindings_and_keeps_an_accepted_chat_tu
         host.reload_configuration(&caller, 0, candidate)
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     let next = create(&host, &caller, vec![], None).await;
     send(&host, &caller, &next, "use configured Responses protocol");

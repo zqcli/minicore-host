@@ -50,11 +50,42 @@ without co-author trailers.
 
 ## Progress
 
-- Repository instructions and current SPEC rules read. Clean local dev heads
-  match the remote baselines. Three implementation workers are assigned; they
-  remain read-only until this SPEC-first commit is created.
-- Shared API and ownership boundaries agreed. Implementation and validation
-  remain pending at this documentation checkpoint.
+- SPEC 4.11.0 was committed before implementation: local `11ff651c786b199aa3921eec337e95d2bbc035f8`,
+  published `be14569cc40bf683468106ca7880102fdaa4999f`, identical tree
+  `36442b3b67f514dba8fc6718041b1f122d1e5e0d`. Three requested Astra/max workers
+  then began implementation in separate scopes.
+- Shared loader, instruction fields, declared Agent ownership and directory
+  reload production paths are implemented; integration tests and independent
+  review remain in progress.
+- Host executable uses shared path selection and directory startup. All real
+  subprocess fixtures now provide explicit configuration directories. Current
+  `cargo check -p minicore-host --all-targets --locked --offline` passed.
+- Host workspace packages are 0.12.0 with the new host-config package registered;
+  the external package version/source/checksum set is unchanged.
+- Example files and package contents now include one complete configuration
+  directory. Its actual binary startup created the declared Agent/default Session
+  and completed graceful signal shutdown without making a model request. The
+  packaging document-link check passed for 22 documents/examples plus binary.
+- Host app all-targets tests passed (28 unique cases). The 28 Python script tests
+  passed. The config/instructions/resources/tools worker reports 37 scoped cases
+  passed; these are not a substitute for the final full workspace gate.
+- TUI source/docs are implemented and isolated local-path all-targets compilation
+  passed. Scoped tests and final immutable Host pins remain pending.
+- An independent requested Astra/max review found a shutdown/reload race: the
+  accepted directory worker could be rejected by later Host/Agent shutdown
+  admission fences. The owner worker corrected that narrow reservation path;
+  the independent reviewer rechecked it and the controlled graceful/force
+  shutdown regression passed.
+- Coordinator review found that omitting serialized empty native instructions
+  would discard fields from existing records under the strict storage decoder.
+  All four native instruction fields now retain explicit empty strings while
+  accepting omitted input. The real store/journal regression confirms supported
+  records and history read without changing their bytes; strict decoding is
+  unchanged. Independent focused review found no remaining blocker.
+- The complete directory regression suite passed 6/6, including actual partial
+  save results, independent child creation operation IDs and shutdown ownership.
+  The native-record preservation regression passed 1/1. Full workspace gate is
+  now running; TUI lib tests passed 463 with 3 explicitly ignored benchmarks.
 
 ## Verification plan
 

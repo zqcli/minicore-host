@@ -280,7 +280,12 @@ async fn binary_tools_produce_exact_files_native_results_and_canonical_sources()
     stopped.safe_diagnostics();
     app.observer.close();
     let saved = fs::read(history_path(&app.root, &target)).unwrap();
-    let mut reopened = Process::start(&app.root, None, true, Some((&app.certificate, &app.key)));
+    let mut reopened = Process::start(
+        &app.root,
+        &app.config_dir,
+        true,
+        Some((&app.certificate, &app.key)),
+    );
     let initial = reopened.rpc("initialize", json!({})).await;
     assert_eq!(initial["host_id"], app.initial["host_id"]);
     assert_ne!(initial["host_incarnation"], app.initial["host_incarnation"]);
@@ -418,11 +423,12 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
     );
 
     app.config.models[0].endpoint = new_provider.endpoint.clone();
+    support::write_config(&app.config_dir, &app.config);
     let operation = OperationId::new().unwrap();
     app.process
         .rpc(
             "host.reload",
-            json!({"operation_id":operation,"expected_revision":0,"candidate":app.config}),
+            json!({"operation_id":operation,"expected_revision":0}),
         )
         .await;
     tokio::time::timeout(support::WAIT, async {

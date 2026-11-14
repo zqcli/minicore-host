@@ -1,0 +1,25 @@
+{
+  "key": "assistant",
+  "name": "Assistant",
+  "role": "coding",
+  "instructions": "",
+  "session_defaults": {
+    "model": "provider/chat",
+    "reasoning": "auto",
+    "tools": [],
+    "execution": {
+      "approval": "ask",
+      "prompt_timeout_ms": 30000,
+      "model_timeout_ms": 600000,
+      "policy_timeout_ms": 30000,
+      "tool_timeout_ms": 1800000,
+      "model_retry_attempts": 2,
+      "model_retry_base_delay_ms": 100,
+      "compaction": {
+        "enabled": true,
+        "trigger_percent": 95,
+        "target_percent": 50
+      }
+    }
+  }
+}

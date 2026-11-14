@@ -1,18 +1,98 @@
 //! Canonical Host reload requests and direct-owner progress snapshots.
 use crate::{
-    ConfigRevision, Fault, HostId, HostIncarnation, OperationId, ValidationError, invalid,
+    AgentCreateReceipt, AgentId, ConfigRevision, Fault, HostId, HostIncarnation, OperationId,
+    ValidationError, invalid,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-/// `C` is the application's concrete readable HostConfig. Private credentials,
-/// resource handles, preparation callbacks and waiting options are not JSON.
+/// Reload only the directory bound at startup. Paths, configuration candidates,
+/// credentials and private preparation callbacks are never accepted over RPC.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct HostReloadRequest<C> {
+pub struct HostReloadRequest {
     pub operation_id: OperationId,
     pub expected_revision: ConfigRevision,
-    pub candidate: C,
+}
+
+/// Stable declaration provenance belongs to the Agent owner, never AgentConfig.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentConfigurationSource {
+    pub key: String,
+    pub managed: bool,
+}
+impl AgentConfigurationSource {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.key.trim().is_empty() || self.key.contains('\0') {
+            return Err(invalid(
+                "Agent configuration key must be nonblank and contain no NUL",
+            ));
+        }
+        Ok(())
+    }
+}
+
+/// Each entry reports the actual direct-owner result; creation retains its
+/// existing Agent/Session steps, including a durable Agent with a failed Session.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AgentConfigurationResult {
+    Created {
+        key: String,
+        receipt: Box<AgentCreateReceipt>,
+    },
+    Updated {
+        key: String,
+        agent_id: AgentId,
+        config_revision: ConfigRevision,
+    },
+    Unmanaged {
+        key: String,
+        agent_id: AgentId,
+        config_revision: ConfigRevision,
+    },
+    Unchanged {
+        key: String,
+        agent_id: AgentId,
+        config_revision: ConfigRevision,
+    },
+    Failed {
+        key: String,
+        agent_id: Option<AgentId>,
+        error: Fault,
+    },
+}
+impl AgentConfigurationResult {
+    pub fn succeeded(&self) -> bool {
+        match self {
+            Self::Created { receipt, .. } => {
+                receipt.result.steps.agent.succeeded() && receipt.result.steps.session.succeeded()
+            }
+            Self::Failed { .. } => false,
+            _ => true,
+        }
+    }
+    fn validate(&self) -> Result<(), ValidationError> {
+        let key = match self {
+            Self::Created { key, receipt } => {
+                receipt.validate()?;
+                key
+            }
+            Self::Updated { key, .. }
+            | Self::Unmanaged { key, .. }
+            | Self::Unchanged { key, .. } => key,
+            Self::Failed { key, error, .. } => {
+                error.validate()?;
+                key
+            }
+        };
+        AgentConfigurationSource {
+            key: key.clone(),
+            managed: true,
+        }
+        .validate()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -29,8 +109,9 @@ pub enum RestartField {
 }
 
 /// Each value is a snapshot of facts owned by the actual configuration work.
-/// Preparing/applying do not claim publication or a confirmed save. The revision
-/// is the unchanged effective version until the complete candidate is applied.
+/// The revision identifies the effective Host configuration at this phase.
+/// Applying may already include Host publication while Agent work continues;
+/// each terminal Agent entry reports its own actual saved result.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HostReloadResult {
@@ -42,6 +123,12 @@ pub enum HostReloadResult {
     },
     Applied {
         config_revision: ConfigRevision,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<AgentConfigurationResult>,
+    },
+    PartiallyApplied {
+        config_revision: ConfigRevision,
+        agents: Vec<AgentConfigurationResult>,
     },
     RestartRequired {
         config_revision: ConfigRevision,
@@ -59,6 +146,26 @@ pub enum HostReloadResult {
 impl HostReloadResult {
     pub fn validate(&self) -> Result<(), ValidationError> {
         match self {
+            Self::Applied { agents, .. } => {
+                for agent in agents {
+                    agent.validate()?;
+                }
+                if agents.iter().any(|agent| !agent.succeeded()) {
+                    return Err(invalid("applied reload cannot contain failed Agent work"));
+                }
+                Ok(())
+            }
+            Self::PartiallyApplied { agents, .. } => {
+                for agent in agents {
+                    agent.validate()?;
+                }
+                if agents.iter().all(AgentConfigurationResult::succeeded) {
+                    return Err(invalid(
+                        "partially applied reload needs an actual Agent failure",
+                    ));
+                }
+                Ok(())
+            }
             Self::RestartRequired { fields, .. } => validate_restart_fields(fields),
             Self::Failed { error, .. } => error.validate(),
             _ => Ok(()),

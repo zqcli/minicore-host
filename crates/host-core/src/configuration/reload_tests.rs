@@ -41,14 +41,36 @@ fn preparation_gate() -> Arc<SaveGate> {
         release: Semaphore::new(0),
     })
 }
+/// Explicit unit fixture binds a real empty directory to an isolated owner.
+/// Production startup is exercised separately through open_directory_configured.
+pub(super) fn bind_directory(host: &Host) -> tempfile::TempDir {
+    let directory = tempfile::tempdir().unwrap();
+    host.configuration_directory
+        .set(directory.path().to_path_buf())
+        .unwrap();
+    write_candidate(host, &host.configuration.snapshot().config);
+    directory
+}
+pub(super) fn write_candidate(host: &Host, candidate: &HostConfig) {
+    let directory = host
+        .configuration_directory
+        .get()
+        .expect("test directory bound");
+    std::fs::write(
+        directory.join("host.json"),
+        serde_json::to_vec(candidate).unwrap(),
+    )
+    .unwrap();
+}
 fn request(
+    host: &Host,
     candidate: HostConfig,
     expected_revision: ConfigRevision,
-) -> HostReloadRequest<HostConfig> {
+) -> HostReloadRequest {
+    write_candidate(host, &candidate);
     HostReloadRequest {
         operation_id: OperationId::new().unwrap(),
         expected_revision,
-        candidate,
     }
 }
 fn progress(host: &Host, caller: &CallerContext, operation: &OperationId) -> HostReloadReceipt {
@@ -89,11 +111,12 @@ async fn canonical_reload_owns_preparation_save_and_force_cleanup_after_waiter_d
     })
     .await
     .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let original = host.connect_network("old-key").unwrap();
     let old_reader = host.connect_network("old-key").unwrap();
     let observer = host.connect().unwrap();
     let save_gate = gate(&host);
-    let request = request(config("new"), 0);
+    let request = request(&host, config("new"), 0);
     let operation = request.operation_id.clone();
     // The client wait is independently cancellable after Host::reload returns.
     let waiter = {
@@ -147,7 +170,10 @@ async fn canonical_reload_owns_preparation_save_and_force_cleanup_after_waiter_d
     stopped(&host, &operator.caller()).await;
     assert_eq!(
         progress(&host, &observer.caller(), &operation).result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(
         formed.result,
@@ -170,12 +196,13 @@ async fn canonical_preparation_failures_remain_queryable_after_later_success() {
     let host =
         Host::memory_configured(prepared(config("old"), "old-key").with_preparer(prep.clone()))
             .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let network = host.connect_network("old-key").unwrap();
     let mut failures = Vec::new();
     for name in ["prepare failure", "changed by preparer", ""] {
-        let request = request(config(name), 0);
+        let request = request(&host, config(name), 0);
         let operation = request.operation_id.clone();
         let formed = host.reload(&caller, request).unwrap();
         let failed = settled_reload(&host, &caller, &operation).await;
@@ -187,12 +214,15 @@ async fn canonical_preparation_failures_remain_queryable_after_later_success() {
         assert!(host.info(&network.caller()).is_ok());
         failures.push(failed);
     }
-    let request = request(config("new"), 0);
+    let request = request(&host, config("new"), 0);
     let operation = request.operation_id.clone();
     host.reload(&caller, request).unwrap();
     assert_eq!(
         settled_reload(&host, &caller, &operation).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     for failed in failures {
         assert_eq!(progress(&host, &caller, &failed.operation_id), failed);
@@ -207,13 +237,14 @@ async fn canonical_reload_rejects_before_acceptance_and_never_rebinds_old_author
     let host =
         Host::memory_configured(prepared(config("old"), "old-key").with_preparer(prep.clone()))
             .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let original = host.connect().unwrap();
     let reader = host.connect().unwrap();
     for (caller, revision, kind) in [
         (reader.caller(), 0, FaultKind::HostAccessReadOnly),
         (original.caller(), 1, FaultKind::HostConfigConflict),
     ] {
-        let request = request(config("new"), revision);
+        let request = request(&host, config("new"), revision);
         let operation = request.operation_id.clone();
         assert_eq!(
             host.reload(&caller, request).unwrap_err().kind(),
@@ -228,10 +259,10 @@ async fn canonical_reload_rejects_before_acceptance_and_never_rebinds_old_author
     }
     assert_eq!(prep.calls.load(Ordering::SeqCst), 0);
     let accepted = host
-        .reload(&original.caller(), request(config("first"), 0))
+        .reload(&original.caller(), request(&host, config("first"), 0))
         .unwrap();
     prepare_gate.entered.acquire().await.unwrap().forget();
-    let contender = request(config("competing"), 0);
+    let contender = request(&host, config("competing"), 0);
     let contender_operation = contender.operation_id.clone();
     assert_eq!(
         host.reload(&original.caller(), contender)
@@ -249,7 +280,7 @@ async fn canonical_reload_rejects_before_acceptance_and_never_rebinds_old_author
     let next = host.connect().unwrap();
     assert!(next.initial_info().can_operate);
     assert!(
-        host.reload(&old_caller, request(config("old connection"), 0))
+        host.reload(&old_caller, request(&host, config("old connection"), 0))
             .is_err()
     );
     host.shutdown(
@@ -261,7 +292,7 @@ async fn canonical_reload_rejects_before_acceptance_and_never_rebinds_old_author
     )
     .unwrap();
     assert_eq!(
-        host.reload(&next.caller(), request(config("too late"), 0))
+        host.reload(&next.caller(), request(&host, config("too late"), 0))
             .unwrap_err()
             .kind(),
         Some(FaultKind::HostLifecycleUnavailable)
@@ -270,7 +301,10 @@ async fn canonical_reload_rejects_before_acceptance_and_never_rebinds_old_author
     stopped(&host, &next.caller()).await;
     assert_eq!(
         progress(&host, &next.caller(), &accepted.operation_id).result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(prep.calls.load(Ordering::SeqCst), 1);
 }
@@ -284,6 +318,7 @@ async fn canonical_mixed_restart_rejects_every_change_but_unchanged_restart_fiel
     let host =
         Host::memory_configured(prepared(initial.clone(), "old-key").with_preparer(prep.clone()))
             .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let network = host.connect_network("old-key").unwrap();
@@ -291,7 +326,8 @@ async fn canonical_mixed_restart_rejects_every_change_but_unchanged_restart_fiel
     mixed.name = "new".into();
     mixed.network.listen = Some("127.0.0.1:4322".parse().unwrap());
     mixed.logging.level = LogLevel::Trace;
-    let receipt = host.reload(&caller, request(mixed, 0)).unwrap();
+    let accepted = host.reload(&caller, request(&host, mixed, 0)).unwrap();
+    let receipt = settled_reload(&host, &caller, &accepted.operation_id).await;
     assert_eq!(
         receipt.result,
         HostReloadResult::RestartRequired {
@@ -302,14 +338,19 @@ async fn canonical_mixed_restart_rejects_every_change_but_unchanged_restart_fiel
     assert_eq!(progress(&host, &caller, &receipt.operation_id), receipt);
     assert_eq!(host.config_get(&caller).unwrap().config, initial);
     assert!(host.info(&network.caller()).is_ok());
-    assert_eq!(prep.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(prep.calls.load(Ordering::SeqCst), 1);
     initial.name = "valid hot change".into();
-    let hot = host.reload(&caller, request(initial.clone(), 0)).unwrap();
+    let hot = host
+        .reload(&caller, request(&host, initial.clone(), 0))
+        .unwrap();
     assert_eq!(
         settled_reload(&host, &caller, &hot.operation_id)
             .await
             .result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(host.config_get(&caller).unwrap().config, initial);
     assert!(host.info(&network.caller()).is_err());
@@ -324,13 +365,16 @@ async fn canonical_actual_save_failure_retains_failed_facts_and_original_live_ke
     })
     .await
     .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let network = host.connect_network("old-key").unwrap();
     let path = directory.path().join("host.json");
     std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
-    let formed = host.reload(&caller, request(config("new"), 0)).unwrap();
+    let formed = host
+        .reload(&caller, request(&host, config("new"), 0))
+        .unwrap();
     let failed = settled_reload(&host, &caller, &formed.operation_id).await;
     assert!(
         matches!(failed.result, HostReloadResult::Failed { config_revision: 0, ref error } if error.kind() == Some(FaultKind::HostStorageUnavailable))
@@ -339,7 +383,7 @@ async fn canonical_actual_save_failure_retains_failed_facts_and_original_live_ke
     assert!(host.info(&network.caller()).is_ok());
     assert!(host.connect_network("new-key").is_err());
     assert_eq!(
-        host.reload(&caller, request(config("no implicit retry"), 0))
+        host.reload(&caller, request(&host, config("no implicit retry"), 0))
             .unwrap_err()
             .kind(),
         Some(FaultKind::HostConfigConflict)
@@ -375,16 +419,20 @@ async fn canonical_key_rotation_keeps_local_calls_and_duplicate_ids_are_not_repl
     let host =
         Host::memory_configured(prepared(config("old"), "old-key").with_preparer(prep.clone()))
             .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let original = host.connect_network("old-key").unwrap();
     let local_reader = host.connect().unwrap();
-    let request = request(config("first"), 0);
+    let request = request(&host, config("first"), 0);
     let operation = request.operation_id.clone();
     let formed = host.reload(&original.caller(), request).unwrap();
     assert_eq!(
         settled_reload(&host, &local_reader.caller(), &operation)
             .await
             .result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert!(host.info(&original.caller()).is_err());
     let new_connection = host.connect_network("new-key").unwrap();
@@ -393,13 +441,13 @@ async fn canonical_key_rotation_keeps_local_calls_and_duplicate_ids_are_not_repl
         progress(&host, &new_connection.caller(), &operation).operation_id,
         operation
     );
+    write_candidate(&host, &config("second"));
     let second = host
         .reload(
             &new_connection.caller(),
             HostReloadRequest {
                 operation_id: operation.clone(),
                 expected_revision: 1,
-                candidate: config("second"),
             },
         )
         .unwrap();
@@ -483,14 +531,20 @@ async fn canonical_publication_and_force_wait_for_real_resource_drop_outside_loc
     .unwrap()
     .with_preparer(preparer(None));
     let host = Host::memory_configured(initial).unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let formed = host.reload(&caller, request(config("new"), 0)).unwrap();
+    let formed = host
+        .reload(&caller, request(&host, config("new"), 0))
+        .unwrap();
     cleanup.entered.acquire().await.unwrap().forget();
     assert_eq!(host.config_get(&caller).unwrap().config_revision, 1);
     assert_eq!(
         progress(&host, &caller, &formed.operation_id).result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     host.shutdown(
         &caller,
@@ -509,15 +563,19 @@ async fn canonical_publication_and_force_wait_for_real_resource_drop_outside_loc
     stopped(&host, &caller).await;
     assert_eq!(
         progress(&host, &caller, &formed.operation_id).result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
 }
 
 #[tokio::test]
 async fn unassembled_host_does_not_claim_reload_is_available() {
     let host = Host::memory_configured(prepared(config("old"), "old-key")).unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
-    let request = request(config("new"), 0);
+    let request = request(&host, config("new"), 0);
     let operation = request.operation_id.clone();
     assert_eq!(
         host.reload(&connection.caller(), request)
@@ -554,18 +612,20 @@ async fn reload_candidates_cannot_replace_the_initial_application_preparer() {
     let host =
         Host::memory_configured(prepared(config("old"), "old-key").with_preparer(original.clone()))
             .unwrap();
+    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     for revision in 0..2 {
         let accepted = host
-            .reload(&caller, request(config("new"), revision))
+            .reload(&caller, request(&host, config("new"), revision))
             .unwrap();
         assert_eq!(
             settled_reload(&host, &caller, &accepted.operation_id)
                 .await
                 .result,
             HostReloadResult::Applied {
-                config_revision: revision + 1
+                config_revision: revision + 1,
+                agents: Vec::new()
             }
         );
     }

@@ -32,12 +32,19 @@ pub fn options() -> CallOptions {
         wait_timeout_ms: Some(5_000),
     }
 }
-pub fn request(candidate: HostConfig, expected_revision: u64) -> HostReloadRequest<HostConfig> {
+pub fn request(expected_revision: u64) -> HostReloadRequest {
     HostReloadRequest {
         operation_id: OperationId::new().unwrap(),
         expected_revision,
-        candidate,
     }
+}
+pub fn write_config(directory: &std::path::Path, config: &HostConfig) {
+    std::fs::create_dir_all(directory).unwrap();
+    std::fs::write(
+        directory.join("host.json"),
+        serde_json::to_vec(config).unwrap(),
+    )
+    .unwrap();
 }
 pub fn fault(error: CallError) -> Fault {
     match error {
@@ -81,23 +88,42 @@ pub struct CredentialFixture {
     pub entered: Semaphore,
     pub release: Semaphore,
     gated: bool,
+    _directory: tempfile::TempDir,
+    pub configuration_directory: std::path::PathBuf,
 }
 impl CredentialFixture {
     pub async fn host(config: HostConfig, gated: bool) -> (Arc<Host>, Arc<Self>) {
+        let directory = tempfile::tempdir().unwrap();
+        let configuration_directory = directory.path().join("config");
+        write_config(&configuration_directory, &config);
         let preparer = Arc::new(Self {
+            configuration_directory: configuration_directory.clone(),
+            _directory: directory,
             builder: HostResourceBuilder::builtins().unwrap(),
             calls: AtomicUsize::new(0),
             entered: Semaphore::new(0),
             release: Semaphore::new(0),
             gated,
         });
-        let candidate = preparer
-            .builder
-            .prepare_with_credentials(config.clone(), credentials(&config))
-            .await
-            .unwrap()
-            .with_preparer(preparer.clone());
-        (Host::memory_configured(candidate).unwrap(), preparer)
+        let initial_preparer = preparer.clone();
+        let host = Host::open_directory_configured(
+            preparer._directory.path().join("data"),
+            configuration_directory,
+            |config| async move {
+                initial_preparer
+                    .builder
+                    .prepare_with_credentials(config.clone(), credentials(&config))
+                    .await
+                    .map(|candidate| candidate.with_preparer(initial_preparer.clone()))
+            },
+        )
+        .await
+        .unwrap();
+        (host, preparer)
+    }
+    pub fn request(&self, candidate: HostConfig, expected_revision: u64) -> HostReloadRequest {
+        write_config(&self.configuration_directory, &candidate);
+        request(expected_revision)
     }
     pub async fn started(&self) {
         tokio::time::timeout(Duration::from_secs(5), self.entered.acquire())

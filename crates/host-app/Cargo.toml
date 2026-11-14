@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "MiniCore Host application and process entry point"
 
 [dependencies]
+minicore-host-config.workspace = true
 minicore-host-core.workspace = true
 minicore-host-protocol.workspace = true
 minicore-host-resources.workspace = true

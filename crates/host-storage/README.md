@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **2** and history schema **3**, implementing the persistence boundaries of SPEC v4.10.3. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
+Object schema **2** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.0. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
@@ -86,7 +86,11 @@ The supplied directory is one Host root. Display names never affect paths.
 | `agents/<AgentId>/sessions/<SessionId>/history.jsonl` | One `HistoryRecord` per line |
 
 `AgentData` contains name, mode, native `AgentConfig`, configuration revision and
-nullable default Session ID. A saved default is checked against this Agent's
+nullable default Session ID. Optional `configuration_source: {key, managed}`
+binds a declared source to the durable Agent ID. Omission means an independent
+Agent; it is not part of copyable `AgentConfig`. The first declared creation
+saves it together with the Agent, and releasing management retains the key.
+A saved default is checked against this Agent's
 open persistent Session metadata and expected history file. Execution-ready
 history validation remains with that Session. The business owner represents a
 runtime memory default as null. `SessionData` contains mode, source Agent configuration revision,

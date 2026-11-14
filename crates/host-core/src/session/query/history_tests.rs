@@ -153,6 +153,7 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
             agent_id.clone(),
             host_id.clone(),
             AgentData {
+                configuration_source: None,
                 name: "task052 fixture".into(),
                 mode: StorageMode::Persistent,
                 config: AgentConfig::default(),
@@ -164,6 +165,7 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
     let id = SessionId::new().unwrap();
     let store = agent.session(id.clone(), StorageMode::Persistent).unwrap();
     let config = SessionConfig {
+        instructions: String::new(),
         model: "test/model".parse().unwrap(),
         ..SessionConfig::default()
     };

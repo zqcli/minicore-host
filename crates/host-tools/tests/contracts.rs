@@ -103,6 +103,7 @@ fn defaults_are_business_defaults_and_wait_has_no_implicit_timeout() {
 fn source_values_are_copied_and_overrides_replace_without_aliasing() {
     let mut source = AgentConfig::default();
     source.role.instructions = "source role".into();
+    source.instructions = "source Agent".into();
     source.session_defaults.tools = vec![ToolBinding {
         name: "read".into(),
     }];
@@ -114,12 +115,63 @@ fn source_values_are_copied_and_overrides_replace_without_aliasing() {
             .unwrap();
     let copied = agent_config_from_settings(&source, &settings).unwrap();
     assert_eq!(copied.role, source.role);
+    assert_eq!(copied.instructions, source.instructions);
     assert_eq!(copied.session_defaults.model.as_str(), "review-model");
     assert!(copied.session_defaults.tools.is_empty());
     assert!(copied.session_defaults.workspace.is_none());
     assert_eq!(source.session_defaults.tools.len(), 1);
     source.role.instructions.clear();
+    source.instructions.clear();
     assert_eq!(copied.role.instructions, "source role");
+    assert_eq!(copied.instructions, "source Agent");
+}
+
+#[test]
+fn settings_instructions_match_agent_session_and_schema_contracts() {
+    let source = AgentConfig {
+        instructions: "original".into(),
+        ..AgentConfig::default()
+    };
+    let settings: SessionConfigPatch =
+        serde_json::from_value(json!({"instructions":"replacement"})).unwrap();
+    assert_eq!(
+        agent_config_from_settings(&source, &settings)
+            .unwrap()
+            .instructions,
+        "replacement"
+    );
+    let cleared: AgentChanges = serde_json::from_value(json!({"instructions":""})).unwrap();
+    let snapshot = AgentConfigSnapshot {
+        name: "source".into(),
+        config: source,
+        config_revision: 7,
+    };
+    assert!(
+        snapshot
+            .apply(&cleared)
+            .unwrap()
+            .config
+            .instructions
+            .is_empty()
+    );
+    for resource in ["agent", "session"] {
+        let target = if resource == "agent" {
+            agent()
+        } else {
+            session()
+        };
+        AgentAction::parse(json!({"action":"update","resource":resource,"target":target,"changes":{"instructions":""}})).unwrap();
+        assert!(AgentAction::parse(json!({"action":"update","resource":resource,"target":target,"changes":{"instructions":null}})).is_err());
+    }
+    let spec = agent_tool_spec();
+    assert_eq!(
+        spec.input_schema()["$defs"]["settings"]["properties"]["instructions"]["type"],
+        "string"
+    );
+    let required = spec.input_schema()["$defs"]["settings"]["properties"]["role"]["required"]
+        .as_array()
+        .unwrap();
+    assert!(!required.contains(&json!("instructions")));
 }
 #[test]
 fn candidate_keeps_snapshot_revision_and_omissions() {

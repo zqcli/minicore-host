@@ -514,6 +514,7 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
             agent_id.clone(),
             host_id,
             AgentData {
+                configuration_source: None,
                 name: "stored fixture".into(),
                 mode: StorageMode::Persistent,
                 config: config(automatic),

@@ -1,6 +1,6 @@
 # Production Host resource assembly
 
-`HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and one frozen framework/Role prompt per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, `apply_patch`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
+`HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and frozen Host/Role/Agent prompt layers per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, `apply_patch`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
 
 The source follows those existing preparation boundaries:
 
@@ -8,7 +8,7 @@ The source follows those existing preparation boundaries:
 | --- | --- |
 | `builder.rs` | Private credential inputs, immutable Host candidates, provider construction, and builder-owned shared bindings across reloads |
 | `resolver.rs` | Session validation, frozen executable Turn bindings, output wrapping, and separate declaration-only compaction resources |
-| `prompt.rs` | Frozen framework/Role/workspace context combined with the existing core history and provenance preparation |
+| `prompt.rs` | Frozen Host/Role/Agent/workspace context combined with the existing core history and provenance preparation |
 | `workspaces.rs` | Weak sharing of actual canonical Workspace mutation bindings across overlapping Turns |
 | `approval.rs` | The selected execution policy and the actual built-in read/agent exemptions |
 
@@ -26,9 +26,9 @@ Turns retain their bound protocol and credentials across a configuration reload.
 
 Keep one builder (or its clones) across reloads, so the agent tool's independently owned delegation scopes and concurrent Turns' actual Workspace mutation binding remain shared. `prepare` reads only explicitly named environment variables. `prepare_with_credentials` supports explicit private embedding inputs, including isolated fixture credentials. Neither path sends model requests or executes tools to test availability.
 
-A production setup calls `prepare`, then `Host::memory_configured`; persistent setup calls `Host::open_configured` with the preparation closure. Saved HostConfig values are authoritative on reopen. Provider and network key bytes are never serialized. There is one `HostRecord<HostConfig>` disk shape; the name-only HostSettings convenience does not define another storage format.
+A directory-based production setup passes one configuration directory and builder to the Host startup entry. Host loads native JSON through `minicore-host-config`, then prepares the complete candidate with this builder before publishing it. Directory declarations supply current Host and managed Agent settings; durable records retain their identities and existing Sessions. The programmatic `Host::memory_configured` and `Host::open_configured` entries remain available for embedding. Provider and network key bytes are never serialized. There is one `HostRecord<HostConfig>` disk shape; the name-only HostSettings convenience does not define another storage format.
 
-For reload, read `Host::config_get` before preparation, prepare a complete candidate without owner locks, then pass it and the original config_revision to `Host::reload_configuration`. A changed listener address or any logging setting returns RestartRequired for the whole candidate. Unchanged startup settings do not block a hot update. The application owns installing its logging backend exactly once and creating its listener; this crate does not do either.
+External `host.reload` accepts an operation ID and expected configuration revision, then reloads the Host's bound directory. Clients do not parse or submit Host candidates. Programmatic callers may still prepare a complete candidate without owner locks and use `Host::reload_configuration`. A changed listener address or any logging setting returns RestartRequired before Host or managed Agent changes. Unchanged startup settings do not block a hot update. The application owns installing its logging backend exactly once and creating its listener; this crate does not do either.
 
 After acceptance, Host owns the original configuration save and publication independently of the waiter's connection/future. Saves run outside owner locks. Version reservation excludes a competing write before it reaches disk. Failed saves preserve the live snapshot/key, retain the candidate and fault, and prevent a false successful shutdown. No new save-recovery interface, automatic retry, rollback, external-file snapshot protocol, or config migration is added.
 
@@ -55,7 +55,7 @@ that boundary; standalone local-tool callers choose their own environment policy
 ## Current limits
 
 - Executable/CLI/config-file and listener startup live in `host-app`; canonical `host.reload` receipts and publication live in `host-core` and route through `host-transport`. This crate prepares resources, not those entrypoints.
-- The Session owner supports automatic compaction before Session model requests using the original bound model/settings. Manual compaction prepares model, reasoning, selected ToolSpecs and the framework/Role/workspace prompt without creating a Turn or binding tools. Enabling compaction is supported; actual utility calls and their persistence can still fail and report their own facts.
+- The Session owner supports automatic compaction before Session model requests using the original bound model/settings. Manual compaction prepares model, reasoning, selected ToolSpecs and the Host/Role/Agent/workspace prompt without creating a Turn or binding tools. Enabling compaction is supported; actual utility calls and their persistence can still fail and report their own facts.
 - Local tools bind the actual selected implementations to the original prepared Turn, Session output/edit owner, and canonical Workspace. Old and new resource publications share a builder-owned weak Workspace map, so overlapping Turns on the same root share the existing mutation guard without extending unused roots' lifetime. Arbitrary shell scripts and outside processes are not coordinated by that guard.
 - Normal Turn preparation uses that shared Workspace binding; manual compaction continues to bind its prompt's canonical workspace directly. It has no executable tool mutation work to register, and this source split does not change either binding path.
 - Public tool Finished state and completion wait for the actual per-call file/process cleanup, with final output positions. Native results enter history immediately; normal completed tools and argument rejection do not wait for Turn completion. The existing Turn collector still owns actual worker joins and blocks finalization on unconfirmed cleanup.

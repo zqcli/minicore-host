@@ -6,8 +6,12 @@
 configuration directory, file-declared Agents, Role references and three optional
 instruction layers. SPEC 4.11.0 is committed before implementation. Host and TUI
 target 0.12.0. The TUI reads tui.json itself; Web remains independently configured.
-Three workers were requested with gpt-6-astra / max. Implementation, integrated
-review, validation and publication are in progress; no new test result is claimed.
+Three implementation workers and an independent reviewer were requested with
+gpt-6-astra / max. Implementation and static review are complete; full validation
+and publication are in progress. The directory/shutdown regressions passed 6/6,
+existing native-record preservation passed 1/1, and the initial executable suite
+passed 28 cases. Exact full-gate, published source and CI results remain pending
+in the task record.
 
 ## Previous checkpoint: Host 0.11.1 directory picker (Task 110)
 

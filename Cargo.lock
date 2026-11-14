@@ -788,8 +788,9 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "minicore-host"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
+ "minicore-host-config",
  "minicore-host-core",
  "minicore-host-diagnostics",
  "minicore-host-protocol",
@@ -804,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-compaction"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "minicore-host-protocol",
@@ -817,11 +818,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicore-host-config"
+version = "0.12.0"
+dependencies = [
+ "minicore-host-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "minicore-host-core"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "minicore-host-compaction",
+ "minicore-host-config",
  "minicore-host-diagnostics",
  "minicore-host-protocol",
  "minicore-host-provider",
@@ -841,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-diagnostics"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "minicore-host-protocol",
  "serde",
@@ -855,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-local-tools"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "minicore-host-provider",
@@ -876,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-protocol"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "getrandom 0.4.3",
  "serde",
@@ -886,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-provider"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -905,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-resources"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "minicore-host-core",
  "minicore-host-protocol",
@@ -921,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-runtime"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "getrandom 0.4.3",
@@ -934,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-storage"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "minicore-host-protocol",
  "minicore-host-runtime",
@@ -951,7 +963,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-tools"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "minicore-host-core",
@@ -967,7 +979,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-transport"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "futures-util",
  "minicore-host-core",
@@ -991,7 +1003,7 @@ dependencies = [
 
 [[package]]
 name = "minicore-host-workspace"
-version = "0.11.1"
+version = "0.12.0"
 dependencies = [
  "ignore",
  "minicore-host-protocol",

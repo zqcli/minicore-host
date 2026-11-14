@@ -201,12 +201,15 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     same_key.name = "Changed name, same actual key".into();
     same_key.network.access_key_env = Some(SOURCE_ALIAS_A.into());
     let unchanged = operator
-        .reload(request(same_key.clone(), 0), options())
+        .reload(preparer.request(same_key.clone(), 0), options())
         .await
         .unwrap();
     assert_eq!(
         terminal(&operator, unchanged.operation_id).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(operator.info(options()).await.unwrap().control, before);
     // The original subscription is still owned, not silently recreated.
@@ -232,7 +235,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     candidate.models[0].endpoint = provider_b.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
     candidate.network.access_key_env = Some(SOURCE_B.into());
-    let reload = request(candidate.clone(), 1);
+    let reload = preparer.request(candidate.clone(), 1);
     let operation = reload.operation_id.clone();
     // The accepted owner may invalidate this WSS connection before reply delivery.
     match operator.reload(reload, options()).await {
@@ -245,7 +248,10 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     }
     assert_eq!(
         terminal(&local, operation.clone()).await.result,
-        HostReloadResult::Applied { config_revision: 2 }
+        HostReloadResult::Applied {
+            config_revision: 2,
+            agents: Vec::new()
+        }
     );
     raw_reader.assert_disconnected().await;
     ended(&mut events).await;
@@ -268,7 +274,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
         assert_eq!(
             fault(
                 reader
-                    .reload(request(original.clone(), 2), options())
+                    .reload(preparer.request(original.clone(), 2), options())
                     .await
                     .unwrap_err()
             )
@@ -280,7 +286,10 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
     assert!(replacement.initial_info().can_operate);
     assert_eq!(
         terminal(&replacement, operation).await.result,
-        HostReloadResult::Applied { config_revision: 2 }
+        HostReloadResult::Applied {
+            config_revision: 2,
+            agents: Vec::new()
+        }
     );
     assert_eq!(preparer.count(), 2);
     finish_a.add_permits(1);
@@ -347,7 +356,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
 #[tokio::test]
 async fn canonical_key_rotation_preserves_typed_and_stdio_operation_rights() {
     for transport in 0..2 {
-        let (host, _) = CredentialFixture::host(config(), false).await;
+        let (host, preparer) = CredentialFixture::host(config(), false).await;
         let operator = Connected::new(host.clone(), transport).await;
         let server = tls_server(host).await;
         let observer = server.client(KEY_A).await.unwrap();
@@ -360,14 +369,17 @@ async fn canonical_key_rotation_preserves_typed_and_stdio_operation_rights() {
         candidate.network.access_key_env = Some(SOURCE_B.into());
         let receipt = operator
             .client
-            .reload(request(candidate, 0), options())
+            .reload(preparer.request(candidate, 0), options())
             .await
             .unwrap();
         assert_eq!(
             terminal(&operator.client, receipt.operation_id)
                 .await
                 .result,
-            HostReloadResult::Applied { config_revision: 1 }
+            HostReloadResult::Applied {
+                config_revision: 1,
+                agents: Vec::new()
+            }
         );
         ended(&mut events).await;
         assert_eq!(
@@ -379,7 +391,7 @@ async fn canonical_key_rotation_preserves_typed_and_stdio_operation_rights() {
         assert_eq!(
             fault(
                 replacement
-                    .reload(request(config(), 1), options())
+                    .reload(preparer.request(config(), 1), options())
                     .await
                     .unwrap_err()
             )

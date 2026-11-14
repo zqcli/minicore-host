@@ -112,6 +112,7 @@ pub(super) fn setup(
             agent_id.clone(),
             host_id.clone(),
             AgentData {
+                configuration_source: None,
                 name: "fixture".into(),
                 mode: StorageMode::Persistent,
                 config: AgentConfig::default(),
@@ -123,6 +124,7 @@ pub(super) fn setup(
     let id = SessionId::new().unwrap();
     let store = agent.session(id.clone(), StorageMode::Persistent).unwrap();
     let config = SessionConfig {
+        instructions: String::new(),
         model: "test/model".parse().unwrap(),
         ..SessionConfig::default()
     };

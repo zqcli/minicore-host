@@ -1,6 +1,6 @@
 # MiniCore Host workspace and directory operations
 
-A small backend module for SPEC v4.10.3 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
+A small backend module for SPEC v4.11.0 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
 
 ## Host directory selection
 

@@ -39,7 +39,7 @@ fn schema() -> Value {
     );
     let role = object(
         json!({"name":{"type":"string","minLength":1},"description":text,"instructions":text}),
-        &["name", "description", "instructions"],
+        &["name", "description"],
     );
     let compaction = object(
         json!({"enabled":{"type":"boolean"},"trigger_percent":{"type":"integer","minimum":1,"maximum":100},"target_percent":{"type":"integer","minimum":1,"maximum":99}}),
@@ -60,6 +60,7 @@ fn schema() -> Value {
     );
     let settings_properties = json!({
         "role":role,
+        "instructions":text,
         "model":{"type":"string","minLength":1,"maxLength":256,"pattern":"^[A-Za-z0-9_.:/-]+$"},
         "reasoning":{"enum":["auto","disabled","low","medium","high","xhigh","max","ultra"]},
         "tools":{"type":"array","items":object(json!({"name":{"type":"string","minLength":1}}), &["name"])},

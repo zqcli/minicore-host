@@ -357,7 +357,10 @@ async fn reload_queries_expose_real_removals_and_keep_missing_selections_as_faul
             )
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     for client in &peers.clients {
         assert_eq!(

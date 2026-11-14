@@ -83,7 +83,7 @@ async fn stdio_reload_deadline_includes_partial_real_response_without_replay_or_
     let (host, preparer) = CredentialFixture::host(config(), true).await;
     let relay = DelayedStdio::new(host.clone()).await;
     let observer = HostClient::in_process(host).unwrap();
-    let reload = request(config(), 0);
+    let reload = preparer.request(config(), 0);
     let operation = reload.operation_id.clone();
     tokio::time::pause();
     let calling = {
@@ -116,12 +116,18 @@ async fn stdio_reload_deadline_includes_partial_real_response_without_replay_or_
     preparer.release.add_permits(1);
     assert_eq!(
         terminal(&observer, operation.clone()).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     relay.release.add_permits(1); // Late genuine response is consumed once.
     assert_eq!(
         terminal(&relay.client, operation).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(preparer.count(), 1);
     assert_eq!(
@@ -132,7 +138,7 @@ async fn stdio_reload_deadline_includes_partial_real_response_without_replay_or_
     assert_eq!(
         fault(
             observer
-                .reload(request(config(), 1), options())
+                .reload(preparer.request(config(), 1), options())
                 .await
                 .unwrap_err()
         )
@@ -147,7 +153,7 @@ async fn stdio_disconnect_before_complete_receipt_keeps_the_accepted_owner_runni
     let (host, preparer) = CredentialFixture::host(config(), true).await;
     let relay = DelayedStdio::new(host.clone()).await;
     let observer = HostClient::in_process(host.clone()).unwrap();
-    let reload = request(config(), 0);
+    let reload = preparer.request(config(), 0);
     let operation = reload.operation_id.clone();
     let calling = {
         let client = relay.client.clone();
@@ -163,7 +169,10 @@ async fn stdio_disconnect_before_complete_receipt_keeps_the_accepted_owner_runni
     preparer.release.add_permits(1);
     assert_eq!(
         terminal(&observer, operation.clone()).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     tokio::time::timeout(Duration::from_secs(5), async {
         while observer.info(options()).await.unwrap().control.occupied {
@@ -176,7 +185,10 @@ async fn stdio_disconnect_before_complete_receipt_keeps_the_accepted_owner_runni
     assert!(replacement.initial_info().can_operate);
     assert_eq!(
         terminal(&replacement, operation).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(preparer.count(), 1);
     replacement.close();
@@ -195,7 +207,7 @@ async fn wss_disconnect_during_preparation_does_not_cancel_rotation_or_replay_re
     let observer = HostClient::in_process(host).unwrap();
     let mut candidate = config();
     candidate.network.access_key_env = Some(SOURCE_B.into());
-    let reload = request(candidate.clone(), 0);
+    let reload = preparer.request(candidate.clone(), 0);
     let operation = reload.operation_id.clone();
     original
         .write(json!({"jsonrpc":"2.0","id":1,"method":"host.reload","params":reload}))
@@ -206,7 +218,10 @@ async fn wss_disconnect_during_preparation_does_not_cancel_rotation_or_replay_re
     preparer.release.add_permits(1);
     assert_eq!(
         terminal(&observer, operation.clone()).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(
         fault(server.client(KEY_A).await.err().unwrap()).kind(),
@@ -216,7 +231,10 @@ async fn wss_disconnect_during_preparation_does_not_cancel_rotation_or_replay_re
     assert!(replacement.initial_info().can_operate);
     assert_eq!(
         terminal(&replacement, operation).await.result,
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     assert_eq!(
         replacement.config(options()).await.unwrap().config,

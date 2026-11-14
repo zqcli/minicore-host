@@ -72,7 +72,10 @@ async fn published_names_are_cumulative_deduplicated_and_host_local() {
         host.reload_configuration(&connection.caller(), 0, candidate)
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     names(
         &view,
@@ -118,16 +121,20 @@ async fn preparation_failure_and_restart_candidate_do_not_publish_names() {
         prepared(config(&["TASK066_OLD"], None)).with_preparer(preparer.clone()),
     )
     .unwrap();
+    let _configuration_directory = reload_tests::bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let view = host.configuration.tool_environment.clone();
     let operation = OperationId::new().unwrap();
+    reload_tests::write_candidate(
+        &host,
+        &config(&["TASK066_REJECTED"], Some("TASK066_REJECTED_NETWORK")),
+    );
     host.reload(
         &caller,
         HostReloadRequest {
             operation_id: operation.clone(),
             expected_revision: 0,
-            candidate: config(&["TASK066_REJECTED"], Some("TASK066_REJECTED_NETWORK")),
         },
     )
     .unwrap();
@@ -147,23 +154,17 @@ async fn preparation_failure_and_restart_candidate_do_not_publish_names() {
     .await
     .unwrap();
     names(&view, &["TASK066_OLD"]);
+    let other = Host::memory_configured(prepared(config(&["TASK066_OLD"], None))).unwrap();
+    let control = other.connect().unwrap();
     let mut restart = config(&["TASK066_RESTART"], Some("TASK066_RESTART_NETWORK"));
     restart.logging.level = LogLevel::Trace;
-    let result = host
-        .reload(
-            &caller,
-            HostReloadRequest {
-                operation_id: OperationId::new().unwrap(),
-                expected_revision: 0,
-                candidate: restart,
-            },
-        )
+    let result = other
+        .reload_configuration(&control.caller(), 0, prepared(restart))
+        .await
         .unwrap();
-    assert!(matches!(
-        result.result,
-        HostReloadResult::RestartRequired { .. }
-    ));
+    assert!(matches!(result, HostReloadResult::RestartRequired { .. }));
     names(&view, &["TASK066_OLD"]);
+    names(&other.configuration.tool_environment, &["TASK066_OLD"]);
     assert_eq!(host.config_get(&caller).unwrap().config_revision, 0);
 }
 
@@ -200,7 +201,10 @@ async fn save_in_progress_and_conflict_leave_policy_unchanged_until_publication(
     gate.release.add_permits(1);
     assert_eq!(
         pending.await.unwrap().unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     names(&view, &["TASK066_OLD", "TASK066_PUBLISHED"]);
 }

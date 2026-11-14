@@ -9,7 +9,7 @@ use support::*;
 #[tokio::test]
 async fn process_readiness_selects_its_component_after_owner_started() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("config.json");
+    let path = directory.path().join("config");
     let (certificate, key, _) = certificates(directory.path());
     let mut settings = config(None, true);
     settings.logging.level = LogLevel::Trace;
@@ -20,7 +20,7 @@ async fn process_readiness_selects_its_component_after_owner_started() {
         .env("MINICORE_APP_HOST_KEY", HOST_KEY)
         .arg("--data-root")
         .arg(directory.path().join("data"))
-        .arg("--config")
+        .arg("--config-dir")
         .arg(&path)
         .arg("--stdio")
         .arg("--tls-cert")

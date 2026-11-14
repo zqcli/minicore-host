@@ -90,7 +90,10 @@ async fn old_and_new_publications_share_workspace_mutations_across_real_sessions
         host.reload_configuration(&caller, 0, prepare(&clone, next).await)
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     let second = create(
         &host,

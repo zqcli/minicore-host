@@ -367,7 +367,12 @@ async fn binary_force_waits_for_actual_child_cleanup_and_preserves_native_cancel
     let native = assert_saved_cancel(&app.root, &target, &turn, "force-call");
     let saved = fs::read(history_path(&app.root, &target)).unwrap();
     // Reopen through the same actual binary, not through a storage test double.
-    let mut reopened = Process::start(&app.root, None, true, Some((&app.certificate, &app.key)));
+    let mut reopened = Process::start(
+        &app.root,
+        &app.config_dir,
+        true,
+        Some((&app.certificate, &app.key)),
+    );
     let initial = reopened.rpc("initialize", json!({})).await;
     assert_eq!(initial["host_id"], app.initial["host_id"]);
     assert_ne!(initial["host_incarnation"], app.initial["host_incarnation"]);

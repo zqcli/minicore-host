@@ -124,6 +124,7 @@ fn request(tools: Vec<ToolBinding>, workspace: Option<WorkspaceRef>) -> AgentCre
     // These resource/ordinary-tool fixtures exercise execution, not approval.
     config.session_defaults.execution.approval = ApprovalMode::Auto;
     config.role.instructions = "ROLE A".into();
+    config.instructions = "AGENT A".into();
     AgentCreate {
         operation_id: OperationId::new().unwrap(),
         name: "Resource test".into(),
@@ -251,54 +252,17 @@ fn selection() -> Vec<ToolBinding> {
     }]
 }
 
-/// Explicit fixture credentials, while all resource preparation still uses
-/// the real production assembler and its original static ToolRegistry.
-struct ExplicitCredentialsPreparer {
-    builder: Arc<HostResourceBuilder>,
-}
-impl HostConfigurationPreparer for ExplicitCredentialsPreparer {
-    fn prepare(&self, config: HostConfig) -> HostConfigurationFuture<'_> {
-        Box::pin(async move {
-            let credentials = keys(&config, "rotated-key");
-            self.builder
-                .prepare_with_credentials(config, credentials)
-                .await
-        })
-    }
-}
-async fn applied(host: &Host, caller: &CallerContext, operation: &OperationId) {
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let receipt = host.receipt_get(caller, operation).unwrap();
-            match receipt {
-                Receipt::HostReload(HostReloadReceipt {
-                    result: HostReloadResult::Applied { .. },
-                    ..
-                }) => return,
-                Receipt::HostReload(HostReloadReceipt {
-                    result: HostReloadResult::Preparing { .. } | HostReloadResult::Applying { .. },
-                    ..
-                }) => {}
-                other => panic!("reload did not apply: {other:?}"),
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-}
-
 #[tokio::test]
-async fn old_turn_keeps_actual_model_tools_role_and_workspace_after_reload() {
+async fn old_turn_keeps_actual_model_tools_role_agent_instructions_and_workspace_after_reload() {
     old_turn_resources_after_reload(false).await;
 }
 
 #[tokio::test]
-async fn canonical_reload_receipt_keeps_real_old_turn_and_new_turn_resource_bindings() {
+async fn network_key_reload_keeps_real_old_turn_and_new_turn_resource_bindings() {
     old_turn_resources_after_reload(true).await;
 }
 
-async fn old_turn_resources_after_reload(canonical: bool) {
+async fn old_turn_resources_after_reload(network_operator: bool) {
     let gate = Arc::new(Semaphore::new(0));
     let mut server_a = Server::start(vec![
         (tool_answer(), Some(gate.clone())),
@@ -311,15 +275,9 @@ async fn old_turn_resources_after_reload(canonical: bool) {
     let builder = Arc::new(builder);
     let mut original = config(&server_a.endpoint);
     original.tools = selection();
-    let host = Host::memory_configured(
-        prepare(&builder, original.clone(), "old-key")
-            .await
-            .with_preparer(Arc::new(ExplicitCredentialsPreparer {
-                builder: builder.clone(),
-            })),
-    )
-    .unwrap();
-    let mut connection = if canonical {
+    let host =
+        Host::memory_configured(prepare(&builder, original.clone(), "old-key").await).unwrap();
+    let mut connection = if network_operator {
         host.connect_network("old-key").unwrap()
     } else {
         host.connect().unwrap()
@@ -343,50 +301,24 @@ async fn old_turn_resources_after_reload(canonical: bool) {
     candidate.models[0].endpoint = server_b.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
     candidate.tools.clear();
-    if canonical {
-        let operation_id = OperationId::new().unwrap();
-        let formed = host
-            .reload(
-                &caller,
-                HostReloadRequest {
-                    operation_id: operation_id.clone(),
-                    expected_revision: 0,
-                    candidate,
-                },
-            )
-            .unwrap();
-        assert_eq!(
-            formed.result,
-            HostReloadResult::Preparing { config_revision: 0 }
-        );
-        applied(&host, &local_reader.caller(), &operation_id).await;
+    assert_eq!(
+        host.reload_configuration(
+            &caller,
+            0,
+            prepare(&builder, candidate, "rotated-key").await,
+        )
+        .await
+        .unwrap(),
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
+    );
+    if network_operator {
         assert!(host.info(&caller).is_err());
         connection = host.connect_network("rotated-key").unwrap();
         assert!(connection.initial_info().can_operate);
         caller = connection.caller();
-        assert!(matches!(
-            host.receipt_get(&caller, &operation_id).unwrap(),
-            Receipt::HostReload(HostReloadReceipt {
-                result: HostReloadResult::Applied { config_revision: 1 },
-                ..
-            })
-        ));
-        // This already-returned control fact was not rewritten or resent.
-        assert_eq!(
-            formed.result,
-            HostReloadResult::Preparing { config_revision: 0 }
-        );
-    } else {
-        assert_eq!(
-            host.reload_configuration(
-                &caller,
-                0,
-                prepare(&builder, candidate, "rotated-key").await,
-            )
-            .await
-            .unwrap(),
-            HostReloadResult::Applied { config_revision: 1 }
-        );
     }
     assert!(host.info(&old_network.caller()).is_err());
     assert!(host.info(&local_reader.caller()).is_ok());
@@ -401,6 +333,7 @@ async fn old_turn_resources_after_reload(canonical: bool) {
                 description: String::new(),
                 instructions: "ROLE B".into(),
             }),
+            instructions: Some("AGENT B".into()),
             tools: Some(vec![]),
             ..Default::default()
         },
@@ -431,6 +364,23 @@ async fn old_turn_resources_after_reload(canonical: bool) {
             messages.iter().filter(|m| m["content"] == "ROLE A").count(),
             1
         );
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m["content"] == "AGENT A")
+                .count(),
+            1
+        );
+        for (message, expected) in messages.iter().zip([
+            "FRAMEWORK A",
+            "ROLE A",
+            "AGENT A",
+            workspace_context.as_str(),
+        ]) {
+            assert_eq!(message["role"], "system");
+            assert_eq!(message["content"], expected);
+        }
+        assert_eq!(messages[4]["role"], "user");
         assert!(
             messages
                 .iter()
@@ -461,14 +411,58 @@ async fn old_turn_resources_after_reload(canonical: bool) {
         messages.iter().filter(|m| m["content"] == "ROLE B").count(),
         1
     );
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m["content"] == "AGENT B")
+            .count(),
+        1
+    );
+    for (message, expected) in messages.iter().zip([
+        "FRAMEWORK B",
+        "ROLE B",
+        "AGENT B",
+        workspace_context.as_str(),
+    ]) {
+        assert_eq!(message["role"], "system");
+        assert_eq!(message["content"], expected);
+    }
     assert!(messages.iter().any(|m| m["content"] == "A finished"));
     assert!(
         !host
             .history(&caller, &target)
             .unwrap()
             .iter()
-            .any(|h| matches!(h,HistoryItem::User(u) if u.input.as_text().contains("FRAMEWORK")))
+            .any(|h| matches!(h,HistoryItem::User(u) if ["FRAMEWORK", "ROLE A", "ROLE B", "AGENT A", "AGENT B"].iter().any(|text| u.input.as_text().contains(text))))
     );
+}
+
+#[tokio::test]
+async fn empty_instruction_layers_and_role_metadata_add_no_system_messages() {
+    let mut server = Server::start(vec![(answer("done"), None)]).await;
+    let builder = HostResourceBuilder::builtins().unwrap();
+    let mut configured = config(&server.endpoint);
+    configured.framework_instructions.clear();
+    let host = Host::memory_configured(prepare(&builder, configured, "key").await).unwrap();
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let mut create = request(Vec::new(), None);
+    create.config.role.name = "NAME IS NOT INSTRUCTIONS".into();
+    create.config.role.description = "DESCRIPTION IS NOT INSTRUCTIONS".into();
+    create.config.role.instructions.clear();
+    create.config.instructions.clear();
+    let receipt = host.create_agent_async(&caller, create).await.unwrap();
+    let target = SessionRef {
+        agent_id: receipt.agent_id.unwrap(),
+        session_id: receipt.session_id.unwrap(),
+    };
+    send(&host, &caller, &target, "task");
+    let body = server.request().await;
+    settled(&host, &caller, &target, 1).await;
+    let messages = body["messages"].as_array().unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0]["role"], "user");
+    assert!(!body.to_string().contains("NOT INSTRUCTIONS"));
 }
 
 #[tokio::test]
@@ -835,7 +829,7 @@ async fn actual_tool_binding_failure_preserves_the_accepted_message() {
 mod session_resource_resume;
 
 #[tokio::test]
-async fn production_builder_binds_reload_preparer_at_initialization_without_an_extra_setter() {
+async fn production_builder_prepares_programmatic_reload_without_an_extra_setter() {
     let builder = HostResourceBuilder::builtins().unwrap();
     let host =
         Host::memory_configured(builder.prepare(HostConfig::default()).await.unwrap()).unwrap();
@@ -843,17 +837,15 @@ async fn production_builder_binds_reload_preparer_at_initialization_without_an_e
     let caller = connection.caller();
     let mut candidate = host.config_get(&caller).unwrap().config;
     candidate.name = "Assembled reload".into();
-    let formed = host
-        .reload(
-            &caller,
-            HostReloadRequest {
-                operation_id: OperationId::new().unwrap(),
-                expected_revision: 0,
-                candidate,
-            },
-        )
-        .unwrap();
-    applied(&host, &caller, &formed.operation_id).await;
+    assert_eq!(
+        host.reload_configuration(&caller, 0, builder.prepare(candidate).await.unwrap())
+            .await
+            .unwrap(),
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
+    );
     assert_eq!(
         host.config_get(&caller).unwrap().config.name,
         "Assembled reload"

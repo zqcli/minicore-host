@@ -7,6 +7,7 @@ rust-version.workspace = true
 description = "Direct-owner Host, Agent, and Session controllers for MiniCore"
 
 [dependencies]
+minicore-host-config.workspace = true
 minicore-host-diagnostics.workspace = true
 tracing = { workspace = true, features = ["std"] }
 minicore-host-compaction.workspace = true

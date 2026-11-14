@@ -142,6 +142,7 @@ impl AgentOwner {
             .validate()
             .map_err(|error| Fault::new(FaultKind::AgentDeleteInvalid, error.to_string()))?;
         let mut state = self.state.lock().expect("Agent mutex poisoned");
+        Self::allow_configuration_update(&state)?;
         if state.deleting
             || !state.deleting_sessions.is_empty()
             || !state.close_running.is_empty()

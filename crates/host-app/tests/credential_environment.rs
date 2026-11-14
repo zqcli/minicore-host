@@ -16,7 +16,7 @@ const CALL: &str = "credential-environment";
 fn isolated_process(
     root: &Path,
     home: &Path,
-    config: Option<&Path>,
+    config_dir: &Path,
     certificate: &Path,
     key: &Path,
 ) -> Process {
@@ -43,9 +43,7 @@ fn isolated_process(
         .env("TEMP", home)
         .env("TMP", home)
         .env("USERPROFILE", home);
-    if let Some(config) = config {
-        command.arg("--config").arg(config);
-    }
+    command.arg("--config-dir").arg(config_dir);
     Process::command(command)
 }
 
@@ -55,14 +53,14 @@ async fn binary_keeps_configured_credentials_out_of_tool_output_and_persistent_h
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("data");
     let home = directory.path().join("empty-home");
-    let path = directory.path().join("config.json");
+    let path = directory.path().join("config");
     fs::create_dir(&home).unwrap();
     let (certificate, key, tls) = support::certificates(directory.path());
     let mut config = support::config(Some(provider.endpoint.clone()), true);
     config.tools = bindings(&["bash"]);
     config.logging.level = LogLevel::Trace;
     support::write_config(&path, &config);
-    let mut process = isolated_process(&root, &home, Some(&path), &certificate, &key);
+    let mut process = isolated_process(&root, &home, &path, &certificate, &key);
     let initial = process.rpc("initialize", json!({})).await;
     assert_eq!(initial["can_operate"], true);
     // A verified-TLS WSS connection must authenticate with the configured key.
@@ -178,7 +176,7 @@ async fn binary_keeps_configured_credentials_out_of_tool_output_and_persistent_h
     assert_eq!(result["outcome"], finished["outcome"]);
     assert_eq!(result["output"], finished["output"]);
     // Reopen the same actual binary and saved root, not a storage test double.
-    let mut reopened = isolated_process(&root, &home, None, &certificate, &key);
+    let mut reopened = isolated_process(&root, &home, &path, &certificate, &key);
     let current = reopened.rpc("initialize", json!({})).await;
     assert_eq!(current["host_id"], initial["host_id"]);
     assert_ne!(current["host_incarnation"], initial["host_incarnation"]);

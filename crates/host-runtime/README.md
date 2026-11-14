@@ -34,5 +34,5 @@ owned arguments. These internal changes preserve the serialized value formats.
 
 There is no spawned loop, independent control plane, input/history callback, or
 accumulated history report. `LoopId` remains a native correlation value so existing
-history records keep their format. See [SPEC 4.10.3](../../SPEC.md) and
+history records keep their format. See [SPEC 4.11.0](../../SPEC.md) and
 [Task 106](../../tasks/106-host-runtime/TASK.md).

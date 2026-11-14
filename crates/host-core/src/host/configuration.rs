@@ -82,15 +82,20 @@ impl Host {
         Ok(result)
     }
 
-    /// Accept canonical host.reload at the direct owner boundary. Preparation,
-    /// necessary saving and atomic publication remain Host-owned after return,
-    /// caller cancellation, disconnect, or access-key invalidation.
+    /// Accept a reread of the startup-bound directory. The accepted Host work
+    /// owns parsing, preparation, per-owner saves and cleanup after disconnect.
     pub fn reload(
         self: &Arc<Self>,
         caller: &CallerContext,
-        request: HostReloadRequest<HostConfig>,
+        request: HostReloadRequest,
     ) -> Result<HostReloadReceipt, Fault> {
         let runtime = reload_runtime()?;
+        let directory = self.configuration_directory.get().cloned().ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "Host has no startup-bound configuration directory",
+            )
+        })?;
         let preparer = self
             .configuration
             .state
@@ -107,52 +112,92 @@ impl Host {
         let (result, index) = self.claim_configuration(
             caller,
             request.expected_revision,
-            &request.candidate,
+            None,
             Some(request.operation_id.clone()),
             true,
         )?;
-        let receipt = self.reload_receipt(request.operation_id, result);
-        if matches!(receipt.result, HostReloadResult::Preparing { .. }) {
-            let owner = Arc::clone(self);
-            let store = self.store();
-            runtime.spawn(async move {
-                let candidate = request.candidate;
-                let prepared = match candidate.validate() {
-                    Ok(()) => preparer.prepare(candidate.clone()).await,
-                    Err(fault) => Err(fault),
-                };
-                // A completed preparation no longer retains its application
-                // callback beyond the accepted work's cleanup barrier.
-                drop(preparer);
-                let prepared = match prepared {
-                    Ok(prepared) if prepared.config == candidate => prepared,
-                    Ok(prepared) => {
-                        drop(prepared);
-                        owner.finish_configuration_failure(
-                            index.as_ref(),
-                            crate::configuration::invalid(
-                                "resource preparation changed candidate configuration values",
-                            ),
-                            None,
-                            false,
-                        );
-                        return;
-                    }
-                    Err(fault) => {
-                        owner.finish_configuration_failure(index.as_ref(), fault, None, false);
-                        return;
-                    }
-                };
-                let _ = owner
-                    .publish_configuration(
-                        prepared,
-                        request.expected_revision + 1,
-                        store,
-                        index.as_ref(),
-                    )
-                    .await;
-            });
-        }
+        let receipt = self.reload_receipt(request.operation_id.clone(), result);
+        let owner = Arc::clone(self);
+        let store = self.store();
+        runtime.spawn(async move {
+            let work = async {
+                let loaded = super::configuration_directory::read_directory(directory).await?;
+                let prepared = preparer.prepare(loaded.host.clone()).await?;
+                if prepared.config != loaded.host {
+                    return Err(crate::configuration::invalid(
+                        "resource preparation changed directory configuration values",
+                    ));
+                }
+                super::configuration_directory::validate_agents(&prepared, &loaded.agents).await?;
+                let existing = owner.configured_agents_owned()?;
+                Ok((loaded, prepared, existing))
+            }
+            .await;
+            drop(preparer);
+            let (loaded, prepared, existing) = match work {
+                Ok(work) => work,
+                Err(fault) => {
+                    owner.finish_configuration_failure(index.as_ref(), fault, None, false);
+                    return;
+                }
+            };
+            let fields = owner
+                .configuration
+                .snapshot()
+                .config
+                .restart_changes(&loaded.host);
+            if !fields.is_empty() {
+                drop(prepared);
+                let mut state = owner
+                    .configuration
+                    .state
+                    .lock()
+                    .expect("Host configuration mutex poisoned");
+                state.saving = false;
+                update_reload(
+                    &mut state,
+                    index.as_ref(),
+                    HostReloadResult::RestartRequired {
+                        config_revision: request.expected_revision,
+                        fields,
+                    },
+                );
+                drop(state);
+                owner.changed.notify_waiters();
+                return;
+            }
+            let revision = request.expected_revision + 1;
+            if owner
+                .publish_configuration(prepared, revision, store, index.as_ref(), false)
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let agents = owner
+                .apply_directory_agents(loaded.agents, existing, &request.operation_id)
+                .await;
+            let result = if agents.iter().all(AgentConfigurationResult::succeeded) {
+                HostReloadResult::Applied {
+                    config_revision: revision,
+                    agents,
+                }
+            } else {
+                HostReloadResult::PartiallyApplied {
+                    config_revision: revision,
+                    agents,
+                }
+            };
+            let mut state = owner
+                .configuration
+                .state
+                .lock()
+                .expect("Host configuration mutex poisoned");
+            update_reload(&mut state, index.as_ref(), result);
+            state.saving = false;
+            drop(state);
+            owner.changed.notify_waiters();
+        });
         Ok(receipt)
     }
 
@@ -165,9 +210,20 @@ impl Host {
         expected_revision: ConfigRevision,
         candidate: PreparedHostConfiguration,
     ) -> Result<HostReloadResult, Fault> {
+        if self.configuration_directory.get().is_some() {
+            return Err(Fault::new(
+                FaultKind::HostMethodUnavailable,
+                "directory-bound Hosts reload their files through host.reload",
+            ));
+        }
         let runtime = reload_runtime()?;
-        let (result, _) =
-            self.claim_configuration(caller, expected_revision, &candidate.config, None, false)?;
+        let (result, _) = self.claim_configuration(
+            caller,
+            expected_revision,
+            Some(&candidate.config),
+            None,
+            false,
+        )?;
         if matches!(result, HostReloadResult::RestartRequired { .. }) {
             return Ok(result);
         }
@@ -176,7 +232,7 @@ impl Host {
         let store = self.store();
         runtime.spawn(async move {
             let result = owner
-                .publish_configuration(candidate, expected_revision + 1, store, None)
+                .publish_configuration(candidate, expected_revision + 1, store, None, true)
                 .await;
             let _ = sender.send(result);
         });
@@ -206,7 +262,7 @@ impl Host {
         &self,
         caller: &CallerContext,
         expected_revision: ConfigRevision,
-        candidate: &HostConfig,
+        candidate: Option<&HostConfig>,
         operation: Option<OperationId>,
         preparing: bool,
     ) -> Result<(HostReloadResult, Option<ReloadIndex>), Fault> {
@@ -232,7 +288,9 @@ impl Host {
                     "Host configuration changed or has an unconfirmed save",
                 ));
             }
-            let fields = state.snapshot.config.restart_changes(candidate);
+            let fields = candidate
+                .map(|candidate| state.snapshot.config.restart_changes(candidate))
+                .unwrap_or_default();
             let result = if !fields.is_empty() {
                 HostReloadResult::RestartRequired {
                     config_revision: expected_revision,
@@ -302,6 +360,7 @@ impl Host {
         revision: ConfigRevision,
         store: Option<HostStore>,
         index: Option<&ReloadIndex>,
+        complete: bool,
     ) -> Result<HostReloadResult, Fault> {
         // Reload never replaces the startup assembler. Release any redundant
         // candidate handle outside owner locks and before work is settled.
@@ -369,8 +428,15 @@ impl Host {
             update_reload(
                 &mut state,
                 index,
-                HostReloadResult::Applied {
-                    config_revision: revision,
+                if complete {
+                    HostReloadResult::Applied {
+                        config_revision: revision,
+                        agents: Vec::new(),
+                    }
+                } else {
+                    HostReloadResult::Applying {
+                        config_revision: revision,
+                    }
                 },
             );
             Ok(old)
@@ -386,13 +452,16 @@ impl Host {
         }
         let result = HostReloadResult::Applied {
             config_revision: revision,
+            agents: Vec::new(),
         };
         let mut state = self
             .configuration
             .state
             .lock()
             .expect("Host configuration mutex poisoned");
-        state.saving = false;
+        if complete {
+            state.saving = false;
+        }
         drop(state);
         self.changed.notify_waiters();
         Ok(result)

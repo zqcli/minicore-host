@@ -29,7 +29,7 @@ impl Host {
         };
         let mode = request.mode;
         let result = self
-            .accept_agent_creation(caller, request, context.clone())
+            .accept_agent_creation(Some(caller), request, context.clone(), None)
             .await;
         if let Err(fault) = &result {
             self.creation_failure_record(context, mode, "admission", fault, false)
@@ -37,11 +37,40 @@ impl Host {
         }
         result
     }
+    pub(super) async fn create_configured_agent_owned(
+        self: &Arc<Self>,
+        definition: minicore_host_config::AgentDefinition,
+        operation: OperationId,
+    ) -> Result<AgentCreateReceipt, Fault> {
+        let context = Context {
+            operation_id: Some(operation.clone()),
+            ..self.diagnostic_context()
+        };
+        let source = AgentConfigurationSource {
+            key: definition.key,
+            managed: true,
+        };
+        self.accept_agent_creation(
+            None,
+            AgentCreate {
+                operation_id: operation,
+                name: definition.name,
+                mode: StorageMode::Persistent,
+                config: definition.config,
+                default_session: None,
+                initial_message: None,
+            },
+            context,
+            Some(source),
+        )
+        .await
+    }
     async fn accept_agent_creation(
         self: &Arc<Self>,
-        caller: &CallerContext,
+        caller: Option<&CallerContext>,
         request: AgentCreate,
         context: Context,
+        configuration_source: Option<AgentConfigurationSource>,
     ) -> Result<AgentCreateReceipt, Fault> {
         request
             .validate()
@@ -100,9 +129,16 @@ impl Host {
         // Create the short operation span before entering the admission lock.
         let mut span = Some(context.span());
         let subscriber = tracing::dispatcher::get_default(Clone::clone);
-        self.access.accept_business(caller, || {
+        let admission = || {
             let mut state = self.state.lock().expect("Host mutex poisoned");
-            if state.lifecycle != HostLifecycle::Running {
+            let directory_owned = caller.is_none() && configuration_source.is_some();
+            if state.lifecycle != HostLifecycle::Running
+                && !(directory_owned
+                    && matches!(
+                        state.lifecycle,
+                        HostLifecycle::Starting | HostLifecycle::Draining | HostLifecycle::Stopping
+                    ))
+            {
                 return Err(Fault::new(
                     FaultKind::HostLifecycleUnavailable,
                     "Host is not accepting new Agents",
@@ -115,11 +151,15 @@ impl Host {
             let mode = request.mode;
             let task = runtime.spawn(
                 async move {
+                    let declaration_key = configuration_source
+                        .as_ref()
+                        .map(|source| source.key.clone());
                     let mut phase = "agent_creation";
                     let result = AssertUnwindSafe(owner.create_agent_work(
                         task_id.clone(),
                         request,
                         context.clone(),
+                        configuration_source,
                         &mut phase,
                     ))
                     .catch_unwind()
@@ -137,12 +177,21 @@ impl Host {
                             ),
                         ),
                     };
-                    owner
-                        .state
-                        .lock()
-                        .expect("Host mutex poisoned")
-                        .creations
-                        .insert(task_id.clone(), receipt.clone());
+                    {
+                        let mut state = owner.state.lock().expect("Host mutex poisoned");
+                        // A failed first save may have written the source key.
+                        // Retain that uncertainty in the accepted creation facts;
+                        // another reload must not manufacture a second identity.
+                        if let Some(key) = declaration_key
+                            && receipt.agent_id.is_none()
+                            && let CreateStep::Failed { error } = &receipt.result.steps.agent
+                        {
+                            state
+                                .configuration_creation_failures
+                                .insert(key, error.clone());
+                        }
+                        state.creations.insert(task_id.clone(), receipt.clone());
+                    }
                     {
                         let mut state = owner.state.lock().expect("Host mutex poisoned");
                         state.create_tasks.remove(&task_id);
@@ -162,7 +211,12 @@ impl Host {
             );
             state.create_tasks.insert(id, task);
             Ok(())
-        })?;
+        };
+        if let Some(caller) = caller {
+            self.access.accept_business(caller, admission)?;
+        } else {
+            self.access.accept_internal_owned(admission)?;
+        }
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::HostInternalUnexpected,
@@ -217,12 +271,16 @@ impl Host {
         id: AgentId,
         request: AgentCreate,
         context: Context,
+        configuration_source: Option<AgentConfigurationSource>,
         phase: &mut &'static str,
     ) -> (AgentCreateReceipt, Option<crate::diagnostics::Record>) {
         let operation = request.operation_id.clone();
         let mode = request.mode;
+        let configuration_creation = configuration_source.is_some();
         let created = async {
-            self.access.ensure_execution_owned()?;
+            if !configuration_creation {
+                self.access.ensure_execution_owned()?;
+            }
             let agent = if request.mode == StorageMode::Persistent {
                 let store = self
                     .store()
@@ -233,6 +291,7 @@ impl Host {
                     id.clone(),
                     self.id.clone(),
                     AgentData {
+                        configuration_source,
                         name: request.name.clone(),
                         mode: request.mode,
                         config: request.config.clone(),
@@ -294,11 +353,11 @@ impl Host {
             }
             *phase = "default_session";
             let result = agent
-                .create_session_async_owned(
+                .create_default_session_owned(
                     operation.clone(),
                     request.default_session.unwrap_or_default(),
                     request.initial_message,
-                    true,
+                    configuration_creation,
                 )
                 .await;
             agent.finish_initial_creation();

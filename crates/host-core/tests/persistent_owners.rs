@@ -123,6 +123,7 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
             agent_id.clone(),
             host_id.clone(),
             AgentData {
+                configuration_source: None,
                 name: "saved Agent".into(),
                 mode: StorageMode::Persistent,
                 config: config(),
@@ -2008,6 +2009,7 @@ async fn review_create_check_selected_config_version_is_not_reread() {
             7,
             &AgentConfigPatch {
                 role: Some(next),
+                instructions: None,
                 session_defaults: None,
             },
         )

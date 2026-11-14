@@ -204,23 +204,30 @@ enabled set is distinct from a missing target or a selected tool removed by a
 successful configuration reload; those missing cases retain the owner's Fault.
 Known references can be used directly without first calling either list method.
 
-`HostClient::reload` and `host.reload` accept the canonical
-`HostReloadRequest<HostConfig>` directly: `operation_id`, `expected_revision`,
-and the full readable `candidate`. The initialization-time application preparer
-comes from `HostResourceBuilder` or an explicit embedding. A Host constructed
-without one returns `HOST_METHOD_UNAVAILABLE`; the adapter cannot install one.
-Operation rights, lifecycle and revision/reservation checks stay at the actual
-Host acceptance boundary. There is no `host.reload_config` alias.
+`HostClient::reload` and `host.reload` accept `HostReloadRequest` directly:
+`operation_id` and `expected_revision`. The request contains neither a candidate
+nor a directory. Host rereads its startup-bound configuration directory using
+the application preparer from `HostResourceBuilder` or an explicit embedding.
+A Host without a bound directory rejects this entry; the adapter cannot choose
+one. Operation rights, lifecycle and revision/reservation checks stay at the
+actual Host acceptance boundary. There is no `host.reload_config` alias.
 
 The returned `HostReloadReceipt` is an immutable snapshot, normally `preparing`,
-not a wait for publication. Later `host.receipt.get` reads the same configuration
-owner's current `preparing`, `applying`, `applied`, `restart_required` or `failed`
-facts. Preparation/save failures are retained in that receipt, while rejection
-before acceptance is a business Fault. Duplicate operation IDs create separate
+not a wait for publication. Later `host.receipt.get` reads the same owner's
+`preparing`, `applying`, `applied`, `partially_applied`, `restart_required` or
+`failed` facts. All declarations and resources are validated first. Host then
+publishes once and delegates each Agent change to its direct owner; per-key
+results preserve actual IDs, revisions and creation receipt steps. There is no
+cross-object rollback. Restart-only changes apply no Host or Agent values.
+
+Preparation/save failures are retained in that receipt, while rejection before
+acceptance is a business Fault. Duplicate operation IDs create separate
 invocations and make a single-result lookup ambiguous; they are not replay keys.
 No transport cache or automatic retry is involved. Caller timeout, disconnect,
 or key invalidation cannot cancel accepted preparation/publication/cleanup.
-The low-level prepared `Host::reload_configuration` embedding API remains valid.
+The prepared `Host::reload_configuration` Rust API remains available to
+programmatic embeddings without a directory binding. See the
+[configuration guide](../../docs/configuration.md).
 
 ## Manual compaction
 

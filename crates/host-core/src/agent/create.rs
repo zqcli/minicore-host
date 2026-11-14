@@ -7,7 +7,14 @@ use std::panic::AssertUnwindSafe;
 use tokio::sync::oneshot;
 use tracing::{Instrument, instrument::WithSubscriber};
 
+#[derive(Clone, Copy)]
+enum CreationOrigin {
+    SessionRequest,
+    AgentCreation,
+    ConfigurationCreation,
+}
 struct PreparedSession {
+    configuration_creation: bool,
     id: SessionId,
     mode: StorageMode,
     config: SessionConfig,
@@ -101,7 +108,7 @@ impl AgentOwner {
                 request.operation_id,
                 options,
                 request.initial_message,
-                false,
+                CreationOrigin::SessionRequest,
                 context.clone(),
                 &mut span,
             )
@@ -118,12 +125,12 @@ impl AgentOwner {
             )
         })
     }
-    pub(crate) async fn create_session_async_owned(
+    pub(crate) async fn create_default_session_owned(
         self: &Arc<Self>,
         operation: OperationId,
         options: SessionOptions,
         message: Option<MessageInput>,
-        make_default: bool,
+        configuration_creation: bool,
     ) -> Result<SessionCreateReceipt, Fault> {
         let context = Context {
             operation_id: Some(operation.clone()),
@@ -144,7 +151,11 @@ impl AgentOwner {
             operation,
             options,
             message,
-            make_default,
+            if configuration_creation {
+                CreationOrigin::ConfigurationCreation
+            } else {
+                CreationOrigin::AgentCreation
+            },
             context.clone(),
             &mut span,
         );
@@ -165,11 +176,15 @@ impl AgentOwner {
         operation: OperationId,
         options: SessionOptions,
         message: Option<MessageInput>,
-        make_default: bool,
+        origin: CreationOrigin,
         context: Context,
         span: &mut Option<tracing::Span>,
     ) -> Result<oneshot::Receiver<SessionCreateReceipt>, Fault> {
-        self.access.ensure_execution_owned()?;
+        let make_default = !matches!(origin, CreationOrigin::SessionRequest);
+        let configuration_creation = matches!(origin, CreationOrigin::ConfigurationCreation);
+        if !configuration_creation {
+            self.access.ensure_execution_owned()?;
+        }
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| {
             Fault::new(
                 FaultKind::AgentLifecycleUnavailable,
@@ -179,8 +194,28 @@ impl AgentOwner {
         let id = SessionId::new()
             .map_err(|error| Fault::new(FaultKind::AgentInternalUnexpected, error.to_string()))?;
         let mut state = self.state.lock().expect("Agent mutex poisoned");
+        // This private origin finishes already accepted directory metadata.
+        // Force still forbids business execution and all ordinary creation.
+        if configuration_creation
+            && (message.is_some()
+                || state.creation_committed
+                || state.info.mode != StorageMode::Persistent
+                || !state
+                    .info
+                    .configuration_source
+                    .as_ref()
+                    .is_some_and(|source| source.managed))
+        {
+            return Err(Fault::new(
+                FaultKind::AgentConfigConflict,
+                "configuration creation requires its original persistent Agent and no message",
+            ));
+        }
         if state.info.lifecycle != AgentLifecycle::Active
             && !(make_default && state.info.lifecycle == AgentLifecycle::Creating)
+            && !(configuration_creation
+                && state.info.lifecycle == AgentLifecycle::Stopping
+                && state.host_shutdown_strategy == Some(HostShutdownStrategy::Force))
         {
             return Err(Fault::new(
                 FaultKind::AgentLifecycleUnavailable,
@@ -196,6 +231,7 @@ impl AgentOwner {
             SessionConfig::from_agent(&state.info.config, &options.overrides.unwrap_or_default())
                 .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
         let prepared = PreparedSession {
+            configuration_creation,
             id: id.clone(),
             mode,
             config,
@@ -296,7 +332,9 @@ impl AgentOwner {
         context: &Context,
         phase: &mut &'static str,
     ) -> Result<(), Fault> {
-        self.access.ensure_execution_owned()?;
+        if !prepared.configuration_creation {
+            self.access.ensure_execution_owned()?;
+        }
         let resources = self.resources_owned()?;
         let config = prepared.config.clone();
         // The accepted creation owner retains this join independently from the
@@ -309,7 +347,9 @@ impl AgentOwner {
                     "Session validation task terminated unexpectedly",
                 )
             })??;
-        self.access.ensure_execution_owned()?;
+        if !prepared.configuration_creation {
+            self.access.ensure_execution_owned()?;
+        }
         let session = if prepared.mode == StorageMode::Persistent {
             *phase = "session_metadata_save";
             let store = self
@@ -393,6 +433,7 @@ impl AgentOwner {
                 self.id.clone(),
                 self.host_id.clone(),
                 AgentData {
+                    configuration_source: info.configuration_source,
                     name: info.name,
                     mode: info.mode,
                     config: info.config,

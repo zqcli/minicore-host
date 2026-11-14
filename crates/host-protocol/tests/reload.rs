@@ -1,35 +1,29 @@
 use minicore_host_protocol::*;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 const ID: &str = "9k3m7x2p5v8c4r6t0w1z";
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Candidate {
-    name: String,
-}
-
 #[test]
-fn reload_requires_caller_operation_revision_and_strict_candidate() {
-    let valid = json!({"operation_id":ID,"expected_revision":3,"candidate":{"name":"Host"}});
-    let request: HostReloadRequest<Candidate> = serde_json::from_value(valid.clone()).unwrap();
+fn reload_requires_operation_revision_and_rejects_candidates_or_paths() {
+    let valid = json!({"operation_id":ID,"expected_revision":3});
+    let request: HostReloadRequest = serde_json::from_value(valid.clone()).unwrap();
     assert_eq!(serde_json::to_value(request).unwrap(), valid);
-    for field in ["operation_id", "expected_revision", "candidate"] {
+    for field in ["operation_id", "expected_revision"] {
         let mut invalid = valid.clone();
         invalid.as_object_mut().unwrap().remove(field);
-        assert!(serde_json::from_value::<HostReloadRequest<Candidate>>(invalid).is_err());
+        assert!(serde_json::from_value::<HostReloadRequest>(invalid).is_err());
     }
     for (field, value) in [
         ("operation_id", json!("caller-made-short-id")),
         ("expected_revision", json!(-1)),
         ("expected_revision", json!(null)),
         ("candidate", json!({"name":"Host","access_key":"secret"})),
+        ("config_dir", json!("/tmp/arbitrary")),
         ("caller", json!({"internal":true})),
         ("wait_timeout_ms", json!(100)),
     ] {
         let mut invalid = valid.clone();
         invalid[field] = value;
-        assert!(serde_json::from_value::<HostReloadRequest<Candidate>>(invalid).is_err());
+        assert!(serde_json::from_value::<HostReloadRequest>(invalid).is_err());
     }
 }
 fn receipt(result: Value) -> Value {
@@ -88,4 +82,26 @@ fn reload_serialization_rejects_fabricated_empty_restart_facts() {
         fields: vec![],
     };
     assert!(serde_json::to_value(value).is_err());
+}
+
+#[test]
+fn reload_partial_results_require_real_failed_owner_facts() {
+    let failure = json!({"status":"failed","key":"writer","agent_id":ID,"error":Fault::new(FaultKind::HostStorageUnavailable,"save failed")});
+    let wire = receipt(
+        json!({"status":"partially_applied","config_revision":4,"agents":[failure.clone()]}),
+    );
+    let parsed: HostReloadReceipt = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), wire);
+    assert!(
+        serde_json::from_value::<HostReloadReceipt>(receipt(
+            json!({"status":"applied","config_revision":4,"agents":[failure]})
+        ))
+        .is_err()
+    );
+    assert!(
+        serde_json::from_value::<HostReloadReceipt>(receipt(
+            json!({"status":"partially_applied","config_revision":4,"agents":[]})
+        ))
+        .is_err()
+    );
 }

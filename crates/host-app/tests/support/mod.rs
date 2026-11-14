@@ -46,7 +46,8 @@ pub fn config(endpoint: Option<String>, network: bool) -> HostConfig {
     config
 }
 pub fn write_config(path: &Path, config: &HostConfig) {
-    std::fs::write(path, serde_json::to_vec(config).unwrap()).unwrap();
+    std::fs::create_dir_all(path).unwrap();
+    std::fs::write(path.join("host.json"), serde_json::to_vec(config).unwrap()).unwrap();
 }
 pub fn agent_request() -> Value {
     let mut config = AgentConfig::default();
@@ -107,17 +108,10 @@ impl Captured {
     }
 }
 impl Process {
-    pub fn start(
-        root: &Path,
-        config: Option<&Path>,
-        stdio: bool,
-        tls: Option<(&Path, &Path)>,
-    ) -> Self {
+    pub fn start(root: &Path, config_dir: &Path, stdio: bool, tls: Option<(&Path, &Path)>) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_minicore-host"));
         command.arg("--data-root").arg(root);
-        if let Some(config) = config {
-            command.arg("--config").arg(config);
-        }
+        command.arg("--config-dir").arg(config_dir);
         if stdio {
             command.arg("--stdio");
         }
