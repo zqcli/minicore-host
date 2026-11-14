@@ -1,6 +1,36 @@
 # MiniCore Host
 
-## Current work: manual compaction tool ordering (Task 110)
+## Current work: Responses compatibility repairs (Tasks 111–113)
+
+[Task 111](tasks/111-responses-stream/TASK.md),
+[Task 112](tasks/112-responses-replay/TASK.md), and
+[Task 113](tasks/113-responses-overload/TASK.md) repair the approved Responses
+issues on the local 0.11.0 dev line. Tool argument completion reconciles only
+matching missing suffixes; terminal reasoning can fill absent encryption;
+incomplete message, tool and reasoning items retain the actual failure terminal
+without becoming executable. Cross-model request projection validates original
+replay before omitting model-bound reasoning and item metadata, preserving
+visible history and tool-call/result identity. The documented server overload
+code uses the existing bounded safe-retry policy. No new dependency, setting,
+public API, durable format or TUI change is introduced.
+
+Integrated implementations are `c919df6`, `beba4a1`, `24d3b6c`, and `14541ec`.
+The exact checked code checkpoint is
+`35873c69b306b7aafdffa8c461ab9dd40d111625`. Remote Linux `scripts/check.sh`
+passes **1,196 unique Rust tests, 7 doctests and 28 Python checks**, whitespace,
+formatting and strict Clippy/rustdoc. Tests are enumerated separately rather
+than counting nested subprocess output. Root DAC bypass capabilities are removed
+for permission-sensitive tests; assertions are unchanged. Independent review
+accepted the completed reasoning follow-up. Per-task red/green evidence and
+[integrated validation](tasks/111-responses-stream/integration.json) record the
+requested `gpt-6-astra:medium` worker configuration and exact limits.
+
+The unclosed-tool history projection and cancellation handoff review findings
+remain explicitly deferred. No local Rust compilation, live-provider validation,
+new native macOS/Windows validation, binary installation or publication is
+claimed. The existing TUI dependency pin and installed binary remain unchanged.
+
+## Previous checkpoint: manual compaction tool ordering (Task 110)
 
 [Task 110](tasks/110-compaction-tool-order/TASK.md) fixes daily acceptance F2
 on the local 0.11.0 dev line, based on

@@ -70,4 +70,14 @@ Local verification was limited to source/diff inspection and `git diff --check` 
 - Dual Retry-After header precedence is explicitly out of scope and unchanged.
 - Full workspace execution, workspace-wide clippy/docs and completed unique-test enumeration were not performed; provider checks above are complete. Parent integration may run broader checks and the inventory after combining disjoint review fixes.
 - No real configuration/session access, model traffic, TUI launch, push or publication.
-- Next: parent independent review/integration of the implementation and task-record commits, preserving history.
+- The original handoff requested independent integration without rewriting history.
+
+## Integrated acceptance
+
+The implementation is integrated on dev as `24d3b6c`; combined code checkpoint
+`35873c69b306b7aafdffa8c461ab9dd40d111625` passed independent review and remote
+Linux `scripts/check.sh`: 1,196 unique Rust tests, 7 doctests, 28 Python checks,
+whitespace, formatting and strict Clippy/rustdoc. The separate locked all-target
+listing completed successfully. [Integration evidence](../111-responses-stream/integration.json)
+supersedes the earlier pending integration notes and incomplete inventory.
+No live-provider validation, installation or publication is claimed.

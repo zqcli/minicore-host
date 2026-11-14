@@ -1,0 +1,49 @@
+{
+  "baseline": "1cff421b63c04f6005288b9f304b4aac3184f3d7",
+  "checked_code_revision": "35873c69b306b7aafdffa8c461ab9dd40d111625",
+  "implementation_commits": {
+    "stream": "c919df6",
+    "cross_model_replay": "beba4a1",
+    "overload": "24d3b6c",
+    "incomplete_reasoning": "14541ec"
+  },
+  "requested_worker_model": "cus-resp/gpt-6-astra:medium",
+  "platform": "remote Linux x86_64",
+  "rustc": "1.99.1 (58cf8f9c3 2026-10-13)",
+  "commands": [
+    "setpriv --bounding-set=-dac_override,-dac_read_search ./scripts/check.sh",
+    "cargo test --workspace --all-targets --locked -- --list"
+  ],
+  "result": {
+    "exit_code": 0,
+    "unique_rust_tests": 1196,
+    "failed_rust_tests": 0,
+    "ignored_rust_tests": 0,
+    "doc_tests": 7,
+    "python_checks": 28,
+    "provider_tests": 87,
+    "whitespace": "passed",
+    "format": "passed",
+    "clippy_warnings_denied": "passed",
+    "rustdoc_warnings_denied": "passed",
+    "independent_source_review": "accepted after incomplete reasoning follow-up"
+  },
+  "evidence": {
+    "log": "minicore-host-integrated-full-02.log",
+    "test_enumeration": "host-test-list.txt",
+    "directory": "/Users/zzq/Develops/minicore-remote-build/responses-fixes/evidence"
+  },
+  "environment_notes": [
+    "A full Git history bundle was used so the repository whitespace gate could run unchanged.",
+    "The first integrated attempt stopped before checks due to scratch checkout ownership; task-owned ownership and rsync flags were corrected without adding safe.directory exceptions.",
+    "Provider sources were invalidated under the shared build lock to prevent stale artifacts from another worktree.",
+    "The root test process drops DAC bypass capabilities for permission fixtures; product code and assertions are unchanged."
+  ],
+  "limits": [
+    "R1 unclosed-tool history recovery and R2 cancellation partial handoff were not changed.",
+    "No new dependency, public API, configuration setting or durable format.",
+    "No local Rust compilation or live-provider calls for these repairs.",
+    "No new native macOS/Windows acceptance or TUI binary installation.",
+    "No push, tag, publication or TUI dependency pin update."
+  ]
+}

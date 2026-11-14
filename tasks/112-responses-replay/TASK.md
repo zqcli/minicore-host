@@ -69,3 +69,13 @@ Coverage: captured loopback HTTP bodies for plain text A→B and reasoning/text/
 - Provider-scoped checks are appropriate to the owned change. Full workspace tests/lints/docs and workspace-wide unique test enumeration are not claimed here; parent integration owns combined-worktree validation. Any test totals reported here are command-local, not a workspace unique-case count.
 - Full remote validation completed successfully; formatter copy-back and final diff inspected, with no out-of-scope edits. Implementation commit: `fbf5082dbc382d3fb04313ea35c042f1f788756f` (`fix(provider): project Responses replay across models`), directly on baseline `1cff421b63c04f6005288b9f304b4aac3184f3d7`. This subsequent task-only documentation update records the exact completed implementation checkpoint. Parent to integrate independently with stream/error worktrees and review; do not merge/push automatically.
 - Integration runners sharing this Cargo target directory should refresh relevant source mtimes under the lock (or use an isolated target directory) before checking another worktree; locking alone did not prevent stale artifact reuse.
+
+## Integrated acceptance
+
+The implementation is integrated on dev as `beba4a1`; combined code checkpoint
+`35873c69b306b7aafdffa8c461ab9dd40d111625` passed independent review and remote
+Linux `scripts/check.sh`: 1,196 unique Rust tests, 7 doctests, 28 Python checks,
+whitespace, formatting and strict Clippy/rustdoc. A separate locked all-target
+listing established the unique count. [Integration evidence](../111-responses-stream/integration.json)
+supersedes the earlier pending integration notes. No live-model validation,
+installation, publication or TUI dependency pin update is claimed.

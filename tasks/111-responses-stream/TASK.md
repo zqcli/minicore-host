@@ -174,7 +174,7 @@ when switching source checkpoints; do not accept stale test names as evidence.
 
 ## Independent-review follow-up — R4 reasoning, 2026-11-14
 
-The owner reports the previous commits were integrated into main at `5215f33`,
+The owner reports the previous commits were integrated into the dev checkout at `5215f33`,
 alongside separately owned request/error changes. This follow-up stays on the
 original topic worktree at `14104926fe972b42ba50915fd2d01a06f92c70ae`; it does not
 merge main or those unrelated changes. The original R4 repair covered only
@@ -258,6 +258,16 @@ check and local full-history whitespace checks also passed. No local Cargo,
 compilation, tests or rustfmt was used. No new workspace-wide count or
 workspace-wide/native-platform/live-model/TUI/storage acceptance is claimed.
 
-Parent next step: integrate only the two follow-up commits and perform combined
-review/acceptance with main's request/error fixes. This follow-up needs no
-request.rs signature adjustment. No push or publication was performed.
+The follow-up required no request.rs signature adjustment. No push or
+publication was performed.
+
+## Integrated acceptance
+
+The combined dev code checkpoint is `35873c69b306b7aafdffa8c461ab9dd40d111625`.
+Independent review accepted the incomplete-reasoning follow-up. Remote Linux
+`scripts/check.sh` passed 1,196 unique Rust tests, 7 doctests, 28 Python checks,
+whitespace, formatting, strict Clippy and strict rustdoc. The unique count comes
+from a separate `cargo test --workspace --all-targets --locked -- --list` run.
+[Integration evidence](integration.json) records commands and environment limits.
+R1/R2, native macOS/Windows acceptance, live models, installation and publication
+remain outside this repair; the installed binary and TUI pin are unchanged.
