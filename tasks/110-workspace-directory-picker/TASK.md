@@ -28,7 +28,8 @@
 
 These are local Git identities. The coordinator owns remote publication, exact
 local/public tree and commit mappings, independent integration and native CI.
-No remote commit or tag is asserted by this worker record.
+The initial local validation record did not attest a remote commit or tag;
+subsequent public CI checkpoints are identified below.
 
 ## Implemented behavior
 
@@ -138,6 +139,58 @@ No full-workspace relink or macOS execution is claimed locally. The coordinator
 owns publication of this test-only correction and the native CI rerun; the first
 run's Linux count is not a claimed count for the corrected revision. CI rerun and
 release publication remain pending at this checkpoint.
+
+## Second native CI — history fixture ordering
+
+The published directory-fixture correction is
+`1b347046c5bdc752c40fc7636cdd14e34a04b8cb`, tree
+`ba7df7eb810f82f4b7e34fcfac1f79e054da0fbd` (identical to local preparation
+`82f8077c558609ac47d45cbe2f3978443efe363a`). Its
+[push CI run 43555557066](https://github.com/zqcli/minicore-host/actions/runs/43555557066)
+passed Linux quality and native Linux, macOS ARM64 and Windows checks. The three
+successful native jobs' separate `cargo test --workspace --all-targets --locked -- --list`
+steps contain 1,194, 1,186 and 1,171 unique cases respectively; each passed 7
+doctests. Counts match both the binary-plus-case identities and the list summaries;
+nested execution output is excluded. Linux quality passed all 28 Python checks,
+formatting, strict Clippy/rustdoc and workspace tests. Windows additionally passed
+all 5 standard-user cases with `IsAdministrator=false`, `ProfileLoaded=true`,
+`ExecutableWriteAccess=denied` and `StandardUserExitCode=0`.
+
+Both macOS jobs passed all 8 directory tests, including native names and non-UTF-8
+display rejection. Intel macOS instead failed the existing
+`resume_settles_history_and_metadata_originals_without_cross_confirmation` fixture
+at `history_continuation.rs:446`: its single configuration update returned
+`SessionBusy` instead of the intended `SessionHistoryWriteFailed`. Its subsequent
+doctest/list steps and all package jobs were skipped; no successful package or
+complete native gate is claimed for this run.
+
+Source inspection and independent review identified a fixture ordering race.
+Model admission did not mean the accepted-input activity checkpoint had finished.
+`SessionStore::load` also opens `history.jsonl`, so the test's rename/replacement
+gap could fail that still-running metadata I/O. The failed owner work remains
+retained with `running=false`; waiting only for `!metadata_saving` therefore did
+not establish that a new configuration update could be admitted. The correction
+waits for `!owned_work.metadata_save` while the model gate is still blocked,
+before replacing the history path, and uses the same owner condition before
+injecting the configuration-save failure. Both waits explicitly reject an
+unexpected metadata fault. The original single update, exact failure assertion,
+explicit resumes and no-rerun checks remain unchanged; there is no sleep, business
+retry, ignored error or production change.
+
+Local validation from public input `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`:
+
+| Command / check | Result |
+| --- | --- |
+| `CARGO_BUILD_JOBS=4 cargo test -p minicore-host-core --test history_continuation --locked` | All 4 cases passed |
+| Compiled `history_continuation` binary, `--exact resume_settles_history_and_metadata_originals_without_cross_confirmation --color never`, 200 independent executions with 4 concurrent processes | 200 passed, 0 failed |
+| `CARGO_BUILD_JOBS=4 cargo clippy -p minicore-host-core --test history_continuation --locked -- -D warnings` | Passed |
+| `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh` and `git diff --check` | Passed |
+
+The unmodified case also passed 100 local Linux executions with 4 concurrent
+processes; this host did not reproduce the Intel macOS failure. The identified
+source race and native failure are distinct evidence from the focused local
+successes. The coordinator owns publication and a fresh native CI run for this
+second test-only correction. Full-workspace linking was not repeated locally.
 
 ## Remaining coordinated validation and publication
 

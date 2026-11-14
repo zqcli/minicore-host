@@ -413,6 +413,18 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
     )
     .unwrap();
     entered.acquire().await.unwrap().forget();
+    // Model admission does not settle the accepted-input metadata checkpoint.
+    // Its real store also opens history.jsonl; finish it before replacing that path.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
+    })
+    .await;
     let history = directory.join("history.jsonl");
     std::fs::rename(&history, history.with_extension("original")).unwrap();
     std::fs::write(&history, b"").unwrap();
@@ -431,7 +443,12 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
     // Settle the activity checkpoint before failing the intended config save.
     until(|| {
         let state = host.session_state(&caller, &target).unwrap().data;
-        (!state.metadata_saving).then_some(())
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
     })
     .await;
     let metadata = directory.join("session.json");

@@ -28,9 +28,24 @@ from dev `f6076cda5584799747b284ff0e1c63985a16325a` retains native-name creation
 explicit non-UTF-8 `display` rejection on every Unix target, while limiting the
 actual non-UTF-8 directory/list fixture to Linux. All 9 workspace library tests,
 affected-crate strict Clippy, formatting and whitespace checks pass locally.
-Production code and the SPEC are
-unchanged. The corrected revision still requires a native CI rerun and publication;
-the initial run's case count does not describe the corrected revision.
+Production code and the SPEC are unchanged; the initial run's case count does not
+describe the corrected revision.
+
+The directory-fixture correction was published as `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`,
+tree `ba7df7eb810f82f4b7e34fcfac1f79e054da0fbd`.
+[Its native CI](https://github.com/zqcli/minicore-host/actions/runs/43555557066)
+passed Linux quality and native Linux/macOS ARM64/Windows, with independent list
+counts of 1,194/1,186/1,171 and 7 doctests on each successful native platform;
+Windows also passed all 5 standard-user checks. Both macOS directory suites passed.
+Intel macOS instead exposed an existing history-continuation fixture race: the
+test replaced `history.jsonl` before accepted activity metadata I/O had settled,
+then mistook a non-running retained metadata fault for completion. Its single
+configuration update returned `SessionBusy`; package jobs were skipped. A second
+test-only correction waits for actual metadata owner completion and asserts no
+unexpected metadata fault before filesystem fault injection. All 4 history cases,
+200 focused repeats, strict affected-test Clippy, formatting and whitespace pass
+locally; the original case did not fail in 100 Linux repeats. This correction
+still needs publication and a fresh native CI run, including all four packages.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 
