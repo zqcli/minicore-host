@@ -1,6 +1,16 @@
 # MiniCore Host
 
-## Current work: Host client capabilities (Task 109)
+## Current work: Host directory picker (Task 110)
+
+[Task 110](tasks/110-workspace-directory-picker/TASK.md) first updates SPEC to
+4.10.3, then adds authenticated Host-level `workspace.roots/list/mkdir` for the
+independent minicore-web client, using explicit configured directory roots and
+real filesystem operations. The Host version becomes 0.11.1. Existing Session
+workspace reads, connection operation rights, frozen Turn approval, Runtime
+ownership and TUI behavior retain their contracts. Validation and commits are
+recorded in the task; no new implementation or test outcome is claimed yet.
+
+## Previous checkpoint: Host client capabilities (Task 109)
 
 [Task 109](tasks/109-host-capabilities/TASK.md) implements the approved Host-only
 capability work against dev `7a1881c85e57a97c85724c1a90a87852a1930bd8`.

@@ -1,6 +1,6 @@
 # MiniCore process diagnostics
 
-This crate implements the shared diagnostic pipeline from SPEC v4.10.2 chapter 12.
+This crate implements the shared diagnostic pipeline from SPEC v4.10.3 chapter 12.
 It is not an event subscription, business persistence or a log query service.
 Direct-owner instrumentation and `host.info` health binding live in `host-core`
 and `host-app`. Host/Agent/Session constructors do not install this pipeline;

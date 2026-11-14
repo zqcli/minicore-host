@@ -1,6 +1,6 @@
 # minicore-host
 
-Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.10.2.
+Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.10.3.
 
 The implementation contains strict contracts, native durable storage, Session-owned
 Turn execution, production HTTP/SSE resources, scoped observation/interaction adapters
