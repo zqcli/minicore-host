@@ -319,10 +319,10 @@ async fn directory_restart_preserves_identity_history_and_session_instructions()
         .join("sessions")
         .join(session.session_id.as_str())
         .join("history.jsonl");
-    let history = std::fs::read(&history_path).unwrap();
     stop(&host, &caller).await;
     drop(connection);
     drop(host);
+    let history = std::fs::read(&history_path).unwrap();
     std::fs::rename(
         fixture.config.join("agents/one.json"),
         fixture.config.join("agents/renamed.json"),
@@ -370,7 +370,6 @@ async fn directory_restart_preserves_identity_history_and_session_instructions()
             .instructions,
         "first instructions"
     );
-    assert_eq!(std::fs::read(&history_path).unwrap(), history);
     let created = host
         .create_session_async(
             &caller,
@@ -397,6 +396,9 @@ async fn directory_restart_preserves_identity_history_and_session_instructions()
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 1);
     stop(&host, &caller).await;
+    drop(connection);
+    drop(host);
+    assert_eq!(std::fs::read(&history_path).unwrap(), history);
 }
 
 #[tokio::test]

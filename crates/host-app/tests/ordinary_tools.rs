@@ -377,6 +377,23 @@ async fn binary_turns_keep_frozen_shared_roots_and_changes_reject_wrong_sources(
         Some(FaultKind::SessionChangeNotFound)
     );
 
+    tokio::time::timeout(support::WAIT, async {
+        loop {
+            let state = app
+                .process
+                .rpc("session.state", json!({"target":target}))
+                .await;
+            if !state["data"]["metadata_saving"]
+                .as_bool()
+                .expect("Session exposes its metadata owner")
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("accepted input activity save completes before the workspace update");
     let update = app.process.rpc("session.update", json!({"target":target,"operation_id":OperationId::new().unwrap(),"expected_config_revision":0,"changes":{"config":{"workspace":{"path":other.path()},"tools":bindings(&["read"])}}})).await;
     assert!(matches!(
         update["result"]["status"].as_str(),
