@@ -107,7 +107,7 @@ impl ResourceResolver for ProductionResources {
                 }
                 None => None,
             };
-            let tools = config
+            let mut tools = config
                 .tools
                 .iter()
                 .map(|selection| {
@@ -116,6 +116,8 @@ impl ResourceResolver for ProductionResources {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            // Match ordinary ToolSet ordering without binding executable tools.
+            tools.sort_by(|left, right| left.name().cmp(right.name()));
             Ok(BoundCompactionResources {
                 model: self.models[&config.model].clone(),
                 reasoning: reasoning(config.reasoning),
@@ -198,4 +200,104 @@ pub(super) fn session_invalid(message: impl Into<String>) -> Fault {
 }
 fn missing(message: impl Into<String>) -> Fault {
     Fault::new(FaultKind::SessionResourceMissing, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minicore_host_protocol::{ToolBinding, WorkspaceRef};
+    use minicore_host_provider::{OpenAiChatConfig, OpenAiChatModel, SecretApiKey};
+    use minicore_host_runtime::model::{ModelDescriptor, ModelLimits, ModelMessage, ModelRequest};
+
+    #[tokio::test]
+    async fn production_compaction_resolver_normalizes_tools_and_rejects_invalid_selections() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut registry = ToolRegistry::new();
+        registry.register_local_tools().unwrap();
+        let mut config = SessionConfig {
+            workspace: Some(WorkspaceRef {
+                path: directory.path().to_str().unwrap().into(),
+            }),
+            ..SessionConfig::default()
+        };
+        let descriptor = ModelDescriptor::new(
+            config.model.as_str().parse().unwrap(),
+            128_000,
+            [RuntimeReasoning::Auto].into(),
+            true,
+        )
+        .unwrap();
+        // Production provider; resolution must not issue any HTTP requests.
+        let model = OpenAiChatModel::new(
+            OpenAiChatConfig::new("http://127.0.0.1:1", "fixture", descriptor),
+            SecretApiKey::new("fixture-only").unwrap(),
+        )
+        .unwrap();
+        let sorted = ["apply_patch", "bash", "edit", "read", "write"];
+        let resources = Arc::new(ProductionResources {
+            workspaces: Arc::default(),
+            models: [(config.model.clone(), Arc::new(model) as Arc<dyn Model>)].into(),
+            tools: Arc::new(registry),
+            enabled: sorted.iter().map(|name| (*name).into()).collect(),
+            framework: String::new(),
+        });
+        let mut expected = None;
+        for names in [
+            sorted,
+            ["read", "write", "edit", "apply_patch", "bash"],
+            ["write", "read", "edit", "bash", "apply_patch"],
+        ] {
+            config.tools = names
+                .iter()
+                .map(|name| ToolBinding {
+                    name: (*name).into(),
+                })
+                .collect();
+            let bound = resources
+                .clone()
+                .resolve_for_compaction(config.clone())
+                .await
+                .unwrap();
+            assert_eq!(
+                bound
+                    .tools
+                    .iter()
+                    .map(|spec| spec.name().as_str())
+                    .collect::<Vec<_>>(),
+                sorted
+            );
+            if let Some(expected) = &expected {
+                assert_eq!(
+                    &bound.tools, expected,
+                    "same complete schemas regardless of selection order"
+                );
+            } else {
+                expected = Some(bound.tools.clone());
+            }
+            ModelRequest::new(
+                vec![ModelMessage::User("fixture".into())],
+                bound.tools,
+                ModelLimits::default(),
+                bound.reasoning,
+            )
+            .unwrap();
+        }
+        config.tools.push(config.tools[0].clone());
+        let error = resources
+            .clone()
+            .resolve_for_compaction(config.clone())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), Some(FaultKind::SessionConfigInvalid));
+        config.tools = vec![ToolBinding {
+            name: "unknown_tool".into(),
+        }];
+        let error = resources
+            .resolve_for_compaction(config)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(error.kind(), Some(FaultKind::SessionResourceMissing));
+    }
 }

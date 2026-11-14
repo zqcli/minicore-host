@@ -63,6 +63,16 @@ fn assert_responses_request(request: &Value) {
 
 #[tokio::test]
 async fn responses_selection_reaches_ordinary_and_manual_compaction_requests() {
+    manual_compaction_with_tools(&[]).await;
+}
+
+#[tokio::test]
+async fn manual_compaction_with_default_tool_order_completes_and_continues() {
+    manual_compaction_with_tools(&["read", "write", "edit", "apply_patch", "bash"]).await;
+}
+
+async fn manual_compaction_with_tools(names: &[&str]) {
+    let directory = tempfile::tempdir().unwrap();
     let mut server = Server::start(vec![
         (
             response("first", &"first historical answer ".repeat(150)),
@@ -81,10 +91,11 @@ async fn responses_selection_reaches_ordinary_and_manual_compaction_requests() {
     let builder = HostResourceBuilder::builtins().unwrap();
     let mut config = responses_config(&server.endpoint);
     config.models[0].context_window = 4096;
+    config.tools = selection(names);
     let host = Host::memory_configured(prepare(&builder, config).await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    let mut creation = request(vec![], None);
+    let mut creation = request(selection(names), workspace(directory.path()));
     creation.config.session_defaults.execution.compaction = CompactionSettings {
         enabled: false,
         trigger_percent: 50,
@@ -102,7 +113,19 @@ async fn responses_selection_reaches_ordinary_and_manual_compaction_requests() {
             &target,
             &format!("task {index} {}", "recorded task ".repeat(100)),
         );
-        assert_responses_request(&server.request().await);
+        let ordinary = server.request().await;
+        assert_responses_request(&ordinary);
+        if !names.is_empty() {
+            assert_eq!(
+                ordinary["tools"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|tool| tool["name"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["apply_patch", "bash", "edit", "read", "write"]
+            );
+        }
         let turns = settled(&host, &caller, &target, index + 1).await;
         assert!(
             turns
@@ -120,14 +143,6 @@ async fn responses_selection_reaches_ordinary_and_manual_compaction_requests() {
         },
     )
     .unwrap();
-    let utility = server.request().await;
-    assert_responses_request(&utility);
-    assert!(utility.get("tools").is_none());
-    assert!(
-        utility
-            .to_string()
-            .contains("Summarize historical conversation data")
-    );
     let mut states = host.session_states(&caller, &target).unwrap();
     let activity = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -150,13 +165,25 @@ async fn responses_selection_reaches_ordinary_and_manual_compaction_requests() {
         ),
         "{activity:?}"
     );
+    let utility = server.request().await;
+    assert_responses_request(&utility);
+    assert!(utility.get("tools").is_none());
+    assert!(
+        utility
+            .to_string()
+            .contains("Summarize historical conversation data")
+    );
     assert_eq!(activity.utility_usage.len(), 1);
     assert!(activity.utility_usage[0].completed);
+    assert_eq!(host.turns(&caller, &target).unwrap().len(), 2);
     assert_eq!(host.history(&caller, &target).unwrap(), original);
     send(&host, &caller, &target, "continue after summary");
     let next = server.request().await;
     assert_responses_request(&next);
     assert!(next.to_string().contains("A concise fixture summary."));
+    if !names.is_empty() {
+        assert_eq!(next["tools"].as_array().unwrap().len(), names.len());
+    }
     let turns = settled(&host, &caller, &target, 3).await;
     assert!(
         turns
