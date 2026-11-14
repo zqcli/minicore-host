@@ -658,9 +658,17 @@ impl State {
                 content,
                 native,
             } => {
-                wire::validate_reasoning(item)?;
-                Self::check_parts(summary, item.summary.as_deref().ok_or(())?, false)?;
-                Self::check_parts(content, item.content.as_deref().unwrap_or_default(), false)?;
+                if incomplete {
+                    wire::validate_reasoning_structure(item)?;
+                } else {
+                    wire::validate_reasoning(item)?;
+                }
+                Self::check_parts(summary, item.summary.as_deref().ok_or(())?, incomplete)?;
+                Self::check_parts(
+                    content,
+                    item.content.as_deref().unwrap_or_default(),
+                    incomplete,
+                )?;
                 if terminal {
                     let mut expected = native.as_ref().ok_or(())?.clone();
                     if expected.encrypted_content.is_none() {
@@ -678,14 +686,20 @@ impl State {
     fn finish_item(&mut self, index: Result<usize, ()>, item: Result<Item, ()>) -> Result<(), ()> {
         let index = index?;
         let item = item?;
-        // A completed reasoning item can carry a real summary without delta
+        // A closed reasoning item can carry a real summary without delta
         // events. Deliver that actual data once, then retain the native item.
         if matches!(
             self.items.get(index).map(|o| &o.body),
             Some(Body::Reasoning { .. })
         ) {
-            wire::validate_reasoning(&item)?;
-            if self.items[index].done || self.items[index].id != item.id {
+            wire::validate_reasoning_structure(&item)?;
+            if self.items[index].done
+                || self.items[index].id != item.id
+                || !matches!(
+                    item.status.as_deref(),
+                    None | Some("completed" | "incomplete")
+                )
+            {
                 return Err(());
             }
             for (summary, snapshots) in [

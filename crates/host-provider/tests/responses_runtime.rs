@@ -1497,3 +1497,199 @@ async fn responses_stream_fix_incomplete_items_cannot_become_completed() {
         }
     }
 }
+
+fn incomplete_reasoning_script(summary: &str) -> Script {
+    let mut script = Script::new();
+    script.reasoning(summary != "empty");
+    if summary == "empty" {
+        script.events.last_mut().unwrap()["item"]["summary"] = json!([]);
+        script.output[0]["summary"] = json!([]);
+    } else if summary == "open" {
+        script.events.retain(|event| {
+            event["type"] != "response.reasoning_summary_text.done"
+                && event["type"] != "response.reasoning_summary_part.done"
+        });
+    }
+    script.events.last_mut().unwrap()["item"]["status"] = json!("incomplete");
+    script.output[0]["status"] = json!("incomplete");
+    script
+}
+
+#[tokio::test]
+async fn responses_incomplete_reasoning_preserves_terminal_and_native_partial() {
+    for summary in ["empty", "closed", "open"] {
+        let mut script = incomplete_reasoning_script(summary);
+        let native = script.output[0].clone();
+        // Even a protocol-closed sibling tool must not end or become executable.
+        let index = script.add_call("fc_wait", "call_wait");
+        script.arguments(index, "{}");
+        script.end_call(index);
+        let usage = json!({"input_tokens":3,"output_tokens":2,"total_tokens":5,"output_tokens_details":{"reasoning_tokens":1}});
+        script.events.push(json!({"type":"response.incomplete","response":{"id":"resp_fixture","status":"incomplete","output":script.output,"usage":usage,"incomplete_details":{"reason":"max_output_tokens"}}}));
+        let fixture =
+            Fixture::start(vec![Reply::sse(script.body()), Reply::sse(script.body())]).await;
+        let model = provider(&fixture.endpoint);
+        let report = call(model.as_ref(), request(true)).await;
+        assert_eq!(report.attempts, 1);
+        let failure = report.outcome.unwrap_err();
+        assert_eq!(
+            failure.error().kind(),
+            ModelErrorKind::IncompleteResponse,
+            "{summary}"
+        );
+        let partial = failure.partial.unwrap();
+        assert_eq!(
+            partial.usage.as_ref().unwrap().provider_total_tokens(),
+            Some(5)
+        );
+        assert_eq!(partial.usage.as_ref().unwrap().reasoning_tokens(), Some(1));
+        assert_eq!(partial.incomplete_tool_calls[0].arguments_text, "{}");
+        if summary == "empty" {
+            assert!(partial.content.is_empty());
+        } else {
+            assert_eq!(partial.content.len(), 1);
+            assert!(
+                matches!(&partial.content[0], AssistantPart::Reasoning(value) if value.text() == Some("Consider 🐈"))
+            );
+        }
+        let replay = partial.provider_replay.unwrap();
+        assert_eq!(replay.format(), "minicore-host.openai-responses.partial.v1");
+        assert_eq!(replay.payload()["items"][0]["item"], native);
+        assert_eq!(replay.payload()["status"], "incomplete");
+        assert_eq!(replay.payload()["usage"], usage);
+        assert_eq!(
+            replay.payload()["incomplete_details"]["reason"],
+            "max_output_tokens"
+        );
+
+        let mut stream = model
+            .start(
+                request(true),
+                ModelCallContext::new(
+                    LoopId::new().unwrap(),
+                    0,
+                    CancellationToken::new(),
+                    Instant::now() + Duration::from_secs(5),
+                ),
+            )
+            .await
+            .unwrap();
+        let mut saw_error = false;
+        let mut saw_replay = false;
+        let mut saw_usage = false;
+        let mut saw_tool = false;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(ModelEvent::ToolCallEnd { .. } | ModelEvent::Finish { .. }) => {
+                    panic!("incomplete reasoning must not authorize completion")
+                }
+                Ok(ModelEvent::ToolCallStart { .. }) => saw_tool = true,
+                Ok(ModelEvent::ProviderReplay { replay }) => {
+                    assert_eq!(replay.payload()["items"][0]["item"], native);
+                    saw_replay = true;
+                }
+                Ok(ModelEvent::Usage { usage }) => {
+                    assert_eq!(usage.provider_total_tokens(), Some(5));
+                    saw_usage = true;
+                }
+                Err(error) => {
+                    assert_eq!(error.kind(), ModelErrorKind::IncompleteResponse);
+                    saw_error = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_tool && saw_replay && saw_usage && saw_error);
+        assert_eq!(fixture.finish().await.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn responses_incomplete_reasoning_cannot_become_completed() {
+    for summary in ["empty", "closed", "open"] {
+        for status in ["incomplete", "completed"] {
+            let mut script = incomplete_reasoning_script(summary);
+            let native = script.output[0].clone();
+            script.output[0]["status"] = json!(status);
+            script.finish(None);
+            let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+            let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+            assert_eq!(report.attempts, 1);
+            let failure = report.outcome.unwrap_err();
+            assert_eq!(
+                failure.error().kind(),
+                ModelErrorKind::InvalidProviderResponse
+            );
+            let replay = failure.partial.unwrap().provider_replay.unwrap();
+            // Rejection must retain the known incomplete native item, not the
+            // terminal snapshot that tried to disguise it as completed.
+            assert_eq!(replay.payload()["items"][0]["item"], native);
+            assert_eq!(fixture.finish().await.len(), 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn responses_incomplete_reasoning_keeps_identity_content_and_status_guards() {
+    for problem in ["identity", "summary", "kind", "status", "duplicate"] {
+        let mut script = incomplete_reasoning_script("open");
+        let done = script.events.last_mut().unwrap();
+        match problem {
+            "identity" => done["item"]["id"] = json!("wrong"),
+            "summary" => done["item"]["summary"][0]["text"] = json!("changed"),
+            "kind" => done["item"]["summary"][0]["type"] = json!("output_text"),
+            "status" => done["item"]["status"] = json!("in_progress"),
+            _ => script.events.push(script.events.last().unwrap().clone()),
+        }
+        script.events.push(json!({"type":"response.incomplete","response":{"id":"resp_fixture","status":"incomplete","output":script.output}}));
+        let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+        let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+        assert_eq!(report.attempts, 1);
+        let failure = report.outcome.unwrap_err();
+        assert_eq!(
+            failure.error().kind(),
+            ModelErrorKind::InvalidProviderResponse,
+            "{problem}"
+        );
+        let partial = failure.partial.unwrap();
+        assert!(
+            matches!(&partial.content[0], AssistantPart::Reasoning(value) if value.text() == Some("Consider 🐈"))
+        );
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn responses_incomplete_reasoning_is_invalid_in_complete_replay() {
+    let mut script = Script::new();
+    script.reasoning(true);
+    script.finish(None);
+    let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+    let model = provider(&fixture.endpoint);
+    let report = call(model.as_ref(), request(false)).await;
+    let response = answer(&report);
+    let original = response.provider_replay().unwrap();
+    let mut payload = original.payload().clone();
+    payload["items"][0]["item"]["status"] = json!("incomplete");
+    let replay = ProviderReplay::new(original.format(), payload).unwrap();
+    let message =
+        ModelMessage::assistant_with_provider_replay(response.parts().to_vec(), Some(replay))
+            .unwrap();
+    let next = ModelRequest::new(
+        vec![message, ModelMessage::user("next").unwrap()],
+        vec![],
+        ModelLimits::default(),
+        ReasoningPreference::Auto,
+    )
+    .unwrap();
+    assert_eq!(
+        call(model.as_ref(), next)
+            .await
+            .outcome
+            .unwrap_err()
+            .error()
+            .kind(),
+        ModelErrorKind::InvalidRequest
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
+}

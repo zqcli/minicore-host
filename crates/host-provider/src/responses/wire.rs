@@ -157,10 +157,18 @@ pub(super) fn valid_phase(value: Option<&str>) -> bool {
     matches!(value, None | Some("commentary" | "final_answer"))
 }
 
+// Complete native replay remains strict; stream item closure has its own
+// status policy and may retain structurally valid incomplete reasoning.
 pub(super) fn validate_reasoning(item: &Item) -> Result<(), ()> {
+    if item.status.as_deref().is_some_and(|s| s != "completed") {
+        return Err(());
+    }
+    validate_reasoning_structure(item)
+}
+
+pub(super) fn validate_reasoning_structure(item: &Item) -> Result<(), ()> {
     if item.kind != "reasoning"
         || !valid_id(&item.id)
-        || item.status.as_deref().is_some_and(|s| s != "completed")
         || item.role.is_some()
         || item.phase.is_some()
         || item.call_id.is_some()
