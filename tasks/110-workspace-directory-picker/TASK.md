@@ -189,8 +189,60 @@ Local validation from public input `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`:
 The unmodified case also passed 100 local Linux executions with 4 concurrent
 processes; this host did not reproduce the Intel macOS failure. The identified
 source race and native failure are distinct evidence from the focused local
-successes. The coordinator owns publication and a fresh native CI run for this
-second test-only correction. Full-workspace linking was not repeated locally.
+successes. This second test-only correction was published as
+`b20f6fee1461cec2925d2538e6d4747c79e9c2b4`, with the exact tree
+`e7af7f818958ff0ecd3a89aef4fe15e75023063a` of local preparation
+`6bab4a7898f2194977f47a2aac4625cac1997d26`. Full-workspace linking was not repeated
+locally; its native run is recorded below.
+
+## Third native CI — isolate history fixture replacement windows
+
+[Push CI run 43557234311](https://github.com/zqcli/minicore-host/actions/runs/43557234311)
+ran against public source `b20f6fee1461cec2925d2538e6d4747c79e9c2b4` in attempt 1.
+All four native jobs passed. Their independent `--list` steps counted 1,194 cases
+on Linux x64, 1,186 on each macOS architecture and 1,171 on Windows x64, matching
+both unique binary-plus-case identities and list summaries. Every platform passed
+7 doctests; Windows also passed the 5 standard-user cases with a loaded profile,
+non-administrator identity, denied executable writes and exit code 0. The prior
+Intel macOS history-continuation failure and both Unix directory tests passed in
+the actual Intel log. These are this run's results, not reused earlier outcomes.
+
+The separate Linux quality job `132332725703` passed 28 Python checks, formatting
+and strict Clippy, then failed `host_shutdown` with 13 passed and 1 failed:
+`shutdown_force_failed_history_holds_root_until_original_save_continues` exceeded
+the existing three-second `until` deadline. CI reports shared helper line 162
+without a backtrace; it does not establish whether the wait for failed history or
+the later wait for Host stopped timed out. The same case passed in every native
+job. The package matrix was skipped, so the complete gate remains unsuccessful.
+
+Source inspection and independent review confirmed two uncontrolled filesystem
+windows in that fixture: initial history replacement and restoration before its
+single resume. Both can overlap activity metadata I/O that also opens the history
+path. A failure reported after resume selects original work can retain metadata
+work and prevent shutdown; that is a source-supported race, not an observed CI
+call-site trace. The bounded review found identical windows in the first history
+continuation case, two tool-cleanup cases and one persistent-owner case. The
+follow-up adds nine owner barriers across those five cases in four test files,
+before their specific history replacement/restoration operations. Every barrier
+requires `!owned_work.metadata_save` and explicitly rejects an unexpected metadata
+fault. Model/tool gates keep the intended execution blocked during initial fault
+injection. The test that intentionally retains a configuration metadata failure
+keeps its existing semantics and is not required to clear that work.
+
+Production, timeouts, original fault/data assertions and single business calls
+are unchanged. The new waits use existing yielding/state observation mechanisms;
+they add no fixed sleep or retry. Local validation on Rust 1.90.0:
+
+| Command / check | Result |
+| --- | --- |
+| `CARGO_BUILD_JOBS=4 cargo test -p minicore-host-core --test host_shutdown --test history_continuation --locked` | 14 shutdown and 4 history cases passed |
+| `CARGO_BUILD_JOBS=4 cargo test -p minicore-host-core --test task033_tool_cleanup --test persistent_owners --locked` | 12 tool-cleanup and 46 persistent-owner cases passed |
+| Strict Clippy with the same two pairs of `--test` targets and `-- -D warnings` | Both commands passed |
+| `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh` and `git diff --check` | Passed |
+
+All 76 affected-suite cases passed. This follow-up used no additional probabilistic
+repeat batch or complete workspace relink. Publication and a fresh full native CI
+run, including the four packages, remain assigned to the coordinator.
 
 ## Remaining coordinated validation and publication
 

@@ -1437,6 +1437,16 @@ async fn review_check_real_save_failure_preserves_completed_outcome() {
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
         .await
         .unwrap();
+    // Model admission does not settle metadata I/O, which also opens history.
+    wait_state(&host, &caller, &target, |state| {
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        !state.owned_work.metadata_save
+    })
+    .await;
     std::fs::rename(&path, path.with_extension("jsonl.saved")).unwrap();
     std::fs::write(&path, b"").unwrap();
     release.add_permits(1);

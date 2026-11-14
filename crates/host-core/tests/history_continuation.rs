@@ -167,6 +167,18 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     )
     .unwrap();
     entered.acquire().await.unwrap().forget();
+    // The model gate does not join accepted activity metadata, whose store
+    // also opens history.jsonl. Keep that I/O outside this path-replacement gap.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
+    })
+    .await;
     let path = dir
         .path()
         .join("agents")
@@ -192,6 +204,18 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     .await;
     assert!(read_history_bytes(&saved_path).unwrap().is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    // Response activity is independent of the failed history save. Settle it
+    // before restoring the path and issuing the single original-save resume.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
+    })
+    .await;
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&saved_path, &path).unwrap();
     let resumed = host

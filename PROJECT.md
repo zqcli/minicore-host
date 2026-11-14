@@ -44,8 +44,24 @@ configuration update returned `SessionBusy`; package jobs were skipped. A second
 test-only correction waits for actual metadata owner completion and asserts no
 unexpected metadata fault before filesystem fault injection. All 4 history cases,
 200 focused repeats, strict affected-test Clippy, formatting and whitespace pass
-locally; the original case did not fail in 100 Linux repeats. This correction
-still needs publication and a fresh native CI run, including all four packages.
+locally; the original case did not fail in 100 Linux repeats. That correction was
+published as `b20f6fee1461cec2925d2538e6d4747c79e9c2b4`, tree
+`e7af7f818958ff0ecd3a89aef4fe15e75023063a`.
+
+[The next native run](https://github.com/zqcli/minicore-host/actions/runs/43557234311)
+passed all four native jobs: Linux x64 1,194, macOS ARM64/x64 1,186 each, Windows
+x64 1,171 independently listed Rust cases; each passed 7 doctests, and Windows
+passed all 5 standard-user cases. Intel macOS passed the previously failing
+history case. The separate Linux quality job instead timed out in
+`shutdown_force_failed_history_holds_root_until_original_save_continues`; its
+shared-helper log does not identify which of that case's two waits expired.
+The package matrix was skipped. Source review found activity metadata I/O could
+cross both history-path replacement gaps. A bounded follow-up synchronizes nine
+such windows in five cases across four test files, including the two tool-cleanup
+fixtures and one persistent-owner fixture. Original assertions, single business
+calls and production remain unchanged. All 76 affected-suite tests, targeted
+strict Clippy, formatting and whitespace checks pass locally. This correction
+still requires publication and a fresh complete CI run with native packages.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 
