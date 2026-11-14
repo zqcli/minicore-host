@@ -497,6 +497,15 @@ struct CleanupGate {
     released: std::sync::Mutex<bool>,
     wake: std::sync::Condvar,
 }
+/// A failed assertion must still release the synchronous resource destructor
+/// before this test's runtime waits for its accepted configuration work.
+struct CleanupRelease(Arc<CleanupGate>);
+impl Drop for CleanupRelease {
+    fn drop(&mut self) {
+        *self.0.released.lock().unwrap() = true;
+        self.0.wake.notify_all();
+    }
+}
 struct CleanupResources(Arc<CleanupGate>);
 impl ResourceResolver for CleanupResources {
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
@@ -531,20 +540,22 @@ async fn canonical_publication_and_force_wait_for_real_resource_drop_outside_loc
     .unwrap()
     .with_preparer(preparer(None));
     let host = Host::memory_configured(initial).unwrap();
+    let release = CleanupRelease(cleanup.clone());
     let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let formed = host
         .reload(&caller, request(&host, config("new"), 0))
         .unwrap();
-    cleanup.entered.acquire().await.unwrap().forget();
+    tokio::time::timeout(Duration::from_secs(5), cleanup.entered.acquire())
+        .await
+        .expect("resource cleanup must start after publication")
+        .unwrap()
+        .forget();
     assert_eq!(host.config_get(&caller).unwrap().config_revision, 1);
     assert_eq!(
         progress(&host, &caller, &formed.operation_id).result,
-        HostReloadResult::Applied {
-            config_revision: 1,
-            agents: Vec::new()
-        }
+        HostReloadResult::Applying { config_revision: 1 }
     );
     host.shutdown(
         &caller,
@@ -558,8 +569,7 @@ async fn canonical_publication_and_force_wait_for_real_resource_drop_outside_loc
         host.info(&caller).unwrap().lifecycle,
         HostLifecycle::Stopping
     );
-    *cleanup.released.lock().unwrap() = true;
-    cleanup.wake.notify_all();
+    drop(release);
     stopped(&host, &caller).await;
     assert_eq!(
         progress(&host, &caller, &formed.operation_id).result,
