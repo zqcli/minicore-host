@@ -2,25 +2,38 @@
 
 `minicore-host` assembles the existing Host owners, canonical persistent storage,
 production resource preparer, stdio and authenticated WSS transports. It is one
-local process, not a daemon manager. TUI is unchanged.
+local process, not a daemon manager. TUI embeds the same Host and shared JSON
+configuration loader; each frontend owns its own UI settings.
 
 ## Start a Host
 
+Copy the complete [example directory](../../example-config/host.json), edit its
+provider settings, and supply the credential environment variable before starting:
+
 ```sh
-cargo run --locked -p minicore-host -- --data-root /absolute/host-data --stdio
+cargo run --locked -p minicore-host -- --config-dir /absolute/minicore-config --stdio
 ```
 
-`--data-root` is required. The storage owner exclusively acquires its actual
-canonical directory before executable owners are created. A fresh root writes
-its real Host identity and complete `HostConfig`; reopening preserves Host ID
-and configuration while generating a new incarnation. Unfinished execution and
-queues are not reconstructed. Another process cannot execute against that root.
+`--config-dir` defaults to `config/` next to the executable. `--data-root` is
+optional and defaults to `<config-dir>/data`. Relative overrides are resolved
+against the startup working directory. The storage owner acquires its canonical
+directory exclusively before executable owners are created. Reopening preserves
+Host and Agent identities and Session history, with a new Host incarnation;
+providers, logging and network use this startup's directory values. Unfinished
+execution and queues are not reconstructed. Another process cannot execute
+against that data root.
 
-To initialize resources, supply `--config /absolute/host-config.json`. This is
-an initial `HostConfig` JSON document, not a second settings format. The file must
-parse when supplied; existing saved configuration wins over these initial values.
-Subsequent `host.reload` uses the existing operation-checked owner and production
-preparer. Nothing watches or silently rereads the initial config file.
+`host.json` is required; `agents/*.json` and `roles/*.json` declare separate
+Agents and reusable Roles. Stable Agent keys preserve identity across file
+renames, reloads and restarts. Host ignores frontend files. See the
+[configuration guide](../../docs/configuration.md) for complete examples,
+three-layer instructions, managed Agents and TUI ownership.
+
+`host.reload` accepts only `operation_id` and `expected_revision`. It rereads the
+startup-bound directory, validates the complete candidate, and delegates updates
+to actual owners. Follow its receipt for applied, partially applied, failed or
+restart-required results. There is no file watcher, candidate/path RPC input or
+legacy `--config` fallback.
 
 For example, this **template** declares one OpenAI-compatible provider:
 
@@ -40,6 +53,7 @@ For example, this **template** declares one OpenAI-compatible provider:
     "request_timeout_ms": 120000
   }],
   "tools": [],
+  "workspace_roots": [],
   "network": {"listen": null, "access_key_env": null},
   "logging": {"level": "info", "output": {"kind": "stderr"}}
 }
@@ -56,7 +70,8 @@ Responses, select `"api":"responses"` and the provider's full Responses endpoint
 The Host does not infer a protocol from the endpoint or fall back to another
 protocol. Both ordinary Turns and compaction use the configured selection.
 Responses sends complete input with `store:false`; provider-side conversation
-state is not required. See [the Responses template](../../example.responses.host.json).
+state is not required. To adapt the example, set `api` to `"responses"` and
+`endpoint` to the provider's full `/v1/responses` URL.
 
 The builtins are `read`, `write`, `edit`, `apply_patch`, `bash`, and the six-action
 `agent` tool. Registration does not enable tools:
@@ -67,6 +82,16 @@ workspace; they do not use the process's current directory as a fallback.
 `apply_patch` accepts `{ "path": "relative/file", "patch": "..." }` for one
 existing UTF-8 file, using unified diff or a single Codex Update File patch.
 It follows the same approval, mutation guard and edit-journal path as `edit`.
+
+`workspace_roots` explicitly enables directory selection before a Session exists.
+For example, set `"workspace_roots":["/home/user/projects"]` (or the actual absolute
+Windows path, such as `"C:\\Users\\User\\projects"`). Every root must already be a
+directory; preparation fixes its canonical path. The default empty list exposes
+none and does not fall back to HOME, cwd or a Session workspace. The three
+`workspace.roots/list/mkdir` operations use this scope; existing Session workspace
+reads and tool execution keep their own configured workspace. Roots can change
+by editing `host.json` and calling `host.reload`. A browser's selected
+path is a path on the Host machine.
 
 Session `execution.approval` defaults to `"ask"`, including when omitted.
 Mutating calls request approval with `allow_once`/`deny` answers; builtin
@@ -80,8 +105,9 @@ name-based environment exclusion, not output redaction or same-user OS
 isolation; already running children are unchanged. See the
 [local-tool boundary](../host-local-tools/README.md).
 
-The default configuration permits management but has no model selections. Create
-Agents and Sessions using canonical RPC with a configured model. On stdio, send
+A Host file with empty models and no Agent declarations permits management only.
+Each declared Agent is created with its default Session, without a task message.
+Additional dynamic Agents and Sessions use canonical RPC. On stdio, send
 one UTF-8 JSON-RPC object per LF-terminated line and first complete `initialize`
 with `{}`. Stdout is reserved exclusively for protocol frames, including during
 startup failure, help, panic and shutdown. `--help` writes only to stderr.
@@ -178,4 +204,4 @@ cargo clippy --locked -p minicore-host --all-targets -- -D warnings
 ```
 
 Task 043 records the original immutable executable checkpoint; current composed
-validation and remaining live-provider/TUI work are tracked in `../../PROJECT.md`.
+validation and its limits are tracked in [PROJECT.md](../../PROJECT.md).

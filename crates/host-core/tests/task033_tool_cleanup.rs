@@ -413,6 +413,25 @@ async fn until<T>(mut condition: impl FnMut() -> Option<T>) -> T {
     .await
     .expect("declared fixture condition")
 }
+async fn activity_metadata_saved(host: &Host, caller: &CallerContext, target: &SessionRef) {
+    let mut changes = host.session_states(caller, target).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let state = changes.snapshot().unwrap().data;
+            assert!(
+                state.metadata_fault.is_none(),
+                "unexpected activity metadata fault: {:?}",
+                state.metadata_fault
+            );
+            if !state.owned_work.metadata_save {
+                return;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("activity metadata owner did not settle");
+}
 async fn bundle(resources: &Resources, index: usize) -> Arc<ProcessBundle> {
     until(|| resources.bundles.lock().unwrap().get(index).cloned()).await
 }
@@ -769,6 +788,8 @@ async fn failed_history_does_not_skip_child_cleanup_or_repeat_it_on_original_sav
         .join(target.session_id.to_string())
         .join("history.jsonl");
     let original = path.with_extension("original");
+    // Metadata also opens history.jsonl; isolate both replacement gaps from it.
+    activity_metadata_saved(&host, &caller, &target).await;
     std::fs::rename(&path, &original).unwrap();
     std::fs::write(&path, b"").unwrap();
     cancel(&host, &caller, &target, &turn);
@@ -780,6 +801,7 @@ async fn failed_history_does_not_skip_child_cleanup_or_repeat_it_on_original_sav
     assert_eq!(bundle.waited.load(Ordering::SeqCst), 0);
     bundle.release.add_permits(1);
     until(|| (bundle.waited.load(Ordering::SeqCst) == 1).then_some(())).await;
+    activity_metadata_saved(&host, &caller, &target).await;
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&original, &path).unwrap();
     host.session_resume(
@@ -1090,6 +1112,7 @@ async fn task051_failed_required_save_retains_source_and_does_not_skip_actual_wo
         .join(target.session_id.as_str());
     let path = dir.join("history.jsonl");
     let original = dir.join("history.original");
+    activity_metadata_saved(&host, &caller, &target).await;
     std::fs::rename(&path, &original).unwrap();
     std::fs::write(&path, b"").unwrap();
     let receipt = host
@@ -1121,6 +1144,7 @@ async fn task051_failed_required_save_retains_source_and_does_not_skip_actual_wo
     assert!(dir.exists());
     // Restore only this test's renamed file, then explicitly reconcile the
     // original save. Deletion itself did not retry, recreate or remove it.
+    activity_metadata_saved(&host, &caller, &target).await;
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&original, &path).unwrap();
     host.session_resume(

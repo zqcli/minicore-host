@@ -2,7 +2,7 @@
 //!
 //! The builder prepares immutable Host candidates; the resolver binds selected
 //! Turn implementations or declaration-only compaction resources; prompt
-//! preparation retains frozen framework, Role and Workspace context.
+//! preparation retains frozen Host, Role, Agent and Workspace context.
 //! No model requests, business tools, environment scans, dynamic module loading,
 //! or process-wide cwd changes occur during preparation.
 

@@ -51,6 +51,7 @@ impl Fixture {
                 agent.id().clone(),
                 host.id().clone(),
                 AgentData {
+                    configuration_source: None,
                     name: "Agent".into(),
                     mode: StorageMode::Persistent,
                     config: AgentConfig::default(),
@@ -267,6 +268,7 @@ fn memory_records_and_journal_create_no_files() {
             agent_id.clone(),
             f.host.id().clone(),
             AgentData {
+                configuration_source: None,
                 name: "memory".into(),
                 mode: StorageMode::Memory,
                 config: AgentConfig::default(),
@@ -1038,6 +1040,19 @@ fn same_revision_config_changes_and_creation_provenance_changes_are_rejected() {
     let mut agent = f.agent.load().unwrap();
     agent.data.config.role.instructions.push_str("changed");
     assert!(f.agent.save(&agent).is_err());
+    let mut source_change = f.agent.load().unwrap();
+    source_change.data.configuration_source =
+        Some(minicore_host_protocol::AgentConfigurationSource {
+            key: "writer".into(),
+            managed: true,
+        });
+    assert!(f.agent.save(&source_change).is_err());
+    source_change.data.config_revision += 1;
+    f.agent.save(&source_change).unwrap();
+    assert_eq!(
+        f.agent.load().unwrap().data.configuration_source,
+        source_change.data.configuration_source
+    );
 }
 
 #[test]
@@ -1399,6 +1414,7 @@ fn unsafe_child_agent_entries_are_isolated_without_following_links() {
                 healthy.id().clone(),
                 f.host.id().clone(),
                 AgentData {
+                    configuration_source: None,
                     name: "healthy".into(),
                     mode: StorageMode::Persistent,
                     config: AgentConfig::default(),

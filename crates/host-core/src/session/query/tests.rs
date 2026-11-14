@@ -114,6 +114,7 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
     let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
     let connection = access.connect().unwrap();
     let config = SessionConfig {
+        instructions: String::new(),
         model: "fixture/model".parse().unwrap(),
         ..Default::default()
     };
@@ -151,6 +152,7 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
                 agent_id.clone(),
                 host_id.clone(),
                 AgentData {
+                    configuration_source: None,
                     name: "query fixture".into(),
                     mode: StorageMode::Persistent,
                     config: AgentConfig::default(),

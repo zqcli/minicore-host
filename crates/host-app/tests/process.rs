@@ -28,9 +28,14 @@ async fn help_invalid_arguments_and_invalid_configuration_never_write_stdout_or_
         );
     }
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("bad.json");
-    std::fs::write(&path, format!(r#"{{"private":"{MODEL_KEY}""#)).unwrap();
-    let output = Process::start(&dir.path().join("root"), Some(&path), true, None)
+    let path = dir.path().join("bad");
+    std::fs::create_dir(&path).unwrap();
+    std::fs::write(
+        path.join("host.json"),
+        format!(r#"{{"private":"{MODEL_KEY}""#),
+    )
+    .unwrap();
+    let output = Process::start(&dir.path().join("root"), &path, true, None)
         .finish()
         .await;
     assert!(!output.status.success());
@@ -44,14 +49,14 @@ async fn help_invalid_arguments_and_invalid_configuration_never_write_stdout_or_
 async fn actual_identity_is_saved_new_incarnation_is_generated_and_root_is_exclusive() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let original = config(None, false);
     write_config(&path, &original);
-    let mut first = Process::start(&root, Some(&path), true, None);
+    let mut first = Process::start(&root, &path, true, None);
     let initial = first.rpc("initialize", json!({})).await;
     assert_eq!(initial["can_operate"], true);
     assert_eq!(initial["control"]["revision"], 1);
-    let conflict = Process::start(&root, None, true, None).finish().await;
+    let conflict = Process::start(&root, &path, true, None).finish().await;
     assert!(!conflict.status.success());
     assert!(conflict.stdout.is_empty());
     let before = std::fs::read(root.join("host.json")).unwrap();
@@ -62,15 +67,15 @@ async fn actual_identity_is_saved_new_incarnation_is_generated_and_root_is_exclu
     output.safe_diagnostics();
     assert!(output.events().iter().any(|event| event["event"] == "host.stopped" && event["host_id"] == initial["host_id"]));
     let mut changed = original.clone();
-    changed.name = "Initial defaults do not overwrite saved config".into();
+    changed.name = "Directory values apply on every startup".into();
     write_config(&path, &changed);
-    let mut second = Process::start(&root, Some(&path), true, None);
+    let mut second = Process::start(&root, &path, true, None);
     let reopened = second.rpc("initialize", json!({})).await;
     assert_eq!(reopened["host_id"], initial["host_id"]);
     assert_ne!(reopened["host_incarnation"], initial["host_incarnation"]);
     let saved = second.rpc("host.config.get", json!({})).await;
-    assert_eq!(saved["config"]["name"], original.name);
-    assert_eq!(std::fs::read(root.join("host.json")).unwrap(), before);
+    assert_eq!(saved["config"]["name"], changed.name);
+    assert_ne!(std::fs::read(root.join("host.json")).unwrap(), before);
     second.send("host.shutdown", shutdown("graceful"));
     assert!(second.finish().await.status.success());
 }
@@ -80,9 +85,9 @@ async fn stdio_message_executes_production_http_adapter_and_persists_real_output
     let mut http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     let created = child.rpc("agent.create", agent_request()).await;
     let target = target(&created);
@@ -127,9 +132,9 @@ async fn graceful_process_shutdown_keeps_root_until_accepted_http_work_really_fi
     let mut http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     let created = child.rpc("agent.create", agent_request()).await;
     let target = target(&created);
@@ -149,14 +154,14 @@ async fn graceful_process_shutdown_keeps_root_until_accepted_http_work_really_fi
     let facts = child.rpc("host.info", json!({})).await;
     assert_eq!(facts["lifecycle"], "draining");
     assert_eq!(facts["shutdown_strategy"], "graceful");
-    let conflict = Process::start(&root, None, true, None).finish().await;
+    let conflict = Process::start(&root, &path, true, None).finish().await;
     assert!(!conflict.status.success());
     http.finish_response();
     let output = child.finish().await;
     assert!(output.status.success());
     output.protocol_only();
     output.safe_diagnostics();
-    let mut reopened = Process::start(&root, None, true, None);
+    let mut reopened = Process::start(&root, &path, true, None);
     reopened.rpc("initialize", json!({})).await;
     reopened.send("host.shutdown", shutdown("graceful"));
     assert!(reopened.finish().await.status.success());
@@ -166,16 +171,14 @@ async fn graceful_process_shutdown_keeps_root_until_accepted_http_work_really_fi
 async fn configured_wss_requires_valid_tls_and_key_and_first_real_client_gets_rights() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let (cert, key, tls) = certificates(dir.path());
     write_config(&path, &config(None, true));
-    let missing_tls = Process::start(&root, Some(&path), false, None)
-        .finish()
-        .await;
+    let missing_tls = Process::start(&root, &path, false, None).finish().await;
     assert!(!missing_tls.status.success());
     assert!(missing_tls.stdout.is_empty());
     assert!(!root.join("host.json").exists());
-    let mut child = Process::start(&root, Some(&path), false, Some((&cert, &key)));
+    let mut child = Process::start(&root, &path, false, Some((&cert, &key)));
     let started = child.event("host.process", "host.started").await;
     let port = started["attributes"]["listen_port"].as_u64().unwrap();
     let url = format!("wss://localhost:{port}/");
@@ -236,10 +239,10 @@ async fn stdio_eof_releases_only_connection_and_wss_observes_accepted_work_then_
     let mut http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let (cert, key, tls) = certificates(dir.path());
     write_config(&path, &config(Some(http.endpoint.clone()), true));
-    let mut child = Process::start(&root, Some(&path), true, Some((&cert, &key)));
+    let mut child = Process::start(&root, &path, true, Some((&cert, &key)));
     let initial = child.rpc("initialize", json!({})).await;
     assert_eq!(initial["can_operate"], true);
     let started = child.event("host.process", "host.started").await;
@@ -307,9 +310,9 @@ async fn repeated_signals_do_not_force_paused_backlog_but_explicit_rpc_force_fin
     let http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     let created = child.rpc("agent.create", agent_request()).await;
     let address = target(&created);
@@ -342,9 +345,9 @@ async fn failed_original_save_stays_stopping_and_external_kill_is_not_logged_as_
     let http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     std::fs::write(
         root.join("agents"),
@@ -359,7 +362,7 @@ async fn failed_original_save_stays_stopping_and_external_kill_is_not_logged_as_
     let repeated = child.rpc("host.shutdown", shutdown("graceful")).await;
     assert_eq!(repeated["result"]["strategy"], "force");
     assert_eq!(repeated["result"]["lifecycle"], "stopping");
-    let conflict = Process::start(&root, None, true, None).finish().await;
+    let conflict = Process::start(&root, &path, true, None).finish().await;
     assert!(!conflict.status.success());
     assert!(child.alive());
     child.kill();
@@ -378,16 +381,16 @@ async fn failed_original_save_stays_stopping_and_external_kill_is_not_logged_as_
 #[tokio::test]
 async fn configured_file_diagnostics_are_exclusive_across_data_roots_and_released_after_cleanup() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let log = dir.path().join("output.jsonl");
     let mut settings = config(None, false);
     settings.logging.output = LogOutput::File {
         path: log.to_str().unwrap().into(),
     };
     write_config(&path, &settings);
-    let mut first = Process::start(&dir.path().join("one"), Some(&path), true, None);
+    let mut first = Process::start(&dir.path().join("one"), &path, true, None);
     first.rpc("initialize", json!({})).await;
-    let second = Process::start(&dir.path().join("two"), Some(&path), true, None)
+    let second = Process::start(&dir.path().join("two"), &path, true, None)
         .finish()
         .await;
     assert!(!second.status.success());
@@ -404,7 +407,7 @@ async fn configured_file_diagnostics_are_exclusive_across_data_roots_and_release
         .collect();
     assert!(rows.iter().any(|record| record["event"] == "host.started"));
     assert!(rows.iter().any(|record| record["event"] == "host.stopped"));
-    let mut second = Process::start(&dir.path().join("two"), Some(&path), true, None);
+    let mut second = Process::start(&dir.path().join("two"), &path, true, None);
     second.rpc("initialize", json!({})).await;
     second.send("host.shutdown", shutdown("graceful"));
     assert!(second.finish().await.status.success());
@@ -413,7 +416,7 @@ async fn configured_file_diagnostics_are_exclusive_across_data_roots_and_release
 #[tokio::test]
 async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_saved_identity() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let root = dir.path().join("root");
     let mut settings = config(Some("http://127.0.0.1:1/v1/chat/completions".into()), false);
     settings.models[0].api_key_env = "MINICORE_APP_ABSENT_FIXTURE_KEY".into();
@@ -422,7 +425,7 @@ async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_sav
     command
         .arg("--data-root")
         .arg(&root)
-        .arg("--config")
+        .arg("--config-dir")
         .arg(&path)
         .arg("--stdio")
         .env_remove("MINICORE_APP_ABSENT_FIXTURE_KEY");
@@ -443,9 +446,7 @@ async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_sav
             .into(),
     };
     write_config(&path, &settings);
-    let output = Process::start(&root, Some(&path), true, None)
-        .finish()
-        .await;
+    let output = Process::start(&root, &path, true, None).finish().await;
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     output.safe_diagnostics();
@@ -456,7 +457,7 @@ async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_sav
     std::fs::write(&cert, HOST_KEY).unwrap();
     std::fs::write(&key, MODEL_KEY).unwrap();
     write_config(&path, &config(None, true));
-    let output = Process::start(&root, Some(&path), true, Some((&cert, &key)))
+    let output = Process::start(&root, &path, true, Some((&cert, &key)))
         .finish()
         .await;
     assert!(!output.status.success());
@@ -465,7 +466,7 @@ async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_sav
     assert!(!root.join("host.json").exists());
     // Failed startup released the real root, so a corrected configuration starts normally.
     write_config(&path, &config(None, false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     assert_eq!(
         child.rpc("initialize", json!({})).await["can_operate"],
         true
@@ -477,15 +478,10 @@ async fn missing_credentials_bad_tls_and_unavailable_log_output_fail_without_sav
 #[tokio::test]
 async fn broken_stdio_frame_does_not_shutdown_the_host_or_disable_the_wss_listener() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     let (cert, key, tls) = certificates(dir.path());
     write_config(&path, &config(None, true));
-    let mut child = Process::start(
-        &dir.path().join("root"),
-        Some(&path),
-        true,
-        Some((&cert, &key)),
-    );
+    let mut child = Process::start(&dir.path().join("root"), &path, true, Some((&cert, &key)));
     child.rpc("initialize", json!({})).await;
     let started = child.event("host.process", "host.started").await;
     child.raw_input(b"{\"jsonrpc\":");
@@ -523,13 +519,11 @@ async fn broken_stdio_frame_does_not_shutdown_the_host_or_disable_the_wss_listen
     );
 }
 
-fn saved_log_output(root: &std::path::Path, output: &std::path::Path) -> Vec<u8> {
-    let path = root.join("host.json");
-    let mut record: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    record["data"]["config"]["logging"]["output"] = json!({"kind":"file","path":output});
-    let bytes = serde_json::to_vec(&record).unwrap();
-    std::fs::write(path, &bytes).unwrap();
-    bytes
+fn configured_log_output(config_dir: &std::path::Path, output: &std::path::Path) {
+    let path = config_dir.join("host.json");
+    let mut config: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    config["logging"]["output"] = json!({"kind":"file","path":output});
+    std::fs::write(path, serde_json::to_vec(&config).unwrap()).unwrap();
 }
 
 #[tokio::test]
@@ -537,9 +531,9 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
     let mut http = HttpFixture::start().await;
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     let created = child.rpc("agent.create", agent_request()).await;
     let address = target(&created);
@@ -578,8 +572,9 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
         destinations
     };
     for destination in destinations {
-        let metadata_before = saved_log_output(&root, &destination);
-        let output = Process::start(&root, None, true, None).finish().await;
+        configured_log_output(&path, &destination);
+        let metadata_before = std::fs::read(root.join("host.json")).unwrap();
+        let output = Process::start(&root, &path, true, None).finish().await;
         assert!(!output.status.success());
         assert!(output.stdout.is_empty());
         output.safe_diagnostics();
@@ -607,7 +602,7 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
 async fn dedicated_log_directory_inside_data_root_is_valid() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("root");
-    let path = dir.path().join("config.json");
+    let path = dir.path().join("config");
     std::fs::create_dir_all(root.join("logs")).unwrap();
     let log = root.join("logs/host.jsonl");
     let mut settings = config(None, false);
@@ -615,7 +610,7 @@ async fn dedicated_log_directory_inside_data_root_is_valid() {
         path: log.to_str().unwrap().into(),
     };
     write_config(&path, &settings);
-    let mut child = Process::start(&root, Some(&path), true, None);
+    let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
     child.send("host.shutdown", shutdown("graceful"));
     let output = child.finish().await;

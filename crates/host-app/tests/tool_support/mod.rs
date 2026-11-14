@@ -148,6 +148,7 @@ pub fn agent(workspace: &Path, tools: &[&str]) -> Value {
 pub struct App {
     pub directory: tempfile::TempDir,
     pub root: PathBuf,
+    pub config_dir: PathBuf,
     pub certificate: PathBuf,
     pub key: PathBuf,
     pub tls: Arc<tls::ClientConfig>,
@@ -160,12 +161,12 @@ impl App {
     pub async fn start(provider: &Provider, tools: &[&str]) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().join("data");
-        let path = directory.path().join("config.json");
+        let path = directory.path().join("config");
         let (certificate, key, tls) = support::certificates(directory.path());
         let mut config = support::config(Some(provider.endpoint.clone()), true);
         config.tools = bindings(tools);
         support::write_config(&path, &config);
-        let mut process = Process::start(&root, Some(&path), true, Some((&certificate, &key)));
+        let mut process = Process::start(&root, &path, true, Some((&certificate, &key)));
         let initial = process.rpc("initialize", json!({})).await;
         assert_eq!(initial["can_operate"], true);
         let observer = connect(&mut process, tls.clone()).await;
@@ -173,6 +174,7 @@ impl App {
         Self {
             directory,
             root,
+            config_dir: path,
             certificate,
             key,
             tls,

@@ -142,7 +142,7 @@ impl Host {
                 (
                     state.lifecycle,
                     state.agents.values().cloned().collect::<Vec<_>>(),
-                    state.creating + state.deleting,
+                    state.creating + state.deleting + state.directory_writes,
                     state.creations.values().find_map(|receipt| {
                         creation_save_fault(&receipt.result.steps.agent)
                             .or_else(|| creation_save_fault(&receipt.result.steps.session))

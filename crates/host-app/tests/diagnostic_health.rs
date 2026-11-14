@@ -7,7 +7,9 @@ use support::*;
 #[tokio::test]
 async fn application_host_info_exposes_the_installed_process_pipeline() {
     let directory = tempfile::tempdir().unwrap();
-    let mut process = Process::start(&directory.path().join("root"), None, true, None);
+    let path = directory.path().join("config");
+    write_config(&path, &config(None, false));
+    let mut process = Process::start(&directory.path().join("root"), &path, true, None);
     let initial = process.rpc("initialize", json!({})).await;
     let info = process.rpc("host.info", json!({})).await;
     assert_eq!(info["host_id"], initial["host_id"]);

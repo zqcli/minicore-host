@@ -253,7 +253,12 @@ async fn binary_omitted_approval_is_ask_and_allow_once_does_not_approve_the_next
     let stopped = app.process.finish().await;
     assert!(stopped.status.success());
     app.observer.close();
-    let mut reopened = Process::start(&app.root, None, true, Some((&app.certificate, &app.key)));
+    let mut reopened = Process::start(
+        &app.root,
+        &app.config_dir,
+        true,
+        Some((&app.certificate, &app.key)),
+    );
     reopened.rpc("initialize", json!({})).await;
     assert_eq!(
         reopened.rpc("session.get", json!({"target":target})).await["config"]["execution"]["approval"],

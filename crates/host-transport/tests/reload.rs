@@ -16,23 +16,30 @@ async fn production_default_preparer_is_available_to_typed_and_stdio_clients() {
     for transport in 0..2 {
         let builder = HostResourceBuilder::builtins().unwrap();
         let original = HostConfig::default();
+        let directory = tempfile::tempdir().unwrap();
+        let config_dir = directory.path().join("config");
+        write_config(&config_dir, &original);
         let host =
-            Host::memory_configured(builder.prepare(original.clone()).await.unwrap()).unwrap();
+            Host::open_directory_configured(directory.path().join("data"), &config_dir, |config| {
+                builder.prepare(config)
+            })
+            .await
+            .unwrap();
         let peer = Connected::new(host, transport).await;
         let mut candidate = original;
         candidate.name = "Production assembler reload".into();
-        let returned = peer
-            .client
-            .reload(request(candidate.clone(), 0), options())
-            .await
-            .unwrap();
+        write_config(&config_dir, &candidate);
+        let returned = peer.client.reload(request(0), options()).await.unwrap();
         assert_eq!(
             returned.result,
             HostReloadResult::Preparing { config_revision: 0 }
         );
         assert_eq!(
             terminal(&peer.client, returned.operation_id).await.result,
-            HostReloadResult::Applied { config_revision: 1 }
+            HostReloadResult::Applied {
+                config_revision: 1,
+                agents: Vec::new()
+            }
         );
         assert_eq!(
             peer.client.config(options()).await.unwrap().config,
@@ -51,7 +58,7 @@ async fn all_transports_keep_immutable_receipts_and_distinct_duplicate_invocatio
         candidate.name = "First accepted candidate".into();
         let first = peer
             .client
-            .reload(request(candidate.clone(), 0), options())
+            .reload(preparer.request(candidate.clone(), 0), options())
             .await
             .unwrap();
         preparer.started().await;
@@ -66,7 +73,7 @@ async fn all_transports_keep_immutable_receipts_and_distinct_duplicate_invocatio
                 .unwrap(),
             Receipt::HostReload(first.clone())
         );
-        let rejected = request(candidate.clone(), 0);
+        let rejected = preparer.request(candidate.clone(), 0);
         let rejected_id = rejected.operation_id.clone();
         assert_eq!(
             fault(peer.client.reload(rejected, options()).await.unwrap_err()).kind(),
@@ -87,7 +94,10 @@ async fn all_transports_keep_immutable_receipts_and_distinct_duplicate_invocatio
         let applied = terminal(&peer.client, first.operation_id.clone()).await;
         assert_eq!(
             applied.result,
-            HostReloadResult::Applied { config_revision: 1 }
+            HostReloadResult::Applied {
+                config_revision: 1,
+                agents: Vec::new()
+            }
         );
         assert_eq!(applied.host_id, peer.client.initial_info().host_id);
         assert_eq!(
@@ -99,13 +109,13 @@ async fn all_transports_keep_immutable_receipts_and_distinct_duplicate_invocatio
             HostReloadResult::Preparing { config_revision: 0 }
         );
         candidate.name = "Independent duplicate ID".into();
+        write_config(&preparer.configuration_directory, &candidate);
         let duplicate = peer
             .client
             .reload(
                 HostReloadRequest {
                     operation_id: first.operation_id.clone(),
                     expected_revision: 1,
-                    candidate: candidate.clone(),
                 },
                 options(),
             )
@@ -152,7 +162,7 @@ async fn all_transports_check_readonly_and_stale_revision_before_preparation() {
                 fault(
                     reader
                         .client
-                        .reload(request(config(), 0), options())
+                        .reload(preparer.request(config(), 0), options())
                         .await
                         .unwrap_err()
                 )
@@ -165,18 +175,21 @@ async fn all_transports_check_readonly_and_stale_revision_before_preparation() {
         assert!(writer.client.initial_info().can_operate);
         let returned = writer
             .client
-            .reload(request(config(), 0), options())
+            .reload(preparer.request(config(), 0), options())
             .await
             .unwrap();
         assert_eq!(
             terminal(&reader.client, returned.operation_id).await.result,
-            HostReloadResult::Applied { config_revision: 1 }
+            HostReloadResult::Applied {
+                config_revision: 1,
+                agents: Vec::new()
+            }
         );
         assert_eq!(
             fault(
                 writer
                     .client
-                    .reload(request(config(), 0), options())
+                    .reload(preparer.request(config(), 0), options())
                     .await
                     .unwrap_err()
             )
@@ -202,7 +215,7 @@ async fn all_transports_retain_preparation_faults_and_whole_candidate_restart_re
         }];
         let returned = peer
             .client
-            .reload(request(invalid, 0), options())
+            .reload(preparer.request(invalid, 0), options())
             .await
             .unwrap();
         let failed = terminal(&peer.client, returned.operation_id).await;
@@ -222,11 +235,12 @@ async fn all_transports_retain_preparation_faults_and_whole_candidate_restart_re
         restart.logging.level = LogLevel::Debug;
         restart.network.listen = Some("127.0.0.1:9999".parse().unwrap());
         restart.network.access_key_env = Some(SOURCE_B.into());
-        let receipt = peer
+        let accepted = peer
             .client
-            .reload(request(restart, 0), options())
+            .reload(preparer.request(restart, 0), options())
             .await
             .unwrap();
+        let receipt = terminal(&peer.client, accepted.operation_id).await;
         assert_eq!(
             receipt.result,
             HostReloadResult::RestartRequired {
@@ -241,7 +255,7 @@ async fn all_transports_retain_preparation_faults_and_whole_candidate_restart_re
                 .unwrap(),
             Receipt::HostReload(receipt)
         );
-        assert_eq!(preparer.count(), 1);
+        assert_eq!(preparer.count(), 2);
         assert_eq!(peer.client.config(options()).await.unwrap(), before);
         peer.finish().await;
     }
@@ -254,13 +268,7 @@ async fn hosts_without_an_initial_preparer_remain_unavailable_on_every_transport
         host.configure_network_access(Some(KEY_A.into())).unwrap();
         let peer = Connected::new(host, transport).await;
         assert_eq!(
-            fault(
-                peer.client
-                    .reload(request(HostConfig::default(), 0), options())
-                    .await
-                    .unwrap_err()
-            )
-            .kind(),
+            fault(peer.client.reload(request(0), options()).await.unwrap_err()).kind(),
             Some(FaultKind::HostMethodUnavailable)
         );
         peer.finish().await;
@@ -279,9 +287,9 @@ async fn reload_rpc_strict_shape_and_business_errors_match_on_duplex_and_tls() {
         false
     );
     assert_eq!(wss.initialize(KEY_A).await["result"]["can_operate"], false);
-    let valid = serde_json::to_value(request(config(), 0)).unwrap();
+    let valid = serde_json::to_value(preparer.request(config(), 0)).unwrap();
     let mut bad = vec![json!({}), json!({"request": valid.clone()})];
-    for field in ["operation_id", "expected_revision", "candidate"] {
+    for field in ["operation_id", "expected_revision"] {
         let mut value = valid.clone();
         value.as_object_mut().unwrap().remove(field);
         bad.push(value);

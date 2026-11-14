@@ -123,6 +123,7 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
             agent_id.clone(),
             host_id.clone(),
             AgentData {
+                configuration_source: None,
                 name: "saved Agent".into(),
                 mode: StorageMode::Persistent,
                 config: config(),
@@ -1437,6 +1438,16 @@ async fn review_check_real_save_failure_preserves_completed_outcome() {
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
         .await
         .unwrap();
+    // Model admission does not settle metadata I/O, which also opens history.
+    wait_state(&host, &caller, &target, |state| {
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        !state.owned_work.metadata_save
+    })
+    .await;
     std::fs::rename(&path, path.with_extension("jsonl.saved")).unwrap();
     std::fs::write(&path, b"").unwrap();
     release.add_permits(1);
@@ -1998,6 +2009,7 @@ async fn review_create_check_selected_config_version_is_not_reread() {
             7,
             &AgentConfigPatch {
                 role: Some(next),
+                instructions: None,
                 session_defaults: None,
             },
         )

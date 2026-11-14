@@ -68,6 +68,15 @@ Agent default; omission on update retains the current independent Session value.
 Candidate construction does not mutate the original, and invalid in-process
 configurations fail serialization too.
 
+`AgentConfig.instructions` and `SessionConfig.instructions` are optional text
+(default empty), alongside `Role.instructions`. They use the same name in
+creation overrides and update patches; omission retains/selects the owner value,
+empty text clears it and null is rejected. Directory loading resolves the Role
+reference before owners receive native configurations. Agent declaration keys
+are optional owner `configuration_source` metadata, never configuration fields.
+`HostReloadRequest` contains only `operation_id` and `expected_revision`; its
+result preserves per-Agent facts and an explicit `partially_applied` state.
+
 The `default` model in `Default` implementations is an unresolved selection
 reference, not evidence of a configured provider. `ConfigResources` validates
 actual Host references without sending model requests, executing tools, replacing
@@ -97,7 +106,7 @@ Owners construct registered Fault leaves. Deserialization also preserves newer
 unrecognized peer leaves and opaque details; `kind()` then returns `None`.
 Registered type/code/details combinations remain strictly validated.
 
-`PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 52 resource methods in SPEC §8.
+`PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 55 resource methods in SPEC §8.
 Host state events are not a new `host.state` method. The catalog describes canonical
 names, interaction forms and access requirements; the transport router reports
 its supported methods. `events.unsubscribe` requires ownership of the observation
@@ -132,3 +141,7 @@ identity, with UTC owner timestamps. Bound-input and completion events and saved
 Turn results use the same positions. Unbound inputs and cold saved results do not
 acquire fabricated record positions or LoadIds. Host object schema 2 and history
 schema 3 retain these facts; old envelope versions are rejected without migration.
+
+`DirectoryRoots`, `DirectoryListRequest/Result` and `DirectoryMkdirRequest/Receipt`
+are Host-level directory selection contracts. They do not carry Session IDs.
+`workspace.mkdir` uses the existing control receipt envelope and Host Fault registry.

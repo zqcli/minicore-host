@@ -1,6 +1,27 @@
 # MiniCore Host
 
-## Current work: Responses compatibility repairs (Tasks 111–113)
+## Current work: Host 0.12.1 integration (Task 114)
+
+[Task 114](tasks/114-sync-0121/TASK.md) merges fetched upstream
+`21c7ff1610c8c7000694df2d141c62a74790e4be` into local
+`b340c0bf8e624fc66b5123f9f999d58206bcd60c` on `sync/upstream-0121`.
+SPEC 4.11.0, JSON configuration directories and Host directory selection are
+retained together with local compaction ordering and Responses repairs.
+All 14 workspace packages and 14 internal dependency declarations move to
+0.12.1; third-party dependencies and historical task records stay unchanged.
+Remote Linux integration validation passes 1,234 unique Rust cases, 7 doctests
+and 28 Python checks, formatting and strict Clippy/rustdoc. Independent `--list`
+enumeration excludes nested subprocess output; permission-sensitive tests run
+without root DAC bypass capabilities. All 225 external lock entries match both
+parents. Exact commands, log hashes and limits are in Task 114 and its
+[validation record](tasks/114-sync-0121/validation.json). The integration is one
+local two-parent commit, `chore(integration): merge upstream and release Host 0.12.1`;
+its returned SHA is the coordinator's immutable TUI pin checkpoint. R1/R2 remain
+deferred; no TUI, live-model, publication or native macOS/Windows validation is
+included. The coordinator still needs to sync final Git objects to the scratch
+runner and check final committed whitespace before its downstream handoff.
+
+## Previous local checkpoint: Responses compatibility repairs (Tasks 111–113)
 
 [Task 111](tasks/111-responses-stream/TASK.md),
 [Task 112](tasks/112-responses-replay/TASK.md), and
@@ -47,6 +68,106 @@ capabilities removed. Both new regressions fail with the fix reverted. Exact
 commands, environment limits and the local-source TUI resolution recommendation
 are recorded in the task. No local compilation, push or live-provider/TUI
 acceptance is claimed.
+## Previous upstream checkpoint: JSON configuration directories (Task 111)
+
+[Task 111](tasks/111-config-directory/TASK.md) is complete on dev. SPEC 4.11.0
+was committed before implementation; Host and TUI are 0.12.0. The shared
+host-config package loads host.json, keyed Agent declarations and reusable
+Roles, while Host/Agent owners apply values and preserve identities and history.
+TUI passes --config-dir to its embedded Host and handles tui.json locally.
+Web configuration belongs to its independent deployment. Optional Host, Role
+and Agent instructions are assembled in order with native Session/Turn snapshots.
+Three implementation workers and an independent reviewer were requested with
+gpt-6-astra / max.
+
+Verified Host source
+[`2f5344d2`](https://github.com/zqcli/minicore-host/commit/2f5344d2e8cfb6e49d11cf1b188381264f8ee7fa)
+has tree `f19f925495066e6181233d13d9f10fdd75fb5659`.
+[Host CI 43588511364](https://github.com/zqcli/minicore-host/actions/runs/43588511364)
+passed all nine jobs on attempt 1: Linux quality, four native platforms and four
+release packages. Independent listings count 1,216 Rust cases on Linux, 1,208
+on each macOS architecture and 1,193 on Windows, with 7 doctests per platform.
+The complete gate also passed 28 Python checks, formatting and strict
+Clippy/rustdoc. Windows passed five actual standard-user Storage/Host cases.
+Every native package passed executable smoke and archive readback with 23 files.
+All 225 external Host package versions, sources and checksums are unchanged.
+
+Verified TUI source
+[`8a6da1ff`](https://github.com/zqcli/minicore-tui/commit/8a6da1ffbca9cee6f4a2770fd222726ddd1bce3e)
+pins that exact Host revision across all 13 native dependencies.
+[TUI CI 43589491558](https://github.com/zqcli/minicore-tui/actions/runs/43589491558)
+passed all eight jobs: quality, Linux/macOS/Windows native tests and four packages.
+Linux and macOS each passed 472 default cases; Windows passed 471. The three
+optional performance tests were not run, and the ignored subprocess helper was
+executed by its passing integration cases. Every downloaded TUI artifact digest
+and actual BUILD.txt source pin was verified. The initial JSON change removes
+obsolete TOML dependencies without unrelated external upgrades.
+
+Independent review findings and the actual CI fixture failures are resolved and
+retained in the task record, together with exact commands, platform counts,
+artifact links and limits. Provider integration uses actual Host/resource paths
+with controlled loopback model responses; no live-provider claim is made.
+The configuration guides and examples received a final bounded consistency
+review. This completion record changes only PROJECT.md and Task 111 with
+`[skip ci]`; code/tests and verified artifacts are unchanged. No tag, GitHub
+Release or main merge was requested or performed.
+
+## Previous checkpoint: Host 0.11.1 directory picker (Task 110)
+
+[Task 110](tasks/110-workspace-directory-picker/TASK.md) implements authenticated
+Host-level `workspace.roots/list/mkdir` for the independent minicore-web client.
+Public SPEC 4.10.3 commit `19390dfe` precedes implementation `d03e5c1d`; the existing
+compaction tool-ordering correction follows at `a0b560ee`. The complete public
+commit sequence and local preparation mappings are retained in the task record.
+All 13 workspace packages and internal pins are 0.11.1. The picker uses explicit
+canonical roots, actual filesystem operations, requested pagination and existing
+Host authority/receipt/shutdown owners; no Session is required. All 225 external
+locked packages are unchanged.
+
+The verified source is
+[`d58e1af6dbb01b0056afccd9f51d183cdefecc98`](https://github.com/zqcli/minicore-host/commit/d58e1af6dbb01b0056afccd9f51d183cdefecc98),
+tree `44f2db3364fc1f49f0e7f98da91e5885d032d5a8`.
+[Native CI run 43558286748](https://github.com/zqcli/minicore-host/actions/runs/43558286748)
+completed successfully on attempt 1 with all nine jobs: Linux quality, native
+Clippy/tests on Linux x64, macOS ARM64/x64 and Windows x64, and four native packages.
+The full quality gate passed formatting, strict Clippy/rustdoc, workspace tests,
+7 doctests and 28 Python checks. Native independent `--list` steps counted **1,194
+Rust cases on Linux, 1,186 on each macOS architecture and 1,171 on Windows**;
+each platform passed 7 doctests. Counts exclude nested subprocess output and
+repeated standard-user executions. Windows additionally passed all 5 existing
+Storage/Host cases under a verified non-administrator account with a loaded
+profile and denied executable writes.
+
+Every native package passed its actual executable smoke test and archive readback,
+with exactly 20 files and one Host executable whose SHA-256 matched the tested
+binary. All four 0.11.1 artifacts were uploaded from the verified source:
+[Linux x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099342041),
+[macOS ARM64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099142519),
+[macOS x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099117832),
+and [Windows x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099377121).
+The task record links all nine jobs and preserves the precise commands, platform
+counts, package checks and validation limits. A remote `v0.11.1` tag is not attested
+by this checkpoint.
+
+The preceding CI failures remain documented. The
+[first run](https://github.com/zqcli/minicore-host/actions/runs/43553519487) exposed
+macOS rejecting the fixture's non-UTF-8 filename with OS error 92 before Host ran;
+`1b347046` separates portable Unix name/display assertions from the Linux directory
+fixture. The [second run](https://github.com/zqcli/minicore-host/actions/runs/43555557066)
+exposed an existing history test mistaking non-running retained metadata work for
+completion; `b20f6fee` adds the actual owner barrier before fault injection. The
+[third run](https://github.com/zqcli/minicore-host/actions/runs/43557234311) passed
+all four native platforms but timed out in a separate Linux quality shutdown
+fixture; its shared-helper log could not identify which wait expired. Bounded
+source review found the same history-path/metadata I/O windows, and `d58e1af6`
+isolates nine such windows across five cases in four test files. These fixture
+corrections preserve production behavior, original assertions and single business
+calls. The final native run actually passed all affected cases on every platform.
+
+Independent Web/Host browser integration is recorded by the coordinator separately;
+these Host results use actual owners/filesystems/transports and controlled model
+fixtures, with no live-provider claim. This completion record changes only
+`PROJECT.md` and Task 110 and uses `[skip ci]`; validated code and tests are unchanged.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 

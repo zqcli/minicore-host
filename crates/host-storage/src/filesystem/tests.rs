@@ -61,6 +61,7 @@ fn initial_history_retry_syncs_existing_empty_file_before_publishing_session() {
             agent.id().clone(),
             host.id().clone(),
             AgentData {
+                configuration_source: None,
                 name: "test".into(),
                 mode: StorageMode::Persistent,
                 config: AgentConfig::default(),
@@ -116,6 +117,7 @@ fn partial_explicit_delete_can_continue_while_closed_ownership_record_remains() 
             agent.id().clone(),
             host.id().clone(),
             AgentData {
+                configuration_source: None,
                 name: "test".into(),
                 mode: StorageMode::Persistent,
                 config: AgentConfig::default(),

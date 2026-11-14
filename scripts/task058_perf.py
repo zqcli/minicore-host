@@ -111,7 +111,7 @@ class Process:
         self.trace = trace
         config = {
             "name": "task058 actual Host", "framework_instructions": "",
-            "models": [{"model": MODEL, "endpoint": endpoint,
+            "models": [{"model": MODEL, "api": "chat_completions", "endpoint": endpoint,
                         "provider_model": "gated-loopback-sse-fixture",
                         "api_key_env": "TASK058_MODEL_KEY", "context_window": 128000,
                         "supported_reasoning": ["auto"], "supports_tools": True,
@@ -120,11 +120,12 @@ class Process:
             "network": {"listen": None, "access_key_env": None},
             "logging": {"level": "info", "output": {"kind": "stderr"}},
         }
-        config_path = directory / "config.json"
-        config_path.write_bytes(encoded(config))
+        config_dir = directory / "config"
+        config_dir.mkdir()
+        (config_dir / "host.json").write_bytes(encoded(config))
         self.child = subprocess.Popen(
             [str(binary), "--data-root", str(directory / "data"),
-             "--config", str(config_path), "--stdio"],
+             "--config-dir", str(config_dir), "--stdio"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             env={**os.environ, "TASK058_MODEL_KEY": KEY}, start_new_session=True,
         )

@@ -68,26 +68,35 @@ impl Host {
             Some(store.clone()),
             HostLifecycle::Starting,
         )?;
+        owner.load_persistent_agents_owned().await?;
+        owner.state.lock().expect("Host mutex poisoned").lifecycle = HostLifecycle::Running;
+        owner
+            .lifecycle_record("host.started", "running", StorageMode::Persistent, None)
+            .emit();
+        Ok(owner)
+    }
+    pub(super) async fn load_persistent_agents_owned(self: &Arc<Self>) -> Result<(), Fault> {
+        let store = self.store().expect("persistent Host");
         let ids = disk(FaultKind::HostStorageUnavailable, move || {
             store.list_agents()
         })
         .await?;
         for id in ids {
-            let store = owner
+            let store = self
                 .store()
                 .as_ref()
                 .expect("persistent Host")
                 .agent(id.clone(), StorageMode::Persistent);
             let result = AgentOwner::load_persistent(
                 store,
-                owner.id.clone(),
-                owner.incarnation.clone(),
-                Arc::clone(&owner.access),
-                owner.resources_owned()?,
-                Arc::clone(&owner.changed),
+                self.id.clone(),
+                self.incarnation.clone(),
+                Arc::clone(&self.access),
+                self.resources_owned()?,
+                Arc::clone(&self.changed),
             )
             .await;
-            let mut state = owner.state.lock().expect("Host mutex poisoned");
+            let mut state = self.state.lock().expect("Host mutex poisoned");
             match result {
                 Ok(agent) => {
                     state.agents.insert(id, agent);
@@ -97,11 +106,7 @@ impl Host {
                 }
             }
         }
-        owner.state.lock().expect("Host mutex poisoned").lifecycle = HostLifecycle::Running;
-        owner
-            .lifecycle_record("host.started", "running", StorageMode::Persistent, None)
-            .emit();
-        Ok(owner)
+        Ok(())
     }
     /// Name-only embedding convenience, derived from the same committed config.
     pub fn settings(&self, caller: &CallerContext) -> Result<Option<HostSettings>, Fault> {

@@ -310,6 +310,18 @@ async fn shutdown_force_failed_history_holds_root_until_original_save_continues(
     )
     .unwrap();
     entered.acquire().await.unwrap().forget();
+    // Metadata reads also open history.jsonl; finish accepted activity I/O
+    // before the fixture temporarily removes that path.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
+    })
+    .await;
     let path = history_path(dir.path(), &target);
     let saved = path.with_extension("audit-original");
     std::fs::rename(&path, &saved).unwrap();
@@ -339,6 +351,18 @@ async fn shutdown_force_failed_history_holds_root_until_original_save_continues(
             .await
             .is_err()
     );
+    // The response has its own activity checkpoint. Finish it before restoring
+    // the path so this fixture cannot fail metadata after resume selects work.
+    until(|| {
+        let state = host.session_state(&caller, &target).unwrap().data;
+        assert!(
+            state.metadata_fault.is_none(),
+            "unexpected activity metadata fault: {:?}",
+            state.metadata_fault
+        );
+        (!state.owned_work.metadata_save).then_some(())
+    })
+    .await;
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(saved, &path).unwrap();
     host.resume(&caller, &target)

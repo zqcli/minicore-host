@@ -55,6 +55,7 @@ impl RecoveryFixture {
             attempts: AtomicUsize::new(0),
         });
         let config = SessionConfig {
+            instructions: String::new(),
             model: "test/model".parse().unwrap(),
             ..Default::default()
         };
@@ -69,6 +70,7 @@ impl RecoveryFixture {
                     agent_id.clone(),
                     host_id.clone(),
                     AgentData {
+                        configuration_source: None,
                         name: "resource recovery fixture".into(),
                         mode,
                         config: AgentConfig::default(),

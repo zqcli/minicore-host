@@ -139,11 +139,12 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` contains the 52 SPEC §8 resource routes:
+`SUPPORTED_METHODS` contains the 55 SPEC §8 resource routes:
 
 - Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
-- Workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
+- Host directory selection: `workspace.roots`, `workspace.list`, `workspace.mkdir`.
+- Session workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
 - Changes: `changes.list`, `changes.diff`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.start`,
   `agent.stop`, `agent.set_default_session`, `agent.delete`.
@@ -203,23 +204,30 @@ enabled set is distinct from a missing target or a selected tool removed by a
 successful configuration reload; those missing cases retain the owner's Fault.
 Known references can be used directly without first calling either list method.
 
-`HostClient::reload` and `host.reload` accept the canonical
-`HostReloadRequest<HostConfig>` directly: `operation_id`, `expected_revision`,
-and the full readable `candidate`. The initialization-time application preparer
-comes from `HostResourceBuilder` or an explicit embedding. A Host constructed
-without one returns `HOST_METHOD_UNAVAILABLE`; the adapter cannot install one.
-Operation rights, lifecycle and revision/reservation checks stay at the actual
-Host acceptance boundary. There is no `host.reload_config` alias.
+`HostClient::reload` and `host.reload` accept `HostReloadRequest` directly:
+`operation_id` and `expected_revision`. The request contains neither a candidate
+nor a directory. Host rereads its startup-bound configuration directory using
+the application preparer from `HostResourceBuilder` or an explicit embedding.
+A Host without a bound directory rejects this entry; the adapter cannot choose
+one. Operation rights, lifecycle and revision/reservation checks stay at the
+actual Host acceptance boundary. There is no `host.reload_config` alias.
 
 The returned `HostReloadReceipt` is an immutable snapshot, normally `preparing`,
-not a wait for publication. Later `host.receipt.get` reads the same configuration
-owner's current `preparing`, `applying`, `applied`, `restart_required` or `failed`
-facts. Preparation/save failures are retained in that receipt, while rejection
-before acceptance is a business Fault. Duplicate operation IDs create separate
+not a wait for publication. Later `host.receipt.get` reads the same owner's
+`preparing`, `applying`, `applied`, `partially_applied`, `restart_required` or
+`failed` facts. All declarations and resources are validated first. Host then
+publishes once and delegates each Agent change to its direct owner; per-key
+results preserve actual IDs, revisions and creation receipt steps. There is no
+cross-object rollback. Restart-only changes apply no Host or Agent values.
+
+Preparation/save failures are retained in that receipt, while rejection before
+acceptance is a business Fault. Duplicate operation IDs create separate
 invocations and make a single-result lookup ambiguous; they are not replay keys.
 No transport cache or automatic retry is involved. Caller timeout, disconnect,
 or key invalidation cannot cancel accepted preparation/publication/cleanup.
-The low-level prepared `Host::reload_configuration` embedding API remains valid.
+The prepared `Host::reload_configuration` Rust API remains available to
+programmatic embeddings without a directory binding. See the
+[configuration guide](../../docs/configuration.md).
 
 ## Manual compaction
 
@@ -419,3 +427,28 @@ persistent directories remain intact unless explicitly included. Received
 launch ToolResults/completion messages and independent workspace artifacts are
 not deleted. A filesystem error may follow partial removal and is reported as
 such, without rollback, implicit retry or fabricated full deletion.
+
+## Directory selection before Session creation
+
+These methods are available through `HostClient` and the same stdio/WSS operation
+handlers. `workspace.roots` takes `{}` and returns `{roots:[{name,path}]}`.
+`workspace.list` takes `{path,hidden:false,limit,cursor:null}` and returns
+`{path,parent,entries:[{name,path}],next_cursor}`. The optional cursor is
+`{scope,after_name}`; page size must be positive and can change between calls.
+Only real direct child directories inside configured `workspace_roots` are listed;
+returned paths are canonical absolute Host-platform paths. No Session reference is
+accepted or required. The client can pass a selected path as `WorkspaceRef.path`.
+
+`workspace.mkdir` takes `{operation_id,parent,name}`. Only the current operator can
+submit it. It creates exactly one child and returns the standard Host receipt with
+`kind:"workspace.mkdir"` and `result:{status:"created",path}` or
+`result:{status:"failed",error}`. `host.receipt.get` may observe
+`result:{status:"creating"}` while the original owned worker is active. Caller
+timeout or disconnection never cancels the write. Existing entries fail, and an
+operation ID does not deduplicate invocations. All reads require a valid connection;
+read-only peers do not gain mkdir rights when the operator disconnects.
+
+Host directory errors are registered at 1701–1709: invalid path, outside roots,
+not found, not directory, already exists, invalid page size, invalid cursor,
+filesystem failure and unsupported path encoding. They retain the ordinary Fault
+and JSON-RPC error/receipt placement; underlying OS diagnostics are not exposed.

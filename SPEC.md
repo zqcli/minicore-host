@@ -1,4 +1,4 @@
-**设计基线：v4.10.2｜2026-11-13。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.11.0｜2026-11-14。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -13,15 +13,15 @@ Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 
 | 范围 | 本版安排 |
 | --- | --- |
 | Host 核心 | 对象和配置管理、逐层消息接收、生命周期、存储、状态及结果读取、事件、错误、日志 |
-| 实际对接 | 完成 TUI 与 Runtime 的实际对接，包含通用工具卡片和既有标准交互；52 项已列名本地资源方法，以及客户端认证、连接初始化和操作权规则一并交付 |
+| 实际对接 | 完成 TUI 与 Runtime 的实际对接，包含通用工具卡片和既有标准交互；55 项已列名本地资源方法，以及客户端认证、连接初始化和操作权规则一并交付 |
 | 同 Host 协作 | 同 Agent 的多 Session，以及不同 Agent 之间的创建、投递、观察和控制 |
 | 客户端接入 | 同进程 API、stdio、WSS；不同设备连接同一个 Host 属于本版 |
 | 既有能力 | 保留模型、普通工具、历史、运行交互、上下文压缩、工作区、文件与差异读取等能力，调整归属与接口；工具按独立模块组织，首版随 Host 构建登记 |
-| 后续扩展 | 无需重新编译的外置工具安装、更新与卸载按第 7 章延期；专属客户端展示、展示插件加载及需要新增特殊界面能力的工具按第 7 章延期；远程 tool/subagent 调用其他 Host 的标准接口；HTTP RPC 加 SSE 和新增独立 GUI、Web、移动产品按需要安排。其他 Host 的连接与调用不属于 Host 核心职责 |
+| 后续扩展 | 无需重新编译的外置工具安装、更新与卸载按第 7 章延期；专属客户端展示、展示插件加载及需要新增特殊界面能力的工具按第 7 章延期；远程 tool/subagent 调用其他 Host 的标准接口；HTTP RPC 加 SSE 和新增独立 GUI、移动产品按需要安排；已授权的独立 minicore-web 沿用原网页界面并直接接入 Host WSS。其他 Host 的连接与调用不属于 Host 核心职责 |
 
 首版中 Agent 与其所属 Sessions 固定在同一 Host，不做 Agent 自动迁移或故障自动接管。
 
-现有 Web 和远程查看等配套能力沿用同一客户端接口适配，不要求本次新增独立客户端产品。工具卡片的布局、收起展开和滚动由客户端约定，Host 只提供通用数据与事件。
+原 minicore-tui 网页拆为独立 minicore-web，保留既有界面并适配 Host 原生 WSS；Host 不承载网页静态资源、旧远程协议或兼容网关。工具卡片的布局、收起展开和滚动由客户端约定，Host 只提供通用数据与事件。
 
 本版不做旧配置、实体记录或历史的数据迁移、导入、转换、双写及迁移回退。程序读取实际支持的格式；不支持时明确报错，不自动改写旧文件。正常持久化初始化和 JSONL 历史读取继续保留。本地 Host、Agent 与内部 Runtime 随同编译、验证和发布；不保留独立 Runtime 产品或完整 AgentLoop API 的兼容承诺。外部客户端与所连接 Host 的兼容由使用者手动保证，不设计版本或能力差异协商、自动适配与降级。
 
@@ -116,12 +116,13 @@ SDK／公共工具模块提供薄的本地 `newId()` 函数，复用成熟的安
 
 | 结构 | 字段及职责 |
 | --- | --- |
+| HostConfig.workspace_roots | 显式允许目录选择的绝对路径数组；默认空数组，不隐式开放 HOME、cwd、磁盘根或所有 Session 工作区；准备配置时规范化并验证目录，随已有 Host reload 整次发布 |
 | Role | name 是角色名称，description 用于选择与说明，instructions 是角色工作约定的唯一主文本 |
-| AgentConfig | role 与 session_defaults |
+| AgentConfig | role、可空 instructions 与 session_defaults；instructions 是该 Agent 的独立补充指令 |
 | SessionDefaults | model、reasoning、tools、可选 workspace、execution；执行循环、压缩等默认值归 execution |
-| SessionConfig | 复用 SessionDefaults 的字段类型，并包含本会话 Role；表示已解析的完整有效配置 |
+| SessionConfig | 复用 SessionDefaults 的字段类型，并包含本会话 Role 与 instructions；表示已解析的完整有效配置 |
 | SessionOverrides／SessionConfigPatch | 复用允许修改字段的值类型；前者用于创建覆盖，后者用于更新已有会话 |
-| AgentRecord | id、host_id、name、mode、config、config_revision、可空 default_session_id |
+| AgentRecord | id、host_id、name、mode、config、config_revision、可空 default_session_id，以及可空 configuration_source（稳定 key 与 managed 标记） |
 | SessionRecord | id、agent_id、mode、agent_config_revision、config_revision、effective_config（本会话 Role 与执行配置）、可选 parent，以及本方历史与结果元数据 |
 | TurnRecord | id、session_id，以及本轮输入、状态与结果；不因此新建独立持久化文件 |
 | ToolCallRecord | id、turn_id，以及工具名、参数、状态、输出与结果；随所属会话按既定历史规则保留 |
@@ -129,25 +130,27 @@ SDK／公共工具模块提供薄的本地 `newId()` 函数，复用成熟的安
 ```typescript
 type AgentConfig = {
   role: Role;
+  instructions: string;
   session_defaults: SessionDefaults;
 };
 
 type SessionConfig = SessionDefaults & {
   role: Role;
+  instructions: string;
 };
 ```
 
 配置值不混入对象 ID、mode、版本或活动执行状态；这些属于相应对象记录。模型客户端、工具执行器与连接句柄由运行期绑定持有。
 
-Role 不承载模型、工具、工作目录、Host 地址、运行历史或权限策略，也不另设一份 system_prompt。角色工作约定不被解释为访问控制。Agent 名称表示参与者身份，Role 名称表示职责；两个 Agent 可以采用同一 Role 和不同执行配置。首版内嵌 Role；后续文件或模板复用由加载器解析为同一结构，不建立 Role 运行服务。
+Role 不承载模型、工具、工作目录、Host 地址、运行历史或权限策略，也不另设一份 system_prompt。角色工作约定不被解释为访问控制。Agent 名称表示参与者身份，Role 名称表示职责；两个 Agent 可以采用同一 Role 和不同执行配置。Role 文件复用由配置目录加载器解析为同一结构；原生 AgentConfig、SessionConfig 中仍保存完整 Role 值，不建立 Role 运行服务。
 
-每次模型请求组装框架规则、当前 Turn 已绑定的 Session Role、历史和本次允许取入的输入。框架规则与 Role 各一份，不反复写入历史；用户任务、同伴消息和工具结果保留各自来源、关联及顺序，临时分工作为任务输入。提供方适配只改变编码形式。
+普通模型请求依次组装 HostConfig.framework_instructions、当前 Turn 已绑定的 Session role.instructions、Session instructions、Workspace 目录上下文、历史和本次允许取入的输入。前三层均可省略或为空字符串，缺省为空；非空层分别形成一条 System 消息，空层不产生占位消息，三层不互相覆盖，也不因此建立新的权限等级。指令不反复写入历史；用户任务、同伴消息和工具结果保留各自来源、关联及顺序，临时分工作为任务输入。Role name/description 不自动拼入指令；工具声明仍由 tools 字段传递。提供方适配只改变编码形式。
 
 mode 只规定数据是否持久化，不等同于“Turn 结束即销毁”。SessionRecord.parent 仅保留创建来源或历史关联，不承担恢复执行的作用。活动委派关联由工具适配层的根协作范围持有，包含原直接父 Session、实际子执行、任务消息和发起调用的引用；启动 ToolCall 返回后该关联可以继续存在，重启不从 parent 或历史重建它。
 
 当前 Turn、队列、暂停、取消令牌和连接句柄属于运行状态，不放入可复制的 AgentConfig。日志输出、目录、级别和轮转属于应用运行配置；访问密钥属于 Host 私有接入配置，均不进入 Agent／Session 默认值。
 
-Agent 的可变业务配置包括 Role，以及 SessionDefaults 中的 model、reasoning、tools、workspace 和已支持的 execution 参数；名称是独立可更新元数据。Agent 选择当前 Host 已配置的模型和已注册的工具，不在 AgentConfig 中安装工具、定义连接密钥或配置网络监听。默认收件 Session 通过 agent.set_default_session 明确修改；ID、所属 Host 和 mode 不进入普通配置更新。模型工具的直接配置、可选来源复制及更新参数见第 7 章。
+Agent 的可变业务配置包括 Role、instructions，以及 SessionDefaults 中的 model、reasoning、tools、workspace 和已支持的 execution 参数；名称是独立可更新元数据。Agent 选择当前 Host 已配置的模型和已注册的工具，不在 AgentConfig 中安装工具、定义连接密钥或配置网络监听。默认收件 Session 通过 agent.set_default_session 明确修改；ID、所属 Host 和 mode 不进入普通配置更新。模型工具的直接配置、可选来源复制及更新参数见第 7 章。
 
 ### 模型协议与基础显示元数据
 
@@ -161,14 +164,14 @@ Session 所有者在创建时记录 `created_at`，并维护 `last_activity_at`�
 
 ## 创建与更新的生效边界
 
-创建 Session 时，目标 Agent 在自己的管理边界选定一个 AgentConfig 版本，Role 与默认值取自同一版本，再应用调用方明确提交且接口允许的覆盖，形成独立的有效配置并记录来源版本。跨 Agent 创建不隐式继承发送方的模型、工具、工作目录或 Role。创建工作开始后沿用已选定的配置版本，不因执行期间默认值更新而改变。 Session 的 agent_config_revision 仅记录创建来源；创建完成后持有独立有效配置，不持续继承 Agent 后续默认值。
+创建 Session 时，目标 Agent 在自己的管理边界选定一个 AgentConfig 版本，Role、Agent instructions 与默认值取自同一版本，再应用调用方明确提交且接口允许的覆盖，形成独立的有效配置并记录来源版本。跨 Agent 创建不隐式继承发送方的模型、工具、工作目录或 Role。创建工作开始后沿用已选定的配置版本，不因执行期间默认值更新而改变。 Session 的 agent_config_revision 仅记录创建来源；创建完成后持有独立有效配置，不持续继承 Agent 后续默认值。
 
-允许通过 session.update 显式修改本 Session 有效配置中的 Role，沿用普通配置更新、校验与保存规则，下一 Turn 生效。当前 Turn 的所有模型请求继续使用原绑定；历史保留，Agent 默认配置和其他 Session 不变。单独修改 Role 不改变 Session 身份、归属、模型、工具或工作目录，也不授予权限。一次性分工仍作为普通任务消息，不自动改写 Role。
+允许通过 session.update 显式修改本 Session 有效配置中的 Role 与 instructions，沿用普通配置更新、校验与保存规则，下一 Turn 生效。当前 Turn 的所有模型请求继续使用原绑定；历史保留，Agent 默认配置和其他 Session 不变。单独修改 Role 不改变 Session 身份、归属、模型、工具或工作目录，也不授予权限。一次性分工仍作为普通任务消息，不自动改写 Role。
 
 | 变化 | 生效范围 |
 | --- | --- |
-| 更新 Agent 的 Role 或 SessionDefaults | 只影响之后认领创建的新 Session，已有 Session 不变 |
-| 显式更新已有 Session 的 Role 或其他允许执行配置 | 下一 Turn 使用；当前 Turn 的模型调用、重试、工具与压缩沿用原绑定 |
+| 更新 Agent 的 Role、instructions 或 SessionDefaults | 只影响之后认领创建的新 Session，已有 Session 不变 |
+| 显式更新已有 Session 的 Role、instructions 或其他允许执行配置 | 下一 Turn 使用；当前 Turn 的模型调用、重试、工具与压缩沿用原绑定 |
 | 配置更新与 Turn 认领并发 | 由 SessionController 的短时串行边界裁定；先提交配置则新 Turn 用新版本，先绑定 Turn 则本轮继续旧版本 |
 | Host 执行配置热更 | 成功发布后供后续资源绑定使用，已开始的 Turn 保持原配置与实际资源 |
 | 移除仍被会话引用的可热更模型或工具定义 | 允许更新 Host 资源列表；当前 Turn 保留原绑定，已有会话配置不被代改；后续使用前由所属 Session 检查资源是否仍存在 |
@@ -179,6 +182,44 @@ agent.update、session.update 采用明确字段的部分更新。SessionOverrid
 
 配置准备与资源解析在状态锁外完成，返回后由直接所有者核对配置版本和必要对象状态再提交。配置版本独立于 Controller 的业务 revision，普通收件或输出不使合法配置更新失效。 Session 查询返回已提交配置及 config_revision，Turn 查询返回本轮绑定配置及其来源 Session 配置版本；二者可以不同。展示元数据和下轮执行配置的生效范围分别表达，不把更新已提交解释为当前 Turn 已切换。
 
+## JSON 配置目录与客户端边界
+
+Host 与内嵌 Host 的 TUI 统一使用 `--config-dir`。显式目录按启动工作目录转为绝对路径；未提供时使用可执行文件旁的 `config/`。`--data-root` 独立覆盖数据目录，未提供时使用 `<config-dir>/data`。TUI 将同一个已解析目录值传给 Host 的 Rust 启动接口，不拼接子进程命令或自行解析 Host 业务配置。配置目录在该 Host 实例启动时绑定，运行中不通过重载请求切换目录。
+
+全部配置文件使用 UTF-8 标准 JSON；不读取旧 TOML、`agent-defaults.json`、旧单文件启动参数或旧 `MINICORE_HOME` 路径规则，不自动转换或兼容旧文件。配置输入与持久记录是不同用途：文件声明 Host 与受文件管理 Agent 的期望配置，数据目录保存稳定身份、已经提交的配置快照、Session 与历史。
+
+| 路径 | 内容与所有者 |
+| --- | --- |
+| `<config-dir>/host.json` | 一个原生 HostConfig，必须存在；保留模型、工具、workspace_roots、网络与日志等现有字段 |
+| `<config-dir>/agents/*.json` | 每文件一个 Agent 声明；字段为 key、name、role、可省略的 instructions、完整 session_defaults |
+| `<config-dir>/roles/*.json` | 每文件一个原生 Role；name、description 与可省略的 instructions |
+| `<config-dir>/tui.json` | TUI 自行读取、校验、应用及保存的界面配置，包含 ui.theme/editor/bell |
+| Web 部署目录的 `web.json` | Web 自己的界面与 Host 连接配置；不属于任何 Host 配置目录，本次不实施 Web 多 Host 界面 |
+
+Host 只读取 host.json 与 agents/roles 下的 JSON，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板仍可放 `<config-dir>/prompt/commands/`。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
+
+Agent 声明的 `key` 在一个 Host 内唯一、非空且不含 NUL，是稳定配置标识；`name` 是可修改且不要求唯一的显示名。文件名通常与 key 一致，但重命名文件不改变实体身份。`role` 精确引用 `roles/<role>.json` 的文件 stem；只允许单个名称，不接受绝对路径、目录穿越或多处搜索。Role name 不参与文件定位。缺失的 agents/roles 目录表示没有相应声明；角色文件被引用但不存在、JSON 错误、重复 key 或非法资源声明必须明确报错，不替换角色、模型或工具。
+
+新增 `crates/host-config` 共享库，承载纯 Host 配置值、目录路径解析、文件加载、Role 引用展开与初始化样例。该库依赖现有 protocol 值类型，不依赖 core、Runtime、UI 或运行资源。Host core 使用其结果；资源准备、对象身份、版本、回执、持久化与正式发布仍由原所有者负责。已解析候选只包含 HostConfig 及 {key,name,config:AgentConfig}，文件引用不进入 Session 或 Runtime。初始样例通过 create_new 生成，不覆盖用户文件，不包含真实凭据；默认本地工具 Agent 明确保存初始化时选定的绝对工作区。
+
+### 文件声明 Agent 与动态 Agent
+
+Host 在 Agent owner 元数据中保存 `configuration_source: {key, managed}`，不放进可复制的 AgentConfig。新 key 通过标准创建流程创建 persistent Agent 与默认 Session，不投递任务；来源 key 与 Agent 的首次记录一起保存，不能先发布一个无关联 Agent 再补写关联。已有 key 复用原 AgentId，仅更新声明配置，不重复创建默认 Session。创建、更新与解绑均按真实保存结果推进。
+
+移除 Agent 声明将 managed 置为 false，保留来源 key、AgentId、最后提交配置及全部 Session/历史；重新加入同 key 时复用原实体。无声明或复制得到的动态 Agent 继续使用原 memory/persistent 机制。复制 Agent 配置不复制来源 key 或 managed 标记，目录加载不清理动态 Agent。
+
+managed 为 true 时，普通 agent.update 不允许修改 name/config，普通 agent.delete 也明确拒绝；先通过编辑声明并重载变更配置，或移除声明并重载解除管理，再执行普通实体删除。Agent start/stop、默认 Session 选择和 Session 自身配置接口保持各自语义。TUI 不维护全局新 Agent 模板；`/agent-new <name>` 明确复制当前选中 Agent 的原生配置创建动态 Agent，不复制该 Agent 的来源管理标记、Session 覆盖或历史。没有可选 Agent 时要求先新增 agents 文件并重载，不猜测默认模型。旧 `/agent-defaults` 流程删除。
+
+### 启动、目录重载与部分结果
+
+目录启动先取得数据根目录独占权，在接受客户端业务前完整读取、解析并验证候选；Host 与文件声明 Agent 的配置取自本次目录，保存快照不能覆盖文件。既有 HostId、AgentId、Session 与历史保留；日志、网络和 provider 以本次有效 HostConfig 初始化。现有非目录程序化构造/应用能力可供嵌入与测试使用，但不得作为旧配置文件的兼容或启动回退路径。
+
+外部 `host.reload` 请求为 `{operation_id, expected_revision}`，重读已绑定目录，不携带 candidate 或任意文件路径；无绑定目录时明确拒绝。文件读取、候选准备在锁外完成；配置操作权、版本核对、已接受工作和退出屏障沿用现有规则。先完整校验文件、引用及资源，再比较 Host 需重启项；任一需重启项变化时，本次 Host 与 Agent 变更都不应用。
+
+可热更时，Host 自身配置字段按原规则整份提交，然后逐层更新声明 Agent 与解除已移除声明的管理。不引入跨所有 Agent 的原子事务或补偿回滚：运行期保存失败必须保留已完成事实，回执报告各 key 的创建、更新、解绑或失败；新建 Agent 复用原 AgentCreateReceipt 的分阶段结果。全部完成返回 Applied，真实部分完成返回 PartiallyApplied，准备阶段失败及需重启仍使用原结果。收到部分结果后客户端只刷新实际状态，不自动重试。密钥发布导致调用连接断开时，已接受的后续 owner 工作仍继续。
+
+Role 或 Agent 指令更新只改变相关 Agent 以后创建的 Session；已有 Session 显式更新，当前 Turn 保持原绑定。Host framework 更新可供已有 Session 的后续 Turn 使用。所有新 instructions 字段省略使用空串，显式空串清空，null 拒绝；Session patch 省略保持已有值。每个 Turn 绑定三层文本，不逐轮回读文件或 Agent 默认配置。初始化后的文件不自动监控，业务重载与 UI 设置保存相互独立。
+
 ## 资源装配与 Host 重载
 
 ModelRef、ToolBinding、WorkspaceRef 是当前 Host 能解析的选择或绑定，不是模型客户端、工具进程或进程全局工作目录。Host 装配实际能力，Agent 与 Session 决定自己的选择；资源未配置、工具不存在、参数不支持或目录绑定无效时明确失败，不自动替换资源。校验不额外运行模型请求或业务工具来证明外部服务持续可用，执行故障仍走既定错误出口。
@@ -187,7 +228,7 @@ ModelRef、ToolBinding、WorkspaceRef 是当前 Host 能解析的选择或绑定
 
 当前 Turn 持有确认后的配置与实际资源绑定。热更不能原地改写旧 Turn 正在使用的共享客户端或工具集合，也不能提前释放仍被使用的旧资源。工作目录按执行参数传入，不改变进程全局目录；配置更新不改历史、不移动产物、不迁移已启动工具。
 
-host.reload 比较实际变更后分类：全部可热更，且候选准备、完整校验与配置版本核对成功，才整体发布；有任一实际变更需要重启，则本次全部不应用，并指出对应项目。未变化的重启项不阻止其他合法重载。日志后端等只初始化一次的设施不因 reload 重新安装。密钥更新的认证失效行为在客户端章节集中定义。
+host.reload 比较实际变更后分类：Host 自身配置全部可热更，且候选准备、完整校验与配置版本核对成功，才整份发布；有任一实际变更需要重启，则本次 Host 与声明 Agent 全部不应用，并指出对应项目。目录组合操作的逐对象结果遵守前节的部分结果规则。未变化的重启项不阻止其他合法重载。日志后端等只初始化一次的设施不因 reload 重新安装。密钥更新的认证失效行为在客户端章节集中定义。
 
 对支持热更的模型和工具定义，允许从 Host 的可用资源列表移除，即使已有 Agent 或 Session 仍引用它。Host 校验自身候选配置，不以所有存量会话都已改用其他资源作为发布条件，也不遍历代改下层配置。已经开始的 Turn 继续持有原绑定，旧资源在实际使用结束后释放；后续使用由所属 Session 按前述资源检查处理。需要重启的配置仍遵守整次不应用的规则。
 
@@ -773,6 +814,7 @@ ReceiptBase 是共享类型定义，不是运行期实体。每个已支持方�
 | session.create | operation_id、已有目标 agent_id 必需；session_id 仅在发布后出现；请求了初始消息才有 message_id | steps.session 及适用的 steps.message，不虚构 Agent 创建步骤；消息接受时包含 MessageAcceptedFacts |
 | message.send | message_id、实际接收方 agent_id 与 session_id 必需 | MessageAcceptedFacts；不强制提供 TurnId |
 | host.shutdown | operation_id 必需；Host 身份沿用 ReceiptBase，不填写 Agent／Session ID | 实际生效的 strategy 与 lifecycle，不能以受理代替退出完成 |
+| workspace.mkdir | operation_id 必需；只含 Host 身份，不填写 Agent／Session ID | status 为 creating、created 或 failed；created 必含实际 path，failed 必含 error；普通调用等待实际完成，超时后可读原回执 |
 | agent.stop | operation_id、agent_id 必需；host_id 沿用 ReceiptBase | 实际 lifecycle：stopping／stopped |
 | session.pause／session.resume | operation_id、agent_id、session_id 必需 | SessionControlFacts：实际调度、暂停原因、阻塞与驻留状态及 Controller 版本 |
 | session.load／session.unload | operation_id、agent_id、session_id 必需 | 同一 SessionControlFacts；loading／unloading 不表示已完成，load_id 只在实际适用时存在 |
@@ -1352,7 +1394,7 @@ agent({
 
 ## 范围与交互标记
 
-以下 52 项本地资源方法全部属于首版，完整方法目录只在本章维护。它们只操作当前入口对应 Host 的资源；引用中的 host_id 仅校验归属，不按其连接或转发其他 Host，不接收代转发地址，也不预留 Host 间管理方法。异属目标明确拒绝，不能剥离限定后改投本地对象。Host、TUI 与 Runtime 的实际对接要求见“实现路线与验收”。
+以下 55 项本地资源方法全部属于首版，完整方法目录只在本章维护。它们只操作当前入口对应 Host 的资源；引用中的 host_id 仅校验归属，不按其连接或转发其他 Host，不接收代转发地址，也不预留 Host 间管理方法。异属目标明确拒绝，不能剥离限定后改投本地对象。Host、TUI 与 Runtime 的实际对接要求见“实现路线与验收”。
 
 已列名方法的数量表示首版功能范围。创建、投递、执行控制、存储、配置提交、认证／操作权及实时事件衔接按正文完整契约实现；对象列表、模型和工具列表、配置查看、工作区／差异读取与诊断摘要只需基本功能，满足当前 TUI 和工具使用即可。列表提供明确顺序、实际需要的筛选与基础分页，长内容按需分段；不为辅助接口提前开发通用查询包装、复杂统计、注册平台或额外生命周期。
 
@@ -1368,7 +1410,7 @@ agent({
 
 标记描述交互形式，不决定客户端操作权限。例如 events.unsubscribe 属于 C，但取消自己的观察不修改业务执行，不需要取得 Host 操作权；业务写入按实际效果遵守统一操作权规则。
 
-客户端认证、连接初始化、首条有效连接取得操作权及当前控制状态读取也属于首版。52 只统计下表已列名的资源方法。接入初始化沿既有认证与可信连接建立流程返回第 10 章的 ConnectionInfo，不新增独立连接业务方法或额外查询步骤；不再设置客户端身份登记或接管入口。
+客户端认证、连接初始化、首条有效连接取得操作权及当前控制状态读取也属于首版。55 只统计下表已列名的资源方法。接入初始化沿既有认证与可信连接建立流程返回第 10 章的 ConnectionInfo，不新增独立连接业务方法或额外查询步骤；不再设置客户端身份登记或接管入口。
 
 ## Host 管理 5 项
 
@@ -1376,7 +1418,7 @@ agent({
 | --- | --- | --- |
 | host.info | Q | Host 身份、当前运行、服务状态、能力与资源、control 字段复用客户端操作权状态，以及轻量日志健康信息 |
 | host.config.get | Q | 可读取配置与资源引用，不返回访问密钥或其他凭证明文 |
-| host.reload | C | 按实际变更校验并整体热更；允许按资源规则移除仍被会话引用的可热更定义；需重启或失败时整次不应用，密钥失效按客户端章节处理 |
+| host.reload | C | 重读启动时绑定的配置目录；先校验整个候选，Host 配置整份发布，声明 Agent 逐 owner 应用并报告真实部分结果；需重启或准备失败时整次不应用；请求只含 operation_id 与 expected_revision |
 | host.receipt.get | Q | 按 operation_id 经索引查询实际所有者保留的进度、回执、部分创建引用与 Host 运行 |
 | host.shutdown | C | graceful 完成剩余工作，force 立即停止业务并完成必要保存与清理；接手后返回实际策略与退出状态，后续由 Host 持有；允许升级 force，不降级 |
 
@@ -1446,7 +1488,7 @@ input.remove 用 SessionRef 与 MessageId 定位，按需携带 Controller 前�
 
 turn.cancel 先核对指定执行，仅成功认领取消时才执行附带的队列清除；已认领正常结束或其他终态时，不得清除等待下一轮的输入。默认仅清除该认领边界之前已排队的输入，keep_inbox=true 明确保留；指定 Turn 已在 cancelling、finalizing 或 finished 时，不再执行该次取消附带的队列清除。Agent.stop 等承诺保留队列的操作复用取消入口时，须明确使用保留选项。turn.wait 只等待该 Turn 的终态或结果引用，不表示整个独立委派范围完成，也不保证 memory 数据已接手。必要结果由范围所有者提前接收；模型侧 wait 等待下一步输入，与查询某个 Turn 结束分别表达。等待超时不自动取消执行。
 
-## 数据与运行交互 15 项
+## 数据与运行交互 18 项
 
 | 接口 | 类型 | 职责 |
 | --- | --- | --- |
@@ -1456,7 +1498,10 @@ turn.cancel 先核对指定执行，仅成功认领取消时才执行附带的�
 | session.context | Q | 上下文用量、压缩与相关执行信息 |
 | session.compact | C | 以 operation_id 关联本次手动压缩，空闲时直接开始；已有活动 Turn、启动或压缩工作时返回忙碌，不进入消息队列 |
 | session.compact.cancel | C | 以 target_operation_id 指定原手动压缩；取消请求使用独立 operation_id，不清消息队列，不改投后来的压缩 |
-| workspace.files | Q | 浏览工作区目录与文件 |
+| workspace.roots | Q | 读取当前 Host 显式配置且已规范化的可选目录根，不要求 Session |
+| workspace.list | Q | 在可选目录根内浏览真实直接子目录并分页，不要求 Session |
+| workspace.mkdir | C | 当前操作连接在可选目录根内新建一个真实直接子目录，不要求 Session |
+| workspace.files | Q | 浏览指定 Session 已绑定工作区的目录与文件 |
 | workspace.read | Q | 按范围读取文件 |
 | workspace.search | Q | 搜索工作区 |
 | workspace.status | Q | 查询工作区状态 |
@@ -1469,6 +1514,41 @@ turn.cancel 先核对指定执行，仅成功认领取消时才执行附带的�
 model.list 主要供 TUI 和管理客户端展示用户已有的自定义模型配置；模型地址、名称和相关参数仍按原配置方式定义。tool.list 从已有内置工具及实际注册信息读取名称、说明和必要参数，复用原工具声明；Host 提供查询，工具继续由原实现执行。选择引用沿用现有配置定义，不另生成 ModelId／ToolId；同名模型保留可准确定位的完整引用。两个接口已经确定返回类型，无须每项再加 kind；调用方已知道选择值时可直接指定，模型执行和工具调用不以前置 list 查询为条件。公共描述不带密钥、句柄或执行器，未知能力不伪装为明确不支持；本项不要求新增插件或工具热更新能力。
 
 tool.list 描述可选或已启用工具，toolcall.* 描述一次实际执行；当前 Turn 的工具声明和执行器来自同一次绑定，沿用第 2 章既定生效边界。workspace.*、changes.* 首版复用已有文件搜索与差异读取能力，按指定目标和必要范围返回实际结果，字段满足当前 TUI 使用即可。工作区读取须由调用方明确请求，不表示消息层自动代读、打包或复制文件；接口不依赖客户端当前打开的页面。
+
+### Session 创建前的目录选择
+
+`workspace.roots`、`workspace.list`、`workspace.mkdir` 直接归 Host；已有 `workspace.files/read/search/status` 仍使用明确 Session 的已提交工作区。可选根只限定这三个目录选择方法，不改变 Session 配置或工具执行的既有边界。客户端将所选绝对路径写入现有 `WorkspaceRef.path`，目录浏览或创建本身不创建 Agent／Session。
+
+同进程、stdio 与 WSS 使用以下相同业务形状，不新增 `filesystem.*` 别名或旧 Web 远程协议：
+
+```typescript
+type DirectoryEntry = { name: string; path: string };
+type DirectoryCursor = { scope: string; after_name: string };
+// workspace.roots: params {} -> { roots: DirectoryEntry[] }
+// workspace.list:
+type DirectoryListRequest = {
+  path: string;
+  hidden?: boolean; // 默认 false
+  cursor?: DirectoryCursor | null;
+  limit: number; // 调用方要求的正整数页大小，不是服务端容量上限
+};
+type DirectoryListResult = {
+  path: string;
+  parent: string | null;
+  entries: DirectoryEntry[];
+  next_cursor: DirectoryCursor | null;
+};
+// workspace.mkdir:
+type DirectoryMkdirRequest = { operation_id: OperationId; parent: string; name: string };
+type DirectoryMkdirResult =
+  | { status: "creating" }
+  | { status: "created"; path: string }
+  | { status: "failed"; error: Fault };
+```
+
+结果 path 是可直接使用的 Host 平台绝对路径，Windows 保留驱动器和 UNC 语义；不把非 UTF-8 名称无损转换成不存在的路径。list 只列直接子目录，按名称确定排序；隐藏项由 hidden 显式控制。cursor 绑定配置根、规范化目录与 hidden 范围，只在仍有下一页时返回，不做 MAX_ENTRIES 等固定截断。目录项和请求路径均检查规范化后的根包含关系；符号链接只能指向任一允许根内目录，越界链接不列出，越界或父级遍历请求明确失败。parent 只有仍处于允许范围内才返回。
+
+roots/list 需要有效读取资格；mkdir 在真实受理边界核对当前连接操作权及 Host 运行状态。name 只能是一个有效平台路径组件，不接受绝对路径、`.`、`..` 或路径分隔符。mkdir 不递归建父目录，已存在明确失败，不覆盖、不自动重试。接受后由现有 Host 所有者持有真实文件工作与对应回执，连接结束或调用等待超时不撤销已接受工作；Host 退出等待实际写入收尾。回执复用 `host.receipt.get`，operation_id 仍只用于关联、不去重。常见路径、未找到、已存在、游标、范围与 I/O 错误使用 HOST_ 域登记，不伪装 Session 故障，不泄露原始 OS 错误正文。
 
 interaction.answer 必须核对 Host 操作权与原 Session、Turn、交互身份，以及适用的 LoadId；新操作端可回答尚未结算的原交互，不能把迟到回答应用到新执行。保留既有交互能力不等于引入 Role 权限系统。
 
@@ -1795,7 +1875,7 @@ Host 运行编号变化后，以新初始化的对象为准；persistent Session
 
 外部客户端先经 Host 可信入口建立来源，再按业务效果核对当前操作资格，请求随后交给对象的直接所有者接受。Host 路由或早先认证通过均不等于业务已经接受；实际接受须与当前认证、操作权及对象状态形成确定先后。Host 不因此跨层管理 Session 队列或持锁等待下层耗时执行。
 
-客户端跨设备连接一个 Host 属于首版，不要求任何 Host 间连接或管理能力。HTTP RPC 加 SSE 和新增独立 GUI／Web／移动产品按后续需要扩展，现有配套能力继续适配。后续 SSE 仅承担输出，自动重连不代表事件全量重放或业务输入重发。
+客户端跨设备连接一个 Host 属于首版，不要求任何 Host 间连接或管理能力。HTTP RPC 加 SSE 和新增独立 GUI／移动产品按后续需要扩展；独立 minicore-web 直接复用本 Host WSS 与既有认证、操作权和事件契约。后续 SSE 仅承担输出，自动重连不代表事件全量重放或业务输入重发。
 
 ## 可信调用上下文与等待选项
 
@@ -2303,13 +2383,11 @@ interface LoggingStatus {
 
 # 13. 实现路线与验收
 
-## 本次 Host 0.11.0 交付范围
+## 本次 Host 0.11.1 与独立 Web 对接范围
 
-以 Host dev `7a1881c85e57a97c85724c1a90a87852a1930bd8` 为实现输入，先发布本设计基线 v4.10.2，再补齐 Responses Provider、单文件 apply_patch、可稳定关联和尾部翻页的历史读取、会话活动时间及必要历史元数据。所有 Host workspace 包统一升级为 0.11.0，完成独立 review、必要本地验证及原生多平台 CI 后创建对应版本 tag。
+以 Host dev `32f074c57868533af81b0c6491440bae24b872c8`（0.11.0）为输入，先提交设计基线 v4.10.3，再实现 `workspace.roots/list/mkdir` 三项 Host 目录选择方法及必要配置、回执、鉴权和实际文件系统验证，Host workspace 统一升级为 0.11.1。独立 minicore-web 由原 minicore-tui 网页提取并保留既有界面，直接调用 Host 原生 WSS；两个仓库分别验证和发布，不引入旧协议适配服务器或 Host 网页服务。
 
-本次只开发 Host。TUI 保持 `3beeb1d8a525e58ce6352e05061f242c5580e248` 参考基线，不修改 TUI 或 Web，不执行旧数据迁移，不增加工具参数生成中的观察接口。下述总体路线中的 TUI 实际对接仍是后续工作，Host 测试或模拟模型通过不表述为已完成终端或真实上游服务联调。
-
-新增验收覆盖：Responses 完整／失败／不完整流、原工具 ID 与原生 reasoning／phase 重放、普通与压缩调用资源选择、工具参数单一组装；apply_patch 的精确匹配、LF／CRLF、无末尾换行、拒绝非法路径或格式、取消及实际文件清理和变更记录；历史正反向固定窗口、追加并发、内存／冷读／Turn 结果及事件的同一位置、重复 MessageId、部分输出和压缩标记、历史终态的真实统计、活动与输入时间的持久化。所有验证沿实际所有者和既有工具设施，不新增配额或通用平台。
+第一条有效连接取得操作权、无主动接管、Turn 固定的 allow_once／deny 审批策略、Runtime 归属及原 TUI 的执行行为保持现有契约。目录 API 不需要先创建 Session，不新增通用资源或后台操作管理平台，不迁移旧配置或数据。验收包括真实目录读取和新建、未认证及只读拒绝、越界路径和符号链接、分页及平台路径、调用结束后的实际写入所有权和统一回执，并验证共享调用路径或 WSS 接入。
 
 ## 从现有能力到新归属
 
@@ -2880,3 +2958,13 @@ RPC 原能力可从 [分派与方法清单](https://github.com/zqcli/minicore-ag
 - [tracing Appender Source](https://docs.rs/tracing-appender/latest/src/tracing_appender/non_blocking.rs.html)
 
 - [OpenTelemetry Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/)
+
+## 配置目录与三层指令验收（v4.11.0）
+
+- 独立 Host 与 TUI 使用同一 JSON 目录；显式路径、默认路径及 data-root 覆盖在 Linux/macOS/Windows 使用原生 Path 语义。Host 忽略错误的 tui.json，TUI 自己报告其界面配置错误；无 Host 前端文件读取 API。
+- 初始目录有多个 Agent，重启、文件改名和显示名修改保持稳定 key 与 AgentId 关联，不重复默认 Session。动态 Agent 和现有 Session/历史保留；解除管理和重新声明可按同 key 重用，未声明对象不被清理。
+- 缺 Role、重复 key、坏 JSON、未知字段与非法资源候选在变更前报错；Host restart-required 候选不改变任何 Agent。真实保存失败的部分结果可查询，不伪装全成功，不自动重试。
+- managed Agent 的普通模板更新/删除拒绝；解除管理后允许；Session 更新及动态复制遵守原生接口，不复制来源管理元数据。
+- Host/Role/Agent 指令为空时不插入占位 System；非空顺序精确为 Host→Role→Agent→Workspace→历史，Role name/description 不代替 instructions。Agent/Session patch、复制、重开与同 Turn 冻结均覆盖新字段。
+- TUI 只解析 tui.json，--config-dir 通过 Rust 参数交给内嵌 Host；/reload 不读 Host 候选、不携带 candidate；全部/部分完成均展示真实结果，旧 TOML、旧模板命令与旧路径参数无兼容分支。
+- 所有新增行为通过实际 owner、文件系统与受控模型边界验证；全平台 lint/test/package 保持现有门禁，不将受控模型声明为真实上游验证。

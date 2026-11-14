@@ -1,0 +1,78 @@
+{
+  "task": 114,
+  "version": "0.12.1",
+  "branch": "sync/upstream-0121",
+  "ordered_merge_parents": [
+    "b340c0bf8e624fc66b5123f9f999d58206bcd60c",
+    "21c7ff1610c8c7000694df2d141c62a74790e4be"
+  ],
+  "commit_subject": "chore(integration): merge upstream and release Host 0.12.1",
+  "runner": "/Users/zzq/Develops/minicore-remote-build/sync-0121/remote-check.py",
+  "source": "/Users/zzq/Develops/minicore-host-wt/sync-0121",
+  "remote_source": "/root/mct/sync-0121/host",
+  "log_directory": "/Users/zzq/Develops/minicore-remote-build/sync-0121/evidence",
+  "checks": [
+    {
+      "label": "host114-lock",
+      "command": "cargo metadata --format-version 1 --no-deps; cargo check --workspace --locked",
+      "exit": 101,
+      "outcome": "Metadata confirmed 14 packages at 0.12.1; locked check correctly rejected the not-yet-updated lockfile.",
+      "log": "host-host114-lock.log",
+      "sha256": "6f6fbbcdfbd50a6a54a95ea8e51f79e7d2e4d2e2c34281c4b3c8064e96e70516"
+    },
+    {
+      "label": "host114-resolve",
+      "command": "cargo metadata --offline --format-version 1",
+      "exit": 0,
+      "outcome": "Only 14 internal lock package versions changed; complete external entries asserted equal before and after.",
+      "log": "host-host114-resolve.log",
+      "sha256": "1a614eefb9e920e76d4e41435cf9b0383a6f4029d68ccd676a33b709d6f87c67"
+    },
+    {
+      "label": "host114-gate",
+      "command": "setpriv --bounding-set=-dac_override,-dac_read_search ./scripts/check.sh",
+      "exit": 0,
+      "log": "host-host114-gate.log",
+      "sha256": "2118cce09d08149587a7d4b2cc42358704ea7e6873bd6881ae27c8d413ec3945",
+      "python_checks": 28,
+      "doctests": 7,
+      "formatting": "passed",
+      "strict_clippy": "passed",
+      "strict_rustdoc": "passed",
+      "failed_cases": 0,
+      "ignored_cases": 0
+    },
+    {
+      "label": "host114-list",
+      "command": "cargo test --workspace --all-targets --locked -- --list",
+      "exit": 0,
+      "log": "host-host114-list.log",
+      "sha256": "9115bf785d52b46411f01e05a60d22a7e8fe2d0d853f2ff7bd8ed3bc6620c3d1",
+      "unique_rust_cases": 1234,
+      "target_listings": 148,
+      "counting": "Unique executable/test-name pairs; equal to sum of listing summaries; nested subprocess output excluded."
+    }
+  ],
+  "versions": {
+    "workspace_packages": 14,
+    "internal_dependency_declarations": 14,
+    "internal_lock_packages": 14,
+    "unchanged_external_lock_packages": 225,
+    "comparison": "Complete external lock entries match both ordered merge parents, including versions, sources, checksums and dependency lists."
+  },
+  "preservation": {
+    "provider_source_and_tests": "Identical to local parent",
+    "upstream_config_core_workspace_transport_app_protocol_code": "Identical to upstream parent",
+    "compaction_sort_calls": 1,
+    "historical_task_directories": "Preserved, including distinct local/upstream Task 110 and 111 paths"
+  },
+  "limits": [
+    "No local Cargo, compilation, tests or rustfmt.",
+    "No live-model or TUI execution, real user configuration/session access or credential access.",
+    "No push, tag, rebase, reset or main worktree/dev operation.",
+    "No new native macOS/Windows or release packaging validation.",
+    "R1/R2 remain explicitly deferred.",
+    "Scratch Git HEAD predates integration; coordinator must synchronize final Git objects and check final committed whitespace.",
+    "Only completion documentation is finalized after passing source checks; no additional commit after final SHA handoff."
+  ]
+}

@@ -14,11 +14,133 @@ pub(super) struct AgentRecordWork {
     context: Context,
 }
 impl AgentOwner {
+    pub(crate) fn configuration_info_owned(&self) -> AgentInfo {
+        self.state
+            .lock()
+            .expect("Agent mutex poisoned")
+            .info
+            .clone()
+    }
+    pub(super) fn allow_configuration_update(state: &AgentState) -> Result<(), Fault> {
+        if state
+            .info
+            .configuration_source
+            .as_ref()
+            .is_some_and(|source| source.managed)
+        {
+            return Err(Fault::new(
+                FaultKind::AgentConfigConflict,
+                "Agent is managed by its configuration file; edit and reload the declaration, or remove it and reload before updating or deleting the Agent",
+            ));
+        }
+        Ok(())
+    }
+
+    fn configuration_writable(state: &AgentState) -> Result<(), Fault> {
+        if state.info.lifecycle == AgentLifecycle::Stopping
+            && state.host_shutdown_strategy == Some(HostShutdownStrategy::Force)
+            && !state.resources_released
+            && !state.deleting
+            && !state.retirement_joining
+        {
+            if state.record_work.is_some() {
+                return Err(Fault::new(
+                    FaultKind::AgentConfigConflict,
+                    "Agent has a pending metadata save",
+                ));
+            }
+            Ok(())
+        } else {
+            Self::writable(state)
+        }
+    }
+
+    /// An already accepted directory operation delegates metadata publication
+    /// to the same Agent save worker used by ordinary updates. It carries no
+    /// caller connection and never grants a new internal client capability.
+    pub(crate) async fn apply_configuration_owned(
+        self: &Arc<Self>,
+        expected: ConfigRevision,
+        name: String,
+        config: AgentConfig,
+        source: AgentConfigurationSource,
+        operation: &OperationId,
+    ) -> Result<AgentInfo, Fault> {
+        source
+            .validate()
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        let original = self.access.accept_internal_owned(|| {
+            let state = self.state.lock().expect("Agent mutex poisoned");
+            Self::configuration_writable(&state)?;
+            if state.info.config_revision != expected
+                || state
+                    .info
+                    .configuration_source
+                    .as_ref()
+                    .map(|value| &value.key)
+                    != Some(&source.key)
+            {
+                return Err(Fault::new(
+                    FaultKind::AgentConfigConflict,
+                    "Agent configuration source or revision changed during directory preparation",
+                ));
+            }
+            Ok(state.info.clone())
+        })?;
+        // An unchanged declaration does not save metadata or require a damaged
+        // child to load. A Session-local load failure remains local to it.
+        if original.name == name
+            && original.config == config
+            && original.configuration_source.as_ref() == Some(&source)
+        {
+            return Ok(original);
+        }
+        let persistent_default = self.persisted_default(&original.default_session_id)?;
+        let (sender, receiver) = oneshot::channel();
+        let context = Context {
+            operation_id: Some(operation.clone()),
+            ..self.diagnostic_context()
+        };
+        let diagnostic = self.access.accept_internal_owned(|| {
+            let mut state = self.state.lock().expect("Agent mutex poisoned");
+            Self::configuration_writable(&state)?;
+            if state.info.config_revision != expected
+                || state.info.default_session_id != original.default_session_id
+                || state.info.configuration_source.as_ref().map(|value| &value.key) != Some(&source.key)
+            {
+                return Err(Fault::new(FaultKind::AgentConfigConflict, "Agent configuration source, revision or default changed during directory preparation"));
+            }
+            if state.info.name == name && state.info.config == config
+                && state.info.configuration_source.as_ref() == Some(&source)
+            {
+                let _ = sender.send(Ok(state.info.clone()));
+                return Ok(None);
+            }
+            let mut candidate = state.info.clone();
+            candidate.name = name;
+            candidate.config = config;
+            candidate.configuration_source = Some(source);
+            candidate.config_revision = expected.checked_add(1).ok_or_else(|| Fault::new(FaultKind::AgentInternalUnexpected, "configuration revision exhausted"))?;
+            let record = self.record(&candidate, persistent_default);
+            self.spawn_record_save(&mut state, record, candidate.default_session_id, sender, context.clone())?;
+            Ok(Some(self.metadata_accepted_record(context, &state.info)))
+        })?;
+        if let Some(diagnostic) = diagnostic {
+            diagnostic.emit();
+        }
+        receiver.await.map_err(|_| {
+            Fault::new(
+                FaultKind::AgentInternalUnexpected,
+                "metadata owner ended without a result",
+            )
+        })?
+    }
     fn record(&self, info: &AgentInfo, persistent_default: Option<SessionId>) -> AgentRecord {
         AgentRecord::new(
             self.id.clone(),
             self.host_id.clone(),
             AgentData {
+                configuration_source: info.configuration_source.clone(),
                 name: info.name.clone(),
                 mode: info.mode,
                 config: info.config.clone(),
@@ -320,6 +442,7 @@ impl AgentOwner {
             let result = match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
+                    state.info.configuration_source = candidate.data.configuration_source;
                     state.info.name = candidate.data.name;
                     state.info.config = candidate.data.config;
                     state.info.config_revision = candidate.data.config_revision;
@@ -476,6 +599,7 @@ impl AgentOwner {
         let (result, diagnostic) = self.access.accept_business(caller, || {
             let mut state = self.state.lock().expect("Agent mutex poisoned");
             Self::writable(&state)?;
+            Self::allow_configuration_update(&state)?;
             if state.info.config_revision != expected
                 || state.info.default_session_id != original.default_session_id
             {

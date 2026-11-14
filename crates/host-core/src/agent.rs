@@ -82,6 +82,7 @@ impl AgentOwner {
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
+                    configuration_source: None,
                     deletion: None,
                     id,
                     host_id,

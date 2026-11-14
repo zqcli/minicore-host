@@ -165,6 +165,7 @@ impl Resources {
     async fn new() -> Self {
         let provider = HttpFixture::start().await;
         let config = HostConfig {
+            workspace_roots: Vec::new(),
             name: "Real configured Host".into(),
             framework_instructions: "Resource query acceptance framework".into(),
             // Deliberately reverse the two complete, same-leaf references.
@@ -356,7 +357,10 @@ async fn reload_queries_expose_real_removals_and_keep_missing_selections_as_faul
             )
             .await
             .unwrap(),
-        HostReloadResult::Applied { config_revision: 1 }
+        HostReloadResult::Applied {
+            config_revision: 1,
+            agents: Vec::new()
+        }
     );
     for client in &peers.clients {
         assert_eq!(

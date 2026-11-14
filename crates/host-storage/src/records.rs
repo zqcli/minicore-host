@@ -1,6 +1,7 @@
 use minicore_host_protocol::{
-    AgentConfig, AgentId, ConfigRevision, HostId, MessageId, MessageMode, MessageSource,
-    SessionConfig, SessionId, SessionRef, StorageMode, Timestamp, TurnId, TurnOutcome,
+    AgentConfig, AgentConfigurationSource, AgentId, ConfigRevision, HostId, MessageId, MessageMode,
+    MessageSource, SessionConfig, SessionId, SessionRef, StorageMode, Timestamp, TurnId,
+    TurnOutcome,
 };
 use minicore_host_runtime::{
     LoopId,
@@ -53,6 +54,8 @@ pub struct AgentRecord {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub configuration_source: Option<AgentConfigurationSource>,
     pub name: String,
     pub mode: StorageMode,
     pub config: AgentConfig,

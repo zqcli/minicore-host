@@ -4,7 +4,7 @@ use crate::{
     signals::Signals,
     transport,
 };
-use minicore_host_core::{Host, HostConfig, HostProcessControl, HostProcessSnapshot};
+use minicore_host_core::{Host, HostProcessControl, HostProcessSnapshot};
 use minicore_host_diagnostics::{Context, EventData};
 use minicore_host_protocol::{
     Fault, FaultKind, HostLifecycle, HostShutdownRequest, HostShutdownStrategy, OperationId,
@@ -15,13 +15,12 @@ use tokio::task::JoinSet;
 
 pub async fn run(
     options: Options,
-    initial: HostConfig,
     diagnostics: &mut Option<Diagnostics>,
 ) -> Result<(), &'static str> {
     let mut signals = Signals::new().map_err(|_| "cannot initialize process signals")?;
     let mut network = None;
     let mut preparation_error = None;
-    let host = Host::open_configured(&options.data_root, initial, |config| async {
+    let host = Host::open_directory_configured(&options.data_root, &options.config_dir, |config| async {
         let prepare = async {
             *diagnostics = Some(
                 tokio::task::spawn_blocking({
@@ -46,7 +45,7 @@ pub async fn run(
     .map_err(|fault| {
         diagnostics::fault(diagnostics::STARTUP_FAILED, Context::default(), &fault);
         preparation_error.unwrap_or(
-            "Host initialization failed; check config, credentials and exclusive data-root access",
+            "Host initialization failed; check config-dir, credentials and exclusive data-root access",
         )
     })?;
     if let Some(diagnostics) = diagnostics.as_ref() {

@@ -13,23 +13,42 @@ async fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
     });
     let agent = crate::agent::AgentOwner::new(
         AgentId::new().unwrap(),
-        host_id,
+        host_id.clone(),
         incarnation,
         "acceptance fixture".into(),
         AgentConfig::default(),
         Arc::clone(&access),
         resources,
     );
-    let create = |make_default| {
-        agent.create_session_async_owned(
+    let first = agent
+        .create_default_session_owned(
             OperationId::new().unwrap(),
             SessionOptions::default(),
             None,
-            make_default,
+            false,
         )
-    };
-    let first = create(true).await.unwrap().session_id.unwrap();
-    let child_id = create(false).await.unwrap().session_id.unwrap();
+        .await
+        .unwrap()
+        .session_id
+        .unwrap();
+    let child_id = agent
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: OperationId::new().unwrap(),
+                target: AgentRef {
+                    host_id,
+                    agent_id: agent.id.clone(),
+                },
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap()
+        .session_id
+        .unwrap();
     let child = agent.session(&child_id).unwrap();
     let baseline = Arc::strong_count(&child);
     let held = child.state.lock().unwrap();

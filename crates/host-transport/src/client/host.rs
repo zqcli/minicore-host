@@ -2,8 +2,8 @@
 use super::{SessionClient, connection::Connection};
 use crate::{diagnostics::Correlation, operations::*};
 use minicore_host_core::{
-    AgentDetails, AgentListPage, AgentListRequest, AgentSummary, HostConfig, HostConfigSnapshot,
-    HostInfo, ModelDescription, SessionListPage, SessionListRequest, SessionSummary,
+    AgentDetails, AgentListPage, AgentListRequest, AgentSummary, HostConfigSnapshot, HostInfo,
+    ModelDescription, SessionListPage, SessionListRequest, SessionSummary,
 };
 use minicore_host_protocol::*;
 use minicore_host_runtime::tools::ToolSpec;
@@ -32,12 +32,12 @@ impl HostClient {
         self.call(GetConfig(Empty {}), options, |_| Correlation::default())
             .await
     }
-    /// Accept a full candidate at the Host configuration owner. The returned
+    /// Reread the startup-bound directory at the Host configuration owner. The returned
     /// receipt is a snapshot, not a wait for publication. Read later facts with
     /// `receipt`; timeout or connection loss does not cancel an accepted reload.
     pub async fn reload(
         &self,
-        request: HostReloadRequest<HostConfig>,
+        request: HostReloadRequest,
         options: CallOptions,
     ) -> Result<HostReloadReceipt, CallError> {
         self.call(Reload(request), options, |operation| {
@@ -50,6 +50,30 @@ impl HostClient {
     pub async fn models(&self, options: CallOptions) -> Result<Vec<ModelDescription>, CallError> {
         self.call(ListModels(Empty {}), options, |_| Correlation::default())
             .await
+    }
+    pub async fn workspace_roots(&self, options: CallOptions) -> Result<DirectoryRoots, CallError> {
+        self.call(WorkspaceRoots(Empty {}), options, |_| {
+            Correlation::default()
+        })
+        .await
+    }
+    pub async fn workspace_list(
+        &self,
+        request: DirectoryListRequest,
+        options: CallOptions,
+    ) -> Result<DirectoryListResult, CallError> {
+        self.call(WorkspaceList(request), options, |_| Correlation::default())
+            .await
+    }
+    pub async fn workspace_mkdir(
+        &self,
+        request: DirectoryMkdirRequest,
+        options: CallOptions,
+    ) -> Result<DirectoryMkdirReceipt, CallError> {
+        self.call(WorkspaceMkdir(request), options, |operation| {
+            Correlation::default().operation(&operation.0.operation_id)
+        })
+        .await
     }
     /// List the Host's available tools or an explicit owner's enabled set.
     /// Missing targets or selected resources preserve the owner's Fault.

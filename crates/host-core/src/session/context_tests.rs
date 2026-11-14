@@ -140,6 +140,7 @@ fn fixture() -> Fixture {
             agent_id.clone(),
             host_id.clone(),
             AgentData {
+                configuration_source: None,
                 name: "gated save fixture".into(),
                 mode: StorageMode::Persistent,
                 config: config.clone(),
