@@ -36,30 +36,38 @@ fn compaction_builder() -> (HostResourceBuilder, Arc<AtomicUsize>, Arc<AtomicUsi
     let binds = Arc::new(AtomicUsize::new(0));
     let calls = Arc::new(AtomicUsize::new(0));
     let mut tools = ToolRegistry::new();
-    tools
-        .register(Arc::new(BindProbe {
-            inner: Probe {
-                spec: ToolSpec::new(
-                    "probe".parse().unwrap(),
-                    "a real selected spec",
-                    json!({"type":"object"}),
-                )
-                .unwrap(),
-                calls: calls.clone(),
-            },
-            binds: binds.clone(),
-        }))
-        .unwrap();
+    for name in ["z_probe", "probe"] {
+        tools
+            .register(Arc::new(BindProbe {
+                inner: Probe {
+                    spec: ToolSpec::new(
+                        name.parse().unwrap(),
+                        "a real selected spec",
+                        json!({"type":"object"}),
+                    )
+                    .unwrap(),
+                    calls: calls.clone(),
+                },
+                binds: binds.clone(),
+            }))
+            .unwrap();
+    }
     (HostResourceBuilder::new(Arc::new(tools)), binds, calls)
+}
+fn compaction_selection() -> Vec<ToolBinding> {
+    // Legal caller order differs from Runtime's sorted declaration invariant.
+    ["z_probe", "probe"]
+        .map(|name| ToolBinding { name: name.into() })
+        .into()
 }
 fn small_config(endpoint: &str) -> HostConfig {
     let mut config = config(endpoint);
     config.models[0].context_window = 4096;
-    config.tools = selection();
+    config.tools = compaction_selection();
     config
 }
 fn small_request(automatic: bool) -> AgentCreate {
-    let mut request = request(selection(), None);
+    let mut request = request(compaction_selection(), None);
     request.config.session_defaults.execution.compaction = CompactionSettings {
         enabled: automatic,
         trigger_percent: 50,
@@ -134,7 +142,7 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
     assert!(utility.get("tools").is_none());
     assert_eq!(
         binds.load(Ordering::SeqCst),
-        2,
+        4,
         "manual utility must not fabricate a Turn to prepare selected tools"
     );
     assert_eq!(host.turns(&caller, &target).unwrap().len(), 2);
@@ -159,7 +167,7 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
     assert!(activity.utility_usage[0].completed);
     assert_eq!(activity.utility_usage[0].usage, None);
     assert_eq!(host.history(&caller, &target).unwrap(), raw);
-    assert_eq!(binds.load(Ordering::SeqCst), 2);
+    assert_eq!(binds.load(Ordering::SeqCst), 4);
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert_eq!(
         host.receipt_get(&caller, &operation).unwrap(),
@@ -206,7 +214,8 @@ async fn http_manual_compaction_uses_real_model_prompt_specs_without_a_turn_or_t
             .is_some_and(|text| text.starts_with("Conversation summary:"))
     }));
     assert_eq!(next["tools"][0]["function"]["name"], "probe");
-    assert_eq!(binds.load(Ordering::SeqCst), 3);
+    assert_eq!(next["tools"][1]["function"]["name"], "z_probe");
+    assert_eq!(binds.load(Ordering::SeqCst), 6);
 }
 
 #[tokio::test]

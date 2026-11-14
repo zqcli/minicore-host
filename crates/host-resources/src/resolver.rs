@@ -107,7 +107,7 @@ impl ResourceResolver for ProductionResources {
                 }
                 None => None,
             };
-            let tools = config
+            let mut tools = config
                 .tools
                 .iter()
                 .map(|selection| {
@@ -116,6 +116,7 @@ impl ResourceResolver for ProductionResources {
                     })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+            tools.sort_by(|left, right| left.name().cmp(right.name()));
             Ok(BoundCompactionResources {
                 model: self.models[&config.model].clone(),
                 reasoning: reasoning(config.reasoning),
