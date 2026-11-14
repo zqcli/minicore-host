@@ -15,21 +15,38 @@
 - Follow-up authorization: fix the existing compaction declaration ordering
   defect exposed by the coordinator's real Web/Host integration.
 
-## Local commits and ownership
+## Published commits and ownership
 
-1. `2dc0cd31a8116b65b5ace6d4c71d0a1c193413ee`
-   `docs(spec): define Host workspace directory selection` — committed before code.
-2. `c9cc848959fe8882d5925e46a00c43fb677f0efd`
+The public `dev` history preserves SPEC-before-implementation order:
+
+1. `19390dfef43944ec03840e7cabafd960a1d447a7`
+   `docs(spec): define Host workspace directory selection` — committed before code;
+   local preparation `2dc0cd31a8116b65b5ace6d4c71d0a1c193413ee`.
+2. `d03e5c1d2c39b9ff5da6bc19c692f96540e8b10b`
    `feat(workspace): add Host directory picker operations` — source, tests,
-   component documentation, configuration templates and workspace 0.11.1.
-3. `06ab698ef4cc37d74984b8937b5284dbd5a94113`
+   component documentation, configuration templates and workspace 0.11.1;
+   local preparation `c9cc848959fe8882d5925e46a00c43fb677f0efd`.
+3. `a0b560ee59c9b04057361ede2757e99f21295613`
    `fix(resources): sort compaction tool declarations` — existing contract fix
-   and strengthened real-owner manual/automatic compaction regressions.
+   and strengthened real-owner manual/automatic compaction regressions;
+   local preparation `06ab698ef4cc37d74984b8937b5284dbd5a94113`.
+4. `f6076cda5584799747b284ff0e1c63985a16325a`
+   `docs(project): record workspace picker validation`.
+5. `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`
+   `test(workspace): isolate non-UTF-8 directory fixture`;
+   local preparation `82f8077c558609ac47d45cbe2f3978443efe363a`.
+6. `b20f6fee1461cec2925d2538e6d4747c79e9c2b4`
+   `test(core): settle activity saves before history fault injection`;
+   local preparation `6bab4a7898f2194977f47a2aac4625cac1997d26`.
+7. `d58e1af6dbb01b0056afccd9f51d183cdefecc98`
+   `test(core): isolate history fault fixtures from activity saves`;
+   local preparation `d9afcee8b07e4761e76759bb6755af9dfa66c5a1`.
 
-These are local Git identities. The coordinator owns remote publication, exact
-local/public tree and commit mappings, independent integration and native CI.
-The initial local validation record did not attest a remote commit or tag;
-subsequent public CI checkpoints are identified below.
+The final verified public source is `d58e1af6dbb01b0056afccd9f51d183cdefecc98`, tree
+`44f2db3364fc1f49f0e7f98da91e5885d032d5a8`, matching its local preparation exactly.
+The coordinator owns publication and separate Web/Host integration. Native CI
+and package evidence below belongs to this exact public source. This completion
+record does not attest a remote `v0.11.1` tag.
 
 ## Implemented behavior
 
@@ -68,7 +85,7 @@ approval policy. Runtime ownership and TUI behavior are unchanged. Local path
 containment retains the documented same-user concurrent path-replacement boundary;
 this work does not introduce an OS filesystem sandbox.
 
-## Local validation — Linux, Rust 1.90.0
+## Initial local validation — Linux, Rust 1.90.0
 
 Commands used `/home/agent/.cargo/bin/cargo`; build/test/lint commands used
 `CARGO_BUILD_JOBS=4`. Component case counts below are run results, not a claimed
@@ -135,10 +152,10 @@ Local follow-up validation uses Rust 1.90.0 and `/home/agent/.cargo/bin/cargo`:
 | `CARGO_BUILD_JOBS=4 cargo clippy -p minicore-host-workspace --all-targets --locked -- -D warnings` | Passed |
 | `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh` and `git diff --check` | Passed |
 
-No full-workspace relink or macOS execution is claimed locally. The coordinator
-owns publication of this test-only correction and the native CI rerun; the first
-run's Linux count is not a claimed count for the corrected revision. CI rerun and
-release publication remain pending at this checkpoint.
+No full-workspace relink or macOS execution was claimed locally. This correction
+was published as `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`; the later native runs
+below establish its actual platform results. The first run's Linux count belongs
+only to that initial revision.
 
 ## Second native CI — history fixture ordering
 
@@ -241,20 +258,64 @@ they add no fixed sleep or retry. Local validation on Rust 1.90.0:
 | `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh` and `git diff --check` | Passed |
 
 All 76 affected-suite cases passed. This follow-up used no additional probabilistic
-repeat batch or complete workspace relink. Publication and a fresh full native CI
-run, including the four packages, remain assigned to the coordinator.
+repeat batch or complete workspace relink. It was published as
+`d58e1af6dbb01b0056afccd9f51d183cdefecc98`, and its complete native results follow.
 
-## Remaining coordinated validation and publication
+## Verified native CI and packages — 2026-11-14
 
-The coordinator reports its independent real Web/Host WSS integration separately.
-These Host checks use real local owners/filesystem/transports and controlled model
-fixtures; they are not a live-provider or browser-rendering claim.
+[Push CI run 43558286748](https://github.com/zqcli/minicore-host/actions/runs/43558286748)
+completed successfully on attempt 1 against source
+`d58e1af6dbb01b0056afccd9f51d183cdefecc98` and tree
+`44f2db3364fc1f49f0e7f98da91e5885d032d5a8`. All nine jobs succeeded: the Linux
+quality gate, four native test jobs and four native release package jobs.
 
-The corrected revision's full workspace/all-target execution and native platform
-gates are assigned to the existing Host CI. The shared local disk has insufficient
-comfortable headroom for another complete set of debug test binaries, and no other
-worker's output was removed. The native Windows fixture passed in the initial CI,
-not on the local Linux host. CI must count unique cases with
-`cargo test --workspace --all-targets --locked -- --list`; nested storage probe
-output must not be counted twice. The coordinator will append public source mapping,
-CI evidence and release/tag status after publication.
+The [Linux quality job](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132336006809)
+ran the complete `./scripts/check.sh`: whitespace, Python checks (15 projection,
+5 RSS, 8 performance helper), formatting, strict workspace Clippy, all-target
+Rust tests, 7 doctests and strict rustdoc for all 13 workspace packages passed.
+The previous shutdown timeout and every affected history/activity fixture passed
+in this quality job and in all four native jobs.
+
+Each native job ran strict workspace/all-target Clippy, full all-target tests,
+doctests and its own `cargo test --workspace --all-targets --locked -- --list` step.
+Counts below come only from those independent list steps. Binary-plus-case
+identities, listed entries and per-suite list totals agree on each platform;
+nested subprocess execution output and repeated standard-user cases are excluded.
+
+| Native platform | Job | Unique Rust cases | Doctests |
+| --- | --- | ---: | ---: |
+| Linux x64 | [132336006824](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132336006824) | 1,194 | 7 |
+| macOS ARM64 | [132336006749](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132336006749) | 1,186 | 7 |
+| macOS x64 | [132336006524](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132336006524) | 1,186 | 7 |
+| Windows x64 | [132336006776](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132336006776) | 1,171 | 7 |
+
+Both macOS jobs actually passed native-name creation and non-UTF-8 display
+rejection; Linux also passed actual non-UTF-8 directory/list refusal. Windows
+passed the real verbatim-name roots/list/mkdir round trip. Its standard-user step
+passed all 5 existing Storage/Host cases, with `IsAdministrator=false`,
+`ProfileLoaded=true`, `ExecutableWriteAccess=denied`, `StandardUserTestsPassed=5`,
+`StandardUserExitCode=0` and `TemporaryAccountRemoved=true`.
+
+Every package job built Host with the internal Runtime for its native target,
+ran the packaged executable's actual `--help` smoke test, checked the expected
+stderr without protocol stdout, and verified the archive by reading it back.
+Each archive contains exactly 20 files and one Host executable; the archived
+binary SHA-256 matches the smoke-tested binary. Job logs retain both Host and
+archive SHA-256 values. All four artifacts were uploaded and their registry
+entries identify the verified source SHA above.
+
+| Package target | Job | Uploaded artifact | Archive verification |
+| --- | --- | --- | --- |
+| `x86_64-unknown-linux-gnu` | [132338654171](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132338654171) | [Host 0.11.1 Linux x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099342041) | 20 files, one Host executable; smoke and readback passed |
+| `aarch64-apple-darwin` | [132338654257](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132338654257) | [Host 0.11.1 macOS ARM64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099142519) | 20 files, one Host executable; smoke and readback passed |
+| `x86_64-apple-darwin` | [132338654172](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132338654172) | [Host 0.11.1 macOS x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099117832) | 20 files, one Host executable; smoke and readback passed |
+| `x86_64-pc-windows-msvc` | [132338654160](https://github.com/zqcli/minicore-host/actions/runs/43558286748/job/132338654160) | [Host 0.11.1 Windows x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099377121) | 20 files, one Host executable; smoke and readback passed |
+
+The coordinator reports independent real Web/Host WSS integration separately.
+These Host checks use actual owners, filesystems and transports with controlled
+model fixtures; they do not claim live-provider or browser-rendering validation.
+The three preceding CI outcomes and their fixture corrections remain recorded
+above. Native package availability does not establish a remote version tag.
+The completion commit changes only this task record and `PROJECT.md`, uses
+`[skip ci]`, and leaves the validated code/tests unchanged; `git diff --check`
+passes without rerunning the completed test matrix.

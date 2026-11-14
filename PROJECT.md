@@ -1,67 +1,61 @@
 # MiniCore Host
 
-## Current work: Host directory picker (Task 110)
+## Current checkpoint: Host 0.11.1 directory picker (Task 110)
 
 [Task 110](tasks/110-workspace-directory-picker/TASK.md) implements authenticated
 Host-level `workspace.roots/list/mkdir` for the independent minicore-web client.
-SPEC 4.10.3 was committed first as `2dc0cd3`; implementation is local `c9cc848`,
-with the existing compaction tool-ordering correction at local `06ab698`.
-All 13 workspace packages and internal pins are 0.11.1. The directory picker uses
-explicit canonical roots, actual filesystem operations, requested pagination and
-existing Host authority/receipt/shutdown owners; no Session is required.
+Public SPEC 4.10.3 commit `19390dfe` precedes implementation `d03e5c1d`; the existing
+compaction tool-ordering correction follows at `a0b560ee`. The complete public
+commit sequence and local preparation mappings are retained in the task record.
+All 13 workspace packages and internal pins are 0.11.1. The picker uses explicit
+canonical roots, actual filesystem operations, requested pagination and existing
+Host authority/receipt/shutdown owners; no Session is required. All 225 external
+locked packages are unchanged.
 
-Local checks pass: protocol 79, workspace 38, core library 135, directory transport
-2, and strengthened real-owner compaction 2 cases; seven doctests, 28 Python checks,
-formatting and full-workspace strict Clippy/rustdoc also pass. Windows path review
-findings are corrected, including verbatim names and their paging cursors.
-The final executable has been rebuilt.
-All 225 external locked packages are unchanged. The task records exact local commits,
-commands, scope and limits; the coordinator owns public commit mappings, CI evidence
-and publication. No remote release or tag is asserted by this local checkpoint.
+The verified source is
+[`d58e1af6dbb01b0056afccd9f51d183cdefecc98`](https://github.com/zqcli/minicore-host/commit/d58e1af6dbb01b0056afccd9f51d183cdefecc98),
+tree `44f2db3364fc1f49f0e7f98da91e5885d032d5a8`.
+[Native CI run 43558286748](https://github.com/zqcli/minicore-host/actions/runs/43558286748)
+completed successfully on attempt 1 with all nine jobs: Linux quality, native
+Clippy/tests on Linux x64, macOS ARM64/x64 and Windows x64, and four native packages.
+The full quality gate passed formatting, strict Clippy/rustdoc, workspace tests,
+7 doctests and 28 Python checks. Native independent `--list` steps counted **1,194
+Rust cases on Linux, 1,186 on each macOS architecture and 1,171 on Windows**;
+each platform passed 7 doctests. Counts exclude nested subprocess output and
+repeated standard-user executions. Windows additionally passed all 5 existing
+Storage/Host cases under a verified non-administrator account with a loaded
+profile and denied executable writes.
 
-The coordinator inspected [initial native CI run 43553519487](https://github.com/zqcli/minicore-host/actions/runs/43553519487):
-Linux quality passed with 1,192 unique Rust cases, 7 doctests and 28 Python checks;
-Windows native and ordinary-user checks passed. Both macOS jobs failed before Host
-listing when the Unix fixture attempted to create a non-UTF-8 byte name and the
-filesystem returned OS error 92, `Illegal byte sequence`. A test-only follow-up
-from dev `f6076cda5584799747b284ff0e1c63985a16325a` retains native-name creation and
-explicit non-UTF-8 `display` rejection on every Unix target, while limiting the
-actual non-UTF-8 directory/list fixture to Linux. All 9 workspace library tests,
-affected-crate strict Clippy, formatting and whitespace checks pass locally.
-Production code and the SPEC are unchanged; the initial run's case count does not
-describe the corrected revision.
+Every native package passed its actual executable smoke test and archive readback,
+with exactly 20 files and one Host executable whose SHA-256 matched the tested
+binary. All four 0.11.1 artifacts were uploaded from the verified source:
+[Linux x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099342041),
+[macOS ARM64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099142519),
+[macOS x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099117832),
+and [Windows x64](https://github.com/zqcli/minicore-host/actions/runs/43558286748/artifacts/14099377121).
+The task record links all nine jobs and preserves the precise commands, platform
+counts, package checks and validation limits. A remote `v0.11.1` tag is not attested
+by this checkpoint.
 
-The directory-fixture correction was published as `1b347046c5bdc752c40fc7636cdd14e34a04b8cb`,
-tree `ba7df7eb810f82f4b7e34fcfac1f79e054da0fbd`.
-[Its native CI](https://github.com/zqcli/minicore-host/actions/runs/43555557066)
-passed Linux quality and native Linux/macOS ARM64/Windows, with independent list
-counts of 1,194/1,186/1,171 and 7 doctests on each successful native platform;
-Windows also passed all 5 standard-user checks. Both macOS directory suites passed.
-Intel macOS instead exposed an existing history-continuation fixture race: the
-test replaced `history.jsonl` before accepted activity metadata I/O had settled,
-then mistook a non-running retained metadata fault for completion. Its single
-configuration update returned `SessionBusy`; package jobs were skipped. A second
-test-only correction waits for actual metadata owner completion and asserts no
-unexpected metadata fault before filesystem fault injection. All 4 history cases,
-200 focused repeats, strict affected-test Clippy, formatting and whitespace pass
-locally; the original case did not fail in 100 Linux repeats. That correction was
-published as `b20f6fee1461cec2925d2538e6d4747c79e9c2b4`, tree
-`e7af7f818958ff0ecd3a89aef4fe15e75023063a`.
+The preceding CI failures remain documented. The
+[first run](https://github.com/zqcli/minicore-host/actions/runs/43553519487) exposed
+macOS rejecting the fixture's non-UTF-8 filename with OS error 92 before Host ran;
+`1b347046` separates portable Unix name/display assertions from the Linux directory
+fixture. The [second run](https://github.com/zqcli/minicore-host/actions/runs/43555557066)
+exposed an existing history test mistaking non-running retained metadata work for
+completion; `b20f6fee` adds the actual owner barrier before fault injection. The
+[third run](https://github.com/zqcli/minicore-host/actions/runs/43557234311) passed
+all four native platforms but timed out in a separate Linux quality shutdown
+fixture; its shared-helper log could not identify which wait expired. Bounded
+source review found the same history-path/metadata I/O windows, and `d58e1af6`
+isolates nine such windows across five cases in four test files. These fixture
+corrections preserve production behavior, original assertions and single business
+calls. The final native run actually passed all affected cases on every platform.
 
-[The next native run](https://github.com/zqcli/minicore-host/actions/runs/43557234311)
-passed all four native jobs: Linux x64 1,194, macOS ARM64/x64 1,186 each, Windows
-x64 1,171 independently listed Rust cases; each passed 7 doctests, and Windows
-passed all 5 standard-user cases. Intel macOS passed the previously failing
-history case. The separate Linux quality job instead timed out in
-`shutdown_force_failed_history_holds_root_until_original_save_continues`; its
-shared-helper log does not identify which of that case's two waits expired.
-The package matrix was skipped. Source review found activity metadata I/O could
-cross both history-path replacement gaps. A bounded follow-up synchronizes nine
-such windows in five cases across four test files, including the two tool-cleanup
-fixtures and one persistent-owner fixture. Original assertions, single business
-calls and production remain unchanged. All 76 affected-suite tests, targeted
-strict Clippy, formatting and whitespace checks pass locally. This correction
-still requires publication and a fresh complete CI run with native packages.
+Independent Web/Host browser integration is recorded by the coordinator separately;
+these Host results use actual owners/filesystems/transports and controlled model
+fixtures, with no live-provider claim. This completion record changes only
+`PROJECT.md` and Task 110 and uses `[skip ci]`; validated code and tests are unchanged.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 
