@@ -2,13 +2,23 @@
 
 ## Current work: Host directory picker (Task 110)
 
-[Task 110](tasks/110-workspace-directory-picker/TASK.md) first updates SPEC to
-4.10.3, then adds authenticated Host-level `workspace.roots/list/mkdir` for the
-independent minicore-web client, using explicit configured directory roots and
-real filesystem operations. The Host version becomes 0.11.1. Existing Session
-workspace reads, connection operation rights, frozen Turn approval, Runtime
-ownership and TUI behavior retain their contracts. Validation and commits are
-recorded in the task; no new implementation or test outcome is claimed yet.
+[Task 110](tasks/110-workspace-directory-picker/TASK.md) implements authenticated
+Host-level `workspace.roots/list/mkdir` for the independent minicore-web client.
+SPEC 4.10.3 was committed first as `2dc0cd3`; implementation is local `c9cc848`,
+with the existing compaction tool-ordering correction at local `06ab698`.
+All 13 workspace packages and internal pins are 0.11.1. The directory picker uses
+explicit canonical roots, actual filesystem operations, requested pagination and
+existing Host authority/receipt/shutdown owners; no Session is required.
+
+Local checks pass: protocol 79, workspace 38, core library 135, directory transport
+2, and strengthened real-owner compaction 2 cases; seven doctests, 28 Python checks,
+formatting and full-workspace strict Clippy/rustdoc also pass. Windows path review
+findings are corrected, including verbatim names and their paging cursors. Native
+Windows filesystem execution, full workspace case counting and release-platform
+validation remain for the existing CI. The final executable has been rebuilt.
+All 225 external locked packages are unchanged. The task records exact local commits,
+commands, scope and limits; the coordinator owns public commit mappings, CI evidence
+and publication. No remote release or tag is asserted by this local checkpoint.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 
