@@ -13,12 +13,24 @@ existing Host authority/receipt/shutdown owners; no Session is required.
 Local checks pass: protocol 79, workspace 38, core library 135, directory transport
 2, and strengthened real-owner compaction 2 cases; seven doctests, 28 Python checks,
 formatting and full-workspace strict Clippy/rustdoc also pass. Windows path review
-findings are corrected, including verbatim names and their paging cursors. Native
-Windows filesystem execution, full workspace case counting and release-platform
-validation remain for the existing CI. The final executable has been rebuilt.
+findings are corrected, including verbatim names and their paging cursors.
+The final executable has been rebuilt.
 All 225 external locked packages are unchanged. The task records exact local commits,
 commands, scope and limits; the coordinator owns public commit mappings, CI evidence
 and publication. No remote release or tag is asserted by this local checkpoint.
+
+The coordinator inspected [initial native CI run 43553519487](https://github.com/zqcli/minicore-host/actions/runs/43553519487):
+Linux quality passed with 1,192 unique Rust cases, 7 doctests and 28 Python checks;
+Windows native and ordinary-user checks passed. Both macOS jobs failed before Host
+listing when the Unix fixture attempted to create a non-UTF-8 byte name and the
+filesystem returned OS error 92, `Illegal byte sequence`. A test-only follow-up
+from dev `f6076cda5584799747b284ff0e1c63985a16325a` retains native-name creation and
+explicit non-UTF-8 `display` rejection on every Unix target, while limiting the
+actual non-UTF-8 directory/list fixture to Linux. All 9 workspace library tests,
+affected-crate strict Clippy, formatting and whitespace checks pass locally.
+Production code and the SPEC are
+unchanged. The corrected revision still requires a native CI rerun and publication;
+the initial run's case count does not describe the corrected revision.
 
 ## Previous checkpoint: Host client capabilities (Task 109)
 

@@ -108,17 +108,48 @@ All 13 workspace packages and internal pins are 0.11.1. A parsed Cargo.lock
 comparison against the input commit confirms all 225 external package entries,
 versions, sources and checksums are unchanged.
 
+## Native CI fixture follow-up — 2026-11-14
+
+Follow-up input: dev `f6076cda5584799747b284ff0e1c63985a16325a`.
+The coordinator inspected [native CI run 43553519487](https://github.com/zqcli/minicore-host/actions/runs/43553519487):
+Linux quality checks passed with 1,192 unique Rust cases, 7 doctests and 28 Python
+checks; Windows native and ordinary-user checks also passed. Both macOS jobs failed
+in the same Unix test fixture while `fs::create_dir` tried to create the byte name
+`[0xff]`: OS error 92, `Illegal byte sequence`. The failure preceded Host listing;
+it did not demonstrate a production directory-operation failure.
+
+The fixture correction splits the combined case into three tests. All Unix targets
+retain native valid-name creation and an explicit `display` rejection of an
+in-memory non-UTF-8 path. Linux separately creates the actual non-UTF-8 directory
+and requires `list` to return `DirectoryError::NonUtf8Path`; fixture setup and the
+failure assertion remain strict. Production code, SPEC, manifests and dependencies
+are unchanged. The requested worker configuration remains gpt-6-astra with max
+reasoning, without independent attestation of effective runtime settings.
+
+Local follow-up validation uses Rust 1.90.0 and `/home/agent/.cargo/bin/cargo`:
+
+| Command | Result |
+| --- | --- |
+| `CARGO_BUILD_JOBS=4 cargo test -p minicore-host-workspace --lib --locked` | 9 passed, 0 failed, 0 ignored; includes all three separated cases |
+| `CARGO_BUILD_JOBS=4 cargo clippy -p minicore-host-workspace --all-targets --locked -- -D warnings` | Passed |
+| `cargo fmt --all -- --check`, `./scripts/check-whitespace.sh` and `git diff --check` | Passed |
+
+No full-workspace relink or macOS execution is claimed locally. The coordinator
+owns publication of this test-only correction and the native CI rerun; the first
+run's Linux count is not a claimed count for the corrected revision. CI rerun and
+release publication remain pending at this checkpoint.
+
 ## Remaining coordinated validation and publication
 
 The coordinator reports its independent real Web/Host WSS integration separately.
 These Host checks use real local owners/filesystem/transports and controlled model
 fixtures; they are not a live-provider or browser-rendering claim.
 
-Full workspace/all-target execution and native platform gates are assigned to the
-existing Host CI. The shared local disk has insufficient comfortable headroom for
-another complete set of debug test binaries, and no other worker's output was
-removed. In particular, the native Windows filesystem fixture is not claimed run
-on Linux. CI must count unique cases with
+The corrected revision's full workspace/all-target execution and native platform
+gates are assigned to the existing Host CI. The shared local disk has insufficient
+comfortable headroom for another complete set of debug test binaries, and no other
+worker's output was removed. The native Windows fixture passed in the initial CI,
+not on the local Linux host. CI must count unique cases with
 `cargo test --workspace --all-targets --locked -- --list`; nested storage probe
 output must not be counted twice. The coordinator will append public source mapping,
 CI evidence and release/tag status after publication.

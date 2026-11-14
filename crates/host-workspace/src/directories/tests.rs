@@ -235,8 +235,7 @@ fn symlinks_can_only_select_or_create_inside_an_allowed_root() {
 
 #[cfg(unix)]
 #[test]
-fn unix_names_use_native_rules_and_non_utf8_paths_are_not_fabricated() {
-    use std::os::unix::ffi::OsStringExt;
+fn unix_names_use_native_rules() {
     let temporary = tempfile::tempdir().unwrap();
     let directories = roots(temporary.path());
     for name in ["CON", "trailing.", "trailing ", "colon:name", "back\\slash"] {
@@ -249,6 +248,23 @@ fn unix_names_use_native_rules_and_non_utf8_paths_are_not_fabricated() {
             .is_dir()
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_non_utf8_paths_are_not_fabricated() {
+    use std::os::unix::ffi::OsStringExt;
+    let path = Path::new("/").join(std::ffi::OsString::from_vec(vec![0xff]));
+    assert!(matches!(display(&path), Err(DirectoryError::NonUtf8Path)));
+}
+
+// The macOS CI filesystem rejects this name before Host can inspect it.
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_listing_rejects_non_utf8_directory_paths() {
+    use std::os::unix::ffi::OsStringExt;
+    let temporary = tempfile::tempdir().unwrap();
+    let directories = roots(temporary.path());
     fs::create_dir(
         temporary
             .path()
