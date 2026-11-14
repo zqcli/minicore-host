@@ -1,17 +1,48 @@
 # MiniCore Host
 
-## Current work: JSON configuration directories (Task 111)
+## Current checkpoint: JSON configuration directories (Task 111)
 
-[Task 111](tasks/111-config-directory/TASK.md) implements the approved shared
-configuration directory, file-declared Agents, Role references and three optional
-instruction layers. SPEC 4.11.0 is committed before implementation. Host and TUI
-target 0.12.0. The TUI reads tui.json itself; Web remains independently configured.
+[Task 111](tasks/111-config-directory/TASK.md) is complete on dev. SPEC 4.11.0
+was committed before implementation; Host and TUI are 0.12.0. The shared
+host-config package loads host.json, keyed Agent declarations and reusable
+Roles, while Host/Agent owners apply values and preserve identities and history.
+TUI passes --config-dir to its embedded Host and handles tui.json locally.
+Web configuration belongs to its independent deployment. Optional Host, Role
+and Agent instructions are assembled in order with native Session/Turn snapshots.
 Three implementation workers and an independent reviewer were requested with
-gpt-6-astra / max. Implementation and static review are complete; full validation
-and publication are in progress. The directory/shutdown regressions passed 6/6,
-existing native-record preservation passed 1/1, and the initial executable suite
-passed 28 cases. Exact full-gate, published source and CI results remain pending
-in the task record.
+gpt-6-astra / max.
+
+Verified Host source
+[`2f5344d2`](https://github.com/zqcli/minicore-host/commit/2f5344d2e8cfb6e49d11cf1b188381264f8ee7fa)
+has tree `f19f925495066e6181233d13d9f10fdd75fb5659`.
+[Host CI 43588511364](https://github.com/zqcli/minicore-host/actions/runs/43588511364)
+passed all nine jobs on attempt 1: Linux quality, four native platforms and four
+release packages. Independent listings count 1,216 Rust cases on Linux, 1,208
+on each macOS architecture and 1,193 on Windows, with 7 doctests per platform.
+The complete gate also passed 28 Python checks, formatting and strict
+Clippy/rustdoc. Windows passed five actual standard-user Storage/Host cases.
+Every native package passed executable smoke and archive readback with 23 files.
+All 225 external Host package versions, sources and checksums are unchanged.
+
+Verified TUI source
+[`8a6da1ff`](https://github.com/zqcli/minicore-tui/commit/8a6da1ffbca9cee6f4a2770fd222726ddd1bce3e)
+pins that exact Host revision across all 13 native dependencies.
+[TUI CI 43589491558](https://github.com/zqcli/minicore-tui/actions/runs/43589491558)
+passed all eight jobs: quality, Linux/macOS/Windows native tests and four packages.
+Linux and macOS each passed 472 default cases; Windows passed 471. The three
+optional performance tests were not run, and the ignored subprocess helper was
+executed by its passing integration cases. Every downloaded TUI artifact digest
+and actual BUILD.txt source pin was verified. The initial JSON change removes
+obsolete TOML dependencies without unrelated external upgrades.
+
+Independent review findings and the actual CI fixture failures are resolved and
+retained in the task record, together with exact commands, platform counts,
+artifact links and limits. Provider integration uses actual Host/resource paths
+with controlled loopback model responses; no live-provider claim is made.
+The configuration guides and examples received a final bounded consistency
+review. This completion record changes only PROJECT.md and Task 111 with
+`[skip ci]`; code/tests and verified artifacts are unchanged. No tag, GitHub
+Release or main merge was requested or performed.
 
 ## Previous checkpoint: Host 0.11.1 directory picker (Task 110)
 
