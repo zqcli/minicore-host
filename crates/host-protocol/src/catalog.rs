@@ -92,6 +92,9 @@ methods! {
     SessionContext, "session.context", Query, Read;
     SessionCompact, "session.compact", Command, Operate;
     SessionCompactCancel, "session.compact.cancel", Command, Operate;
+    WorkspaceRoots, "workspace.roots", Query, Read;
+    WorkspaceList, "workspace.list", Query, Read;
+    WorkspaceMkdir, "workspace.mkdir", Command, Operate;
     WorkspaceFiles, "workspace.files", Query, Read;
     WorkspaceRead, "workspace.read", Query, Read;
     WorkspaceSearch, "workspace.search", Query, Read;

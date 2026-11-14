@@ -150,5 +150,8 @@ pub use input::*;
 mod resources;
 pub use resources::*;
 
+mod directories;
+pub use directories::*;
+
 mod deletion;
 pub use deletion::*;

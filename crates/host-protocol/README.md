@@ -97,7 +97,7 @@ Owners construct registered Fault leaves. Deserialization also preserves newer
 unrecognized peer leaves and opaque details; `kind()` then returns `None`.
 Registered type/code/details combinations remain strictly validated.
 
-`PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 52 resource methods in SPEC §8.
+`PUBLIC_METHODS` and `METHOD_CATALOG` are the exact 55 resource methods in SPEC §8.
 Host state events are not a new `host.state` method. The catalog describes canonical
 names, interaction forms and access requirements; the transport router reports
 its supported methods. `events.unsubscribe` requires ownership of the observation
@@ -132,3 +132,7 @@ identity, with UTC owner timestamps. Bound-input and completion events and saved
 Turn results use the same positions. Unbound inputs and cold saved results do not
 acquire fabricated record positions or LoadIds. Host object schema 2 and history
 schema 3 retain these facts; old envelope versions are rejected without migration.
+
+`DirectoryRoots`, `DirectoryListRequest/Result` and `DirectoryMkdirRequest/Receipt`
+are Host-level directory selection contracts. They do not carry Session IDs.
+`workspace.mkdir` uses the existing control receipt envelope and Host Fault registry.

@@ -14,6 +14,7 @@ mod controls;
 mod create;
 mod deletion;
 mod diagnostics;
+mod directories;
 mod discovery;
 mod metadata;
 mod network;
@@ -45,6 +46,8 @@ pub struct Host {
     process_changed: tokio::sync::Notify,
     pub(crate) configuration: Arc<ConfigurationOwner>,
     logging_health: std::sync::OnceLock<minicore_host_diagnostics::Health>,
+    #[cfg(test)]
+    directory_gate: Mutex<Option<Arc<directories::tests::DirectoryGate>>>,
 }
 struct HostState {
     lifecycle: HostLifecycle,
@@ -52,6 +55,7 @@ struct HostState {
     shutdown_fault: Option<Fault>,
     shutdown_task: Option<tokio::task::JoinHandle<()>>,
     creating: usize,
+    directory_writes: usize,
     retirement_watch: Option<tokio::task::JoinHandle<()>>,
     retirement_epoch: u64,
     agents: BTreeMap<AgentId, Arc<AgentOwner>>,
@@ -111,12 +115,15 @@ impl Host {
             process_changed: tokio::sync::Notify::new(),
             configuration,
             logging_health: std::sync::OnceLock::new(),
+            #[cfg(test)]
+            directory_gate: Mutex::new(None),
             state: Mutex::new(HostState {
                 lifecycle,
                 shutdown_strategy: None,
                 shutdown_fault: None,
                 shutdown_task: None,
                 creating: 0,
+                directory_writes: 0,
                 retirement_watch: None,
                 retirement_epoch: 0,
                 agents: BTreeMap::new(),

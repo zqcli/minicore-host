@@ -14,6 +14,9 @@ pub use context::QueryContext;
 pub use error::{Result, WorkspaceError};
 pub use workspace::{Workspace, WorkspaceMutation};
 
+mod directories;
+pub use directories::{DirectoryError, WorkspaceDirectories};
+
 mod files;
 pub use files::*;
 

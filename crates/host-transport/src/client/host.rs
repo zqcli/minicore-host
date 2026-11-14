@@ -51,6 +51,30 @@ impl HostClient {
         self.call(ListModels(Empty {}), options, |_| Correlation::default())
             .await
     }
+    pub async fn workspace_roots(&self, options: CallOptions) -> Result<DirectoryRoots, CallError> {
+        self.call(WorkspaceRoots(Empty {}), options, |_| {
+            Correlation::default()
+        })
+        .await
+    }
+    pub async fn workspace_list(
+        &self,
+        request: DirectoryListRequest,
+        options: CallOptions,
+    ) -> Result<DirectoryListResult, CallError> {
+        self.call(WorkspaceList(request), options, |_| Correlation::default())
+            .await
+    }
+    pub async fn workspace_mkdir(
+        &self,
+        request: DirectoryMkdirRequest,
+        options: CallOptions,
+    ) -> Result<DirectoryMkdirReceipt, CallError> {
+        self.call(WorkspaceMkdir(request), options, |operation| {
+            Correlation::default().operation(&operation.0.operation_id)
+        })
+        .await
+    }
     /// List the Host's available tools or an explicit owner's enabled set.
     /// Missing targets or selected resources preserve the owner's Fault.
     pub async fn tools(

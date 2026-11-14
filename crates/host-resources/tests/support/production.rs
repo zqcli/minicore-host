@@ -60,6 +60,7 @@ pub(crate) fn selection(names: &[&str]) -> Vec<ToolBinding> {
 }
 pub(crate) fn config(endpoint: &str) -> HostConfig {
     HostConfig {
+        workspace_roots: Vec::new(),
         name: "Production local tools fixture".into(),
         framework_instructions: "FRAMEWORK A".into(),
         models: vec![OpenAiModelSettings {

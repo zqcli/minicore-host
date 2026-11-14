@@ -13,6 +13,7 @@
     "request_timeout_ms": 120000
   }],
   "tools": [],
+  "workspace_roots": [],
   "network": {"listen": null, "access_key_env": null},
   "logging": {"level": "info", "output": {"kind": "stderr"}}
 }

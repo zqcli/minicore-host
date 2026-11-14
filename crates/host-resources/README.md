@@ -74,3 +74,7 @@ retain the actual worker cleanup and cancellation witnesses.
 `tests/input_provenance.rs` and its input/compaction modules retain the original
 input identity, queue, history, and compaction coverage. The private builder
 concurrency test still holds a real Workspace mutation guard as its gate.
+
+Host resource preparation validates and canonicalizes `workspace_roots` into the
+immutable configuration candidate. The existing Host publication boundary applies
+new roots together; preparing or rejecting a candidate changes no directory scope.

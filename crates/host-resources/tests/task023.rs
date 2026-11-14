@@ -67,6 +67,7 @@ fn tool_answer() -> String {
 }
 fn config(endpoint: &str) -> HostConfig {
     HostConfig {
+        workspace_roots: Vec::new(),
         name: "Configured Host".into(),
         framework_instructions: "FRAMEWORK A".into(),
         models: vec![OpenAiModelSettings {

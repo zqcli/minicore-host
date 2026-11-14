@@ -174,7 +174,7 @@ fn close_and_stop_do_not_claim_running_or_open() {
     assert!(serde_json::from_value::<CompactCancelRequest>(json!({"operation_id":ID})).is_err());
 }
 #[test]
-fn catalog_exactly_matches_all_52_spec_methods_in_order() {
+fn catalog_exactly_matches_all_55_spec_methods_in_order() {
     let spec = include_str!("../../../SPEC.md");
     let section = spec
         .split("# 8. 首版公共接口目录")
@@ -198,7 +198,7 @@ fn catalog_exactly_matches_all_52_spec_methods_in_order() {
             .then_some(candidate)
         })
         .collect();
-    assert_eq!(from_spec.len(), 52);
+    assert_eq!(from_spec.len(), 55);
     assert_eq!(
         PUBLIC_METHODS
             .iter()
@@ -206,7 +206,7 @@ fn catalog_exactly_matches_all_52_spec_methods_in_order() {
             .collect::<Vec<_>>(),
         from_spec
     );
-    assert_eq!(PUBLIC_METHODS.iter().collect::<BTreeSet<_>>().len(), 52);
+    assert_eq!(PUBLIC_METHODS.iter().collect::<BTreeSet<_>>().len(), 55);
     for method in PUBLIC_METHODS {
         assert_eq!(method.as_str().parse::<Method>().unwrap(), *method);
         assert_eq!(

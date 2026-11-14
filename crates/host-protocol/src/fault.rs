@@ -67,6 +67,15 @@ fault_registry! {
     HostObservationResyncRequired = 1503, "HOST_OBSERVATION_RESYNC_REQUIRED", [Host], None, false;
     HostConfigInvalid = 1601, "HOST_CONFIG_INVALID", [Host], None, false;
     HostConfigConflict = 1602, "HOST_CONFIG_CONFLICT", [Host], None, false;
+    HostWorkspacePathInvalid = 1701, "HOST_WORKSPACE_PATH_INVALID", [Host], None, false;
+    HostWorkspaceOutsideRoots = 1702, "HOST_WORKSPACE_OUTSIDE_ROOTS", [Host], None, false;
+    HostWorkspaceNotFound = 1703, "HOST_WORKSPACE_NOT_FOUND", [Host], None, false;
+    HostWorkspaceNotDirectory = 1704, "HOST_WORKSPACE_NOT_DIRECTORY", [Host], None, false;
+    HostWorkspaceAlreadyExists = 1705, "HOST_WORKSPACE_ALREADY_EXISTS", [Host], None, false;
+    HostWorkspaceRangeInvalid = 1706, "HOST_WORKSPACE_RANGE_INVALID", [Host], None, false;
+    HostWorkspaceCursorInvalid = 1707, "HOST_WORKSPACE_CURSOR_INVALID", [Host], None, false;
+    HostWorkspaceIoFailed = 1708, "HOST_WORKSPACE_IO_FAILED", [Host], None, false;
+    HostWorkspaceUnsupported = 1709, "HOST_WORKSPACE_UNSUPPORTED", [Host], None, false;
     HostInternalUnexpected = 1999, "HOST_INTERNAL_UNEXPECTED", [Host], None, false;
     AgentConfigInvalid = 2101, "AGENT_CONFIG_INVALID", [Agent, AgentConfig], None, false;
     AgentConfigConflict = 2102, "AGENT_CONFIG_CONFLICT", [Agent, AgentConfig], None, false;

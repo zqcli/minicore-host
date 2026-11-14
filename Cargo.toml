@@ -17,7 +17,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.11.0"
+version = "0.11.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.90"
@@ -28,18 +28,18 @@ futures-util = "=0.3.34"
 getrandom = "=0.4.3"
 httpdate = "=1.0.3"
 ignore = "=0.4.33"
-minicore-host-compaction = { path = "crates/host-compaction", version = "0.11.0" }
-minicore-host-core = { path = "crates/host-core", version = "0.11.0" }
-minicore-host-diagnostics = { path = "crates/host-diagnostics", version = "0.11.0" }
-minicore-host-local-tools = { path = "crates/host-local-tools", version = "0.11.0" }
-minicore-host-protocol = { path = "crates/host-protocol", version = "0.11.0" }
-minicore-host-provider = { path = "crates/host-provider", version = "0.11.0" }
-minicore-host-resources = { path = "crates/host-resources", version = "0.11.0" }
-minicore-host-storage = { path = "crates/host-storage", version = "0.11.0" }
-minicore-host-tools = { path = "crates/host-tools", version = "0.11.0" }
-minicore-host-transport = { path = "crates/host-transport", version = "0.11.0" }
-minicore-host-workspace = { path = "crates/host-workspace", version = "0.11.0" }
-minicore-host-runtime = { path = "crates/host-runtime", version = "0.11.0" }
+minicore-host-compaction = { path = "crates/host-compaction", version = "0.11.1" }
+minicore-host-core = { path = "crates/host-core", version = "0.11.1" }
+minicore-host-diagnostics = { path = "crates/host-diagnostics", version = "0.11.1" }
+minicore-host-local-tools = { path = "crates/host-local-tools", version = "0.11.1" }
+minicore-host-protocol = { path = "crates/host-protocol", version = "0.11.1" }
+minicore-host-provider = { path = "crates/host-provider", version = "0.11.1" }
+minicore-host-resources = { path = "crates/host-resources", version = "0.11.1" }
+minicore-host-storage = { path = "crates/host-storage", version = "0.11.1" }
+minicore-host-tools = { path = "crates/host-tools", version = "0.11.1" }
+minicore-host-transport = { path = "crates/host-transport", version = "0.11.1" }
+minicore-host-workspace = { path = "crates/host-workspace", version = "0.11.1" }
+minicore-host-runtime = { path = "crates/host-runtime", version = "0.11.1" }
 rcgen = { version = "=0.14.10", default-features = false }
 regex = "=1.13.1"
 reqwest = { version = "=0.12.28", default-features = false }

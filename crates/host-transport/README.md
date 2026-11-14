@@ -139,11 +139,12 @@ and never dispatch `message.send` or other business work.
 
 ## Implemented routing scope
 
-`SUPPORTED_METHODS` contains the 52 SPEC §8 resource routes:
+`SUPPORTED_METHODS` contains the 55 SPEC §8 resource routes:
 
 - Host: `host.info`, `host.config.get`, `host.reload`, `host.receipt.get`, `host.shutdown`.
 - Resources: `model.list`, `tool.list`.
-- Workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
+- Host directory selection: `workspace.roots`, `workspace.list`, `workspace.mkdir`.
+- Session workspace: `workspace.files`, `workspace.read`, `workspace.search`, `workspace.status`.
 - Changes: `changes.list`, `changes.diff`.
 - Agent: `agent.create`, `agent.get`, `agent.list`, `agent.update`, `agent.start`,
   `agent.stop`, `agent.set_default_session`, `agent.delete`.
@@ -419,3 +420,28 @@ persistent directories remain intact unless explicitly included. Received
 launch ToolResults/completion messages and independent workspace artifacts are
 not deleted. A filesystem error may follow partial removal and is reported as
 such, without rollback, implicit retry or fabricated full deletion.
+
+## Directory selection before Session creation
+
+These methods are available through `HostClient` and the same stdio/WSS operation
+handlers. `workspace.roots` takes `{}` and returns `{roots:[{name,path}]}`.
+`workspace.list` takes `{path,hidden:false,limit,cursor:null}` and returns
+`{path,parent,entries:[{name,path}],next_cursor}`. The optional cursor is
+`{scope,after_name}`; page size must be positive and can change between calls.
+Only real direct child directories inside configured `workspace_roots` are listed;
+returned paths are canonical absolute Host-platform paths. No Session reference is
+accepted or required. The client can pass a selected path as `WorkspaceRef.path`.
+
+`workspace.mkdir` takes `{operation_id,parent,name}`. Only the current operator can
+submit it. It creates exactly one child and returns the standard Host receipt with
+`kind:"workspace.mkdir"` and `result:{status:"created",path}` or
+`result:{status:"failed",error}`. `host.receipt.get` may observe
+`result:{status:"creating"}` while the original owned worker is active. Caller
+timeout or disconnection never cancels the write. Existing entries fail, and an
+operation ID does not deduplicate invocations. All reads require a valid connection;
+read-only peers do not gain mkdir rights when the operator disconnects.
+
+Host directory errors are registered at 1701–1709: invalid path, outside roots,
+not found, not directory, already exists, invalid page size, invalid cursor,
+filesystem failure and unsupported path encoding. They retain the ordinary Fault
+and JSON-RPC error/receipt placement; underlying OS diagnostics are not exposed.

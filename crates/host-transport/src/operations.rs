@@ -228,6 +228,9 @@ operations! {
     GetConfig, HostConfigGet, Empty => HostConfigSnapshot, |h, c, _p| { h.config_get(&c) };
     Reload, HostReload, HostReloadRequest<HostConfig> => HostReloadReceipt, |h, c, p| { h.reload(&c, p) };
     ListModels, ModelList, Empty => Vec<ModelDescription>, |h, c, _p| { h.model_list(&c) };
+    WorkspaceRoots, WorkspaceRoots, Empty => DirectoryRoots, |h, c, _p| { h.workspace_roots(&c) };
+    WorkspaceList, WorkspaceList, DirectoryListRequest => DirectoryListResult, |h, c, p| { h.workspace_list(&c, p).await };
+    WorkspaceMkdir, WorkspaceMkdir, DirectoryMkdirRequest => DirectoryMkdirReceipt, |h, c, p| { h.workspace_mkdir(&c, p).await };
     ListTools, ToolList, ToolListRequest => Vec<ToolSpec>, |h, c, p| {
         match p.target {
             None => h.tool_list(&c),

@@ -357,6 +357,7 @@ impl Host {
                 config: candidate.config,
                 revision,
                 tools: candidate.tools,
+                directories: candidate.directories,
                 resources: Some(candidate.resources),
             });
             // Only a successful publication tightens launch inheritance. Old

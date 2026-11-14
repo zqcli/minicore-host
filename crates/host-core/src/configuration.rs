@@ -22,6 +22,9 @@ pub struct HostConfig {
     pub models: Vec<OpenAiModelSettings>,
     /// Available selections from the statically compiled tool registry.
     pub tools: Vec<ToolBinding>,
+    /// Explicit directory-picker roots. Empty exposes no directories.
+    #[serde(default)]
+    pub workspace_roots: Vec<String>,
     pub network: NetworkSettings,
     pub logging: LogSettings,
 }
@@ -32,6 +35,7 @@ impl Default for HostConfig {
             framework_instructions: String::new(),
             models: Vec::new(),
             tools: Vec::new(),
+            workspace_roots: Vec::new(),
             network: NetworkSettings::default(),
             logging: LogSettings::default(),
         }
@@ -71,6 +75,11 @@ impl HostConfig {
                 .map_err(|error| invalid(error.to_string()))?;
             if !tools.insert(&tool.name) {
                 return Err(invalid("duplicate configured tool"));
+            }
+        }
+        for root in &self.workspace_roots {
+            if !std::path::Path::new(root).is_absolute() || root.contains('\0') {
+                return Err(invalid("workspace roots must be absolute directory paths"));
             }
         }
         if let Some(source) = &self.network.access_key_env {
@@ -216,6 +225,7 @@ pub struct PreparedHostConfiguration {
     pub(crate) tools: Vec<ToolSpec>,
     pub(crate) access_key: Option<String>,
     pub(crate) preparer: Option<Arc<dyn HostConfigurationPreparer>>,
+    pub(crate) directories: Arc<minicore_host_workspace::WorkspaceDirectories>,
 }
 impl fmt::Debug for PreparedHostConfiguration {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -250,6 +260,10 @@ impl PreparedHostConfiguration {
             ));
         }
         Ok(Self {
+            directories: Arc::new(
+                minicore_host_workspace::WorkspaceDirectories::prepare(&config.workspace_roots)
+                    .map_err(|error| invalid(format!("workspace roots: {error}")))?,
+            ),
             config,
             resources,
             tools,
@@ -317,6 +331,7 @@ pub(crate) struct PublishedConfiguration {
     pub(crate) config: HostConfig,
     pub(crate) revision: ConfigRevision,
     pub(crate) tools: Vec<ToolSpec>,
+    pub(crate) directories: Arc<minicore_host_workspace::WorkspaceDirectories>,
     // Retired only after the real Host shutdown barrier has settled all work.
     pub(crate) resources: Option<Arc<dyn ResourceResolver>>,
 }
@@ -335,6 +350,7 @@ impl ConfigurationOwner {
                     config: candidate.config,
                     revision,
                     tools: candidate.tools,
+                    directories: candidate.directories,
                     resources: Some(candidate.resources),
                 }),
                 saving: false,
@@ -365,6 +381,7 @@ impl ConfigurationOwner {
                 config: prior.config.clone(),
                 revision: prior.revision,
                 tools: prior.tools.clone(),
+                directories: Arc::clone(&prior.directories),
                 resources: None,
             });
             (

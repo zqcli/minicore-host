@@ -40,6 +40,7 @@ For example, this **template** declares one OpenAI-compatible provider:
     "request_timeout_ms": 120000
   }],
   "tools": [],
+  "workspace_roots": [],
   "network": {"listen": null, "access_key_env": null},
   "logging": {"level": "info", "output": {"kind": "stderr"}}
 }
@@ -67,6 +68,16 @@ workspace; they do not use the process's current directory as a fallback.
 `apply_patch` accepts `{ "path": "relative/file", "patch": "..." }` for one
 existing UTF-8 file, using unified diff or a single Codex Update File patch.
 It follows the same approval, mutation guard and edit-journal path as `edit`.
+
+`workspace_roots` explicitly enables directory selection before a Session exists.
+For example, set `"workspace_roots":["/home/user/projects"]` (or the actual absolute
+Windows path, such as `"C:\\Users\\User\\projects"`). Every root must already be a
+directory; preparation fixes its canonical path. The default empty list exposes
+none and does not fall back to HOME, cwd or a Session workspace. The three
+`workspace.roots/list/mkdir` operations use this scope; existing Session workspace
+reads and tool execution keep their own configured workspace. Roots can change
+through the existing whole-candidate `host.reload` boundary. A browser's selected
+path is a path on the Host machine.
 
 Session `execution.approval` defaults to `"ask"`, including when omitted.
 Mutating calls request approval with `allow_once`/`deny` answers; builtin

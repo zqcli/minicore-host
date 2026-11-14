@@ -1,6 +1,23 @@
-# MiniCore Host workspace reads
+# MiniCore Host workspace and directory operations
 
 A small backend module for SPEC v4.10.3 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
+
+## Host directory selection
+
+`WorkspaceDirectories::prepare` canonicalizes only explicitly configured absolute
+roots during Host resource preparation. `roots/list/mkdir` operate on that immutable
+selection without requiring a Session. List results contain direct directories only,
+including symlinks whose targets remain inside an allowed root. They use absolute
+Host-platform paths, preserve Windows drive/UNC syntax, and reject unrepresentable
+UTF-8 paths rather than inventing lossy names. Names use the Host platform's rules.
+List cursors bind all prepared roots, the canonical directory and hidden filter;
+page size is caller-selected with no fixed entry cap. These are live observations.
+
+Host owns authentication, operation rights, blocking-worker lifetime, shutdown
+settlement, error mapping and the mkdir receipt. `mkdir` creates one actual child,
+never recursively creates parents or overwrites an existing entry. The same local
+path containment limits described below apply; this is not isolation from a hostile
+same-user process changing filesystem components concurrently.
 
 ## Owner integration
 
