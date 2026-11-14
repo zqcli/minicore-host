@@ -1,6 +1,24 @@
 # MiniCore Host
 
-## Current work: Host client capabilities (Task 109)
+## Current work: manual compaction tool ordering (Task 110)
+
+[Task 110](tasks/110-compaction-tool-order/TASK.md) fixes daily acceptance F2
+on the local 0.11.0 dev line, based on
+`32f074c57868533af81b0c6491440bae24b872c8`. The production compaction resolver
+normalizes selected tool declarations by name, matching ordinary Turn binding
+while preserving duplicate/unknown-tool validation and Runtime's strict request
+contract. Regression coverage uses three orders of the same builtin toolset
+and real manual compaction/continuation through a scripted loopback Responses
+provider. No TUI, dependency pin, version or durable format changes are made.
+Implementation: `8fb386d6ee070d9edf291fde32b8ed57f099ff38`. Remote Linux gates
+pass 1,180 unique Rust tests, 7 doctests, 28 Python checks, formatting and strict
+Clippy/rustdoc; the permission-sensitive suite runs with root DAC bypass
+capabilities removed. Both new regressions fail with the fix reverted. Exact
+commands, environment limits and the local-source TUI resolution recommendation
+are recorded in the task. No local compilation, push or live-provider/TUI
+acceptance is claimed.
+
+## Previous checkpoint: Host client capabilities (Task 109)
 
 [Task 109](tasks/109-host-capabilities/TASK.md) implements the approved Host-only
 capability work against dev `7a1881c85e57a97c85724c1a90a87852a1930bd8`.
