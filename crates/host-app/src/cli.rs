@@ -102,15 +102,15 @@ mod tests {
             .unwrap();
         let expected = std::path::absolute("settings").unwrap();
         assert_eq!(options.config_dir, expected);
-        assert_eq!(options.data_root, PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap()).join(".minicore/data"));
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .unwrap();
+        let root = PathBuf::from(home).join(".minicore");
+        assert_eq!(options.data_root, root.join("data"));
         let options = parse(&["--config-dir", "settings", "--data-root", "state"])
             .unwrap()
             .unwrap();
         assert_eq!(options.data_root, std::path::absolute("state").unwrap());
         let options = parse(&[]).unwrap().unwrap();
-        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
-            .unwrap();
-        let root = PathBuf::from(home).join(".minicore");
         assert_eq!(options.config_dir, root.join("config"));
         assert_eq!(options.data_root, root.join("data"));
     }
