@@ -1,6 +1,25 @@
 # MiniCore Host
 
-## Current delivery: Host/TUI 0.12.3 (Task 116)
+## In progress: Host/TUI 0.12.4 (Task 117)
+
+[Task 117](tasks/117-tui-functional-fixes/TASK.md) records the owner's approval
+to repair exactly three frontend issues after updating the specification:
+paste into Find/Sessions/Models/Agents queries, forward-delete undo/redo, and
+Session rows whose distinct long titles clip to the same visible label.
+SPEC 4.11.3 defines the local editing and stable short-ID contracts; the TUI's
+English design contract mirrors them. Host -> Agent -> SessionController,
+native identities and schema-3 storage remain unchanged. No backend production
+logic or new metadata is required.
+
+The patch target is 0.12.4 for both repositories. Workers were requested with
+`gpt-6-astra` / `max`; these are requested settings, not independently verified
+runtime settings. Specification preparation is complete; implementation,
+release integration, independent review and validation are pending. Exact
+commits and observed checks will be recorded as they complete. Frozen prior QA
+remains failure evidence, not validation of the repaired build. Themes, F4,
+clipboard behavior and the other deferred findings remain outside this task.
+
+## Previous delivery: Host/TUI 0.12.3 (Task 116)
 
 [Task 116](tasks/116-error-context/TASK.md) implements SPEC 4.11.2: preserve safe
 upstream error messages and source details, bind current identities for agent
