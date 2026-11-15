@@ -436,7 +436,7 @@ async fn cancellation_during_save_keeps_save_owner_and_complete_response() {
         CancelStatus::Claimed
     );
     assert!(fixture.session.state.lock().unwrap().completed.is_empty());
-    assert!(DataRoot::acquire(fixture.store.canonical_path().ancestors().nth(4).unwrap()).is_err());
+    assert!(DataRoot::acquire(fixture._dir.path().join("host")).is_err());
     gate.add_permits(1);
     until(&fixture, |state| state.completed.len() == 1).await;
     let saved = records(&fixture);
