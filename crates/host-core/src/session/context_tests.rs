@@ -140,10 +140,11 @@ fn fixture() -> Fixture {
             agent_id.clone(),
             host_id.clone(),
             AgentData {
-                configuration_source: None,
-                name: "gated save fixture".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "gated save fixture".into(),
+                    config: config.clone(),
+                },
                 mode: StorageMode::Persistent,
-                config: config.clone(),
                 config_revision: 0,
                 default_session_id: None,
             },
@@ -167,7 +168,7 @@ fn fixture() -> Fixture {
             closed: None,
         },
     );
-    store.save(&record).unwrap();
+    store.create(&record).unwrap();
     let model = Arc::new(ScriptedModel {
         descriptor: ModelDescriptor::new(
             "test/model".parse().unwrap(),

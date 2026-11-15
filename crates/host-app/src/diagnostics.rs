@@ -70,9 +70,12 @@ fn validate_output(data_root: &Path, output: &LogOutput) -> Result<(), &'static 
         }
         Err(_) => return Err("cannot inspect diagnostic output"),
     };
-    // HostStore owns host.json and the agents subtree. A separate logs
+    // HostStore owns host.json, agents and sessions. A separate logs
     // directory remains valid; diagnostics must never append to those records.
-    if resolved == root.join("host.json") || resolved.starts_with(root.join("agents")) {
+    if resolved == root.join("host.json")
+        || resolved.starts_with(root.join("agents"))
+        || resolved.starts_with(root.join("sessions"))
+    {
         return Err("diagnostic output conflicts with Host business storage");
     }
     Ok(())

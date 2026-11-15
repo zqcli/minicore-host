@@ -83,10 +83,12 @@ fn paths(
     agent: &AgentRef,
     session: &SessionClient,
 ) -> (PathBuf, PathBuf) {
-    let root = directory.join("agents").join(agent.agent_id.as_str());
     (
-        root.join("agent.json"),
-        root.join("sessions")
+        directory
+            .join("agents")
+            .join(format!("{}.json", agent.agent_id)),
+        directory
+            .join("sessions")
             .join(session.target().session_id.as_str())
             .join("session.json"),
     )

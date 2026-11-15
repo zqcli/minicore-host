@@ -64,8 +64,6 @@ async fn update_and_close_save_errors_keep_original_operation_not_the_resume_ope
             );
         }
         let metadata = root
-            .join("agents")
-            .join(target.agent_id.as_str())
             .join("sessions")
             .join(target.session_id.as_str())
             .join("session.json");

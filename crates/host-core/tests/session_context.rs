@@ -514,10 +514,11 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
             agent_id.clone(),
             host_id,
             AgentData {
-                configuration_source: None,
-                name: "stored fixture".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "stored fixture".into(),
+                    config: config(automatic),
+                },
                 mode: StorageMode::Persistent,
-                config: config(automatic),
                 config_revision: 3,
                 default_session_id: None,
             },
@@ -527,7 +528,7 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
         .session(session_id.clone(), StorageMode::Persistent)
         .unwrap();
     store
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session_id.clone(),
             agent_id.clone(),
             SessionData {

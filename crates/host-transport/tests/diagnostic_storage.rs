@@ -45,11 +45,7 @@ async fn real_cold_load_and_metadata_failures_keep_business_state_and_record_onl
     stop(&seed).await;
     drop(client);
     drop(seed);
-    let session_path = root
-        .join("agents")
-        .join(target.agent_id.as_str())
-        .join("sessions")
-        .join(target.session_id.as_str());
+    let session_path = root.join("sessions").join(target.session_id.as_str());
     let history = session_path.join("history.jsonl");
     let original = std::fs::read(&history).unwrap();
     let mut corrupt = original.clone();

@@ -61,8 +61,6 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     .await
     .unwrap();
     let history = root
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str())
         .join("history.jsonl");

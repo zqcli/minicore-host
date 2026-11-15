@@ -151,9 +151,7 @@ fn malformed_unknown_and_incomplete_native_json_never_fall_back() {
 
 #[test]
 fn path_selection_uses_home_defaults_and_independent_explicit_paths() {
-    let home = PathBuf::from(
-        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap(),
-    );
+    let home = std::env::home_dir().unwrap();
     let root = home.join(".minicore");
     let paths = resolve_config_paths(None, None).unwrap();
     assert_eq!(paths.config_dir, root.join("config"));
@@ -204,7 +202,7 @@ fn scaffold_is_native_explicit_and_does_not_replace_existing_files() {
         vec![workspace.to_str().unwrap()]
     );
     assert!(
-        matches!(loaded.host.logging.output, LogOutput::File { ref path } if Path::new(path).is_absolute())
+        matches!(loaded.host.logging.output, LogOutput::File { ref path } if PathBuf::from(path) == std::env::home_dir().unwrap().join(".minicore/logs").canonicalize().unwrap().join("host.log"))
     );
     assert!(!root.path().join("tui.json").exists());
     assert!(!root.path().join("data").exists());

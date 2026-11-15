@@ -262,9 +262,9 @@ async fn persistent_metadata_failure_and_reconcile_callbacks_leave_owner_guards(
     let path = directory
         .path()
         .join("agents")
-        .join(agent.agent_id.as_str());
-    std::fs::rename(path.join("agent.json"), path.join("original-agent.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+        .join(format!("{}.json", agent.agent_id));
+    std::fs::rename(path.clone(), directory.path().join("original-agent.json")).unwrap();
+    std::fs::create_dir(path.clone()).unwrap();
     let (probe, dispatch) = reentry();
     probe.arm(&host, &caller, Some(agent.clone()));
     async {
@@ -283,8 +283,8 @@ async fn persistent_metadata_failure_and_reconcile_callbacks_leave_owner_guards(
         .await
         .unwrap();
         until(|| host.agent_info(&caller, &agent).unwrap().metadata_fault).await;
-        std::fs::remove_dir(path.join("agent.json")).unwrap();
-        std::fs::rename(path.join("original-agent.json"), path.join("agent.json")).unwrap();
+        std::fs::remove_dir(path.clone()).unwrap();
+        std::fs::rename(directory.path().join("original-agent.json"), path.clone()).unwrap();
         host.reconcile_agent_record(&caller, &agent).await.unwrap();
     }
     .with_subscriber(dispatch)

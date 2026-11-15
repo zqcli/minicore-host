@@ -1,18 +1,28 @@
 # MiniCore Host
 
-## Current work: configuration references and flat storage (Task 115)
+## Current delivery: Host/TUI 0.12.2 (Task 115)
 
-[Task 115](tasks/115-config-references/TASK.md) implements the approved
-SPEC 4.11.1 update before changing Host and TUI from 0.12.1 to 0.12.2.
+[Task 115](tasks/115-config-references/TASK.md) implements SPEC 4.11.1,
+committed first at `d95ab422dbb844b79ed3a9a386345f3175c69c39`.
 File-managed configuration bodies live only in the configuration directory;
-durable owner metadata keeps identity, source and a fingerprint. Missing declared
-Agents fail preparation instead of recovering a saved configuration. Dynamic
-Agents and independent Hosts retain inline configuration; Sessions retain their
-own effective configuration and history. Persistent Agents use `agents/<id>.json`
-and Sessions use `sessions/<id>/`. Default config, data and logs are separated
-under the user's `.minicore` directory. Three implementation workers were
-requested with `gpt-6-astra` and `max` reasoning, with disjoint ownership.
-The spec checkpoint is prepared first; implementation and validation are pending.
+owner records keep stable identities, source keys, applied fingerprints and
+revisions. Missing declarations fail before startup writes or reload publication.
+Dynamic Agents and standalone Hosts retain inline configuration. Sessions keep
+independent effective configuration and history in the flat schema-3 layout.
+Configuration, data and scaffolded logs use separate native-home defaults;
+TUI uses the shared path resolver and owns its JSON preferences and commands.
+Old object formats are rejected without migration or snapshot recovery.
+
+Local Linux validation passed the full Host gate: formatting, strict Clippy,
+1,240 enumerated native test cases, seven doctests, strict rustdoc and 28 Python
+checks. TUI default tests passed (483 passed; three optional performance cases
+and one explicitly invoked subprocess helper excluded from the default run),
+with strict Clippy/rustdoc and real in-process Host integration.
+The normal Linux/macOS/Windows CI and native package jobs remain the final
+publication gates for each exact delivered revision. No release tag is created.
+The completion environment has no callable Astra/max subagent facility; the
+implementation and local validation were performed directly. Earlier requested
+worker settings are not evidence of effective execution in this environment.
 
 ## Previous checkpoint: Host 0.12.1 integration (Task 114)
 

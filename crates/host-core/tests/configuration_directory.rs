@@ -314,8 +314,6 @@ async fn directory_restart_preserves_identity_history_and_session_instructions()
     .unwrap();
     let history_path = fixture
         .data
-        .join("agents")
-        .join(agent.agent_id.as_str())
         .join("sessions")
         .join(session.session_id.as_str())
         .join("history.jsonl");
@@ -402,7 +400,7 @@ async fn directory_restart_preserves_identity_history_and_session_instructions()
 }
 
 #[tokio::test]
-async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
+async fn file_sources_are_required_and_explicit_deletion_preserves_dynamic_agents() {
     let fixture = Fixture::new();
     fixture.agent("writer.json", "writer", "Writer", "file instructions");
     let host = fixture.open().await;
@@ -417,7 +415,7 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
             0,
             &AgentConfigPatch {
                 instructions: Some("RPC overwrite".into()),
-                ..AgentConfigPatch::default()
+                ..Default::default()
             }
         )
         .await
@@ -431,12 +429,12 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
             &agent,
             AgentDeleteRequest {
                 operation_id: operation(),
-                scope: AgentDeleteScope::default()
+                scope: AgentDeleteScope::default(),
             }
         )
         .unwrap_err()
         .kind(),
-        Some(FaultKind::AgentConfigConflict)
+        Some(FaultKind::AgentDeleteInvalid)
     );
     host.update_session_async(
         &caller,
@@ -444,7 +442,7 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
         0,
         &SessionConfigPatch {
             instructions: Some("Session override".into()),
-            ..SessionConfigPatch::default()
+            ..Default::default()
         },
     )
     .await
@@ -473,55 +471,58 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
             .configuration_source
             .is_none()
     );
+    let paths = [
+        fixture.data.join("host.json"),
+        fixture
+            .data
+            .join("agents")
+            .join(format!("{}.json", agent.agent_id)),
+        fixture
+            .data
+            .join("sessions")
+            .join(session.session_id.as_str())
+            .join("session.json"),
+    ];
+    let before: Vec<_> = paths
+        .iter()
+        .map(|path| std::fs::read(path).unwrap())
+        .collect();
+    let original = host.agent_info(&caller, &agent).unwrap();
     std::fs::remove_file(fixture.config.join("agents/writer.json")).unwrap();
-    let result = reload(&host, &caller).await;
-    assert!(
-        matches!(result, HostReloadResult::Applied { ref agents, .. } if matches!(&agents[0], AgentConfigurationResult::Unmanaged { .. }))
-    );
-    let detached = host.agent_info(&caller, &agent).unwrap();
+    assert!(matches!(
+        reload(&host, &caller).await,
+        HostReloadResult::Failed { .. }
+    ));
+    let actual = host.agent_info(&caller, &agent).unwrap();
+    assert_eq!(actual.config, original.config);
+    assert_eq!(actual.config_revision, original.config_revision);
     assert_eq!(
-        detached.configuration_source,
+        actual.configuration_source,
         Some(AgentConfigurationSource {
-            key: "writer".into(),
-            managed: false
+            key: "writer".into()
         })
     );
-    host.update_agent_async(
-        &caller,
-        &agent,
-        detached.config_revision,
-        &AgentConfigPatch {
-            instructions: Some("dynamic instructions".into()),
-            ..AgentConfigPatch::default()
-        },
-    )
-    .await
-    .unwrap();
+    for (path, bytes) in paths.iter().zip(&before) {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
     stop(&host, &caller).await;
     drop(connection);
     drop(host);
+    let result = Host::open_directory_configured(&fixture.data, &fixture.config, |config| async {
+        fixture.preparer.prepare(config).await
+    })
+    .await;
+    assert!(matches!(result, Err(ref fault) if fault.to_string().contains("writer")));
+    for (path, bytes) in paths.iter().zip(&before) {
+        assert_eq!(&std::fs::read(path).unwrap(), bytes);
+    }
+
+    // Restoring the declaration with the same key restores its association,
+    // never by guessing a default from the independent Session override.
+    fixture.agent("renamed.json", "writer", "Returned writer", "new defaults");
     let host = fixture.open().await;
     let connection = host.connect().unwrap();
     let caller = connection.caller();
-    assert_eq!(
-        host.agent_info(&caller, &agent)
-            .unwrap()
-            .configuration_source,
-        Some(AgentConfigurationSource {
-            key: "writer".into(),
-            managed: false
-        })
-    );
-    fixture.agent(
-        "other-file.json",
-        "writer",
-        "returned Writer",
-        "returned instructions",
-    );
-    assert!(matches!(
-        reload(&host, &caller).await,
-        HostReloadResult::Applied { .. }
-    ));
     assert_eq!(target(&host, &caller, "writer"), agent);
     assert_eq!(default_session(&host, &caller, &agent), session);
     assert_eq!(
@@ -531,25 +532,27 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
             .instructions,
         "Session override"
     );
+    assert_eq!(
+        host.agent_info(&caller, &agent)
+            .unwrap()
+            .config
+            .instructions,
+        "new defaults"
+    );
     assert!(
         host.agent_info(&caller, &copy)
             .unwrap()
             .configuration_source
             .is_none()
     );
-    assert_eq!(host.agents(&caller).unwrap().len(), 2);
-    std::fs::remove_file(fixture.config.join("agents/other-file.json")).unwrap();
-    assert!(matches!(
-        reload(&host, &caller).await,
-        HostReloadResult::Applied { .. }
-    ));
+    std::fs::remove_file(fixture.config.join("agents/renamed.json")).unwrap();
     host.agent_delete(
         &caller,
         &agent,
         AgentDeleteRequest {
             operation_id: operation(),
             scope: AgentDeleteScope::Sessions {
-                session_ids: vec![session.session_id],
+                session_ids: vec![session.session_id.clone()],
                 close: true,
             },
         },
@@ -567,7 +570,12 @@ async fn managed_updates_delete_and_copy_obey_owner_source_boundaries() {
     })
     .await
     .unwrap();
+    assert!(matches!(
+        reload(&host, &caller).await,
+        HostReloadResult::Applied { .. }
+    ));
     assert_eq!(host.agents(&caller).unwrap().len(), 1);
+    assert!(host.agent_info(&caller, &copy).is_ok());
     stop(&host, &caller).await;
 }
 
@@ -650,8 +658,7 @@ async fn real_agent_save_failure_reports_partial_host_and_sibling_commits() {
     let broken = fixture
         .data
         .join("agents")
-        .join(b.agent_id.as_str())
-        .join("agent.json");
+        .join(format!("{}.json", b.agent_id.as_str()));
     std::fs::rename(&broken, broken.with_extension("saved")).unwrap();
     std::fs::create_dir(&broken).unwrap();
     let result = reload(&host, &caller).await;
@@ -730,8 +737,7 @@ async fn key_rotation_does_not_cancel_new_configured_agent_creation() {
         host.agent_info(&new.caller(), &agent)
             .unwrap()
             .configuration_source
-            .unwrap()
-            .managed
+            .is_some()
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), 0);
     stop(&host, &new.caller()).await;
@@ -824,4 +830,160 @@ async fn accepted_directory_work_finishes_existing_and_new_agents_during_shutdow
         assert_eq!(reopened.agents(&caller).unwrap().len(), 2);
         stop(&reopened, &caller).await;
     }
+}
+
+#[tokio::test]
+async fn reference_only_restart_ignores_json_formatting_and_role_changes_only_new_sessions() {
+    let fixture = Fixture::new();
+    fixture.agent(
+        "one.json",
+        "first",
+        "private Agent display",
+        "private Agent instructions",
+    );
+    let host = fixture.open().await;
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    let agent = target(&host, &caller, "first");
+    let session = default_session(&host, &caller, &agent);
+    let initial_host = host.config_get(&caller).unwrap();
+    let initial_agent = host.agent_info(&caller, &agent).unwrap();
+    let host_path = fixture.data.join("host.json");
+    let agent_path = fixture
+        .data
+        .join("agents")
+        .join(format!("{}.json", agent.agent_id));
+    let host_record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&host_path).unwrap()).unwrap();
+    let agent_record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&agent_path).unwrap()).unwrap();
+    assert_eq!(host_record["schema_version"], 3);
+    assert_eq!(host_record["data"]["configuration"]["source"], "file");
+    assert!(host_record["data"]["configuration"].get("config").is_none());
+    assert_eq!(agent_record["data"]["configuration"]["key"], "first");
+    for text in [
+        "private Agent display",
+        "private Agent instructions",
+        "role text",
+        "test/model",
+    ] {
+        assert!(!agent_record.to_string().contains(text));
+    }
+    stop(&host, &caller).await;
+    drop(connection);
+    drop(host);
+    // Re-encode as sorted JSON rather than the native struct's field order.
+    for path in [
+        fixture.config.join("host.json"),
+        fixture.config.join("agents/one.json"),
+        fixture.config.join("roles/writer.json"),
+    ] {
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
+    }
+    let host = fixture.open().await;
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(target(&host, &caller, "first"), agent);
+    assert_eq!(
+        host.config_get(&caller).unwrap().config_revision,
+        initial_host.config_revision
+    );
+    assert_eq!(
+        host.agent_info(&caller, &agent).unwrap().config_revision,
+        initial_agent.config_revision
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&std::fs::read(&agent_path).unwrap()).unwrap(),
+        agent_record
+    );
+    stop(&host, &caller).await;
+    drop(connection);
+    drop(host);
+    let role_path = fixture.config.join("roles/writer.json");
+    let mut role: Role = serde_json::from_slice(&std::fs::read(&role_path).unwrap()).unwrap();
+    role.instructions = "updated shared Role".into();
+    std::fs::write(role_path, serde_json::to_vec(&role).unwrap()).unwrap();
+    let host = fixture.open().await;
+    let connection = host.connect().unwrap();
+    let caller = connection.caller();
+    assert_eq!(
+        host.agent_info(&caller, &agent).unwrap().config_revision,
+        initial_agent.config_revision + 1
+    );
+    assert_eq!(
+        host.session_info(&caller, &session)
+            .unwrap()
+            .config
+            .role
+            .instructions,
+        "role text"
+    );
+    let created = host
+        .create_session_async(
+            &caller,
+            SessionCreate {
+                operation_id: operation(),
+                target: agent.clone(),
+                mode: None,
+                overrides: None,
+                initial_message: None,
+            },
+        )
+        .await
+        .unwrap();
+    let next = SessionRef {
+        agent_id: agent.agent_id,
+        session_id: created.session_id.unwrap(),
+    };
+    assert_eq!(
+        host.session_info(&caller, &next)
+            .unwrap()
+            .config
+            .role
+            .instructions,
+        "updated shared Role"
+    );
+    stop(&host, &caller).await;
+}
+
+#[tokio::test]
+async fn constructors_reject_persisted_source_changes_without_rewriting_identity() {
+    let fixture = Fixture::new();
+    let host = fixture.open().await;
+    let connection = host.connect().unwrap();
+    stop(&host, &connection.caller()).await;
+    drop(connection);
+    drop(host);
+    let path = fixture.data.join("host.json");
+    let before = std::fs::read(&path).unwrap();
+    assert!(
+        Host::open_configured(&fixture.data, HostConfig::default(), |config| fixture
+            .preparer
+            .prepare(config))
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let inline_root = fixture._root.path().join("inline-data");
+    let host = Host::open_configured(&inline_root, HostConfig::default(), |config| {
+        fixture.preparer.prepare(config)
+    })
+    .await
+    .unwrap();
+    let connection = host.connect().unwrap();
+    stop(&host, &connection.caller()).await;
+    drop(connection);
+    drop(host);
+    let path = inline_root.join("host.json");
+    let before = std::fs::read(&path).unwrap();
+    assert!(
+        Host::open_directory_configured(&inline_root, &fixture.config, |config| fixture
+            .preparer
+            .prepare(config))
+        .await
+        .is_err()
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before);
 }

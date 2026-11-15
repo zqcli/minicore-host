@@ -20,7 +20,6 @@ pub struct HostReloadRequest {
 #[serde(deny_unknown_fields)]
 pub struct AgentConfigurationSource {
     pub key: String,
-    pub managed: bool,
 }
 impl AgentConfigurationSource {
     pub fn validate(&self) -> Result<(), ValidationError> {
@@ -43,11 +42,6 @@ pub enum AgentConfigurationResult {
         receipt: Box<AgentCreateReceipt>,
     },
     Updated {
-        key: String,
-        agent_id: AgentId,
-        config_revision: ConfigRevision,
-    },
-    Unmanaged {
         key: String,
         agent_id: AgentId,
         config_revision: ConfigRevision,
@@ -79,19 +73,13 @@ impl AgentConfigurationResult {
                 receipt.validate()?;
                 key
             }
-            Self::Updated { key, .. }
-            | Self::Unmanaged { key, .. }
-            | Self::Unchanged { key, .. } => key,
+            Self::Updated { key, .. } | Self::Unchanged { key, .. } => key,
             Self::Failed { key, error, .. } => {
                 error.validate()?;
                 key
             }
         };
-        AgentConfigurationSource {
-            key: key.clone(),
-            managed: true,
-        }
-        .validate()
+        AgentConfigurationSource { key: key.clone() }.validate()
     }
 }
 

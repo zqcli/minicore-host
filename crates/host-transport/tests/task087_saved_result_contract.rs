@@ -92,8 +92,6 @@ async fn saved_result_and_wait_share_exact_contract_on_typed_stdio_and_wss() {
     let network = server.client(wss_common::FIRST).await.unwrap();
     let path = directory
         .path()
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str())
         .join("history.jsonl");

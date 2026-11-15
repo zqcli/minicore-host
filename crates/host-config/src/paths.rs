@@ -34,14 +34,11 @@ pub fn resolve_config_paths(
     })
 }
 
-fn default_root() -> Result<PathBuf, Fault> {
-    let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
-    let home = std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| invalid(format!("cannot determine user home from {name}")))?;
-    let home = PathBuf::from(home);
+pub(crate) fn default_root() -> Result<PathBuf, Fault> {
+    let home = std::env::home_dir()
+        .ok_or_else(|| invalid("cannot determine the user's home directory"))?;
     if !home.is_absolute() {
-        return Err(invalid(format!("{name} must be an absolute directory")));
+        return Err(invalid("user home must be an absolute directory"));
     }
     Ok(home.join(".minicore"))
 }

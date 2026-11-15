@@ -315,8 +315,7 @@ async fn closing_memory_default_preserves_persistent_agent_without_replacement()
             directory
                 .path()
                 .join("agents")
-                .join(target.agent_id.to_string())
-                .join("agent.json"),
+                .join(format!("{}.json", target.agent_id)),
         )
         .unwrap(),
     )
@@ -325,8 +324,6 @@ async fn closing_memory_default_preserves_persistent_agent_without_replacement()
     assert!(
         !directory
             .path()
-            .join("agents")
-            .join(target.agent_id.to_string())
             .join("sessions")
             .join(target.session_id.to_string())
             .exists()

@@ -112,10 +112,11 @@ pub(super) fn setup(
             agent_id.clone(),
             host_id.clone(),
             AgentData {
-                configuration_source: None,
-                name: "fixture".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "fixture".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 0,
                 default_session_id: None,
             },
@@ -129,7 +130,7 @@ pub(super) fn setup(
         ..SessionConfig::default()
     };
     store
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             id.clone(),
             agent_id.clone(),
             SessionData {

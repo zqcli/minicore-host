@@ -192,9 +192,7 @@ async fn stopped(host: &Host, caller: &CallerContext) {
     until(|| (host.info(caller).unwrap().lifecycle == HostLifecycle::Stopped).then_some(())).await
 }
 fn history_path(dir: &std::path::Path, target: &SessionRef) -> std::path::PathBuf {
-    dir.join("agents")
-        .join(target.agent_id.to_string())
-        .join("sessions")
+    dir.join("sessions")
         .join(target.session_id.to_string())
         .join("history.jsonl")
 }

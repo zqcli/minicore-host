@@ -70,10 +70,11 @@ impl RecoveryFixture {
                     agent_id.clone(),
                     host_id.clone(),
                     AgentData {
-                        configuration_source: None,
-                        name: "resource recovery fixture".into(),
+                        configuration: minicore_host_storage::AgentConfiguration::Inline {
+                            name: "resource recovery fixture".into(),
+                            config: AgentConfig::default(),
+                        },
                         mode,
-                        config: AgentConfig::default(),
                         config_revision: 0,
                         default_session_id: None,
                     },
@@ -98,7 +99,7 @@ impl RecoveryFixture {
                     closed: None,
                 },
             );
-            store.save(&record).unwrap();
+            store.create(&record).unwrap();
             SessionController::from_record(
                 record,
                 store.clone(),

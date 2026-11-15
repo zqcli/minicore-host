@@ -2,7 +2,7 @@ use super::*;
 use crate::persistence::disk;
 use futures_util::FutureExt;
 use minicore_host_diagnostics::Context;
-use minicore_host_storage::{AgentData, AgentRecord};
+use minicore_host_storage::{AgentConfiguration, AgentData, AgentRecord};
 use std::panic::AssertUnwindSafe;
 use tokio::sync::oneshot;
 use tracing::{Instrument, instrument::WithSubscriber};
@@ -48,7 +48,6 @@ impl Host {
         };
         let source = AgentConfigurationSource {
             key: definition.key,
-            managed: true,
         };
         self.accept_agent_creation(
             None,
@@ -291,10 +290,15 @@ impl Host {
                     id.clone(),
                     self.id.clone(),
                     AgentData {
-                        configuration_source,
-                        name: request.name.clone(),
+                        configuration: AgentConfiguration::from_values(
+                            request.name.clone(),
+                            request.config.clone(),
+                            configuration_source,
+                        )
+                        .map_err(|error| {
+                            Fault::new(FaultKind::AgentConfigInvalid, error.to_string())
+                        })?,
                         mode: request.mode,
-                        config: request.config.clone(),
                         config_revision: 0,
                         default_session_id: None,
                     },
@@ -308,6 +312,7 @@ impl Host {
                 .await?;
                 AgentOwner::from_record(
                     record,
+                    (request.name.clone(), request.config.clone()),
                     store,
                     self.incarnation.clone(),
                     Arc::clone(&self.access),

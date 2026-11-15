@@ -13,6 +13,7 @@ mod diagnostics;
 mod discovery;
 mod metadata;
 mod persistent;
+pub(crate) use persistent::PersistentAgent;
 mod retirement;
 pub(crate) mod shutdown;
 use minicore_host_protocol::*;

@@ -181,8 +181,6 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
     .await;
     let path = dir
         .path()
-        .join("agents")
-        .join(target.agent_id.to_string())
         .join("sessions")
         .join(target.session_id.to_string())
         .join("history.jsonl");
@@ -333,10 +331,7 @@ async fn audit_explicit_resume_reconciles_original_unwritten_history_without_rer
 }
 
 fn session_directory(root: &std::path::Path, target: &SessionRef) -> std::path::PathBuf {
-    root.join("agents")
-        .join(target.agent_id.as_str())
-        .join("sessions")
-        .join(target.session_id.as_str())
+    root.join("sessions").join(target.session_id.as_str())
 }
 #[tokio::test]
 async fn resume_reconciles_only_this_sessions_original_metadata_candidate() {

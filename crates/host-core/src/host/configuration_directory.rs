@@ -3,7 +3,7 @@
 use super::*;
 use crate::persistence::disk;
 use minicore_host_config::{AgentDefinition, LoadedConfiguration, load_config_directory};
-use minicore_host_storage::DataRoot;
+use minicore_host_storage::{DataRoot, HostConfiguration, configuration_fingerprint};
 use std::path::{Path, PathBuf};
 
 pub(super) type ConfiguredOwners = BTreeMap<String, (Arc<AgentOwner>, AgentInfo)>;
@@ -77,9 +77,23 @@ impl Host {
             reading.load_host::<HostConfig>()
         })
         .await?;
-        let record = match previous {
+        let fingerprint = configuration_fingerprint(&loaded.host)
+            .map_err(|error| crate::configuration::invalid(error.to_string()))?;
+        let (record, agents) = match previous {
             Some(mut record) => {
-                if record.data.config != loaded.host {
+                let HostConfiguration::File {
+                    fingerprint: previous,
+                } = &record.data.configuration
+                else {
+                    return Err(crate::configuration::invalid(
+                        "inline Host cannot be opened as a file-managed Host",
+                    ));
+                };
+                // Resolve all bound declarations before changing any saved identity
+                // or configuration version. Missing files never trigger recovery.
+                let agents = super::persistent::read_agents(root.host(record.id.clone())).await?;
+                super::persistent::validate_sources(&agents, Some(&loaded.agents))?;
+                if previous != &fingerprint {
                     record.data.config_revision =
                         record.data.config_revision.checked_add(1).ok_or_else(|| {
                             Fault::new(
@@ -87,16 +101,20 @@ impl Host {
                                 "configuration revision exhausted",
                             )
                         })?;
-                    record.data.config = loaded.host;
+                    record.data.configuration = HostConfiguration::File { fingerprint };
                 }
-                record
+                (record, agents)
             }
-            None => HostRecord::new(
-                HostId::new().map_err(|error| {
-                    Fault::new(FaultKind::HostInternalUnexpected, error.to_string())
-                })?,
-                loaded.host,
-                0,
+            None => (
+                HostRecord::file(
+                    HostId::new().map_err(|error| {
+                        Fault::new(FaultKind::HostInternalUnexpected, error.to_string())
+                    })?,
+                    &loaded.host,
+                    0,
+                )
+                .map_err(|error| crate::configuration::invalid(error.to_string()))?,
+                Vec::new(),
             ),
         };
         let store = root.host(record.id.clone());
@@ -117,7 +135,9 @@ impl Host {
             .configuration_directory
             .set(loaded.directory)
             .expect("new Host directory binding");
-        owner.load_persistent_agents_owned().await?;
+        owner
+            .load_persistent_agents_owned(agents, &loaded.agents)
+            .await?;
         let existing = owner.configured_agents_owned()?;
         let results = owner
             .apply_directory_agents(loaded.agents, existing, &Self::operation_id()?)
@@ -174,6 +194,20 @@ impl Host {
         Ok(keyed)
     }
 
+    pub(super) fn validate_directory_sources(
+        definitions: &[AgentDefinition],
+        existing: &ConfiguredOwners,
+    ) -> Result<(), Fault> {
+        for key in existing.keys() {
+            if !definitions.iter().any(|definition| &definition.key == key) {
+                return Err(crate::configuration::invalid(format!(
+                    "missing Agent declaration for key {key}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn apply_directory_agents(
         self: &Arc<Self>,
         definitions: Vec<AgentDefinition>,
@@ -186,19 +220,13 @@ impl Host {
             if let Some((agent, original)) = existing.remove(&key) {
                 let unchanged = original.name == definition.name
                     && original.config == definition.config
-                    && original
-                        .configuration_source
-                        .as_ref()
-                        .is_some_and(|source| source.managed);
+                    && original.configuration_source.is_some();
                 let result = agent
                     .apply_configuration_owned(
                         original.config_revision,
                         definition.name,
                         definition.config,
-                        AgentConfigurationSource {
-                            key: key.clone(),
-                            managed: true,
-                        },
+                        AgentConfigurationSource { key: key.clone() },
                         operation,
                     )
                     .await;
@@ -242,39 +270,6 @@ impl Host {
                     },
                 });
             }
-        }
-        for (key, (agent, original)) in existing {
-            if !original
-                .configuration_source
-                .as_ref()
-                .is_some_and(|source| source.managed)
-            {
-                continue;
-            }
-            let result = agent
-                .apply_configuration_owned(
-                    original.config_revision,
-                    original.name,
-                    original.config,
-                    AgentConfigurationSource {
-                        key: key.clone(),
-                        managed: false,
-                    },
-                    operation,
-                )
-                .await;
-            results.push(match result {
-                Ok(info) => AgentConfigurationResult::Unmanaged {
-                    key,
-                    agent_id: info.id,
-                    config_revision: info.config_revision,
-                },
-                Err(error) => AgentConfigurationResult::Failed {
-                    key,
-                    agent_id: Some(original.id),
-                    error,
-                },
-            });
         }
         results
     }

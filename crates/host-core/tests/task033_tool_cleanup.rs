@@ -782,8 +782,6 @@ async fn failed_history_does_not_skip_child_cleanup_or_repeat_it_on_original_sav
     let turn = bundle.capability.source().turn.turn_id.clone();
     let path = data
         .path()
-        .join("agents")
-        .join(target.agent_id.to_string())
         .join("sessions")
         .join(target.session_id.to_string())
         .join("history.jsonl");
@@ -1007,8 +1005,6 @@ async fn task051_delete_acceptance_and_disconnect_wait_for_actual_tool_cleanup()
     until(|| (bundle.finish_calls.load(Ordering::SeqCst) == 1).then_some(())).await;
     let dir = data
         .path()
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str());
     assert!(dir.join("history.jsonl").exists());
@@ -1106,8 +1102,6 @@ async fn task051_failed_required_save_retains_source_and_does_not_skip_actual_wo
     invoked(&bundle).await;
     let dir = data
         .path()
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str());
     let path = dir.join("history.jsonl");

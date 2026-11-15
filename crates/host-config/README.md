@@ -9,7 +9,8 @@ Core re-exports the shared Host types for existing Rust embedding calls.
 absolute against the startup working directory. Without an override,
 configuration defaults to `~/.minicore/config`; data defaults to
 `~/.minicore/data`, independently. Path selection does not create files or consult legacy
-environment/home-directory rules.
+`MINICORE_HOME` rules. Native home discovery supplies defaults; missing required
+home information fails instead of falling back to the executable or cwd.
 
 `load_config_directory(root)` reads `host.json`, `roles/*.json` and
 `agents/*.json`. The Host file is required. Missing Agent/Role directories are
@@ -32,7 +33,8 @@ overwrites existing files. The examples contain a placeholder provider endpoint
 and environment-variable name, no actual credentials. The Agent explicitly
 selects the canonical supplied workspace or initialization working directory;
 the same directory is an explicit picker root in the generated Host file.
-Logging goes to an absolute file path, so a TUI can use the same examples.
+Logging goes to the absolute native-home `.minicore/logs/host.log` path; the
+initializer creates its parent. Host config remains the owner of custom log paths.
 
 Host framework, Role instructions and Agent instructions each default to an
 empty string when omitted. Native serialization retains explicit empty strings

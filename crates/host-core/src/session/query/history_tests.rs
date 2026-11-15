@@ -153,10 +153,11 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
             agent_id.clone(),
             host_id.clone(),
             AgentData {
-                configuration_source: None,
-                name: "task052 fixture".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "task052 fixture".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 0,
                 default_session_id: None,
             },
@@ -170,7 +171,7 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
         ..SessionConfig::default()
     };
     store
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             id.clone(),
             agent_id.clone(),
             SessionData {

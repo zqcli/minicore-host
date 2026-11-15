@@ -92,6 +92,16 @@ impl Directory {
         })
     }
 
+    pub fn create_child(&self, name: &str) -> Result<Self, StorageError> {
+        component(name)?;
+        self.verify_attached()?;
+        fs::mkdirat(&*self.file, name, Mode::from_bits_truncate(0o700)).map_err(|error| {
+            io_error("reserve new Session directory", self.path.join(name), error)
+        })?;
+        self.sync()?;
+        self.child(name, false)
+    }
+
     pub fn contains(&self, name: &str) -> Result<bool, StorageError> {
         component(name)?;
         match fs::statat(&*self.file, name, AtFlags::SYMLINK_NOFOLLOW) {
@@ -123,14 +133,6 @@ impl Directory {
 
     pub fn open_history(&self, write: bool) -> Result<File, StorageError> {
         self.open_file("history.jsonl", write, false)
-    }
-
-    pub fn read(&self, name: &str) -> Result<Vec<u8>, StorageError> {
-        let mut file = self.open_file(name, false, false)?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|e| io_error("read storage file", self.path.join(name), e))?;
-        Ok(bytes)
     }
 
     /// Capture one metadata file, excluding only this instance's atomic

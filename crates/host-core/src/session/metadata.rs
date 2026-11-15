@@ -577,10 +577,11 @@ mod activity_tests {
                 agent_id.clone(),
                 host_id.clone(),
                 AgentData {
-                    configuration_source: None,
-                    name: "activity metadata fixture".into(),
+                    configuration: minicore_host_storage::AgentConfiguration::Inline {
+                        name: "activity metadata fixture".into(),
+                        config: AgentConfig::default(),
+                    },
                     mode: StorageMode::Persistent,
-                    config: AgentConfig::default(),
                     config_revision: 0,
                     default_session_id: None,
                 },
@@ -604,7 +605,7 @@ mod activity_tests {
                 closed: None,
             },
         );
-        store.save(&record).unwrap();
+        store.create(&record).unwrap();
         let incarnation = HostIncarnation::new().unwrap();
         let access = ConnectionRegistry::new(host_id.clone(), incarnation.clone());
         let connection = access.connect().unwrap();

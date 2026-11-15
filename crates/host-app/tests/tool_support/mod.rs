@@ -295,9 +295,7 @@ pub fn history_result<'a>(history: &'a Value, id: &str) -> &'a Value {
     &results[0]["result"]
 }
 pub fn history_path(root: &Path, target: &Value) -> PathBuf {
-    root.join("agents")
-        .join(target["agent_id"].as_str().unwrap())
-        .join("sessions")
+    root.join("sessions")
         .join(target["session_id"].as_str().unwrap())
         .join("history.jsonl")
 }

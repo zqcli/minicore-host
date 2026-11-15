@@ -411,10 +411,11 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
             target.agent_id.clone(),
             host_id,
             AgentData {
-                configuration_source: None,
-                name: "saved fixture agent".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "saved fixture agent".into(),
+                    config: config.clone(),
+                },
                 mode: StorageMode::Persistent,
-                config: config.clone(),
                 config_revision: 0,
                 default_session_id: None,
             },
@@ -424,7 +425,7 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
         .session(target.session_id.clone(), StorageMode::Persistent)
         .unwrap();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             target.session_id.clone(),
             target.agent_id.clone(),
             SessionData {
@@ -447,8 +448,6 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
     drop(journal);
     let native = session.read_history().unwrap().runtime_history();
     let file = path
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str())
         .join("history.jsonl");

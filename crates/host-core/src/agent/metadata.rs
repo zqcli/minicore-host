@@ -1,14 +1,14 @@
 use super::*;
 use crate::persistence::disk;
 use minicore_host_diagnostics::Context;
-use minicore_host_storage::AgentData;
+use minicore_host_storage::{AgentConfiguration, AgentData};
 use tokio::sync::oneshot;
 
 #[derive(Clone)]
 pub(super) struct AgentRecordWork {
     candidate: AgentRecord,
     baseline: AgentRecord,
-    runtime_default: Option<SessionId>,
+    runtime: AgentInfo,
     running: bool,
     fault: Option<Fault>,
     context: Context,
@@ -22,15 +22,10 @@ impl AgentOwner {
             .clone()
     }
     pub(super) fn allow_configuration_update(state: &AgentState) -> Result<(), Fault> {
-        if state
-            .info
-            .configuration_source
-            .as_ref()
-            .is_some_and(|source| source.managed)
-        {
+        if state.info.configuration_source.is_some() {
             return Err(Fault::new(
                 FaultKind::AgentConfigConflict,
-                "Agent is managed by its configuration file; edit and reload the declaration, or remove it and reload before updating or deleting the Agent",
+                "Agent is managed by its configuration file; edit and reload the declaration to change defaults",
             ));
         }
         Ok(())
@@ -121,8 +116,8 @@ impl AgentOwner {
             candidate.config = config;
             candidate.configuration_source = Some(source);
             candidate.config_revision = expected.checked_add(1).ok_or_else(|| Fault::new(FaultKind::AgentInternalUnexpected, "configuration revision exhausted"))?;
-            let record = self.record(&candidate, persistent_default);
-            self.spawn_record_save(&mut state, record, candidate.default_session_id, sender, context.clone())?;
+            let record = self.record(&candidate, persistent_default)?;
+            self.spawn_record_save(&mut state, record, candidate, sender, context.clone())?;
             Ok(Some(self.metadata_accepted_record(context, &state.info)))
         })?;
         if let Some(diagnostic) = diagnostic {
@@ -135,19 +130,27 @@ impl AgentOwner {
             )
         })?
     }
-    fn record(&self, info: &AgentInfo, persistent_default: Option<SessionId>) -> AgentRecord {
-        AgentRecord::new(
+    fn record(
+        &self,
+        info: &AgentInfo,
+        persistent_default: Option<SessionId>,
+    ) -> Result<AgentRecord, Fault> {
+        let configuration = AgentConfiguration::from_values(
+            info.name.clone(),
+            info.config.clone(),
+            info.configuration_source.clone(),
+        )
+        .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+        Ok(AgentRecord::new(
             self.id.clone(),
             self.host_id.clone(),
             AgentData {
-                configuration_source: info.configuration_source.clone(),
-                name: info.name.clone(),
+                configuration,
                 mode: info.mode,
-                config: info.config.clone(),
                 config_revision: info.config_revision,
                 default_session_id: persistent_default,
             },
-        )
+        ))
     }
     fn persisted_default(&self, id: &Option<SessionId>) -> Result<Option<SessionId>, Fault> {
         let Some(id) = id.as_ref() else {
@@ -321,8 +324,10 @@ impl AgentOwner {
                 self.changed.notify_waiters();
                 self.metadata_result_record(context, &state.info, None)
             } else {
-                let record = self.record(&state.info, persistent_default);
-                self.spawn_record_save(&mut state, record, target, sender, context.clone())?;
+                let record = self.record(&state.info, persistent_default)?;
+                let mut runtime = state.info.clone();
+                runtime.default_session_id = target;
+                self.spawn_record_save(&mut state, record, runtime, sender, context.clone())?;
                 self.metadata_accepted_record(context, &state.info)
             };
             Ok((accepted(&mut state), diagnostic))
@@ -369,11 +374,11 @@ impl AgentOwner {
         self: &Arc<Self>,
         state: &mut AgentState,
         candidate: AgentRecord,
-        runtime_default: Option<SessionId>,
+        runtime: AgentInfo,
         sender: oneshot::Sender<Result<AgentInfo, Fault>>,
         context: Context,
     ) -> Result<(), Fault> {
-        let runtime = state
+        let executor = state
             .executor
             .clone()
             .or_else(|| tokio::runtime::Handle::try_current().ok())
@@ -394,16 +399,16 @@ impl AgentOwner {
         state.record_work = Some(AgentRecordWork {
             candidate: candidate.clone(),
             baseline,
-            runtime_default: runtime_default.clone(),
+            runtime: runtime.clone(),
             running: true,
             fault: None,
             context,
         });
         let owner = Arc::clone(self);
         state.record_task = Some(
-            runtime.spawn(
+            executor.spawn(
                 async move {
-                    let result = owner.save_record(candidate, runtime_default).await;
+                    let result = owner.save_record(candidate, runtime).await;
                     drop(owner);
                     let _ = sender.send(result);
                 }
@@ -415,7 +420,7 @@ impl AgentOwner {
     async fn save_record(
         self: &Arc<Self>,
         candidate: AgentRecord,
-        runtime_default: Option<SessionId>,
+        runtime: AgentInfo,
     ) -> Result<AgentInfo, Fault> {
         let store = self.store().expect("persistent Agent");
         let saved = candidate.clone();
@@ -442,11 +447,11 @@ impl AgentOwner {
             let result = match result {
                 Ok(_) => {
                     state.record_base = Some(candidate.clone());
-                    state.info.configuration_source = candidate.data.configuration_source;
-                    state.info.name = candidate.data.name;
-                    state.info.config = candidate.data.config;
+                    state.info.configuration_source = candidate.data.configuration.source();
+                    state.info.name = runtime.name;
+                    state.info.config = runtime.config;
                     state.info.config_revision = candidate.data.config_revision;
-                    state.info.default_session_id = runtime_default;
+                    state.info.default_session_id = runtime.default_session_id;
                     state.info.metadata_fault = None;
                     state.record_work = None;
                     Ok(state.info.clone())
@@ -489,9 +494,9 @@ impl AgentOwner {
                 ));
             }
             let candidate = work.candidate.clone();
-            let target = work.runtime_default.clone();
+            let runtime = work.runtime.clone();
             let context = work.context.clone();
-            self.spawn_record_save(&mut state, candidate, target, sender, context.clone())?;
+            self.spawn_record_save(&mut state, candidate, runtime, sender, context.clone())?;
             Ok(self.metadata_accepted_record(context, &state.info))
         })?;
         diagnostic.emit();
@@ -522,7 +527,7 @@ impl AgentOwner {
                     || state
                         .record_work
                         .as_ref()
-                        .is_some_and(|work| work.runtime_default.as_ref() == Some(id));
+                        .is_some_and(|work| work.runtime.default_session_id.as_ref() == Some(id));
                 if !references_child {
                     // An unrelated record candidate does not own this child's
                     // close. In particular, a prior failed Agent config save
@@ -537,25 +542,28 @@ impl AgentOwner {
                 } else if state.info.default_session_id.as_ref() != Some(id) {
                     return Ok(());
                 } else {
-                    let record = self.record(&state.info, None);
+                    let record = self.record(&state.info, None)?;
+                    let mut runtime = state.info.clone();
+                    runtime.default_session_id = None;
                     state.info.metadata_saving = true;
                     state.record_work = Some(AgentRecordWork {
                         baseline: state.record_base.clone().expect("metadata baseline"),
                         candidate: record.clone(),
-                        runtime_default: None,
+                        runtime: runtime.clone(),
                         running: true,
                         fault: None,
                         context: context.clone(),
                     });
                     Some((
                         record,
+                        runtime,
                         self.metadata_accepted_record(context.clone(), &state.info),
                     ))
                 }
             };
-            if let Some((candidate, diagnostic)) = candidate {
+            if let Some((candidate, runtime, diagnostic)) = candidate {
                 diagnostic.emit();
-                self.save_record(candidate, None).await?;
+                self.save_record(candidate, runtime).await?;
                 return Ok(());
             }
             notified.await;
@@ -623,14 +631,8 @@ impl AgentOwner {
                 let _ = sender.send(Ok(state.info.clone()));
                 self.metadata_result_record(context, &state.info, None)
             } else {
-                let record = self.record(&candidate, persistent_default);
-                self.spawn_record_save(
-                    &mut state,
-                    record,
-                    candidate.default_session_id,
-                    sender,
-                    context.clone(),
-                )?;
+                let record = self.record(&candidate, persistent_default)?;
+                self.spawn_record_save(&mut state, record, candidate, sender, context.clone())?;
                 self.metadata_accepted_record(context, &state.info)
             };
             Ok((accepted(&mut state), diagnostic))

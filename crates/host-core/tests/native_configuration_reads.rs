@@ -18,7 +18,7 @@ fn rewrite(path: &Path, edit: impl FnOnce(&mut Value)) {
 }
 
 #[test]
-fn explicit_empty_native_instructions_and_pre_extension_records_remain_readable() {
+fn explicit_empty_and_omitted_native_instructions_remain_readable() {
     let directory = tempfile::tempdir().unwrap();
     let root = DataRoot::acquire(directory.path().join("data")).unwrap();
     let host = root.host(HostId::new().unwrap());
@@ -34,10 +34,11 @@ fn explicit_empty_native_instructions_and_pre_extension_records_remain_readable(
             agent.id().clone(),
             host.id().clone(),
             AgentData {
-                configuration_source: None,
-                name: "Native record fixture".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "Native record fixture".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 0,
                 default_session_id: None,
             },
@@ -48,7 +49,7 @@ fn explicit_empty_native_instructions_and_pre_extension_records_remain_readable(
         .unwrap();
     let created = Timestamp::now();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session.id().clone(),
             agent.id().clone(),
             SessionData {
@@ -78,18 +79,19 @@ fn explicit_empty_native_instructions_and_pre_extension_records_remain_readable(
     let agent_path = host
         .canonical_path()
         .join("agents")
-        .join(agent.id().as_str())
-        .join("agent.json");
+        .join(format!("{}.json", agent.id().as_str()));
     let session_path = session.canonical_path().join("session.json");
     let history_path = session.canonical_path().join("history.jsonl");
     // The supported record schema already wrote these two original fields as
     // explicit empty strings. New Agent/Session instructions were absent.
     rewrite(&host_path, |value| {
-        value["data"]["config"]["framework_instructions"] = Value::String(String::new())
+        value["data"]["configuration"]["config"]["framework_instructions"] =
+            Value::String(String::new())
     });
     rewrite(&agent_path, |value| {
-        value["data"]["config"]["role"]["instructions"] = Value::String(String::new());
-        value["data"]["config"]
+        value["data"]["configuration"]["config"]["role"]["instructions"] =
+            Value::String(String::new());
+        value["data"]["configuration"]["config"]
             .as_object_mut()
             .unwrap()
             .remove("instructions");
@@ -107,17 +109,20 @@ fn explicit_empty_native_instructions_and_pre_extension_records_remain_readable(
         .map(|path| std::fs::read(path).unwrap())
         .collect();
 
-    assert!(
-        host.load_host::<HostConfig>()
-            .unwrap()
-            .data
-            .config
-            .framework_instructions
-            .is_empty()
-    );
+    let saved = host.load_host::<HostConfig>().unwrap();
+    let minicore_host_storage::HostConfiguration::Inline { config } = saved.data.configuration
+    else {
+        panic!("inline Host expected")
+    };
+    assert!(config.framework_instructions.is_empty());
     let loaded_agent = agent.load().unwrap();
-    assert!(loaded_agent.data.config.role.instructions.is_empty());
-    assert!(loaded_agent.data.config.instructions.is_empty());
+    let minicore_host_storage::AgentConfiguration::Inline { config, .. } =
+        loaded_agent.data.configuration
+    else {
+        panic!("dynamic Agent expected")
+    };
+    assert!(config.role.instructions.is_empty());
+    assert!(config.instructions.is_empty());
     let loaded_session = session.load().unwrap();
     assert!(
         loaded_session

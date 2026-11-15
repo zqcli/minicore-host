@@ -31,9 +31,24 @@ assertions use the workspace's `tests/support/input_context.rs`.
 
 `Host::open_persistent(path, initial_settings, resources).await` acquires the exclusive data root before constructing executable owners. A new root saves its identity; an existing root uses its saved Host ID and supported settings. Each open receives a fresh incarnation. The name-only `HostSettings` is an embedding construction convenience, converted to the single complete `HostConfig` disk shape. Directory composition uses `Host::open_directory_configured(data_root, config_dir, prepare)` and the `minicore-host-resources` builder. It reads current directory values on every startup; `open_configured` remains the separate programmatic embedding entry. Config queries, immutable resource catalogs, and accepted reload publication belong to Host; raw keys and execution handles are never stored in the record.
 
-The Host reads direct Agents. Each Agent reads its own metadata and initializes its direct Session metadata independently. History remains unloaded until the Session's load/resume/execution path validates it. Stored execution handles, queues, pauses, Load IDs, active Turns and tool processes are never reconstructed. Closed Sessions remain closed.
+Storage discovers Session metadata once and groups IDs by recorded Agent
+ownership. Host constructs its direct Agents and hands each only its discovered
+children; the Agent initializes Session metadata. History remains unloaded until
+the Session validates it. Execution handles, queues, pauses, Load IDs, active
+Turns and tool processes are never reconstructed. Closed Sessions remain closed.
 
-Malformed or unsafe child entries remain associated with their actual IDs through `agent_load_failures` or `session_load_failures`. They do not silently become empty objects or hide healthy siblings. An unavailable default remains unavailable; it is not redirected or replaced automatically. Unsupported records/settings are rejected without overwriting saved values with defaults.
+File-managed owner records retain configuration references and fingerprints, not
+bodies. Directory startup resolves every saved key before any record write;
+missing declarations fail startup or reload rather than restore old defaults.
+Independent programmatic Hosts and dynamic Agents retain inline configuration.
+Constructor/source mismatches are errors. Session effective configuration remains
+independent. Identity records use schema 3 and flat `agents/<id>.json` plus
+`sessions/<id>/` paths; old formats/layouts are not migrated.
+
+An untrusted or unknown Session owner makes discovery fail. Once ownership is
+known, invalid child configuration/history is exposed via the existing load
+failure facts without hiding healthy siblings. Unavailable defaults are not
+replaced automatically. Unsupported data is never overwritten with defaults.
 
 P/P, P/M and M/M are supported. M/P is rejected. Memory descendants of a persistent Host retain its root lease during accepted work but create no identity/history files of their own.
 
@@ -210,9 +225,11 @@ logging and network. It never starts with saved defaults and reloads afterward.
 Declared Agent keys live in optional `configuration_source` owner metadata,
 separate from native `AgentConfig`. The first Agent save binds the key. Later
 startup/reload reuses that identity and does not recreate its default Session.
-Removal releases file management while retaining source key, Sessions and
-history. File-managed Agents reject ordinary configuration/name updates and
-deletion; owner controls and independent Session updates keep their semantics.
+Missing declarations fail before startup writes or reload publication, retaining
+existing records and the running configuration. File-managed Agents reject ordinary
+configuration/name updates. Explicit deletion keeps the existing lifecycle and exact
+child scope; it does not edit declarations. Other owner controls and independent
+Session updates keep their semantics.
 
 `host.reload` owns directory parsing, full validation, Host publication and
 sequential direct Agent updates until the real work finishes. Individual Agent

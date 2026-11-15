@@ -473,11 +473,7 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
         let child_state = host.session_state(&connection.caller(), &child).unwrap();
         assert_eq!(child_state.data.lifecycle, SessionLifecycle::Closed);
         assert!(child_state.data.deletion.is_none());
-        let child_path = directory
-            .join("agents")
-            .join(child.agent_id.as_str())
-            .join("sessions")
-            .join(child.session_id.as_str());
+        let child_path = directory.join("sessions").join(child.session_id.as_str());
         assert!(child_path.join("session.json").exists());
         assert!(child_path.join("history.jsonl").exists());
         assert_eq!(
@@ -592,11 +588,7 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
             |item| matches!(item,HistoryItem::ToolResult(result) if result.output == tool.output)
         ));
         assert!(retained.iter().any(|item| matches!(item,HistoryItem::User(input) if serde_json::from_str::<Value>(input.input.as_text()).ok().as_ref() == Some(&notification))));
-        let child_path = directory
-            .join("agents")
-            .join(child.agent_id.as_str())
-            .join("sessions")
-            .join(child.session_id.as_str());
+        let child_path = directory.join("sessions").join(child.session_id.as_str());
         assert!(!child_path.exists());
         host.shutdown(
             &replacement.caller(),

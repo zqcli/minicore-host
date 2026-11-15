@@ -19,6 +19,25 @@ mod history_fixture;
 use history_fixture::read_history_bytes;
 use test_support::{set_mode, symlink};
 
+fn inline_host<C>(record: &HostRecord<C>) -> &C {
+    match &record.data.configuration {
+        HostConfiguration::Inline { config } => config,
+        HostConfiguration::File { .. } => panic!("expected independent Host"),
+    }
+}
+fn inline_host_mut<C>(record: &mut HostRecord<C>) -> &mut C {
+    match &mut record.data.configuration {
+        HostConfiguration::Inline { config } => config,
+        HostConfiguration::File { .. } => panic!("expected independent Host"),
+    }
+}
+fn inline_agent_mut(record: &mut AgentRecord) -> (&mut String, &mut AgentConfig) {
+    match &mut record.data.configuration {
+        AgentConfiguration::Inline { name, config } => (name, config),
+        AgentConfiguration::File { .. } => panic!("expected dynamic Agent"),
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct HostConfig {
@@ -51,10 +70,11 @@ impl Fixture {
                 agent.id().clone(),
                 host.id().clone(),
                 AgentData {
-                    configuration_source: None,
-                    name: "Agent".into(),
+                    configuration: minicore_host_storage::AgentConfiguration::Inline {
+                        name: "Agent".into(),
+                        config: AgentConfig::default(),
+                    },
                     mode: StorageMode::Persistent,
-                    config: AgentConfig::default(),
                     config_revision: 1,
                     default_session_id: None,
                 },
@@ -64,7 +84,7 @@ impl Fixture {
             .session(SessionId::new().unwrap(), StorageMode::Persistent)
             .unwrap();
         session
-            .save(&SessionRecord::new(
+            .create(&SessionRecord::new(
                 session.id().clone(),
                 agent.id().clone(),
                 SessionData {
@@ -225,7 +245,7 @@ fn stable_identity_discovery_and_atomic_object_roundtrip() {
         vec![f.session.id().clone()]
     );
     let mut record = f.agent.load().unwrap();
-    record.data.name = "renamed".into();
+    *inline_agent_mut(&mut record).0 = "renamed".into();
     record.data.config_revision += 1;
     f.agent.save(&record).unwrap();
     assert_eq!(f.agent.load().unwrap(), record);
@@ -244,7 +264,7 @@ fn unsupported_objects_and_ownership_mismatch_are_not_rewritten() {
     let original = fs::read(&path).unwrap();
     for (field, value) in [
         ("schema_version", serde_json::json!(1)),
-        ("schema_version", serde_json::json!(3)),
+        ("schema_version", serde_json::json!(2)),
         ("agent_id", serde_json::json!(AgentId::new().unwrap())),
         ("id", serde_json::json!(SessionId::new().unwrap())),
     ] {
@@ -268,10 +288,11 @@ fn memory_records_and_journal_create_no_files() {
             agent_id.clone(),
             f.host.id().clone(),
             AgentData {
-                configuration_source: None,
-                name: "memory".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "memory".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Memory,
-                config: AgentConfig::default(),
                 config_revision: 1,
                 default_session_id: None,
             },
@@ -286,7 +307,7 @@ fn memory_records_and_journal_create_no_files() {
         .session(SessionId::new().unwrap(), StorageMode::Memory)
         .unwrap();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session.id().clone(),
             agent_id.clone(),
             SessionData {
@@ -873,7 +894,7 @@ fn object_write_failure_probe() {
     let root = DataRoot::acquire(&path).unwrap();
     let mut record: HostRecord<HostConfig> = root.load_host().unwrap().unwrap();
     let host = root.host(record.id.clone());
-    record.data.config.label = "large object under OS file-size limit".repeat(1024);
+    inline_host_mut(&mut record).label = "large object under OS file-size limit".repeat(1024);
     record.data.config_revision += 1;
     assert!(matches!(
         host.save_host(&record),
@@ -1035,24 +1056,27 @@ fn same_revision_config_changes_and_creation_provenance_changes_are_rejected() {
     assert!(f.session.save(&changed).is_err());
     assert_eq!(fs::read(&path).unwrap(), before);
     let mut host = f.host.load_host::<HostConfig>().unwrap();
-    host.data.config.label = "changed without revision".into();
+    inline_host_mut(&mut host).label = "changed without revision".into();
     assert!(f.host.save_host(&host).is_err());
     let mut agent = f.agent.load().unwrap();
-    agent.data.config.role.instructions.push_str("changed");
+    inline_agent_mut(&mut agent)
+        .1
+        .role
+        .instructions
+        .push_str("changed");
     assert!(f.agent.save(&agent).is_err());
     let mut source_change = f.agent.load().unwrap();
-    source_change.data.configuration_source =
-        Some(minicore_host_protocol::AgentConfigurationSource {
-            key: "writer".into(),
-            managed: true,
-        });
+    source_change.data.configuration = AgentConfiguration::File {
+        key: "writer".into(),
+        fingerprint: "0".repeat(64),
+    };
     assert!(f.agent.save(&source_change).is_err());
     source_change.data.config_revision += 1;
-    f.agent.save(&source_change).unwrap();
-    assert_eq!(
-        f.agent.load().unwrap().data.configuration_source,
-        source_change.data.configuration_source
-    );
+    assert!(f.agent.save(&source_change).is_err());
+    assert!(matches!(
+        f.agent.load().unwrap().data.configuration,
+        AgentConfiguration::Inline { .. }
+    ));
 }
 
 #[test]
@@ -1066,8 +1090,7 @@ fn child_listing_checks_direct_owner_records_before_enumeration() {
         .root
         .canonical_path()
         .join("agents")
-        .join(f.agent.id().as_str())
-        .join("agent.json");
+        .join(format!("{}.json", f.agent.id().as_str()));
     let mut record: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
     record["host_id"] = serde_json::json!(HostId::new().unwrap());
     fs::write(&path, serde_json::to_vec(&record).unwrap()).unwrap();
@@ -1141,8 +1164,8 @@ fn exact_json_numbers_are_preserved_or_explicitly_rejected_by_native_codec() {
     let host = HostRecord::new(f.host.id().clone(), config, 2);
     f.host.save_host(&host).unwrap();
     let loaded = f.root.load_host::<serde_json::Value>().unwrap().unwrap();
-    assert_eq!(loaded.data.config["n"].to_string(), exact);
-    assert_eq!(loaded.data.config, host.data.config);
+    assert_eq!(inline_host(&loaded)["n"].to_string(), exact);
+    assert_eq!(loaded.data.configuration, host.data.configuration);
     let turn = TurnId::new().unwrap();
     let loop_id = LoopId::new().unwrap();
     let good = record_bytes(&f.session, vec![tool_response(turn, loop_id)]);
@@ -1245,7 +1268,7 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
         .session(SessionId::new().unwrap(), StorageMode::Persistent)
         .unwrap();
     healthy
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             healthy.id().clone(),
             f.agent.id().clone(),
             SessionData {
@@ -1266,14 +1289,17 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
     f.agent.save(&agent).unwrap();
     let metadata = f.session.canonical_path().join("session.json");
     let original = fs::read(&metadata).unwrap();
-    fs::write(&metadata, b"broken Session metadata").unwrap();
+    let mut broken: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    broken["data"]["effective_config"] = serde_json::json!({});
+    let broken = serde_json::to_vec(&broken).unwrap();
+    fs::write(&metadata, &broken).unwrap();
     assert_eq!(f.agent.load_record().unwrap(), agent);
     assert!(f.agent.load().is_err());
     assert!(f.agent.list_sessions().unwrap().contains(healthy.id()));
     assert!(healthy.load().is_ok());
     assert!(f.session.load().is_err());
     // No replacement/default selection or original-file repair took place.
-    assert_eq!(fs::read(&metadata).unwrap(), b"broken Session metadata");
+    assert_eq!(fs::read(&metadata).unwrap(), broken);
     fs::write(&metadata, &original).unwrap();
     fs::remove_file(f.history_path()).unwrap();
     assert_eq!(f.agent.load_record().unwrap(), agent);
@@ -1288,7 +1314,7 @@ fn create_sibling_session(agent: &AgentStore) -> SessionStore {
         .session(SessionId::new().unwrap(), StorageMode::Persistent)
         .unwrap();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session.id().clone(),
             agent.id().clone(),
             SessionData {
@@ -1349,7 +1375,7 @@ fn assert_healthy_session_can_persist(session: &SessionStore) {
 }
 
 #[test]
-fn unsafe_child_session_entries_are_isolated_without_following_links() {
+fn unsafe_session_owner_discovery_fails_without_following_links_or_modifying_siblings() {
     for kind in [
         UnsafeChildEntry::WritableDirectory,
         UnsafeChildEntry::File,
@@ -1362,13 +1388,14 @@ fn unsafe_child_session_entries_are_isolated_without_following_links() {
         let original = fs::read(path.join("session.json")).unwrap();
         let outside = f.temp.path().join("outside-session");
         make_child_entry_unsafe(&path, &outside, kind);
-        let ids = f
-            .agent
-            .list_sessions()
-            .expect("one unsafe Session entry must not prevent sibling enumeration");
-        assert_eq!(ids.len(), 2, "{kind:?}");
-        assert!(ids.contains(f.session.id()));
-        assert!(ids.contains(healthy.id()));
+        assert!(
+            matches!(
+                f.host.discover_sessions(),
+                Err(StorageError::UnsafePath { .. })
+            ),
+            "{kind:?}"
+        );
+        assert!(f.agent.list_sessions().is_err());
         assert!(
             matches!(f.session.load(), Err(StorageError::UnsafePath { .. })),
             "{kind:?}"
@@ -1414,10 +1441,11 @@ fn unsafe_child_agent_entries_are_isolated_without_following_links() {
                 healthy.id().clone(),
                 f.host.id().clone(),
                 AgentData {
-                    configuration_source: None,
-                    name: "healthy".into(),
+                    configuration: minicore_host_storage::AgentConfiguration::Inline {
+                        name: "healthy".into(),
+                        config: AgentConfig::default(),
+                    },
                     mode: StorageMode::Persistent,
-                    config: AgentConfig::default(),
                     config_revision: 1,
                     default_session_id: None,
                 },
@@ -1429,10 +1457,20 @@ fn unsafe_child_agent_entries_are_isolated_without_following_links() {
             .root
             .canonical_path()
             .join("agents")
-            .join(f.agent.id().as_str());
-        let original = fs::read(path.join("agent.json")).unwrap();
-        let outside = f.temp.path().join("outside-agent");
-        make_child_entry_unsafe(&path, &outside, kind);
+            .join(format!("{}.json", f.agent.id()));
+        let original = fs::read(&path).unwrap();
+        let outside = f.temp.path().join("outside-agent.json");
+        match kind {
+            UnsafeChildEntry::WritableDirectory => set_mode(&path, 0o666),
+            UnsafeChildEntry::File => {
+                fs::rename(&path, &outside).unwrap();
+                fs::create_dir(&path).unwrap();
+            }
+            UnsafeChildEntry::Symlink => {
+                fs::rename(&path, &outside).unwrap();
+                symlink(&outside, &path).unwrap();
+            }
+        }
         let ids = f
             .host
             .list_agents()
@@ -1460,7 +1498,7 @@ fn unsafe_child_agent_entries_are_isolated_without_following_links() {
         } else {
             &outside
         };
-        assert_eq!(fs::read(preserved.join("agent.json")).unwrap(), original);
+        assert_eq!(fs::read(preserved).unwrap(), original);
         assert!(healthy.load_record().is_ok());
         assert_eq!(healthy.list_sessions().unwrap(), vec![session.id().clone()]);
         assert_healthy_session_can_persist(&session);
@@ -1507,7 +1545,8 @@ fn concurrent_parent_child_metadata_saves_preserve_confirmed_records() {
             start.wait();
             for revision in 2..=rounds + 1 {
                 agent_record.data.config_revision = revision;
-                agent_record.data.config.role.name = format!("Agent revision {revision}");
+                inline_agent_mut(&mut agent_record).1.role.name =
+                    format!("Agent revision {revision}");
                 assert_eq!(
                     f.agent.save(&agent_record).unwrap(),
                     ObjectSave {
@@ -1764,4 +1803,168 @@ fn session_timestamps_are_required_and_activity_cannot_precede_creation() {
         Err(StorageError::InvalidObject { .. })
     ));
     assert_eq!(f.session.load().unwrap(), advanced);
+}
+
+#[test]
+fn flat_session_admission_never_overwrites_another_agents_record_or_an_empty_reservation() {
+    let f = Fixture::new();
+    let other = f
+        .host
+        .agent(AgentId::new().unwrap(), StorageMode::Persistent);
+    other
+        .save(&AgentRecord::new(
+            other.id().clone(),
+            f.host.id().clone(),
+            AgentData {
+                configuration: AgentConfiguration::Inline {
+                    name: "Other".into(),
+                    config: AgentConfig::default(),
+                },
+                mode: StorageMode::Persistent,
+                config_revision: 0,
+                default_session_id: None,
+            },
+        ))
+        .unwrap();
+    let foreign = other
+        .session(f.session.id().clone(), StorageMode::Persistent)
+        .unwrap();
+    let before = fs::read(f.session.canonical_path().join("session.json")).unwrap();
+    let mut candidate = f.session.load().unwrap();
+    candidate.agent_id = other.id().clone();
+    assert!(foreign.create(&candidate).is_err());
+    assert!(matches!(
+        foreign.save(&candidate),
+        Err(StorageError::OwnershipMismatch)
+    ));
+    assert!(matches!(
+        foreign.load(),
+        Err(StorageError::OwnershipMismatch)
+    ));
+    assert!(foreign.open_journal().is_err());
+    assert!(foreign.delete_closed().is_err());
+    assert_eq!(
+        fs::read(f.session.canonical_path().join("session.json")).unwrap(),
+        before
+    );
+    assert_eq!(fs::read(f.history_path()).unwrap(), b"");
+    assert!(other.list_sessions().unwrap().is_empty());
+    assert!(
+        f.root
+            .canonical_path()
+            .join("agents")
+            .join(format!("{}.json", other.id()))
+            .is_file()
+    );
+    assert!(
+        !f.root
+            .canonical_path()
+            .join("agents")
+            .join(other.id().as_str())
+            .exists()
+    );
+    let empty = other
+        .session(SessionId::new().unwrap(), StorageMode::Persistent)
+        .unwrap();
+    fs::create_dir(empty.canonical_path()).unwrap();
+    candidate.id = empty.id().clone();
+    assert!(empty.create(&candidate).is_err());
+    assert!(empty.save(&candidate).is_err());
+    assert!(
+        fs::read_dir(empty.canonical_path())
+            .unwrap()
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
+fn metadata_update_cannot_recreate_a_missing_session() {
+    let f = Fixture::new();
+    let record = f.session.load().unwrap();
+    let path = f.session.canonical_path().join("session.json");
+    fs::remove_file(&path).unwrap();
+    assert!(f.session.save(&record).is_err());
+    assert!(f.session.create(&record).is_err());
+    assert!(!path.exists());
+    assert_eq!(fs::read(f.history_path()).unwrap(), b"");
+}
+
+#[test]
+fn unknown_ownership_and_legacy_layout_fail_discovery_without_rewriting_records() {
+    let f = Fixture::new();
+    let path = f.session.canonical_path().join("session.json");
+    let original = fs::read(&path).unwrap();
+    let mut invalid: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    invalid["agent_id"] = serde_json::json!(AgentId::new().unwrap());
+    let invalid = serde_json::to_vec(&invalid).unwrap();
+    fs::write(&path, &invalid).unwrap();
+    assert!(matches!(
+        f.host.discover_sessions(),
+        Err(StorageError::OwnershipMismatch)
+    ));
+    assert_eq!(fs::read(&path).unwrap(), invalid);
+    fs::write(&path, &original).unwrap();
+    let legacy = f
+        .root
+        .canonical_path()
+        .join("agents")
+        .join(AgentId::new().unwrap().as_str());
+    fs::create_dir(&legacy).unwrap();
+    fs::write(legacy.join("agent.json"), b"old layout remains untouched").unwrap();
+    assert!(f.host.list_agents().is_err());
+    assert_eq!(
+        fs::read(legacy.join("agent.json")).unwrap(),
+        b"old layout remains untouched"
+    );
+    assert_eq!(fs::read(path).unwrap(), original);
+    fs::remove_file(f.root.canonical_path().join("host.json")).unwrap();
+    assert!(f.root.load_host::<HostConfig>().is_err());
+}
+
+#[test]
+fn configuration_records_require_one_source_and_fingerprints_do_not_store_bodies() {
+    let id = HostId::new().unwrap();
+    let value = HostConfig {
+        label: "private host configuration".into(),
+    };
+    let record = HostRecord::file(id, &value, 7).unwrap();
+    let wire = serde_json::to_value(&record).unwrap();
+    assert_eq!(wire["data"]["configuration"]["source"], "file");
+    assert!(wire["data"]["configuration"].get("config").is_none());
+    assert!(!wire.to_string().contains(&value.label));
+    let digest = configuration_fingerprint(&value).unwrap();
+    assert_eq!(digest.len(), 64);
+    assert!(
+        digest
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    );
+    for wire in [
+        serde_json::json!({"source":"file","fingerprint":digest,"config":{}}),
+        serde_json::json!({"source":"inline","config":{},"fingerprint":digest}),
+        serde_json::json!({"source":"inline"}),
+        serde_json::json!({"source":"file","fingerprint":null}),
+    ] {
+        assert!(serde_json::from_value::<HostConfiguration<serde_json::Value>>(wire).is_err());
+    }
+    let configuration = AgentConfiguration::from_values(
+        "private name".into(),
+        AgentConfig::default(),
+        Some(minicore_host_protocol::AgentConfigurationSource {
+            key: "stable".into(),
+        }),
+    )
+    .unwrap();
+    let wire = serde_json::to_value(&configuration).unwrap();
+    assert_eq!(wire["source"], "file");
+    assert_eq!(wire["key"], "stable");
+    assert!(wire.get("config").is_none());
+    assert!(wire.get("name").is_none());
+    assert!(
+        serde_json::from_value::<AgentConfiguration>(serde_json::json!({
+            "source":"file","key":"stable","fingerprint":digest,"name":"hybrid"
+        }))
+        .is_err()
+    );
 }

@@ -1117,8 +1117,6 @@ async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate()
     .unwrap();
     let session_path = directory
         .path()
-        .join("agents")
-        .join(parent.agent_id.as_str())
         .join("sessions")
         .join(parent.session_id.as_str())
         .join("session.json");
@@ -1145,14 +1143,18 @@ async fn persisted_title_and_name_are_confirmed_with_the_same_config_candidate()
             directory
                 .path()
                 .join("agents")
-                .join(parent.agent_id.as_str())
-                .join("agent.json"),
+                .join(format!("{}.json", parent.agent_id.as_str())),
         )
         .unwrap(),
     )
     .unwrap();
-    assert_eq!(record.data.name, "persisted name");
-    assert_eq!(record.data.config, agent.config);
+    assert_eq!(
+        record.data.configuration,
+        minicore_host_storage::AgentConfiguration::Inline {
+            name: "persisted name".into(),
+            config: agent.config,
+        }
+    );
     assert_eq!(record.data.config_revision, 1);
     complete(&f.events[0], "done");
     finished(&f, &parent, &cap.source().turn.turn_id).await;
@@ -1454,8 +1456,6 @@ async fn persistent_partial_cancel_with_preserved_inbox_waits_for_actual_next_tu
     assert_eq!(result.results[1].info.outcome, Some(TurnOutcome::Completed));
     let path = directory
         .path()
-        .join("agents")
-        .join(child.agent_id.as_str())
         .join("sessions")
         .join(child.session_id.as_str())
         .join("history.jsonl");

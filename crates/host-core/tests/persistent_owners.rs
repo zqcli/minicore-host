@@ -123,10 +123,11 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
             agent_id.clone(),
             host_id.clone(),
             AgentData {
-                configuration_source: None,
-                name: "saved Agent".into(),
+                configuration: minicore_host_storage::AgentConfiguration::Inline {
+                    name: "saved Agent".into(),
+                    config: config(),
+                },
                 mode: StorageMode::Persistent,
-                config: config(),
                 config_revision: 7,
                 default_session_id: None,
             },
@@ -138,7 +139,7 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
         agent
             .session(id.clone(), StorageMode::Persistent)
             .unwrap()
-            .save(&SessionRecord::new(
+            .create(&SessionRecord::new(
                 id.clone(),
                 agent_id.clone(),
                 SessionData {
@@ -239,8 +240,6 @@ async fn discovers_metadata_lazily_and_runs_persistent_history_through_runtime()
     let history = read_history_text(
         directory
             .path()
-            .join("agents")
-            .join(agent_id.as_str())
             .join("sessions")
             .join(ids[0].as_str())
             .join("history.jsonl"),
@@ -263,8 +262,6 @@ async fn corrupt_history_blocks_only_that_session_and_preserves_the_file() {
     let (_, agent_id, ids) = seed(directory.path());
     let bad = directory
         .path()
-        .join("agents")
-        .join(agent_id.as_str())
         .join("sessions")
         .join(ids[0].as_str())
         .join("history.jsonl");
@@ -323,12 +320,14 @@ async fn damaged_default_metadata_does_not_hide_healthy_sibling() {
     let (host_id, agent_id, ids) = seed(directory.path());
     let bad = directory
         .path()
-        .join("agents")
-        .join(agent_id.as_str())
         .join("sessions")
         .join(ids[0].as_str())
         .join("session.json");
-    std::fs::write(&bad, b"{bad metadata").unwrap();
+    let mut damaged: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&bad).unwrap()).unwrap();
+    damaged["data"]["effective_config"] = serde_json::json!({});
+    let damaged = serde_json::to_vec(&damaged).unwrap();
+    std::fs::write(&bad, &damaged).unwrap();
     let (resources, _) = resources();
     let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
         .await
@@ -385,7 +384,7 @@ async fn damaged_default_metadata_does_not_hide_healthy_sibling() {
     host.send(&caller, SendMessage::new(input("healthy"), good.clone()))
         .unwrap();
     completed(&host, &caller, &good).await;
-    assert_eq!(std::fs::read(&bad).unwrap(), b"{bad metadata");
+    assert_eq!(std::fs::read(&bad).unwrap(), damaged);
 }
 #[tokio::test]
 async fn unsupported_host_settings_are_not_replaced_with_defaults() {
@@ -467,8 +466,6 @@ async fn persistent_creation_modes_reopen_and_real_partial_input_failure() {
     assert!(
         !directory
             .path()
-            .join("agents")
-            .join(target.agent_id.as_str())
             .join("sessions")
             .join(memory_target.session_id.as_str())
             .exists()
@@ -657,15 +654,7 @@ async fn default_session_real_file_failure_keeps_published_agent_receipt() {
         tokio::spawn(async move { owner.create_agent_async(&task_caller, request).await });
     gate.entered.notified().await;
     let agent_id = host.receipt(&caller, &operation).unwrap().agent_id.unwrap();
-    std::fs::write(
-        directory
-            .path()
-            .join("agents")
-            .join(agent_id.as_str())
-            .join("sessions"),
-        b"not a directory",
-    )
-    .unwrap();
+    std::fs::write(directory.path().join("sessions"), b"not a directory").unwrap();
     gate.release();
     let receipt = waiting.await.unwrap().unwrap();
     receipt.validate_call_return().unwrap();
@@ -682,8 +671,7 @@ async fn default_session_real_file_failure_keeps_published_agent_receipt() {
         directory
             .path()
             .join("agents")
-            .join(agent_id.as_str())
-            .join("agent.json")
+            .join(format!("{}.json", agent_id.as_str()))
             .exists()
     );
 }
@@ -694,8 +682,6 @@ async fn review_resume_validates_history_without_new_input() {
     let (_, agent_id, ids) = seed(directory.path());
     let bad = directory
         .path()
-        .join("agents")
-        .join(agent_id.as_str())
         .join("sessions")
         .join(ids[0].as_str())
         .join("history.jsonl");
@@ -833,15 +819,19 @@ async fn wait_state(
     .unwrap()
 }
 fn agent_path(directory: &Path, agent: &AgentId) -> std::path::PathBuf {
-    directory.join("agents").join(agent.as_str())
+    directory.join("agents").join(format!("{agent}.json"))
 }
 fn session_path(directory: &Path, target: &SessionRef) -> std::path::PathBuf {
-    agent_path(directory, &target.agent_id)
-        .join("sessions")
-        .join(target.session_id.as_str())
+    directory.join("sessions").join(target.session_id.as_str())
 }
 fn read_agent(path: &Path) -> AgentRecord {
-    serde_json::from_slice(&std::fs::read(path.join("agent.json")).unwrap()).unwrap()
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+fn saved_config(record: &AgentRecord) -> &AgentConfig {
+    match &record.data.configuration {
+        minicore_host_storage::AgentConfiguration::Inline { config, .. } => config,
+        _ => panic!("dynamic Agent expected"),
+    }
 }
 fn read_session(path: &Path) -> SessionRecord {
     serde_json::from_slice(&std::fs::read(path.join("session.json")).unwrap()).unwrap()
@@ -887,10 +877,7 @@ async fn durable_config_versions_defaults_and_reload_preserve_real_history() {
         .unwrap();
     assert_eq!(updated.config_revision, 8);
     assert_eq!(
-        read_agent(&agent_path(directory.path(), &agent_id))
-            .data
-            .config
-            .role,
+        saved_config(&read_agent(&agent_path(directory.path(), &agent_id))).role,
         role
     );
     assert_ne!(
@@ -1018,7 +1005,15 @@ async fn metadata_write_failure_retains_old_config_and_reconciles_only_original_
     };
     let path = session_path(directory.path(), &target);
     let original = host.session_info(&caller, &target).unwrap();
-    std::fs::rename(path.join("session.json"), path.join("original.json")).unwrap();
+    std::fs::rename(
+        path.join("session.json"),
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+    )
+    .unwrap();
     std::fs::create_dir(path.join("session.json")).unwrap();
     let role = Role {
         name: "candidate".into(),
@@ -1063,7 +1058,15 @@ async fn metadata_write_failure_retains_old_config_and_reconciles_only_original_
         .is_err()
     );
     std::fs::remove_dir(path.join("session.json")).unwrap();
-    std::fs::rename(path.join("original.json"), path.join("session.json")).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+        path.join("session.json"),
+    )
+    .unwrap();
     let original_bytes = std::fs::read(path.join("session.json")).unwrap();
     let mut unrelated = read_session(&path);
     unrelated.data.effective_config.role.name = "unrelated external value".into();
@@ -1202,8 +1205,16 @@ async fn failed_default_clear_keeps_session_closing_until_exact_save_is_reconcil
         session_id: ids[0].clone(),
     };
     let path = agent_path(directory.path(), &agent_id);
-    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(
+        &path,
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+    )
+    .unwrap();
+    std::fs::create_dir(&path).unwrap();
     host.close_session(&caller, &target).unwrap();
     let state = wait_state(&host, &caller, &target, |state| {
         state.metadata_fault.is_some()
@@ -1216,19 +1227,24 @@ async fn failed_default_clear_keeps_session_closing_until_exact_save_is_reconcil
             .closed
             .is_none()
     );
-    std::fs::remove_dir(path.join("agent.json")).unwrap();
-    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
-    let original_bytes = std::fs::read(path.join("agent.json")).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+        &path,
+    )
+    .unwrap();
+    let original_bytes = std::fs::read(&path).unwrap();
     let mut unrelated = read_agent(&path);
     unrelated.data.default_session_id = Some(ids[1].clone());
     let unrelated_bytes = serde_json::to_vec(&unrelated).unwrap();
-    std::fs::write(path.join("agent.json"), &unrelated_bytes).unwrap();
+    std::fs::write(&path, &unrelated_bytes).unwrap();
     assert!(host.reconcile_agent_record(&caller, &agent).await.is_err());
-    assert_eq!(
-        std::fs::read(path.join("agent.json")).unwrap(),
-        unrelated_bytes
-    );
-    std::fs::write(path.join("agent.json"), original_bytes).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), unrelated_bytes);
+    std::fs::write(&path, original_bytes).unwrap();
     assert_eq!(
         read_agent(&path).data.default_session_id,
         Some(target.session_id.clone())
@@ -1264,11 +1280,7 @@ async fn memory_default_is_runtime_only_and_never_recreated_after_restart() {
             .default_session_id,
         None
     );
-    assert!(
-        !agent_path(directory.path(), &agent_id)
-            .join("sessions")
-            .exists()
-    );
+    assert!(!directory.path().join("sessions").exists());
     drop(connection);
     drop(host);
     let reopened = Host::open_persistent(directory.path(), settings("ignored"), resources)
@@ -1309,8 +1321,6 @@ async fn review_check_closed_session_cannot_reopen_or_write() {
     }
     let path = directory
         .path()
-        .join("agents")
-        .join(agent_id.as_str())
         .join("sessions")
         .join(ids[0].as_str())
         .join("history.jsonl");
@@ -1415,8 +1425,6 @@ async fn review_check_real_save_failure_preserves_completed_outcome() {
     let (_, agent_id, ids) = seed(directory.path());
     let path = directory
         .path()
-        .join("agents")
-        .join(agent_id.as_str())
         .join("sessions")
         .join(ids[0].as_str())
         .join("history.jsonl");
@@ -1548,47 +1556,25 @@ async fn review_check_restart_uses_saved_context_with_fresh_turn_and_load() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn review_single_unsafe_session_directory_is_isolated() {
+async fn unsafe_session_directory_blocks_startup_without_guessing_ownership() {
     use std::os::unix::fs::PermissionsExt;
     let directory = tempfile::tempdir().unwrap();
-    let (host_id, agent_id, ids) = seed(directory.path());
-    let bad = directory
-        .path()
-        .join("agents")
-        .join(agent_id.as_str())
-        .join("sessions")
-        .join(ids[0].as_str());
+    let (_, _, ids) = seed(directory.path());
+    let bad = directory.path().join("sessions").join(ids[0].as_str());
+    let before = std::fs::read(directory.path().join("host.json")).unwrap();
+    let metadata = std::fs::read(bad.join("session.json")).unwrap();
     std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o777)).unwrap();
     let (resources, _) = resources();
-    let host = Host::open_persistent(directory.path(), settings("ignored"), resources)
-        .await
-        .unwrap();
-    let connection = host.connect().unwrap();
-    let caller = connection.caller();
-    let target = SessionRef {
-        agent_id: agent_id.clone(),
-        session_id: ids[1].clone(),
-    };
-    let child_result = host.session_info(&caller, &target);
-    let failures = host.agent_load_failures(&caller).unwrap();
-    assert!(failures.is_empty());
-    assert_eq!(
-        host.session_load_failures(
-            &caller,
-            &AgentRef {
-                host_id: host_id.clone(),
-                agent_id: agent_id.clone()
-            }
-        )
-        .unwrap()[0]
-            .session_id,
-        ids[0]
-    );
     assert!(
-        child_result.is_ok(),
-        "single child directory fault hid healthy sibling and Agent {}",
-        host_id
+        Host::open_persistent(directory.path(), settings("ignored"), resources)
+            .await
+            .is_err()
     );
+    assert_eq!(
+        std::fs::read(directory.path().join("host.json")).unwrap(),
+        before
+    );
+    assert_eq!(std::fs::read(bad.join("session.json")).unwrap(), metadata);
 }
 
 #[test]
@@ -1701,7 +1687,10 @@ fn accepted_metadata_saves_outlive_both_waiters_and_connection() {
             "accepted Session config"
         );
         assert_eq!(saved_agent.data.config_revision, 8);
-        assert_eq!(saved_agent.data.config.role.name, "accepted Agent config");
+        assert_eq!(
+            saved_config(&saved_agent).role.name,
+            "accepted Agent config"
+        );
         host.send(
             &caller,
             SendMessage::new(input("after owned saves"), target.clone()),
@@ -2633,7 +2622,10 @@ fn review_meta_check_close_and_stop_wait_for_owned_saves() {
         let saved_agent = read_agent(&agent_path(directory.path(), &agent.agent_id));
         let saved_session = read_session(&session_path(directory.path(), &target));
         assert_eq!(saved_agent.data.config_revision, 8);
-        assert_eq!(saved_agent.data.config.role.name, "confirmed Agent value");
+        assert_eq!(
+            saved_config(&saved_agent).role.name,
+            "confirmed Agent value"
+        );
         assert!(saved_agent.data.default_session_id.is_none());
         assert_eq!(saved_session.data.config_revision, 5);
         assert_eq!(
@@ -2833,8 +2825,16 @@ async fn unrelated_failed_agent_record_does_not_block_nondefault_close() {
         session_id: ids[1].clone(),
     };
     let path = agent_path(directory.path(), &agent_id);
-    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(
+        &path,
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+    )
+    .unwrap();
+    std::fs::create_dir(&path).unwrap();
     assert!(
         host.update_agent_async(
             &caller,
@@ -2851,8 +2851,16 @@ async fn unrelated_failed_agent_record_does_not_block_nondefault_close() {
         .await
         .is_err()
     );
-    std::fs::remove_dir(path.join("agent.json")).unwrap();
-    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+        &path,
+    )
+    .unwrap();
     host.close_session(&caller, &target).unwrap();
     let state = wait_state(&host, &caller, &target, |state| {
         state.lifecycle == SessionLifecycle::Closed || state.metadata_fault.is_some()
@@ -2907,15 +2915,31 @@ async fn pending_default_candidate_still_orders_its_target_close() {
         session_id: ids[1].clone(),
     };
     let path = agent_path(directory.path(), &agent_id);
-    std::fs::rename(path.join("agent.json"), path.join("original.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(
+        &path,
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+    )
+    .unwrap();
+    std::fs::create_dir(&path).unwrap();
     assert!(
         host.set_default_session_async(&caller, &agent, Some(target.session_id.clone()))
             .await
             .is_err()
     );
-    std::fs::remove_dir(path.join("agent.json")).unwrap();
-    std::fs::rename(path.join("original.json"), path.join("agent.json")).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("original.json"),
+        &path,
+    )
+    .unwrap();
     host.close_session(&caller, &target).unwrap();
     let state = wait_state(&host, &caller, &target, |state| {
         state.metadata_fault.is_some() || state.lifecycle == SessionLifecycle::Closed
@@ -3131,15 +3155,31 @@ async fn review_close_unrelated_pending_default_does_not_block_third_child() {
         session_id: created.session_id.unwrap(),
     };
     let path = agent_path(directory.path(), &agent_id);
-    std::fs::rename(path.join("agent.json"), path.join("saved-agent.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(
+        &path,
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("saved-agent.json"),
+    )
+    .unwrap();
+    std::fs::create_dir(&path).unwrap();
     assert!(
         host.set_default_session_async(&caller, &agent, Some(ids[1].clone()))
             .await
             .is_err()
     );
-    std::fs::remove_dir(path.join("agent.json")).unwrap();
-    std::fs::rename(path.join("saved-agent.json"), path.join("agent.json")).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("saved-agent.json"),
+        &path,
+    )
+    .unwrap();
     host.close_session(&caller, &target).unwrap();
     let state = wait_state(&host, &caller, &target, |state| {
         state.lifecycle == SessionLifecycle::Closed || state.metadata_fault.is_some()
@@ -3189,15 +3229,31 @@ async fn review_close_old_default_preserves_confirmed_new_default() {
         session_id: ids[0].clone(),
     };
     let path = agent_path(directory.path(), &agent_id);
-    std::fs::rename(path.join("agent.json"), path.join("saved-agent.json")).unwrap();
-    std::fs::create_dir(path.join("agent.json")).unwrap();
+    std::fs::rename(
+        &path,
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("saved-agent.json"),
+    )
+    .unwrap();
+    std::fs::create_dir(&path).unwrap();
     assert!(
         host.set_default_session_async(&caller, &agent, Some(ids[1].clone()))
             .await
             .is_err()
     );
-    std::fs::remove_dir(path.join("agent.json")).unwrap();
-    std::fs::rename(path.join("saved-agent.json"), path.join("agent.json")).unwrap();
+    std::fs::remove_dir(&path).unwrap();
+    std::fs::rename(
+        path.parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("saved-agent.json"),
+        &path,
+    )
+    .unwrap();
     host.close_session(&caller, &target).unwrap();
     let state = wait_state(&host, &caller, &target, |state| {
         state.metadata_fault.is_some() || state.lifecycle == SessionLifecycle::Closed

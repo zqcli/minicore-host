@@ -139,7 +139,7 @@ Cursors bind the actual Session, Host incarnation and requested direction.
 Core history records expose original native positions and applicable Turn/response
 identity, with UTC owner timestamps. Bound-input and completion events and saved
 Turn results use the same positions. Unbound inputs and cold saved results do not
-acquire fabricated record positions or LoadIds. Host object schema 2 and history
+acquire fabricated record positions or LoadIds. Host object schema 3 and history
 schema 3 retain these facts; old envelope versions are rejected without migration.
 
 `DirectoryRoots`, `DirectoryListRequest/Result` and `DirectoryMkdirRequest/Receipt`

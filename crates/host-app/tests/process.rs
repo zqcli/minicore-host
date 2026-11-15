@@ -115,8 +115,6 @@ async fn stdio_message_executes_production_http_adapter_and_persists_real_output
     output.protocol_only();
     output.safe_diagnostics();
     let history = root
-        .join("agents")
-        .join(target["agent_id"].as_str().unwrap())
         .join("sessions")
         .join(target["session_id"].as_str().unwrap())
         .join("history.jsonl");
@@ -555,8 +553,6 @@ async fn log_targets_cannot_append_to_resolved_host_metadata_or_owned_session_hi
     child.send("host.shutdown", shutdown("graceful"));
     assert!(child.finish().await.status.success());
     let history = root
-        .join("agents")
-        .join(address["agent_id"].as_str().unwrap())
         .join("sessions")
         .join(address["session_id"].as_str().unwrap())
         .join("history.jsonl");

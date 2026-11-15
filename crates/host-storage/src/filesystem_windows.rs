@@ -155,6 +155,16 @@ impl Directory {
         })
     }
 
+    pub fn create_child(&self, name: &str) -> Result<Self, StorageError> {
+        component(name)?;
+        self.verify_attached()?;
+        fs::create_dir(self.path.join(name)).map_err(|error| {
+            io_error("reserve new Session directory", self.path.join(name), error)
+        })?;
+        self.sync()?;
+        self.child(name, false)
+    }
+
     pub fn contains(&self, name: &str) -> Result<bool, StorageError> {
         component(name)?;
         match fs::symlink_metadata(self.path.join(name)) {
@@ -203,14 +213,6 @@ impl Directory {
             })?;
         check_file(&file)?;
         Ok(file)
-    }
-
-    pub fn read(&self, name: &str) -> Result<Vec<u8>, StorageError> {
-        let mut file = self.open_file(name, false, false)?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)
-            .map_err(|e| io_error("read storage file", self.path.join(name), e))?;
-        Ok(bytes)
     }
 
     pub fn read_metadata(&self, name: &str) -> Result<Vec<u8>, StorageError> {

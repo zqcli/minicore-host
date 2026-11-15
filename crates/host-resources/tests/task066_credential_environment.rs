@@ -262,8 +262,6 @@ async fn publication_scenario() {
     assert_eq!(saved_results.len(), 4);
     let journal = data
         .path()
-        .join("agents")
-        .join(target.agent_id.to_string())
         .join("sessions")
         .join(target.session_id.to_string())
         .join("history.jsonl");

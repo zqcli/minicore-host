@@ -89,7 +89,7 @@ async fn accepted_configuration_save_survives_waiter_drop_disconnect_and_force_s
     let stored: serde_json::Value =
         serde_json::from_slice(&std::fs::read(directory.path().join("host.json")).unwrap())
             .unwrap();
-    assert_eq!(stored["data"]["config"]["name"], "old");
+    assert_eq!(stored["data"]["configuration"]["config"]["name"], "old");
     host.shutdown(
         &caller,
         HostShutdownRequest {
@@ -113,7 +113,7 @@ async fn accepted_configuration_save_survives_waiter_drop_disconnect_and_force_s
     let stored: serde_json::Value =
         serde_json::from_slice(&std::fs::read(directory.path().join("host.json")).unwrap())
             .unwrap();
-    assert_eq!(stored["data"]["config"]["name"], "new");
+    assert_eq!(stored["data"]["configuration"]["config"]["name"], "new");
     assert_eq!(stored["data"]["config_revision"], 1);
     assert!(host.info(&old_network.caller()).is_err());
     assert!(host.info(&caller).is_ok());

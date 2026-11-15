@@ -153,10 +153,7 @@ async fn until(mut ready: impl FnMut() -> bool) {
     .unwrap();
 }
 fn path(dir: &std::path::Path, target: &SessionRef) -> std::path::PathBuf {
-    dir.join("agents")
-        .join(target.agent_id.as_str())
-        .join("sessions")
-        .join(target.session_id.as_str())
+    dir.join("sessions").join(target.session_id.as_str())
 }
 fn delete(close: bool) -> SessionDeleteRequest {
     SessionDeleteRequest {
@@ -312,8 +309,7 @@ async fn default_closed_deletion_preserves_another_session_and_immutable_parent_
         &std::fs::read(
             dir.path()
                 .join("agents")
-                .join(agent.agent_id.as_str())
-                .join("agent.json"),
+                .join(format!("{}.json", agent.agent_id.as_str())),
         )
         .unwrap(),
     )

@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **2** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.0. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
+Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.1. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
@@ -80,16 +80,17 @@ The supplied directory is one Host root. Display names never affect paths.
 
 | Path relative to root | Envelope |
 | --- | --- |
-| `host.json` | `{schema_version,id,data:{config,config_revision}}` |
-| `agents/<AgentId>/agent.json` | `{schema_version,id,host_id,data:AgentData}` |
-| `agents/<AgentId>/sessions/<SessionId>/session.json` | `{schema_version,id,agent_id,data:SessionData}` |
-| `agents/<AgentId>/sessions/<SessionId>/history.jsonl` | One `HistoryRecord` per line |
+| `host.json` | `{schema_version,id,data:{configuration,config_revision}}` |
+| `agents/<AgentId>.json` | `{schema_version,id,host_id,data:AgentData}` |
+| `sessions/<SessionId>/session.json` | `{schema_version,id,agent_id,data:SessionData}` |
+| `sessions/<SessionId>/history.jsonl` | One `HistoryRecord` per line |
 
-`AgentData` contains name, mode, native `AgentConfig`, configuration revision and
-nullable default Session ID. Optional `configuration_source: {key, managed}`
-binds a declared source to the durable Agent ID. Omission means an independent
-Agent; it is not part of copyable `AgentConfig`. The first declared creation
-saves it together with the Agent, and releasing management retains the key.
+`AgentData` contains mode, configuration revision, nullable default Session ID,
+and one exclusive `configuration` branch. File sources contain only `key` and
+`fingerprint`; inline sources contain the Agent name and native `AgentConfig`.
+Runtime `configuration_source: {key}` is derived from the file branch and is
+not part of copyable `AgentConfig`. The first declared save binds the key;
+missing declarations never release management or recover old defaults.
 A saved default is checked against this Agent's
 open persistent Session metadata and expected history file. Execution-ready
 history validation remains with that Session. The business owner represents a
@@ -106,24 +107,33 @@ direct-owner fields must agree with the selected hierarchy. Unsupported schemas,
 unknown/discarded fields, duplicate JSON keys, content normalization and ownership
 mismatch fail without migration or rewriting. `AgentStore::load_record()` validates
 only the Agent record; initialization then loads each Session independently.
-`list_sessions()` uses that same direct-owner boundary. Both Session and Agent
-listing enumerate canonical direct-child names without opening those entries;
-each child's load independently checks directory safety, schema and ownership.
-A bad child directory is a fault for that child, not a failed enumeration for its
-healthy siblings. Shared collection directories still require safe no-follow
-access, and invalid names without a canonical object ID remain structural errors.
-A broken default does not
-block healthy siblings or silently redirect the default. The stricter `load()`
-convenience method also checks the default reference. Changing configuration requires a
-new configuration revision; Session creation provenance remains immutable.
+The startup discovery pass reads Session metadata once and groups IDs by the
+recorded `agent_id` before handing them to each direct Agent. It does not persist
+another ownership index. `list_sessions()` is an explicit scoped query using
+that same discovery adapter. Unreadable/untrusted ownership, mismatched directory
+IDs and unknown Agents fail discovery without guessing or skipping records.
+Identifiable malformed Session configuration or history remains a child fault;
+healthy siblings remain available. An unavailable default is never redirected.
+`load()` also checks the default reference. Configuration changes require a new
+revision, and Session creation provenance remains immutable.
+
+File-managed Host/Agent records store only configuration references and SHA-256
+fingerprints. Standalone Hosts and dynamic Agents store inline configuration.
+These source branches are mutually exclusive and cannot be silently converted.
+Session records always retain their own effective configuration. Missing source
+files cannot be reconstructed from storage. Object schema 2 and nested layouts
+are unsupported and preserved unchanged on rejection.
 
 `save_host`, `AgentStore::save` and `SessionStore::save` write a new exclusive
 temporary file in the same directory, `sync_all` it, rename over the original,
 then `sync_all` the containing directory and its owned ancestry. Root acquisition
 confirms the ancestry needed to locate the root, including retries where a prior
 failed synchronization left new directories visible, subject to the explicit
-Windows Profile boundary above. Existing empty initial
-histories are synchronized again before Session publication. The returned `ObjectSave` binds the original configuration
+Windows Profile boundary above. `SessionStore::create` reserves a global Session
+ID by exclusive directory creation, then synchronizes its initial history before
+publishing metadata. An existing directory, even empty, is a collision;
+`SessionStore::save` only updates an existing valid record. Neither entry repairs
+a partial initial creation. The returned `ObjectSave` binds the original configuration
 revision and reports persisted only after these operations succeed. A failure
 after rename may leave the new version visible: the business owner must check
 that original version and must not infer rollback from the error. Temporary-file

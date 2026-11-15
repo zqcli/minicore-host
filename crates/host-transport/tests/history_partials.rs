@@ -371,8 +371,6 @@ async fn cancelled_partial_keeps_order_through_paging_unload_reload_and_restart(
         }
         let path = directory
             .path()
-            .join("agents")
-            .join(target.agent_id.as_str())
             .join("sessions")
             .join(target.session_id.as_str())
             .join("history.jsonl");

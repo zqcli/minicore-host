@@ -1,3 +1,4 @@
+use crate::StorageError;
 use minicore_host_protocol::{
     AgentConfig, AgentConfigurationSource, AgentId, ConfigRevision, HostId, MessageId, MessageMode,
     MessageSource, SessionConfig, SessionId, SessionRef, StorageMode, Timestamp, TurnId,
@@ -9,13 +10,87 @@ use minicore_host_runtime::{
     model::ModelPartial,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Object-file schema version, independent of the design-specification version.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Timestamped native Host envelopes. Older envelopes are explicitly unsupported;
 /// their bytes and native Runtime values are never migrated or backfilled.
 pub const HISTORY_SCHEMA_VERSION: u32 = 3;
+
+/// A digest compares applied native values; it cannot restore their contents.
+pub fn configuration_fingerprint(value: &impl Serialize) -> Result<String, StorageError> {
+    let bytes = serde_json::to_vec(value).map_err(|error| StorageError::InvalidObject {
+        reason: error.to_string(),
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn validate_fingerprint(value: &str) -> Result<(), StorageError> {
+    if value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        Ok(())
+    } else {
+        Err(StorageError::InvalidObject {
+            reason: "invalid SHA-256 configuration fingerprint".into(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum HostConfiguration<C> {
+    File { fingerprint: String },
+    Inline { config: C },
+}
+// Deserialize the generic configuration directly, without serde's tagged-enum
+// content buffer, so exact JSON numbers keep the storage codec's guarantees.
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum ConfigurationSourceKind {
+    File,
+    Inline,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, bound(deserialize = "C: Deserialize<'de>"))]
+struct HostConfigurationWire<C> {
+    source: ConfigurationSourceKind,
+    #[serde(default, deserialize_with = "configuration_value")]
+    fingerprint: Option<String>,
+    #[serde(default, deserialize_with = "configuration_value")]
+    config: Option<C>,
+}
+fn configuration_value<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<T>, D::Error> {
+    T::deserialize(deserializer).map(Some)
+}
+impl<'de, C: Deserialize<'de>> Deserialize<'de> for HostConfiguration<C> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = HostConfigurationWire::<C>::deserialize(deserializer)?;
+        match (wire.source, wire.fingerprint, wire.config) {
+            (ConfigurationSourceKind::File, Some(fingerprint), None) => {
+                Ok(Self::File { fingerprint })
+            }
+            (ConfigurationSourceKind::Inline, None, Some(config)) => Ok(Self::Inline { config }),
+            _ => Err(serde::de::Error::custom(
+                "configuration must contain exactly its source payload",
+            )),
+        }
+    }
+}
+impl<C> HostConfiguration<C> {
+    pub fn validate(&self) -> Result<(), StorageError> {
+        match self {
+            Self::File { fingerprint } => validate_fingerprint(fingerprint),
+            Self::Inline { .. } => Ok(()),
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,7 +102,7 @@ pub struct HostRecord<C> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HostData<C> {
-    pub config: C,
+    pub configuration: HostConfiguration<C>,
     pub config_revision: ConfigRevision,
 }
 impl<C> HostRecord<C> {
@@ -36,9 +111,82 @@ impl<C> HostRecord<C> {
             schema_version: SCHEMA_VERSION,
             id,
             data: HostData {
-                config,
+                configuration: HostConfiguration::Inline { config },
                 config_revision,
             },
+        }
+    }
+    pub fn file(
+        id: HostId,
+        config: &C,
+        config_revision: ConfigRevision,
+    ) -> Result<Self, StorageError>
+    where
+        C: Serialize,
+    {
+        Ok(Self {
+            schema_version: SCHEMA_VERSION,
+            id,
+            data: HostData {
+                configuration: HostConfiguration::File {
+                    fingerprint: configuration_fingerprint(config)?,
+                },
+                config_revision,
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AgentConfiguration {
+    File { key: String, fingerprint: String },
+    Inline { name: String, config: AgentConfig },
+}
+impl AgentConfiguration {
+    pub fn from_values(
+        name: String,
+        config: AgentConfig,
+        source: Option<AgentConfigurationSource>,
+    ) -> Result<Self, StorageError> {
+        let value = match source {
+            Some(source) => Self::File {
+                key: source.key,
+                fingerprint: configuration_fingerprint(&(&name, &config))?,
+            },
+            None => Self::Inline { name, config },
+        };
+        value.validate()?;
+        Ok(value)
+    }
+    pub fn source(&self) -> Option<AgentConfigurationSource> {
+        match self {
+            Self::File { key, .. } => Some(AgentConfigurationSource { key: key.clone() }),
+            Self::Inline { .. } => None,
+        }
+    }
+    pub fn validate(&self) -> Result<(), StorageError> {
+        match self {
+            Self::File { key, fingerprint } => {
+                AgentConfigurationSource { key: key.clone() }
+                    .validate()
+                    .map_err(|error| StorageError::InvalidObject {
+                        reason: error.to_string(),
+                    })?;
+                validate_fingerprint(fingerprint)
+            }
+            Self::Inline { name, config } => {
+                if name.trim().is_empty() || name.contains('\0') {
+                    return Err(StorageError::InvalidObject {
+                        reason: "invalid Agent name".into(),
+                    });
+                }
+                config
+                    .validate()
+                    .map_err(|error| StorageError::InvalidObject {
+                        reason: error.to_string(),
+                    })
+            }
         }
     }
 }
@@ -54,14 +202,10 @@ pub struct AgentRecord {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentData {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub configuration_source: Option<AgentConfigurationSource>,
-    pub name: String,
+    pub configuration: AgentConfiguration,
     pub mode: StorageMode,
-    pub config: AgentConfig,
     pub config_revision: ConfigRevision,
-    /// Only a reloadable persistent Session may appear here. A runtime default
-    /// pointing at a memory Session is represented by None, not a saved pointer.
+    /// Memory defaults are represented by None, never restored as objects.
     pub default_session_id: Option<SessionId>,
 }
 impl AgentRecord {

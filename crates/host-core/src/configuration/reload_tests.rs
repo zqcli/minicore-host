@@ -106,12 +106,19 @@ async fn canonical_reload_owns_preparation_save_and_force_cleanup_after_waiter_d
     let directory = tempfile::tempdir().unwrap();
     let prepare_gate = preparation_gate();
     let prep = preparer(Some(prepare_gate.clone()));
-    let host = Host::open_configured(directory.path(), config("old"), |value| async {
-        Ok(prepared(value, "old-key").with_preparer(prep.clone()))
-    })
+    let configuration_directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        configuration_directory.path().join("host.json"),
+        serde_json::to_vec(&config("old")).unwrap(),
+    )
+    .unwrap();
+    let host = Host::open_directory_configured(
+        directory.path(),
+        configuration_directory.path(),
+        |value| async { Ok(prepared(value, "old-key").with_preparer(prep.clone())) },
+    )
     .await
     .unwrap();
-    let _configuration_directory = bind_directory(&host);
     let original = host.connect_network("old-key").unwrap();
     let old_reader = host.connect_network("old-key").unwrap();
     let observer = host.connect().unwrap();
@@ -184,7 +191,12 @@ async fn canonical_reload_owns_preparation_save_and_force_cleanup_after_waiter_d
     let stored: serde_json::Value =
         serde_json::from_slice(&std::fs::read(directory.path().join("host.json")).unwrap())
             .unwrap();
-    assert_eq!(stored["data"]["config"]["name"], "new");
+    assert_eq!(stored["data"]["configuration"]["source"], "file");
+    assert_eq!(
+        stored["data"]["configuration"]["fingerprint"],
+        minicore_host_storage::configuration_fingerprint(&config("new")).unwrap()
+    );
+    assert!(stored["data"]["configuration"].get("config").is_none());
     assert_eq!(stored["data"]["config_revision"], 1);
     // The initialization-only assembler is released at the actual stop barrier.
     assert!(host.configuration.state.lock().unwrap().preparer.is_none());
@@ -360,12 +372,19 @@ async fn canonical_mixed_restart_rejects_every_change_but_unchanged_restart_fiel
 async fn canonical_actual_save_failure_retains_failed_facts_and_original_live_key() {
     let directory = tempfile::tempdir().unwrap();
     let prep = preparer(None);
-    let host = Host::open_configured(directory.path(), config("old"), |value| async {
-        Ok(prepared(value, "old-key").with_preparer(prep))
-    })
+    let configuration_directory = tempfile::tempdir().unwrap();
+    std::fs::write(
+        configuration_directory.path().join("host.json"),
+        serde_json::to_vec(&config("old")).unwrap(),
+    )
+    .unwrap();
+    let host = Host::open_directory_configured(
+        directory.path(),
+        configuration_directory.path(),
+        |value| async { Ok(prepared(value, "old-key").with_preparer(prep)) },
+    )
     .await
     .unwrap();
-    let _configuration_directory = bind_directory(&host);
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     let network = host.connect_network("old-key").unwrap();

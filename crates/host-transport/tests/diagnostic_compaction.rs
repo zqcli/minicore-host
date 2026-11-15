@@ -361,8 +361,6 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         matches!(rejected, CallError::Business(fault) if fault.kind() == Some(FaultKind::SessionBusy))
     );
     let history = root
-        .join("agents")
-        .join(session.target().agent_id.as_str())
         .join("sessions")
         .join(session.target().session_id.as_str())
         .join("history.jsonl");
@@ -585,8 +583,6 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     utility_started(&http).await;
     let automatic_save_turn = bound(&session, &message.message_id).await;
     let automatic_history = root
-        .join("agents")
-        .join(session.target().agent_id.as_str())
         .join("sessions")
         .join(session.target().session_id.as_str())
         .join("history.jsonl");

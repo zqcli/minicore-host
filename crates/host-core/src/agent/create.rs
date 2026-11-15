@@ -2,7 +2,7 @@ use super::*;
 use crate::persistence::disk;
 use futures_util::FutureExt;
 use minicore_host_diagnostics::Context;
-use minicore_host_storage::{AgentData, SessionData, SessionRecord};
+use minicore_host_storage::{AgentConfiguration, AgentData, SessionData, SessionRecord};
 use std::panic::AssertUnwindSafe;
 use tokio::sync::oneshot;
 use tracing::{Instrument, instrument::WithSubscriber};
@@ -200,11 +200,7 @@ impl AgentOwner {
             && (message.is_some()
                 || state.creation_committed
                 || state.info.mode != StorageMode::Persistent
-                || !state
-                    .info
-                    .configuration_source
-                    .as_ref()
-                    .is_some_and(|source| source.managed))
+                || state.info.configuration_source.is_none())
         {
             return Err(Fault::new(
                 FaultKind::AgentConfigConflict,
@@ -384,7 +380,7 @@ impl AgentOwner {
             let save_store = store.clone();
             let save_record = record.clone();
             disk(FaultKind::SessionHistoryWriteFailed, move || {
-                save_store.save(&save_record)
+                save_store.create(&save_record)
             })
             .await?;
             SessionController::from_record(
@@ -433,10 +429,15 @@ impl AgentOwner {
                 self.id.clone(),
                 self.host_id.clone(),
                 AgentData {
-                    configuration_source: info.configuration_source,
-                    name: info.name,
+                    configuration: AgentConfiguration::from_values(
+                        info.name,
+                        info.config,
+                        info.configuration_source,
+                    )
+                    .map_err(|error| {
+                        Fault::new(FaultKind::AgentConfigInvalid, error.to_string())
+                    })?,
                     mode: info.mode,
-                    config: info.config,
                     config_revision: info.config_revision,
                     default_session_id: (prepared.mode == StorageMode::Persistent)
                         .then(|| prepared.id.clone()),

@@ -43,7 +43,7 @@ fn child_retry_syncs_parent_after_mkdir_succeeded_but_sync_failed() {
     assert!(traced(&root.path));
 }
 #[test]
-fn initial_history_retry_syncs_existing_empty_file_before_publishing_session() {
+fn failed_initial_history_sync_keeps_reserved_id_without_publishing_or_recreating() {
     use crate::*;
     use minicore_host_protocol::*;
     let temp = tempfile::tempdir().unwrap();
@@ -61,10 +61,11 @@ fn initial_history_retry_syncs_existing_empty_file_before_publishing_session() {
             agent.id().clone(),
             host.id().clone(),
             AgentData {
-                configuration_source: None,
-                name: "test".into(),
+                configuration: crate::AgentConfiguration::Inline {
+                    name: "test".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 1,
                 default_session_id: None,
             },
@@ -90,12 +91,16 @@ fn initial_history_retry_syncs_existing_empty_file_before_publishing_session() {
     );
     let history = session.canonical_path().join("history.jsonl");
     fail(&history);
+    assert!(session.create(&record).is_err());
+    assert_eq!(std::fs::read(&history).unwrap(), b"");
+    assert!(!session.canonical_path().join("session.json").exists());
+    assert!(traced(&history));
+    clear_trace();
+    assert!(session.create(&record).is_err());
     assert!(session.save(&record).is_err());
     assert_eq!(std::fs::read(&history).unwrap(), b"");
     assert!(!session.canonical_path().join("session.json").exists());
-    clear_trace();
-    session.save(&record).unwrap();
-    assert!(traced(&history));
+    assert!(!traced(&history));
 }
 
 #[test]
@@ -117,10 +122,11 @@ fn partial_explicit_delete_can_continue_while_closed_ownership_record_remains() 
             agent.id().clone(),
             host.id().clone(),
             AgentData {
-                configuration_source: None,
-                name: "test".into(),
+                configuration: crate::AgentConfiguration::Inline {
+                    name: "test".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 1,
                 default_session_id: None,
             },
@@ -130,7 +136,7 @@ fn partial_explicit_delete_can_continue_while_closed_ownership_record_remains() 
         .session(SessionId::new().unwrap(), StorageMode::Persistent)
         .unwrap();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session.id().clone(),
             agent.id().clone(),
             SessionData {

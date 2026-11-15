@@ -20,12 +20,17 @@ fn read_agent(path: &Path, agent: &AgentRef) -> AgentRecord {
     serde_json::from_slice(
         &std::fs::read(
             path.join("agents")
-                .join(agent.agent_id.as_str())
-                .join("agent.json"),
+                .join(format!("{}.json", agent.agent_id.as_str())),
         )
         .unwrap(),
     )
     .unwrap()
+}
+fn saved_name(record: AgentRecord) -> String {
+    match record.data.configuration {
+        minicore_host_storage::AgentConfiguration::Inline { name, .. } => name,
+        _ => panic!("dynamic Agent expected"),
+    }
 }
 async fn create(host: &Arc<Host>, caller: &CallerContext) -> (AgentRef, SessionRef) {
     let result = host
@@ -57,10 +62,10 @@ async fn failed_record_save_and_explicit_reconcile_preserve_original_operation_a
         let path = directory
             .path()
             .join("agents")
-            .join(agent.agent_id.as_str());
+            .join(format!("{}.json", agent.agent_id));
         // A real directory at the record file path rejects the production store read/write.
-        std::fs::rename(path.join("agent.json"), path.join("original-agent.json")).unwrap();
-        std::fs::create_dir(path.join("agent.json")).unwrap();
+        std::fs::rename(path.clone(), directory.path().join("original-agent.json")).unwrap();
+        std::fs::create_dir(path.clone()).unwrap();
         let operation = OperationId::new().unwrap();
         let receipt = host
             .agent_update(&caller, &agent, update(operation.clone()))
@@ -75,14 +80,14 @@ async fn failed_record_save_and_explicit_reconcile_preserve_original_operation_a
         let info = host.agent_info(&caller, &agent).unwrap();
         assert_eq!(info.name, "private Agent name");
         assert_eq!(info.config_revision, 0);
-        std::fs::remove_dir(path.join("agent.json")).unwrap();
-        std::fs::rename(path.join("original-agent.json"), path.join("agent.json")).unwrap();
+        std::fs::remove_dir(path.clone()).unwrap();
+        std::fs::rename(directory.path().join("original-agent.json"), path.clone()).unwrap();
         let recovered = host.reconcile_agent_record(&caller, &agent).await.unwrap();
         assert_eq!(recovered.config_revision, 1);
         assert_eq!(recovered.name, "private updated Agent name");
         assert!(recovered.metadata_fault.is_none());
         assert_eq!(
-            read_agent(directory.path(), &agent).data.name,
+            saved_name(read_agent(directory.path(), &agent)),
             recovered.name
         );
         assert_eq!(
@@ -153,9 +158,9 @@ async fn default_clear_failure_has_one_agent_error_with_original_close_operation
         let path = directory
             .path()
             .join("agents")
-            .join(agent.agent_id.as_str());
-        std::fs::rename(path.join("agent.json"), path.join("original-agent.json")).unwrap();
-        std::fs::create_dir(path.join("agent.json")).unwrap();
+            .join(format!("{}.json", agent.agent_id));
+        std::fs::rename(path.clone(), directory.path().join("original-agent.json")).unwrap();
+        std::fs::create_dir(path.clone()).unwrap();
         let operation = OperationId::new().unwrap();
         host.session_close(
             &caller,
@@ -184,8 +189,8 @@ async fn default_clear_failure_has_one_agent_error_with_original_close_operation
             host.agent_info(&caller, &agent).unwrap().metadata_fault,
             Some(fault.clone())
         );
-        std::fs::remove_dir(path.join("agent.json")).unwrap();
-        std::fs::rename(path.join("original-agent.json"), path.join("agent.json")).unwrap();
+        std::fs::remove_dir(path.clone()).unwrap();
+        std::fs::rename(directory.path().join("original-agent.json"), path.clone()).unwrap();
         host.reconcile_agent_record(&caller, &agent).await.unwrap();
         assert!(
             read_agent(directory.path(), &agent)
@@ -358,7 +363,7 @@ async fn uninstalled_or_closed_logging_does_not_change_confirmed_metadata() {
             })
             .await;
             assert_eq!(
-                read_agent(directory.path(), &agent).data.name,
+                saved_name(read_agent(directory.path(), &agent)),
                 "private updated Agent name"
             );
             assert!(
@@ -477,9 +482,9 @@ async fn session_and_agent_delete_keep_original_operation_on_default_save_failur
             let path = directory
                 .path()
                 .join("agents")
-                .join(agent.agent_id.as_str());
-            std::fs::rename(path.join("agent.json"), path.join("original-agent.json")).unwrap();
-            std::fs::create_dir(path.join("agent.json")).unwrap();
+                .join(format!("{}.json", agent.agent_id));
+            std::fs::rename(path.clone(), directory.path().join("original-agent.json")).unwrap();
+            std::fs::create_dir(path.clone()).unwrap();
             let operation = OperationId::new().unwrap();
             if cascade {
                 host.agent_delete(
@@ -539,7 +544,9 @@ async fn session_and_agent_delete_keep_original_operation_on_default_save_failur
                 SessionLifecycle::Closing
             );
             assert!(
-                path.join("sessions")
+                directory
+                    .path()
+                    .join("sessions")
                     .join(session.session_id.as_str())
                     .join("session.json")
                     .exists()

@@ -152,10 +152,11 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
                 agent_id.clone(),
                 host_id.clone(),
                 AgentData {
-                    configuration_source: None,
-                    name: "query fixture".into(),
+                    configuration: minicore_host_storage::AgentConfiguration::Inline {
+                        name: "query fixture".into(),
+                        config: AgentConfig::default(),
+                    },
                     mode: StorageMode::Persistent,
-                    config: AgentConfig::default(),
                     config_revision: 0,
                     default_session_id: None,
                 },
@@ -165,7 +166,7 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
             .session(session_id.clone(), StorageMode::Persistent)
             .unwrap();
         store
-            .save(&SessionRecord::new(
+            .create(&SessionRecord::new(
                 session_id.clone(),
                 agent_id.clone(),
                 SessionData {

@@ -192,8 +192,6 @@ impl Rig {
     fn path(&self) -> PathBuf {
         self.directory
             .path()
-            .join("agents")
-            .join(self.target.agent_id.as_str())
             .join("sessions")
             .join(self.target.session_id.as_str())
             .join("history.jsonl")

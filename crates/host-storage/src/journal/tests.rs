@@ -19,10 +19,11 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
             agent.id().clone(),
             host.id().clone(),
             AgentData {
-                configuration_source: None,
-                name: "test".into(),
+                configuration: crate::AgentConfiguration::Inline {
+                    name: "test".into(),
+                    config: AgentConfig::default(),
+                },
                 mode: StorageMode::Persistent,
-                config: AgentConfig::default(),
                 config_revision: 1,
                 default_session_id: None,
             },
@@ -32,7 +33,7 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
         .session(SessionId::new().unwrap(), StorageMode::Persistent)
         .unwrap();
     session
-        .save(&SessionRecord::new(
+        .create(&SessionRecord::new(
             session.id().clone(),
             agent.id().clone(),
             SessionData {

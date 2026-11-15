@@ -7,6 +7,7 @@ use minicore_host_protocol::{
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -32,9 +33,25 @@ impl DataRoot {
         &self,
     ) -> Result<Option<HostRecord<C>>, StorageError> {
         if !self.inner.directory.contains("host.json")? {
+            for name in ["agents", "sessions"] {
+                if self.inner.directory.contains(name)?
+                    && !self
+                        .inner
+                        .directory
+                        .child(name, false)?
+                        .entries()?
+                        .is_empty()
+                {
+                    return Err(StorageError::InvalidObject {
+                        reason: "stored children have no Host identity".into(),
+                    });
+                }
+            }
             return Ok(None);
         }
-        read_object(&self.inner.directory, "host.json").map(Some)
+        let record: HostRecord<C> = read_object(&self.inner.directory, "host.json")?;
+        record.data.configuration.validate()?;
+        Ok(Some(record))
     }
     pub fn canonical_path(&self) -> &Path {
         &self.inner.directory.path
@@ -72,6 +89,7 @@ impl HostStore {
         if record.id != self.host_id {
             return Err(StorageError::OwnershipMismatch);
         }
+        record.data.configuration.validate()?;
         Ok(record)
     }
     pub fn save_host<C: DeserializeOwned + Serialize>(
@@ -79,6 +97,7 @@ impl HostStore {
         record: &HostRecord<C>,
     ) -> Result<ObjectSave, StorageError> {
         check_schema(record.schema_version)?;
+        record.data.configuration.validate()?;
         if record.id != self.host_id {
             return Err(StorageError::OwnershipMismatch);
         }
@@ -86,13 +105,20 @@ impl HostStore {
         if dir.contains("host.json")? {
             let old: HostRecord<C> = self.load_host()?;
             check_revision(old.data.config_revision, record.data.config_revision)?;
+            if std::mem::discriminant(&old.data.configuration)
+                != std::mem::discriminant(&record.data.configuration)
+            {
+                return Err(StorageError::InvalidObject {
+                    reason: "Host configuration source cannot change".into(),
+                });
+            }
             if old.data.config_revision == record.data.config_revision {
-                let before = serde_json::to_value(&old.data.config).map_err(|e| {
+                let before = serde_json::to_value(&old.data.configuration).map_err(|e| {
                     StorageError::InvalidObject {
                         reason: e.to_string(),
                     }
                 })?;
-                let after = serde_json::to_value(&record.data.config).map_err(|e| {
+                let after = serde_json::to_value(&record.data.configuration).map_err(|e| {
                     StorageError::InvalidObject {
                         reason: e.to_string(),
                     }
@@ -125,7 +151,42 @@ impl HostStore {
         if !self.root.inner.directory.contains("agents")? {
             return Ok(Vec::new());
         }
-        list_ids(&self.root.inner.directory.child("agents", false)?)
+        self.root.inner.directory.child("agents", false)?.entries()?.into_iter().map(|name| {
+            name.strip_suffix(".json").and_then(|stem| stem.parse().ok()).ok_or(StorageError::UnsafePath {
+                reason: "Agent records must use <AgentId>.json; nested storage is unsupported",
+            })
+        }).collect()
+    }
+    /// Scan Session ownership once at startup. Direct Agents load their own
+    /// records afterwards; no second persistent ownership index is maintained.
+    pub fn discover_sessions(&self) -> Result<BTreeMap<AgentId, Vec<SessionId>>, StorageError> {
+        let agents: BTreeSet<_> = self.list_agents()?.into_iter().collect();
+        let mut grouped: BTreeMap<AgentId, Vec<SessionId>> = BTreeMap::new();
+        if !self.root.inner.directory.contains("sessions")? {
+            return Ok(grouped);
+        }
+        let directory = self.root.inner.directory.child("sessions", false)?;
+        for id in list_ids::<SessionId>(&directory)? {
+            let child = directory.child(id.as_str(), false)?;
+            let value = strict_json::value(&child.read_metadata("session.json")?)
+                .map_err(|reason| StorageError::InvalidObject { reason })?;
+            let stored_id: SessionId = serde_json::from_value(
+                value.get("id").cloned().unwrap_or_default(),
+            )
+            .map_err(|error| StorageError::InvalidObject {
+                reason: error.to_string(),
+            })?;
+            let agent: AgentId =
+                serde_json::from_value(value.get("agent_id").cloned().unwrap_or_default())
+                    .map_err(|error| StorageError::InvalidObject {
+                        reason: error.to_string(),
+                    })?;
+            if stored_id != id || !agents.contains(&agent) {
+                return Err(StorageError::OwnershipMismatch);
+            }
+            grouped.entry(agent).or_default().push(id);
+        }
+        Ok(grouped)
     }
     fn check_host(&self) -> Result<(), StorageError> {
         // Only identity is needed here. The Host remains the owner of its actual
@@ -153,19 +214,17 @@ impl AgentStore {
             return Err(StorageError::InvalidStorageMode);
         }
         self.host.check_host()?;
-        self.host
-            .root
-            .inner
-            .directory
-            .child("agents", create)?
-            .child(self.agent_id.as_str(), create)
+        self.host.root.inner.directory.child("agents", create)
+    }
+    fn filename(&self) -> String {
+        format!("{}.json", self.agent_id)
     }
     /// Read only this Agent's authoritative record. Initialization uses this
     /// boundary so a broken default Session cannot block healthy siblings. The
     /// owner initializes each child independently and keeps an unusable default
     /// unavailable; it must not silently choose another Session.
     pub fn load_record(&self) -> Result<AgentRecord, StorageError> {
-        let record: AgentRecord = read_object(&self.directory(false)?, "agent.json")?;
+        let record: AgentRecord = read_object(&self.directory(false)?, &self.filename())?;
         self.validate(&record)?;
         Ok(record)
     }
@@ -183,20 +242,7 @@ impl AgentStore {
         if record.data.mode != self.mode {
             return Err(StorageError::InvalidStorageMode);
         }
-        if let Some(source) = &record.data.configuration_source {
-            source
-                .validate()
-                .map_err(|error| StorageError::InvalidObject {
-                    reason: error.to_string(),
-                })?;
-        }
-        record
-            .data
-            .config
-            .validate()
-            .map_err(|e| StorageError::InvalidObject {
-                reason: e.to_string(),
-            })?;
+        record.data.configuration.validate()?;
         Ok(())
     }
     fn check_default(&self, record: &AgentRecord) -> Result<(), StorageError> {
@@ -221,14 +267,18 @@ impl AgentStore {
             });
         }
         let dir = self.directory(true)?;
-        if dir.contains("agent.json")? {
-            let old: AgentRecord = read_object(&dir, "agent.json")?;
+        let filename = self.filename();
+        if dir.contains(&filename)? {
+            let old: AgentRecord = read_object(&dir, &filename)?;
             self.validate(&old)?;
+            if old.data.configuration.source() != record.data.configuration.source() {
+                return Err(StorageError::InvalidObject {
+                    reason: "Agent configuration source cannot change".into(),
+                });
+            }
             check_revision(old.data.config_revision, record.data.config_revision)?;
             if old.data.config_revision == record.data.config_revision
-                && (old.data.config != record.data.config
-                    || old.data.name != record.data.name
-                    || old.data.configuration_source != record.data.configuration_source)
+                && old.data.configuration != record.data.configuration
             {
                 return Err(StorageError::InvalidObject {
                     reason: "configuration changed without a new revision".into(),
@@ -236,7 +286,7 @@ impl AgentStore {
             }
         }
         self.check_default(record)?;
-        write_object(&dir, "agent.json", record)?;
+        write_object(&dir, &filename, record)?;
         Ok(ObjectSave {
             config_revision: record.data.config_revision,
             persistence: PersistenceState::Persisted,
@@ -256,41 +306,22 @@ impl AgentStore {
             mode,
         })
     }
-    /// Discover canonical direct-child IDs, not a claim that their objects are
-    /// usable. Session loads perform all path/ownership checks independently.
+    /// Explicit query for this Agent; startup uses one Host-wide discovery pass.
     pub fn list_sessions(&self) -> Result<Vec<SessionId>, StorageError> {
         self.load_record()?;
-        let dir = self.directory(false)?;
-        if !dir.contains("sessions")? {
-            return Ok(Vec::new());
-        }
-        list_ids(&dir.child("sessions", false)?)
+        Ok(self
+            .host
+            .discover_sessions()?
+            .remove(&self.agent_id)
+            .unwrap_or_default())
     }
-    /// The caller is the direct owner and must first stop the Agent. This only
-    /// deletes its own empty hierarchy; it never recursively removes Sessions.
+    /// The direct owner has stopped the Agent and deleted its exact child scope.
     pub fn delete_empty(&self) -> Result<(), StorageError> {
         self.load()?;
-        let dir = self.directory(false)?;
-        let entries = dir.entries()?;
-        if entries.iter().any(|s| s != "agent.json" && s != "sessions") {
+        if !self.list_sessions()?.is_empty() {
             return Err(StorageError::DirectoryNotEmpty);
         }
-        if dir.contains("sessions")? {
-            if !dir.child("sessions", false)?.entries()?.is_empty() {
-                return Err(StorageError::DirectoryNotEmpty);
-            }
-            dir.remove_empty_child("sessions")?;
-        }
-        dir.remove_file("agent.json")?;
-        // Windows directory guards reject replacement while owned. Release the
-        // now-empty target before its parent performs the explicit deletion.
-        drop(dir);
-        self.host
-            .root
-            .inner
-            .directory
-            .child("agents", false)?
-            .remove_empty_child(self.agent_id.as_str())
+        self.directory(false)?.remove_file(&self.filename())
     }
 }
 
@@ -311,8 +342,6 @@ impl SessionStore {
         self.agent
             .host
             .canonical_path()
-            .join("agents")
-            .join(self.agent.agent_id.as_str())
             .join("sessions")
             .join(self.session_id.as_str())
     }
@@ -320,11 +349,12 @@ impl SessionStore {
         if self.mode != StorageMode::Persistent {
             return Err(StorageError::InvalidStorageMode);
         }
-        let agent = self.agent.directory(false)?;
-        // Avoid following the Agent default reference back into this Session.
-        let record: AgentRecord = read_object(&agent, "agent.json")?;
-        self.agent.validate(&record)?;
-        agent
+        self.agent.load_record()?;
+        self.agent
+            .host
+            .root
+            .inner
+            .directory
             .child("sessions", create)?
             .child(self.session_id.as_str(), create)
     }
@@ -371,6 +401,39 @@ impl SessionStore {
     pub fn load(&self) -> Result<SessionRecord, StorageError> {
         self.load_without_agent()
     }
+    /// Initial admission reserves the Session ID with an exclusive directory
+    /// creation. Even an empty existing directory is a conflict, not a retry.
+    pub fn create(&self, record: &SessionRecord) -> Result<ObjectSave, StorageError> {
+        self.validate(record)?;
+        if self.mode == StorageMode::Memory {
+            return Ok(ObjectSave {
+                config_revision: record.data.config_revision,
+                persistence: PersistenceState::NotApplicable,
+            });
+        }
+        self.agent.load_record()?;
+        let parent = self
+            .agent
+            .host
+            .root
+            .inner
+            .directory
+            .child("sessions", true)?;
+        let dir = parent.create_child(self.session_id.as_str())?;
+        let history = dir.open_file("history.jsonl", true, true)?;
+        crate::filesystem::sync_file(
+            &history,
+            &dir.path.join("history.jsonl"),
+            "sync initial history",
+        )?;
+        dir.sync()?;
+        write_object(&dir, "session.json", record)?;
+        Ok(ObjectSave {
+            config_revision: record.data.config_revision,
+            persistence: PersistenceState::Persisted,
+        })
+    }
+    /// Update an existing object. Missing metadata is an error, never creation.
     pub fn save(&self, record: &SessionRecord) -> Result<ObjectSave, StorageError> {
         self.validate(record)?;
         if self.mode == StorageMode::Memory {
@@ -379,54 +442,34 @@ impl SessionStore {
                 persistence: PersistenceState::NotApplicable,
             });
         }
-        let dir = self.directory(true)?;
-        if dir.contains("session.json")? {
-            let old = self.load()?;
-            check_revision(old.data.config_revision, record.data.config_revision)?;
-            if old.data.config_revision == record.data.config_revision
-                && (old.data.effective_config != record.data.effective_config
-                    || old.data.title != record.data.title)
-            {
-                return Err(StorageError::InvalidObject {
-                    reason: "configuration changed without a new revision".into(),
-                });
-            }
-            if old.data.agent_config_revision != record.data.agent_config_revision
-                || old.data.parent != record.data.parent
-                || old.data.created_at != record.data.created_at
-            {
-                return Err(StorageError::InvalidObject {
-                    reason: "Session creation provenance cannot change".into(),
-                });
-            }
-            if record.data.last_activity_at < old.data.last_activity_at {
-                return Err(StorageError::InvalidObject {
-                    reason: "Session activity cannot move backwards".into(),
-                });
-            }
-            if old.data.closed.is_some() && record.data.closed != old.data.closed {
-                return Err(StorageError::InvalidObject {
-                    reason: "a committed Session close cannot be reopened or rewritten".into(),
-                });
-            }
-        } else {
-            // Initial publication is deliberately not a multi-file transaction.
-            // The empty history is confirmed before the Session record. A later
-            // error reports the actual partial creation, never fake rollback.
-            let history = if dir.contains("history.jsonl")? {
-                if !dir.read("history.jsonl")?.is_empty() {
-                    return Err(StorageError::UncertainWrite);
-                }
-                dir.open_file("history.jsonl", true, false)?
-            } else {
-                dir.open_file("history.jsonl", true, true)?
-            };
-            crate::filesystem::sync_file(
-                &history,
-                &dir.path.join("history.jsonl"),
-                "sync initial history",
-            )?;
-            dir.sync()?;
+        let dir = self.directory(false)?;
+        let old = self.load()?;
+        check_revision(old.data.config_revision, record.data.config_revision)?;
+        if old.data.config_revision == record.data.config_revision
+            && (old.data.effective_config != record.data.effective_config
+                || old.data.title != record.data.title)
+        {
+            return Err(StorageError::InvalidObject {
+                reason: "configuration changed without a new revision".into(),
+            });
+        }
+        if old.data.agent_config_revision != record.data.agent_config_revision
+            || old.data.parent != record.data.parent
+            || old.data.created_at != record.data.created_at
+        {
+            return Err(StorageError::InvalidObject {
+                reason: "Session creation provenance cannot change".into(),
+            });
+        }
+        if record.data.last_activity_at < old.data.last_activity_at {
+            return Err(StorageError::InvalidObject {
+                reason: "Session activity cannot move backwards".into(),
+            });
+        }
+        if old.data.closed.is_some() && record.data.closed != old.data.closed {
+            return Err(StorageError::InvalidObject {
+                reason: "a committed Session close cannot be reopened or rewritten".into(),
+            });
         }
         write_object(&dir, "session.json", record)?;
         Ok(ObjectSave {
@@ -468,7 +511,10 @@ impl SessionStore {
         dir.remove_file("session.json")?;
         drop(dir);
         self.agent
-            .directory(false)?
+            .host
+            .root
+            .inner
+            .directory
             .child("sessions", false)?
             .remove_empty_child(self.session_id.as_str())
     }

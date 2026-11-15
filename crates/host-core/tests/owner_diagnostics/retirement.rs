@@ -296,7 +296,7 @@ async fn shutdown_distinguishes_memory_retirement_from_persistent_resource_relea
 }
 
 #[tokio::test]
-async fn actual_agent_directory_refusal_keeps_partial_delete_and_real_release_phase() {
+async fn unadmitted_persistent_child_prevents_agent_record_deletion_without_expanding_scope() {
     let (file, dispatch, guard) = logging();
     let directory = tempfile::tempdir().unwrap();
     let (agent, operation, shutdown_operation, fault) = async {
@@ -313,15 +313,16 @@ async fn actual_agent_directory_refusal_keeps_partial_delete_and_real_release_ph
             host_id: created.host_id,
             agent_id: created.agent_id.unwrap(),
         };
-        let path = directory
-            .path()
-            .join("agents")
-            .join(agent.agent_id.as_str());
-        std::fs::write(
-            path.join("independent-artifact"),
-            "private retained artifact",
-        )
-        .unwrap();
+        let path = directory.path().join("sessions");
+        let original = path.join(created.session_id.as_ref().unwrap().as_str());
+        let mut outside_scope: minicore_host_storage::SessionRecord =
+            serde_json::from_slice(&std::fs::read(original.join("session.json")).unwrap()).unwrap();
+        outside_scope.id = SessionId::new().unwrap();
+        let retained = path.join(outside_scope.id.as_str());
+        std::fs::create_dir(&retained).unwrap();
+        let retained_bytes = serde_json::to_vec(&outside_scope).unwrap();
+        std::fs::write(retained.join("session.json"), &retained_bytes).unwrap();
+        std::fs::write(retained.join("history.jsonl"), b"").unwrap();
         let operation = OperationId::new().unwrap();
         host.agent_delete(
             &caller,
@@ -350,20 +351,15 @@ async fn actual_agent_directory_refusal_keeps_partial_delete_and_real_release_ph
             host.agent_info(&caller, &agent).unwrap().lifecycle,
             AgentLifecycle::Retiring
         );
-        assert!(
-            !path
-                .join("sessions")
-                .join(created.session_id.unwrap().as_str())
-                .exists()
-        );
+        assert!(!path.join(created.session_id.unwrap().as_str()).exists());
         let shutdown_operation = shutdown(&host, &caller).await;
         assert_eq!(
             host.agent_info(&caller, &agent).unwrap().lifecycle,
             AgentLifecycle::Retiring
         );
         assert_eq!(
-            std::fs::read_to_string(path.join("independent-artifact")).unwrap(),
-            "private retained artifact"
+            std::fs::read(retained.join("session.json")).unwrap(),
+            retained_bytes
         );
         (agent, operation, shutdown_operation, fault)
     }
@@ -376,7 +372,7 @@ async fn actual_agent_directory_refusal_keeps_partial_delete_and_real_release_ph
     assert_eq!(errors[0]["operation_id"], operation.as_str());
     assert_eq!(errors[0]["fault_code"], fault.code());
     assert_eq!(errors[0]["fault_type"], fault.type_name());
-    assert_eq!(errors[0]["attributes"]["phase"], "agent_directory_delete");
+    assert_eq!(errors[0]["attributes"]["phase"], "agent_record_delete");
     assert!(!rows.iter().any(|row| matches!(
         row["event"].as_str(),
         Some("agent.retired" | "host.agent_removed")

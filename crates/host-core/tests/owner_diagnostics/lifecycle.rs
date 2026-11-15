@@ -139,7 +139,7 @@ async fn actual_creation_filesystem_failures_have_one_owner_error_and_no_unpubli
         ));
         std::fs::remove_file(&agents).unwrap();
         std::fs::rename(&saved, &agents).unwrap();
-        let sessions = agents.join(agent.agent_id.as_str()).join("sessions");
+        let sessions = directory.path().join("sessions");
         let saved = sessions.with_extension("saved");
         std::fs::rename(&sessions, &saved).unwrap();
         std::fs::write(&sessions, "private filesystem blocker").unwrap();
@@ -241,12 +241,11 @@ async fn accepted_partial_creation_survives_dropped_wait_and_reports_actual_defa
         let progress = host.receipt(&caller, &operation).unwrap();
         assert!(progress.result.steps.agent.succeeded());
         assert!(progress.result.steps.session.in_progress());
-        let path = directory
-            .path()
-            .join("agents")
-            .join(progress.agent_id.as_ref().unwrap().as_str());
+        let path = directory.path().join("agents");
+        #[cfg(windows)]
+        let record = path.join(format!("{}.json", progress.agent_id.as_ref().unwrap()));
         // Real Session writes remain allowed, but Agent default publication is refused.
-        std::fs::create_dir(path.join("sessions")).unwrap();
+        std::fs::create_dir(directory.path().join("sessions")).unwrap();
         #[cfg(unix)]
         {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o500)).unwrap();
@@ -261,13 +260,13 @@ async fn accepted_partial_creation_survives_dropped_wait_and_reports_actual_defa
         let publication_guard = {
             // Keep ordinary metadata reads and Session creation available, but
             // deny the actual atomic replacement of the Agent's existing file.
-            let record = path.join("agent.json");
             let held = std::fs::OpenOptions::new()
                 .read(true)
                 .share_mode(1 | 2) // FILE_SHARE_READ | FILE_SHARE_WRITE, without DELETE.
                 .open(&record)
                 .unwrap();
-            let error = std::fs::rename(&record, path.join("agent.json.blocked")).unwrap_err();
+            let error =
+                std::fs::rename(&record, directory.path().join("agent.json.blocked")).unwrap_err();
             assert_eq!(error.raw_os_error(), Some(32));
             held
         };
@@ -289,7 +288,7 @@ async fn accepted_partial_creation_survives_dropped_wait_and_reports_actual_defa
         #[cfg(windows)]
         drop(publication_guard);
         assert!(
-            std::fs::read_dir(path.join("sessions"))
+            std::fs::read_dir(directory.path().join("sessions"))
                 .unwrap()
                 .any(|entry| entry.unwrap().path().join("session.json").is_file())
         );

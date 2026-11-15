@@ -43,12 +43,12 @@ pub fn create_config_directory(
         .to_vec();
     let model: minicore_host_protocol::ModelRef =
         "provider/chat".parse().expect("literal model reference");
-    let log_dir = root
-        .parent()
-        .ok_or_else(|| invalid("configuration directory has no parent"))?
-        .join("logs");
+    let log_dir = crate::paths::default_root()?.join("logs");
     std::fs::create_dir_all(&log_dir)
         .map_err(|error| file_error(&log_dir, "create log directory", error))?;
+    let log_dir = log_dir
+        .canonicalize()
+        .map_err(|error| file_error(&log_dir, "resolve log directory", error))?;
     let host = HostConfig {
         name: "MiniCore Host".into(),
         models: vec![OpenAiModelSettings {

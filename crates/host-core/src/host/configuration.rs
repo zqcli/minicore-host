@@ -130,6 +130,7 @@ impl Host {
                 }
                 super::configuration_directory::validate_agents(&prepared, &loaded.agents).await?;
                 let existing = owner.configured_agents_owned()?;
+                Self::validate_directory_sources(&loaded.agents, &existing)?;
                 Ok((loaded, prepared, existing))
             }
             .await;
@@ -390,8 +391,15 @@ impl Host {
             }
         }
         let saved = if let Some(store) = store {
-            let record = HostRecord::new(self.id.clone(), candidate.config.clone(), revision);
+            let directory_bound = self.configuration_directory.get().is_some();
+            let id = self.id.clone();
+            let config = candidate.config.clone();
             disk(FaultKind::HostStorageUnavailable, move || {
+                let record = if directory_bound {
+                    HostRecord::file(id, &config, revision)?
+                } else {
+                    HostRecord::new(id, config, revision)
+                };
                 store.save_host(&record)
             })
             .await

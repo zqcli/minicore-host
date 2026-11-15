@@ -1,25 +1,72 @@
 use super::*;
 use crate::persistence::disk;
+use minicore_host_config::AgentDefinition;
+use minicore_host_storage::AgentConfiguration;
+
+pub(crate) struct PersistentAgent {
+    pub record: AgentRecord,
+    pub definition: Option<AgentDefinition>,
+    pub sessions: Vec<SessionId>,
+}
 
 impl AgentOwner {
     pub(crate) async fn load_persistent(
         store: AgentStore,
-        host_id: HostId,
+        saved: PersistentAgent,
         incarnation: HostIncarnation,
         access: Arc<ConnectionRegistry>,
         resources: Arc<dyn ResourceResolver>,
         changed: Arc<tokio::sync::Notify>,
     ) -> Result<Arc<Self>, Fault> {
-        let source = store.clone();
-        let record = disk(FaultKind::AgentConfigInvalid, move || source.load_record()).await?;
-        let owner = Self::from_record(record, store.clone(), incarnation, access, resources)
-            .with_change_signal(changed);
-        let source = store.clone();
-        let ids = disk(FaultKind::HostStorageUnavailable, move || {
-            source.list_sessions()
-        })
-        .await?;
-        for id in ids {
+        let mut record = saved.record;
+        let values = match &record.data.configuration {
+            AgentConfiguration::Inline { name, config } => (name.clone(), config.clone()),
+            AgentConfiguration::File { key, .. } => {
+                let definition = saved
+                    .definition
+                    .filter(|item| &item.key == key)
+                    .ok_or_else(|| {
+                        Fault::new(
+                            FaultKind::AgentConfigInvalid,
+                            format!("missing Agent declaration for key {key}"),
+                        )
+                    })?;
+                let configuration = AgentConfiguration::from_values(
+                    definition.name.clone(),
+                    definition.config.clone(),
+                    record.data.configuration.source(),
+                )
+                .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
+                if record.data.configuration != configuration {
+                    record.data.configuration = configuration;
+                    record.data.config_revision =
+                        record.data.config_revision.checked_add(1).ok_or_else(|| {
+                            Fault::new(
+                                FaultKind::AgentInternalUnexpected,
+                                "configuration revision exhausted",
+                            )
+                        })?;
+                    let source = store.clone();
+                    let candidate = record.clone();
+                    disk(FaultKind::HostStorageUnavailable, move || {
+                        source.save(&candidate)
+                    })
+                    .await?;
+                }
+                (definition.name, definition.config)
+            }
+        };
+        let host_id = record.host_id.clone();
+        let owner = Self::from_record(
+            record,
+            values,
+            store.clone(),
+            incarnation,
+            access,
+            resources,
+        )
+        .with_change_signal(changed);
+        for id in saved.sessions {
             let child_store =
                 store
                     .session(id.clone(), StorageMode::Persistent)
@@ -63,6 +110,7 @@ impl AgentOwner {
     }
     pub(crate) fn from_record(
         record: AgentRecord,
+        values: (String, AgentConfig),
         store: AgentStore,
         incarnation: HostIncarnation,
         access: Arc<ConnectionRegistry>,
@@ -82,15 +130,15 @@ impl AgentOwner {
             changed: Arc::new(tokio::sync::Notify::new()),
             state: Mutex::new(AgentState {
                 info: AgentInfo {
-                    configuration_source: record.data.configuration_source,
+                    configuration_source: record.data.configuration.source(),
                     deletion: None,
                     id: record.id,
                     host_id: record.host_id,
-                    name: record.data.name,
+                    name: values.0,
                     mode: record.data.mode,
                     lifecycle: AgentLifecycle::Active,
                     config_revision: record.data.config_revision,
-                    config: record.data.config,
+                    config: values.1,
                     default_session_id: record.data.default_session_id,
                     metadata_saving: false,
                     metadata_fault: None,

@@ -224,8 +224,6 @@ async fn explicit_load_settles_discarded_input(fail: bool, close: bool) {
     let history = f
         .directory
         .path()
-        .join("agents")
-        .join(child.agent_id.to_string())
         .join("sessions")
         .join(child.session_id.to_string())
         .join("history.jsonl");

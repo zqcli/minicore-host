@@ -54,8 +54,6 @@ async fn force_upgrade_records_one_actual_claim_without_guessing_a_missing_opera
     assert_eq!(http.count(), 1);
     http.abort().await;
     let path = data
-        .join("agents")
-        .join(target.agent_id.as_str())
         .join("sessions")
         .join(target.session_id.as_str())
         .join("history.jsonl");

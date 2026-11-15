@@ -46,24 +46,16 @@ tag, GitHub Release or independent Web changes are part of this task.
 - Old object formats and nested layout are explicitly unsupported. No migration,
   automatic rewrite, dual writer or fallback is added; old files are preserved.
 
-## Ownership and work plan
+## Implementation ownership
 
-All three engineering workers were requested with `gpt-6-astra` and `max`
-reasoning. This records the requested configuration, not independent proof of
-effective runtime settings.
+The earlier plan requested engineering workers with `gpt-6-astra` and `max`.
+The completion environment exposes no callable subagent/model-selection tool;
+implementation, review and validation here were performed directly. Do not
+interpret the earlier requested settings as verified effective execution.
 
-1. Coordinator: SPEC, root manifests/locks/version, integration review, complete
-   validation, exact revision pins and publication checkpoints.
-2. `host_config_reference_impl`: owner/core configuration, public provenance,
-   persisted sum types and deterministic fingerprints; no storage path ownership.
-3. `host_flat_storage_impl`: physical storage, discovery, collision/deletion and
-   lease behavior, path defaults/scaffolding, diagnostics and affected fixtures.
-4. `tui_config_reference_impl`: TUI integration, initialization, docs/help,
-   regression tests and package version; final Host pin is coordinated.
-
-Workers begin with read-only planning and review; implementation starts only
-after the specification checkpoint is committed. Shared type/API decisions are
-coordinated before editing. Runtime ownership and the existing UI are retained.
+Host owners apply resolved configuration, storage owns physical record access,
+and TUI owns local preferences. The existing Runtime and terminal UI are retained.
+No independent Web, migration, detach or recovery interface was added.
 
 ## Validation plan
 
@@ -82,25 +74,73 @@ coordinated before editing. Runtime ownership and the existing UI are retained.
 - Run existing Linux/macOS/Windows CI and package checks on published revisions.
   Controlled provider tests are not described as live upstream validation.
 
-## Progress and evidence
+## Implementation and verification
 
-- Fresh clean checkouts match both recorded remote `dev` heads.
-- SPEC rules and current configuration/storage/TUI contracts were inspected.
-- SPEC 4.11.1 was published first at `d95ab422`; the full schema-3
-  storage and file-reference implementation is not yet present on remote dev.
-- The prior 0.12.1 Linux quality-gate failure was traced to
-  `repeated_signals_do_not_force_paused_backlog_but_explicit_rpc_force_finishes`.
-  The process emitted `host.shutdown_requested` before the owner accepted
-  shutdown, allowing a subsequent `host.info` read to see `running`.
-  Commit `2c5de6bb` emits the event after successful acceptance; its Linux
-  quality gate passed in run 43669197785.
-- Commit `f064db49` updates shared startup defaults to independent
-  `~/.minicore/config` and `~/.minicore/data` paths, and places scaffold
-  logs in a sibling `logs/` directory. Commit `74b4808f` formats the
-  updated application path test. Cross-platform CI is pending.
-- TUI commits `32399085` and `11973145` flatten command templates and
-  make missing `host.json` the first-run condition; the latter fixes the
-  formatting failure from the first CI attempt.
-- Both repositories still report package version 0.12.1. Do not publish
-  0.12.2 or pin the new Host in TUI until schema-3 persistence, references,
-  validation and cross-platform CI are complete.
+- SPEC 4.11.1 was published first at `d95ab422`. Completion starts from Host
+  `67e19d31d61ee3038aeecf92daed02c4d602e2f4` and TUI
+  `1197314521430b7e72e36e25de6e4a45cdc5945e`, preserving prior fixes.
+- Both package versions are 0.12.2. TUI pins the exact published Host revision;
+  local path patches are validation-only and are not shipped.
+- Stored schema-3 sum types distinguish file references from inline values.
+  The generic Host decoder preserves exact arbitrary-precision JSON instead of
+  routing numbers through serde's intermediate tagged-enum content buffer.
+- Startup validates bound declarations and global Session ownership before
+  writing configuration metadata. Same-value restarts preserve revisions;
+  changed Role defaults affect new Sessions without rewriting existing ones.
+- A single metadata discovery pass groups Sessions by their recorded Agent.
+  Identifiable per-Session configuration/history faults remain local; unreadable
+  ownership, orphaned records, conflicting IDs and legacy layouts fail discovery.
+- Session creation exclusively reserves its ID directory. Metadata saves update
+  existing records only; collisions and partial creations are not overwritten or
+  retried. Explicit deletion retains its exact admitted child scope and leases.
+- Native-home defaults and log scaffolding are independent of config/data
+  overrides. TUI reads only its own UI JSON, with flat command templates and
+  no Host-owned UI-file interface. Diagnostics protect both flat object subtrees.
+- The prior signal test race was fixed at `2c5de6bb`: the process emits the
+  shutdown-request diagnostic only after the Host accepts the transition. The
+  original lifecycle assertions remain intact.
+
+### Local checks
+
+Rust 1.90.0, locked dependencies, Linux x86_64, an ordinary user and an isolated
+home directory were used. The container's PID 1 does not reap orphaned shell
+children, so an external test launcher acted as a child subreaper; production
+code and process-cleanup assertions were not changed for that environment.
+
+```sh
+./scripts/check.sh
+cargo test --workspace --all-targets --locked -- --list
+```
+
+Host: full gate passed; 1,240 native test cases enumerated, seven doctests and
+28 Python checks. Nested storage subprocess-probe output is not counted twice.
+Formatting, strict Clippy and strict rustdoc passed.
+
+TUI used a temporary local Cargo patch to the exact prepared Host tree for:
+
+```sh
+cargo fmt --all -- --check
+cargo test --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps
+cargo test --locked --all-targets -- --list
+```
+
+TUI: 487 cases enumerated; default run passed 483 with four ignored entries
+(three optional performance checks and the subprocess helper invoked by the
+integration cases). Native embedded Host tests cover chat/responses, directory
+reopen, source identity, flat files, reference-only records, reload failure and
+accepted-work shutdown. Snapshot changes are limited to the visible version.
+
+### Publication boundary
+
+The normal CI workflows are retained unchanged. Linux, macOS ARM/Intel and
+Windows checks, standard-user Windows storage tests and release-package smoke
+checks must pass on the delivered sources. CI URLs and exact commit IDs accompany
+the delivery report. No external live model-provider test or interactive terminal
+manual acceptance is claimed; integration uses real owners and controlled
+loopback HTTP/SSE at the provider boundary.
+
+Temporary source/dependency export tooling is removed from the delivered tree.
+Public source files and pinned dependency archives were used only for isolated
+validation; no credentials or private runtime data were copied into artifacts.

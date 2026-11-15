@@ -1,6 +1,6 @@
 # JSON configuration directories
 
-Host 0.12.1 and SPEC 4.11.0 use one explicit configuration directory. Configuration
+Host 0.12.2 and SPEC 4.11.1 use one explicit configuration directory. Configuration
 files are UTF-8 standard JSON: no TOML, comments, legacy-file fallback or automatic
 migration. Runtime persistence stays in the separate data root.
 
@@ -12,7 +12,7 @@ migration. Runtime persistence stays in the separate data root.
 | `agents/*.json` | One declared Agent per file | Loader resolves references; Host and Agent owners apply values |
 | `roles/*.json` | One reusable Role per file | Loader expands the selected Role into each native Agent configuration |
 | `tui.json` | TUI editor, display and terminal preferences | TUI reads, parses and saves locally |
-| `<data-root>/` | Host/Agent/Session identities, configuration snapshots and history | Existing durable owners |
+| `<data-root>/` | Owner identities, configuration references, independent Session settings and history | Existing durable owners |
 
 Web owns its `web.json` in its own deployment. It may connect to multiple Hosts.
 Host does not parse either UI file or expose a general configuration-file API.
@@ -50,10 +50,15 @@ and an existing parent directory. TUI's first-run initializer creates example
 Host, Role, Agent and UI files without replacing existing files; its Host example
 uses a file log and explicitly records the initial workspace.
 
-Each directory startup prepares providers, logging and network from that
-directory's current values. Saved snapshots supply durable identities and
-history, rather than overriding current source files. Startup does not send an
-Agent message or execute a model call.
+The starter log is `~/.minicore/logs/host.log`; its parent is created during
+initialization. Custom config/data paths do not implicitly relocate that log.
+Edit `host.json.logging` to choose another absolute destination.
+
+Each directory startup prepares providers, logging and network from the current
+source files. File-managed Host and Agent data contain no copied configuration
+body. Their stable IDs and fingerprints identify the applied values; Session
+configuration and history remain independent. Startup does not send an Agent
+message or execute a model call.
 
 The former Host `--config`, TUI `--home`/`--host-config`, `MINICORE_HOME`,
 `config.toml`, `agent-defaults.json` and `/agent-defaults` entry points are removed.
@@ -70,18 +75,29 @@ display name, a path or an ordered search across directories.
 
 First application of a key creates one persistent Agent and a default Session.
 Later startup or reload reuses that Agent ID, even if its file or display name
-changes. Removing the declaration marks its source unmanaged and retains the
-Agent, source key, Sessions and history. Reintroducing that key reuses the same
-Agent. Declared Agents expose `configuration_source: {key, managed}` on owner
-facts; this metadata is not part of copyable `AgentConfig`.
+changes. Owner queries expose `configuration_source: {key}` for file-managed
+Agents; dynamic Agents omit it. Source metadata is not part of copyable
+`AgentConfig`.
 
-While `managed` is true, ordinary Agent name/configuration updates and deletion
-are rejected. Edit the declaration and reload instead. Start, stop, default
-Session selection and explicit Session updates remain available. Dynamic Agents
-are independent. TUI `/agent-new <name>` copies the selected Agent's native
-configuration into a new dynamic persistent Agent, without its source key,
-Session overrides or history. Without a selected Agent, first add a declaration
-and reload.
+A saved file-managed Agent must have its declaration in the selected directory.
+Removing it makes startup or reload fail before any configuration publication or
+record write. A failed running reload retains the previous effective values;
+restart cannot restore the deleted default configuration from a digest, Session
+or history. Restore a valid declaration with the same key to reuse the identity.
+There is no automatic unmanage, fallback, detach or snapshot-recovery API.
+
+Ordinary Agent name/configuration updates are rejected for file-managed Agents.
+Edit the declaration and reload instead. Explicit deletion remains available
+with the existing lifecycle and exact child scope; it never deletes source files.
+To remove a declared Agent permanently, remove its declaration and explicitly
+delete the Agent before reloading. Keeping a declaration after deleting the
+object creates a new Agent through the normal creation path on the next reload.
+Start, stop, default Session selection and Session updates retain their behavior.
+
+Dynamic Agents are independent. TUI `/agent-new <name>` copies the selected
+Agent's native configuration into a new dynamic persistent Agent, without its
+source key, Session overrides or history. Without a selected Agent, first add a
+declaration and reload.
 
 ## Three instruction layers
 
@@ -120,3 +136,32 @@ caller disconnects and participates in the Host shutdown barrier.
 
 See [SPEC.md](../SPEC.md) for the normative contract and
 [host-config](../crates/host-config/README.md) for the shared loading API.
+
+## Persistent files and format boundary
+
+| Data-root path | Contents |
+| --- | --- |
+| `host.json` | Host ID, configuration source and revision |
+| `agents/<AgentId>.json` | Agent ID, Host ID, configuration source, mode, revision and default Session |
+| `sessions/<SessionId>/session.json` | Session ID, Agent ID and independent effective configuration/metadata |
+| `sessions/<SessionId>/history.jsonl` | Original native history records |
+| `tui/history.jsonl` | Frontend input recall, owned by TUI |
+
+Object schema is 3; history schema remains 3. Old object schemas and the nested
+Agent/Session layout are rejected without rewriting or migration. Keep an old
+data root as a backup and select a fresh `--data-root` for this format; merely
+moving files is not a supported conversion.
+
+`data.configuration` is exclusive: a file-managed Host stores
+`{"source":"file","fingerprint":"<sha256>"}`, and a file-managed Agent also
+stores `key`. Standalone programmatic Hosts store
+`{"source":"inline","config":{...}}`; dynamic Agents store
+`{"source":"inline","name":"...","config":{...}}`. Constructors do not
+convert between these sources. File records contain no duplicate names,
+instructions, models or Role bodies.
+
+Fingerprints use SHA-256 over deterministic JSON of the full typed HostConfig or
+`[Agent name, resolved AgentConfig]`, including Role content. Input JSON field
+order/formatting does not change revisions. Changed effective defaults increment
+the Agent revision; an unchanged restart preserves it. A digest cannot recover
+configuration contents. Session settings are not inferred back into Agent defaults.
