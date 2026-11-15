@@ -1,0 +1,63 @@
+name: Task 115 validation inputs
+
+on:
+  push:
+    branches: [dev]
+    paths: [".github/workflows/task115-validation.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          path: host
+          persist-credentials: false
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: zqcli/minicore-tui
+          ref: 1197314521430b7e72e36e25de6e4a45cdc5945e
+          path: tui
+          persist-credentials: false
+      - name: Archive exact tracked source checkpoints
+        shell: bash
+        run: |
+          mkdir sources
+          git -C host archive --format=tar --prefix=host/ HEAD | tar -xf - -C sources
+          git -C tui archive --format=tar --prefix=tui/ HEAD | tar -xf - -C sources
+          git -C host rev-parse HEAD > sources/host-revision.txt
+          git -C tui rev-parse HEAD > sources/tui-revision.txt
+          tar -czf task115-sources.tar.gz -C sources .
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: task115-sources
+          path: task115-sources.tar.gz
+          retention-days: 3
+          compression-level: 0
+      - name: Prepare pinned offline compiler and dependency sources
+        shell: bash
+        env:
+          RUSTUP_TOOLCHAIN: "1.90.0"
+        run: |
+          rustup toolchain install 1.90.0 --profile minimal --component rustfmt --component clippy
+          cd host
+          cargo fetch --locked
+          cd ../tui
+          cargo fetch --locked
+          cd ..
+          mkdir offline
+          cp -a "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu" offline/toolchain
+          mkdir offline/cargo
+          cp -a "$HOME/.cargo/registry" offline/cargo/registry
+          cp -a "$HOME/.cargo/git" offline/cargo/git
+          tar -czf task115-offline.tar.gz -C offline .
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: task115-offline
+          path: task115-offline.tar.gz
+          retention-days: 3
+          compression-level: 0
