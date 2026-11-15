@@ -1,23 +1,49 @@
 # MiniCore Host
 
-## In progress: Host/TUI 0.12.4 (Task 117)
+## Current delivery: Host/TUI 0.12.4 (Task 117)
 
-[Task 117](tasks/117-tui-functional-fixes/TASK.md) records the owner's approval
-to repair exactly three frontend issues after updating the specification:
-paste into Find/Sessions/Models/Agents queries, forward-delete undo/redo, and
-Session rows whose distinct long titles clip to the same visible label.
-SPEC 4.11.3 defines the local editing and stable short-ID contracts; the TUI's
-English design contract mirrors them. Host -> Agent -> SessionController,
-native identities and schema-3 storage remain unchanged. No backend production
-logic or new metadata is required.
+[Task 117](tasks/117-tui-functional-fixes/TASK.md) implements the three approved
+frontend repairs: pasted Find/Sessions/Models/Agents queries, forward-delete
+undo/redo, and stable Session-picker short IDs when long titles clip alike.
+SPEC 4.11.3 and the TUI design contract were committed before implementation.
+Host -> Agent -> SessionController, schema-3 storage and native identities remain
+unchanged. All 468 tracked Host Rust files, including tests, are unchanged.
 
-The patch target is 0.12.4 for both repositories. Workers were requested with
-`gpt-6-astra` / `max`; these are requested settings, not independently verified
-runtime settings. Specification preparation is complete; implementation,
-release integration, independent review and validation are pending. Exact
-commits and observed checks will be recorded as they complete. Frozen prior QA
-remains failure evidence, not validation of the repaired build. Themes, F4,
-clipboard behavior and the other deferred findings remain outside this task.
+Host `667f0923b827fea9b5fdb60f75a21f5369e44193` and TUI
+`be80bfe570358a6d9f408f321ffe817a9acec733` are published on `dev`; the TUI pins
+that exact Host revision. Canonical publication preserves the locally reviewed
+Git trees. No history rewrite, release tag or main merge was performed. Workers
+were requested with `gpt-6-astra` / `max`; these are requested settings, not an
+independent runtime attestation. No Codex CLI was used.
+
+The complete local Host gate passed 1,255 uniquely enumerated Rust cases,
+seven doctests and 28 Python checks, plus formatting, strict Clippy and rustdoc.
+The canonical-pin TUI gate exited 0 with 509 passed and four existing ignored
+cases (513 enumerated), including 16 net additional regression cases; its
+54 snapshot checks also passed. Third-party lock entries remain unchanged:
+225 for Host and 272 for TUI. An independent release audit passed all 53 checks.
+
+Fresh desktop verification retained 66 screenshots and 177 logical actions
+across three clean native exits and two restarts. All four query paste surfaces,
+Delete/Ctrl+D history, visible Session IDs, targeted renaming and draft isolation
+were exercised. The final canonical binary completed and persisted two
+concurrent 45-second fixture Turns under one Agent; native history and API
+records account for exactly five explicit inputs and five requests overall.
+Two earlier 120-second fixture Turns reached the configured HTTP deadline and
+remain recorded as failed/timeouts, not successful completions. The final
+restart changed no Session metadata/history or API-log bytes. The provider was
+an explicit local simulated fixture; no live-model or performance claim is made.
+
+**All release CI gates passed on the exact published source checkpoints.** Host
+[run 43718763910](https://github.com/zqcli/minicore-host/actions/runs/43718763910)
+completed all nine jobs successfully, including five quality/native checks and
+four platform packages. TUI
+[run 43720128579](https://github.com/zqcli/minicore-tui/actions/runs/43720128579)
+completed all eight jobs successfully: quality, Linux/macOS/Windows tests and
+four platform packages. The coordinator verified both completed workflow
+conclusions and every job on 2026-11-15. Themes, F4, clipboard
+readback, provider-history limitations and other deferred findings stay outside
+this repair; previous QA reports and archives remain byte-for-byte unchanged.
 
 ## Previous delivery: Host/TUI 0.12.3 (Task 116)
 
