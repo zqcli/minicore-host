@@ -14,8 +14,8 @@ provider settings, and supply the credential environment variable before startin
 cargo run --locked -p minicore-host -- --config-dir /absolute/minicore-config --stdio
 ```
 
-`--config-dir` defaults to `config/` next to the executable. `--data-root` is
-optional and defaults to `<config-dir>/data`. Relative overrides are resolved
+`--config-dir` defaults to `~/.minicore/config`. `--data-root` is
+optional and independently defaults to `~/.minicore/data`. Relative overrides are resolved
 against the startup working directory. The storage owner acquires its canonical
 directory exclusively before executable owners are created. Reopening preserves
 Host and Agent identities and Session history, with a new Host incarnation;
