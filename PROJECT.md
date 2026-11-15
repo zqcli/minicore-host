@@ -1,6 +1,16 @@
 # MiniCore Host
 
-## Current delivery: Host/TUI 0.12.2 (Task 115)
+## Current work: Host/TUI 0.12.3 (Task 116)
+
+[Task 116](tasks/116-error-context/TASK.md) implements SPEC 4.11.2: preserve safe
+upstream error messages and source details, bind current identities for agent
+invocations, retain actionable validation errors, and improve TUI diagnostics
+and bounded previews. Three collaboration workers were requested with
+`gpt-6-astra` / `max`; no Codex CLI is used. The existing missing-tool
+configuration and synthetic parallel-tool concerns are outside this scope.
+Validation and publication are pending; no new passing result is claimed.
+
+## Previous delivery: Host/TUI 0.12.2 (Task 115)
 
 [Task 115](tasks/115-config-references/TASK.md) implements SPEC 4.11.1,
 committed first at `d95ab422dbb844b79ed3a9a386345f3175c69c39`.
