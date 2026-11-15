@@ -202,9 +202,18 @@ The original two teardown orders, exact unsubscribe response, clean request EOF,
 real second Turn completion, retained history and independent owner liveness
 assertions remain. No production source, dependency, version, storage format or
 specification contract changes. TUI keeps the same immutable Host source pin;
-all compiled library source remains identical. The test-only follow-up must pass
-the normal nine-job native CI gate before handoff; the earlier cancelled run is
-retained as diagnostic evidence rather than reported as successful.
+all compiled library source remains identical. The published test follow-up is
+`b1c4cb85bae201d4dfb4b2ec6188021a3541c363`, tree
+`98d5b5d9ef02cad99e7d42176f4a9ebc6e53401c`, exactly matching locally validated
+checkpoint `c6948a60195951a01b06ed23b2f62a4374c89285`. Its normal nine-job native
+CI gate passed on the first attempt in
+[run 43692339426](https://github.com/zqcli/minicore-host/actions/runs/43692339426),
+completed at 08:17:30 UTC on 2026-11-15. The five quality/platform jobs and all
+four release-package jobs succeeded. Windows also passed its standard-user
+storage/Host checks. Its archived log shows the corrected shutdown test passing
+at 08:08:56 UTC: one passed, zero failed, completed in 0.02 seconds.
+The earlier cancelled run is retained as diagnostic evidence rather than
+reported as successful.
 
 Local follow-up validation passes `cargo fmt --all -- --check`,
 `cargo clippy --locked --offline -p minicore-host-transport --all-targets -- -D warnings`,
@@ -212,3 +221,12 @@ Local follow-up validation passes `cargo fmt --all -- --check`,
 and `git diff --check`. The targeted test passes both native-pipe teardown orders.
 An independent worker reviewed the platform helper implementation and the full
 test diff; no blocking issue or weakened ownership assertion was found.
+
+The final completion record changes only PROJECT.md and this task document.
+All production source, tests, manifests, lockfiles, workflows and packaging
+scripts are identical to the fully validated `b1c4cb85` checkpoint. The
+documentation-only commit uses `[skip ci]` to avoid repeating the same completed
+native matrix solely to record its results. Source validation is the immutable
+successful run linked above; this record does not claim a new code validation.
+Both delivered repositories have clean worktrees, and publication preserves
+remote history with non-forced `dev` updates by `zqcli`.

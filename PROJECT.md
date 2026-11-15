@@ -22,8 +22,14 @@ The report checkpoint passed all nine Host jobs, and the TUI checkpoint passed
 all eight jobs, including all platform packages. An earlier Windows run exposed
 an existing named-pipe shutdown fixture race. The Task 116 follow-up reuses the
 native disconnect helper and adds bounded diagnostic waits to that single test;
-production source, the TUI source pin, versions and SPEC remain unchanged. Its
-normal native CI gate is required before final handoff.
+production source, the TUI source pin, versions and SPEC remain unchanged.
+The corrected test checkpoint `b1c4cb85bae201d4dfb4b2ec6188021a3541c363` passed
+all nine jobs on its first attempt in
+[run 43692339426](https://github.com/zqcli/minicore-host/actions/runs/43692339426),
+including the Windows ordinary-user checks and all four platform packages.
+The formerly stalled test passed on Windows in 0.02 seconds. This final
+completion record changes only documentation; source and tests remain exactly
+those of that fully validated checkpoint.
 
 ## Previous delivery: Host/TUI 0.12.2 (Task 115)
 
