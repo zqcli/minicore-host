@@ -154,20 +154,22 @@ fn request_shutdown(
 ) -> Result<(), &'static str> {
     let operation_id =
         OperationId::new().map_err(|_| "cannot allocate shutdown operation identity")?;
+    control
+        .shutdown(HostShutdownRequest {
+            operation_id: operation_id.clone(),
+            strategy: HostShutdownStrategy::Graceful,
+        })
+        .map_err(|_| "Host did not accept controlled shutdown")?;
+    // Observers may use this event as an acceptance barrier. Emit it only
+    // after the Host has committed its lifecycle transition.
     diagnostics::SHUTDOWN_REQUESTED.emit(|| {
         EventData::default()
             .context(Context {
-                operation_id: Some(operation_id.clone()),
+                operation_id: Some(operation_id),
                 ..context.clone()
             })
             .attribute("reason", reason)
     });
-    control
-        .shutdown(HostShutdownRequest {
-            operation_id,
-            strategy: HostShutdownStrategy::Graceful,
-        })
-        .map_err(|_| "Host did not accept controlled shutdown")?;
     Ok(())
 }
 fn context(snapshot: &HostProcessSnapshot) -> Context {
