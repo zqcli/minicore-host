@@ -1,6 +1,6 @@
 # MiniCore Host
 
-## In progress: Host/TUI 0.12.5 (Task 118)
+## Current delivery: Host/TUI 0.12.5 (Task 118)
 
 [Task 118](tasks/118-transcript-boundaries/TASK.md) repairs two reported display
 regressions: Responses reasoning parts lost their separators before reaching
@@ -8,14 +8,41 @@ the TUI, and zero-row Assistant projections added an extra gap between tool
 cards. SPEC 4.11.4 assigns genuine reasoning boundaries to the provider and
 visible block spacing to the frontend while retaining canonical history
 identity, original provider replay items and meaningful internal whitespace.
-The specification checkpoint precedes implementation. The patch target is
-0.12.5 for both repositories, with no external dependency or schema change.
-Workers are requested with `gpt-6-astra` / `max`. Provider implementation and
-independent review are complete; the full local Host gate passes 1,259 unique
-Rust cases, seven doctests and 28 Python checks. The TUI layout repair and
-focused tests also pass independent review. Canonical dependency integration,
-the fixed native comparison and platform CI remain pending at this checkpoint.
-Earlier reports remain frozen.
+The specification checkpoint precedes implementation. Both repositories are
+0.12.5, with no external dependency or schema change. Three workers were
+requested with `gpt-6-astra` / `max` for implementation, reference analysis and
+independent review; no Codex CLI or coding-model subprocess was used.
+
+Host `355d4b8bac4a3a634cd83a49fbf33fea7b67a262` and TUI
+`ecccdd9c2ea0ce99a29f121746e76629bbccc7c8` are published on `dev`; the TUI pins
+that exact Host revision. Published source trees match the reviewed and locally
+tested trees. The complete Host gate passes 1,259 uniquely enumerated Rust
+cases, seven doctests and 28 Python checks. The TUI gate passes 515 cases with
+four existing ignored cases (519 enumerated), including all 54 snapshot checks.
+Formatting, strict Clippy/rustdoc and the release build pass. The 225 Host and
+272 TUI external lock records remain unchanged.
+
+A fresh native desktop comparison reproduces both defects on 0.12.4 and verifies
+the repairs on 0.12.5 while streaming, after completion and after reopening the
+same Session. Each version executes one real Host Turn with four identical
+scripted Responses streams and three real tool executions. Mouse expansion,
+thinking visibility, Find and window resizing retain correct geometry; Bash
+output retains meaningful internal blank lines. The 48 original screenshots,
+51 logical actions, four clean exits and both unchanged reopened histories are
+retained in the QA record. This is an explicit local simulated-provider test,
+not a live-model or performance claim. Previously concatenated reasoning text
+is not migrated. Eight previous QA archives/reports remain byte-for-byte intact.
+
+**All release CI gates passed on the exact published source checkpoints.** Host
+[run 43726944284](https://github.com/zqcli/minicore-host/actions/runs/43726944284)
+completed all nine jobs successfully: quality, four native test platforms and
+four platform packages. TUI
+[run 43727578961](https://github.com/zqcli/minicore-tui/actions/runs/43727578961)
+completed all eight jobs successfully: quality, Linux/macOS/Windows tests and
+four platform packages. Both passed on attempt 1. The coordinator verified each
+completed workflow and every job on 2026-11-15. The final closeout changes only
+this project record and Task 118; the tested implementation and TUI Host pin
+remain unchanged.
 
 ## Previous delivery: Host/TUI 0.12.4 (Task 117)
 

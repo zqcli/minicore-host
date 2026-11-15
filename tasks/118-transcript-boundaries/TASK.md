@@ -9,10 +9,9 @@ earlier minicore-agent work as the reference. The current project workflow
 updates the specification before production code, reviews independently and
 publishes verified work to dev without rewriting history.
 
-Status: the provider repair and independent review are complete, and the full
-local Host gate passes at version 0.12.5. The TUI repair and focused tests are
-complete; its canonical Host pin, complete gate, native fixed-build comparison
-and published platform CI remain pending at this source checkpoint.
+Status: complete. Implementation, independent reviews, complete local gates,
+native desktop comparison and every required platform CI/package job pass at
+version 0.12.5. Both exact source revisions are published on dev.
 
 ## Baseline and target
 
@@ -115,15 +114,122 @@ events are unchanged.
 The TUI cache now separates only visible bodies, keeps zero-height identities
 and reuses unchanged body chunks. Narrow empty Assistants follow the same rule;
 partial markers and nonempty narrow rendering retain their existing behavior.
-Six focused layout/render regressions cover visibility, cache reuse, native
-history, folds, geometry, selection and internal whitespace. A separate real
-embedded-Host test observes reasoning through OutputBuffer and reopens durable
-history; it awaits the new Host pin. The focused frontend results are 52 passed
+Six additional layout/render regressions cover visibility, cache reuse, native
+history, folds, geometry, selection and internal whitespace. The existing real
+embedded-Host test was extended and renamed to observe reasoning through
+OutputBuffer and reopen durable history; it passes against the canonical Host
+pin and is not an additional test-count increment. The focused results were 52 passed
 and one existing ignored transcript case, plus 212 passed and two existing
 ignored UI cases. Independent source reviews found no actionable layout defect.
 
-New native evidence uses a declared local simulated Responses endpoint and real
-embedded Host/tool execution. The coordinator has reproduced both display
-defects on the protected 0.12.4 executable during streaming and after completion.
-Fixed-build and restart observations will be recorded in the final closeout;
-current fixture results are not a live-model access or quality claim.
+## Canonical publication and complete TUI verification
+
+The local source commits were published with exactly equal Git trees and a
+checked expected dev head. All published commits are authored by `zqcli`.
+
+| Checkpoint | Local source | Published source | Equal tree |
+| --- | --- | --- | --- |
+| Host specification | `9c14da393b47fd7c65e136f3c6c60695736dfa43` | `d76e25d467254e4af82573a6ebbd45ec88586e6e` | `ce3e2448beb934691977fce488bafe34f41852bb` |
+| Host implementation | `36bfb9250a6e7fa89eafc90aa733f53e137afb0c` | `355d4b8bac4a3a634cd83a49fbf33fea7b67a262` | `cde4d491b3f9e25b9432635b41b89a5bf7f55120` |
+| TUI design | `da8bb62fe1b947618a446562595424de856a3df9` | `1ed827641274ea3c05adedf7d41dc33965fb01fa` | `d124ffe55f06a8529bcc1d5fa86457031ebed450` |
+| TUI implementation | `700e3c5531b020460cdec73c084a76c92b883abe` | `ecccdd9c2ea0ce99a29f121746e76629bbccc7c8` | `72803d8cdf8d10794249fa7063fef8773d713737` |
+
+TUI's eleven manifest declarations, thirteen Host lock records and thirteen
+resolved metadata packages pin Host `355d4b8bac4a3a634cd83a49fbf33fea7b67a262`.
+All 272 external lock records, including dependency edges, sources and checksums,
+match the baseline. The independent integration audit passes all seventeen
+source/pin/version checks; its original pending-test notes remain a historical
+snapshot, superseded by the completed evidence below.
+
+The complete canonical-pin TUI gate exits 0 under Rust 1.90.0. It runs locked,
+offline metadata resolution, `cargo fmt --all -- --check`, strict all-target
+Clippy, `cargo test --locked --offline --all-targets`, doctests, strict rustdoc,
+the crossterm dependency tree and an independent test listing. It passes 515
+cases, with four existing ignored cases and zero failures, from 519 unique
+enumerated cases. The 54 snapshot cases are included in that total. The real
+embedded Responses observation/persistence/reopen regression passes. The first
+gate exposed four snapshots containing the old version string; only those
+version strings were updated, and the entire gate was rerun successfully.
+
+The release build exits 0. The protected native verification executable is
+31,911,472 bytes and reports `minicore-tui 0.12.5`; its SHA-256 is
+`e8fbb8599d60ff207fba86acaed47ce437695f2e0f7337e99feae4b26fe7feb8`.
+
+## Native desktop comparison
+
+The coordinator operated the Linux terminal using native keyboard, mouse and
+clipboard actions. The launcher supplied no simulated input or native history.
+Separate data roots retained protected 0.12.4 and 0.12.5 binaries. A declared
+local Responses fixture supplied the same four SSE bodies to each version;
+their bytes match. Each run accepted one explicit prompt, completed one Turn,
+made exactly four provider requests and executed real read, Bash and missing-read
+tools. The last read deliberately returns a structured filesystem error shown
+as a red tool card. Normal first-run and reopened-session exits all return 0.
+
+| Scenario | 0.12.4 observation | 0.12.5 observation |
+| --- | --- | --- |
+| Live reasoning summary parts/items | Headings concatenate | Separate parts/items render on separate lines |
+| Adjacent tool cards | Two blank separator rows | One blank separator row |
+| Completed canonical transcript | Both defects remain | Both repairs remain |
+| Reopened same Session | Both defects remain | Reasoning and spacing remain correct |
+| Thinking hidden/restored and tool folding | Baseline observations retained | Correct visible spacing and functioning controls |
+| Mouse expansion and Find | Baseline expansion retained | Correct Bash hit and sole final-answer match |
+| Narrow and restored-wide window | Not a baseline claim | Correct reasoning and tool geometry |
+| Bash internal whitespace | Preserved | Preserved, including both internal blank lines |
+
+The canonical and reopened verifiers each pass sixteen checks for both versions.
+No second prompt is sent after reopening. Native metadata/history and provider
+evidence are unchanged across each restart; the baseline history SHA-256 is
+`ba35b08801221a25afeda73f4ec6376028da867482ad73ef61518db5edfbf7e3`, and the fixed
+history SHA-256 is
+`7e13661b1b77d98ca10e0b2f49d9565c8457ccff35a57d7f62e599515cd68c94`.
+All 48 unmodified screenshots and 51 logical actions are retained, including
+desktop setup and the initial fixture preflight. Both loopback endpoints were
+stopped and verified closed.
+
+The initial fixture preflight rejected the Host's native input-provenance
+envelope with HTTP 409. The rejected run and original fixture source remain
+preserved; only the fixture validator was corrected before clean baseline/fixed
+runs. The first baseline verifier incorrectly expected the missing-read outer
+ToolOutcome to be failed; the native contract returns outer success containing
+structured `status: failed`. The original failed result remains, and the corrected
+verifier requires that exact structured filesystem failure. Neither fixture
+correction is reported as a production regression or a successful live-model run.
+
+## Platform CI and retained evidence
+
+Both exact published code checkpoints passed their complete CI workflows on
+attempt 1. The coordinator checked the completed workflow conclusions and every
+job on 2026-11-15:
+
+- Host source: `355d4b8bac4a3a634cd83a49fbf33fea7b67a262`,
+  [run 43726944284](https://github.com/zqcli/minicore-host/actions/runs/43726944284):
+  all nine jobs succeeded. These are Linux quality, native Clippy/tests on
+  Linux, Windows, macOS Intel and macOS ARM, and packages for those four targets.
+- TUI source: `ecccdd9c2ea0ce99a29f121746e76629bbccc7c8`,
+  [run 43727578961](https://github.com/zqcli/minicore-tui/actions/runs/43727578961):
+  all eight jobs succeeded. These are quality, Linux/macOS/Windows Clippy/tests,
+  and four native platform packages.
+
+This documentation-only closeout changes `PROJECT.md` and this task with
+`[skip ci]`. The implementation, tests, versions, SPEC, locks and TUI Host pin
+remain exactly those of the fully validated code checkpoints above.
+
+The separate `minicore-fixes-0125-qa-20261115.zip` evidence package contains the
+report, original test logs, source/pin/hash audits, independent reviews, explicit
+fixture sources, HTTP/SSE records, native histories, terminal captures and
+unmodified screenshots. Repository source and executables are identified by
+exact Git revisions and digests instead of duplicated in that package. Eight
+earlier archives/reports remain byte-for-byte unchanged.
+
+## Limits
+
+The fixture simulates only model responses; native Host execution, tool results,
+history and UI operations are real. It establishes these two display repairs,
+not live-model quality, long-run reliability or performance. GUI observations
+are Linux-only; other native platforms are covered by the separate CI jobs.
+Old reasoning already persisted as joined text is not rewritten or inferred
+from Markdown/capitalization. New reasoning keeps its boundaries through reopen;
+the visible-block spacing repair also applies when rendering existing history.
+Other deferred product findings remain outside this task. No tag, main merge,
+history rewrite or force update is performed.
