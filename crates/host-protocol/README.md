@@ -1,6 +1,6 @@
 # MiniCore Host protocol foundation
 
-Shared value contracts for the v4.11.2 design in `../../SPEC.md`.
+Shared value contracts for the v4.11.3 design in `../../SPEC.md`.
 This crate does not implement Host services, authentication, execution, storage,
 transports, or TUI integration. A method's presence in the canonical catalog is
 not a claim that its handler is implemented.

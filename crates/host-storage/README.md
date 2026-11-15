@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.2. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
+Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.3. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
