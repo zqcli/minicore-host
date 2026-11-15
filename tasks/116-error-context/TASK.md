@@ -171,3 +171,44 @@ The requested code and specification scope is complete. Publication is limited
 to `dev`, with unchanged schema-3 storage and no release tag or main merge.
 The separate Web client, missing agent tool declaration and synthetic parallel
 tool wrapper remain outside this approved repair batch.
+
+## Native CI follow-up: Windows pipe teardown
+
+The report checkpoint `8598de792beb7c5f74e52589dfea64bb2608095e` passed all
+nine native quality/platform/package jobs in
+[run 43689631894](https://github.com/zqcli/minicore-host/actions/runs/43689631894).
+It differs from the implementation pin only in PROJECT.md and this task record.
+TUI `0b7d4dc799fbe8c124661713bf8300fc3686ca78` passed all eight jobs in its
+linked run, including the four uploaded 0.12.3 platform packages.
+
+The earlier implementation run's Windows job `132735129270` reached its
+40-minute limit and was cancelled. The archived log identifies the unchanged
+`observation_shutdown` test
+`request_eof_before_reader_close_is_clean_and_broken_reader_does_not_cancel_owner`:
+it began at 07:21:00 UTC, reported running over 60 seconds at 07:22:00, and was
+cancelled at 07:52:38 on 2026-11-15. No assertion failure or panic precedes that
+cancellation. The entire transport crate is unchanged from the 0.12.2 baseline.
+
+Independent source review identified a fixture-level wait cycle. On Windows,
+dropping a named-pipe reader does not synchronously release every handle retained
+by Mio's pending overlapped read. The gated reply could therefore succeed while
+the test kept its request pipe open and waited indefinitely for server exit.
+The existing `os_pipe::close_reader` helper explicitly disconnects that peer
+before dropping it. This follow-up reuses that helper and the existing assertion
+for the platform's actual closed-pipe errors; it also bounds previously unbounded
+fixture phases with five-second timeouts that identify the stalled phase.
+
+The original two teardown orders, exact unsubscribe response, clean request EOF,
+real second Turn completion, retained history and independent owner liveness
+assertions remain. No production source, dependency, version, storage format or
+specification contract changes. TUI keeps the same immutable Host source pin;
+all compiled library source remains identical. The test-only follow-up must pass
+the normal nine-job native CI gate before handoff; the earlier cancelled run is
+retained as diagnostic evidence rather than reported as successful.
+
+Local follow-up validation passes `cargo fmt --all -- --check`,
+`cargo clippy --locked --offline -p minicore-host-transport --all-targets -- -D warnings`,
+`cargo test --locked --offline -p minicore-host-transport --test observation_shutdown`
+and `git diff --check`. The targeted test passes both native-pipe teardown orders.
+An independent worker reviewed the platform helper implementation and the full
+test diff; no blocking issue or weakened ownership assertion was found.

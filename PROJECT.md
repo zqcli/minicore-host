@@ -18,6 +18,12 @@ Host `dbaaa8175780759b84d26e0519aa4b27ced5f8f4` and TUI
 that exact Host commit. [Task 116](tasks/116-error-context/TASK.md) records source
 tree equivalence, unchanged external dependency graphs and the exact native
 Linux/macOS/Windows CI/package workflows. Publication creates no release tag.
+The report checkpoint passed all nine Host jobs, and the TUI checkpoint passed
+all eight jobs, including all platform packages. An earlier Windows run exposed
+an existing named-pipe shutdown fixture race. The Task 116 follow-up reuses the
+native disconnect helper and adds bounded diagnostic waits to that single test;
+production source, the TUI source pin, versions and SPEC remain unchanged. Its
+normal native CI gate is required before final handoff.
 
 ## Previous delivery: Host/TUI 0.12.2 (Task 115)
 

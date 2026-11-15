@@ -17,6 +17,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     task::{Context, Poll, ready},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader},
@@ -54,14 +55,25 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for GatedWriter<W> {
     }
 }
 
+async fn wait_for<T>(phase: &str, future: impl Future<Output = T>) -> T {
+    tokio::time::timeout(Duration::from_secs(5), future)
+        .await
+        .unwrap_or_else(|_| panic!("OS-pipe shutdown fixture timed out during {phase}"))
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_cancel_owner() {
     for reader_first in [true, false] {
         let (host, events, mut started) = setup(2, None);
         let owner = HostClient::in_process(host.clone()).unwrap();
         let session = create(&owner).await;
-        let (mut to_server, server_input) = crate::os_pipe::pipe().await.unwrap();
-        let (output, from_server) = crate::os_pipe::pipe().await.unwrap();
+        let (mut to_server, server_input) =
+            wait_for("request pipe creation", crate::os_pipe::pipe())
+                .await
+                .unwrap();
+        let (output, from_server) = wait_for("response pipe creation", crate::os_pipe::pipe())
+            .await
+            .unwrap();
         let armed = Arc::new(AtomicBool::new(false));
         let (entered, write_started) = oneshot::channel();
         let (release, gate) = oneshot::channel();
@@ -74,22 +86,32 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
         let server = tokio::spawn(serve_stdio(host, server_input, output));
         let mut reader = BufReader::new(from_server);
         let mut line = String::new();
-        to_server
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        wait_for(
+            "initialize request write",
+            to_server.write_all(
+                b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
+            ),
+        )
+        .await
+        .unwrap();
+        wait_for("initialize response read", reader.read_line(&mut line))
             .await
             .unwrap();
-        reader.read_line(&mut line).await.unwrap();
         assert!(serde_json::from_str::<Value>(&line).unwrap()["result"].is_object());
         let subscribe = json!({
             "jsonrpc":"2.0", "id":2, "method":"events.subscribe",
             "params":request(scope(session.target()), &[EventCategory::Completion]),
         });
-        to_server
-            .write_all(format!("{subscribe}\n").as_bytes())
+        wait_for(
+            "subscribe request write",
+            to_server.write_all(format!("{subscribe}\n").as_bytes()),
+        )
+        .await
+        .unwrap();
+        line.clear();
+        wait_for("subscribe response read", reader.read_line(&mut line))
             .await
             .unwrap();
-        line.clear();
-        reader.read_line(&mut line).await.unwrap();
         let subscription_id =
             serde_json::from_str::<Value>(&line).unwrap()["result"]["subscription_id"].clone();
         assert!(subscription_id.is_string());
@@ -98,54 +120,72 @@ async fn request_eof_before_reader_close_is_clean_and_broken_reader_does_not_can
             .send(input("before disconnect"), options(2000))
             .await
             .unwrap();
-        started.recv().await.unwrap();
+        wait_for("first model start", started.recv()).await.unwrap();
         events[0]
             .send(ModelEvent::text_delta("saved before close"))
             .unwrap();
         finish(&events[0]);
         // Drain the actual first Turn completion. No completion frame remains
         // to confuse the following gate with the unsubscribe response.
-        loop {
-            line.clear();
-            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
-            let value: Value = serde_json::from_str(&line).unwrap();
-            if value["params"]["event"]["kind"] == "turn.finished" {
-                break;
+        wait_for("first turn completion notification", async {
+            loop {
+                line.clear();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                let value: Value = serde_json::from_str(&line).unwrap();
+                if value["params"]["event"]["kind"] == "turn.finished" {
+                    break;
+                }
             }
-        }
+        })
+        .await;
         session
             .send(input("accepted before disconnect"), options(2000))
             .await
             .unwrap();
-        started.recv().await.unwrap();
+        wait_for("second model start", started.recv())
+            .await
+            .unwrap();
         let turn = running(&session).await;
         armed.store(true, Ordering::SeqCst);
         let unsubscribe = json!({
             "jsonrpc":"2.0", "id":3, "method":"events.unsubscribe",
             "params":{"subscription_id":subscription_id},
         });
-        to_server
-            .write_all(format!("{unsubscribe}\n").as_bytes())
-            .await
-            .unwrap();
-        let reply: Value = serde_json::from_slice(&write_started.await.unwrap()).unwrap();
+        wait_for(
+            "unsubscribe request write",
+            to_server.write_all(format!("{unsubscribe}\n").as_bytes()),
+        )
+        .await
+        .unwrap();
+        let reply: Value = serde_json::from_slice(
+            &wait_for("gated unsubscribe response", write_started)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(reply["id"], 3);
         assert_eq!(reply["result"]["ended"], true);
         if reader_first {
             // The request pipe remains open, so EOF cannot race the known
             // response write. Closing its reader yields the exact OS error.
-            drop(reader);
+            // Windows must disconnect before drop: a pending overlapped read
+            // can keep the native handle alive until its completion arrives.
+            crate::os_pipe::close_reader(reader.into_inner()).unwrap();
             release.send(()).unwrap();
-            assert_eq!(
-                server.await.unwrap().unwrap_err().kind(),
-                io::ErrorKind::BrokenPipe
-            );
+            let error = wait_for("broken-reader server termination", server)
+                .await
+                .unwrap()
+                .unwrap_err();
+            crate::os_pipe::assert_reader_closed_error(&error);
             drop(to_server);
         } else {
             // Normal teardown keeps the response reader alive until request
             // EOF has ended the server. No I/O error is ignored or retried.
             drop(to_server);
-            server.await.unwrap().unwrap();
+            wait_for("request-EOF server termination", server)
+                .await
+                .unwrap()
+                .unwrap();
             drop(reader);
             assert!(release.send(()).is_err());
         }
