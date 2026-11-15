@@ -1,6 +1,20 @@
 # MiniCore Host
 
-## Current work: Host 0.12.1 integration (Task 114)
+## Current work: configuration references and flat storage (Task 115)
+
+[Task 115](tasks/115-config-references/TASK.md) implements the approved
+SPEC 4.11.1 update before changing Host and TUI from 0.12.1 to 0.12.2.
+File-managed configuration bodies live only in the configuration directory;
+durable owner metadata keeps identity, source and a fingerprint. Missing declared
+Agents fail preparation instead of recovering a saved configuration. Dynamic
+Agents and independent Hosts retain inline configuration; Sessions retain their
+own effective configuration and history. Persistent Agents use `agents/<id>.json`
+and Sessions use `sessions/<id>/`. Default config, data and logs are separated
+under the user's `.minicore` directory. Three implementation workers were
+requested with `gpt-6-astra` and `max` reasoning, with disjoint ownership.
+The spec checkpoint is prepared first; implementation and validation are pending.
+
+## Previous checkpoint: Host 0.12.1 integration (Task 114)
 
 [Task 114](tasks/114-sync-0121/TASK.md) merges fetched upstream
 `21c7ff1610c8c7000694df2d141c62a74790e4be` into local
