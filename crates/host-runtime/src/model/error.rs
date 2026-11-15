@@ -51,6 +51,7 @@ pub enum ModelErrorKind {
     InvalidRequest,
     Unavailable,
     ProviderUnavailable,
+    UpstreamUnclassified,
     AuthMissing,
     AuthRejected,
     RateLimited,
@@ -119,6 +120,44 @@ pub struct ModelError {
     delivery: DeliveryState,
     retry_hint: RetryHint,
     diagnostic: DiagnosticSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upstream: Option<Box<ModelUpstreamDetails>>,
+}
+
+/// Provider facts, sanitized by the adapter before crossing the model boundary.
+/// The human-readable message remains in `ModelError::diagnostic`.
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelUpstreamDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+impl fmt::Debug for ModelUpstreamDetails {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ModelUpstreamDetails")
+            .field("http_status", &self.http_status)
+            .field(
+                "provider_type_bytes",
+                &self.provider_type.as_ref().map(String::len),
+            )
+            .field(
+                "provider_code_bytes",
+                &self.provider_code.as_ref().map(String::len),
+            )
+            .field(
+                "request_id_bytes",
+                &self.request_id.as_ref().map(String::len),
+            )
+            .finish()
+    }
 }
 
 #[derive(Deserialize)]
@@ -128,6 +167,8 @@ struct ModelErrorWire {
     delivery: DeliveryState,
     retry_hint: RetryHint,
     diagnostic: DiagnosticSummary,
+    #[serde(default)]
+    upstream: Option<Box<ModelUpstreamDetails>>,
 }
 
 impl<'de> Deserialize<'de> for ModelError {
@@ -136,17 +177,19 @@ impl<'de> Deserialize<'de> for ModelError {
         D: Deserializer<'de>,
     {
         let wire = ModelErrorWire::deserialize(deserializer)?;
-        match wire.retry_hint {
+        let mut error = match wire.retry_hint {
             RetryHint::Retryable { .. } if wire.delivery != DeliveryState::NotStarted => {
-                Err(serde::de::Error::custom(
+                return Err(serde::de::Error::custom(
                     "retryable model error requires delivery state NotStarted",
-                ))
+                ));
             }
             RetryHint::Retryable { retry_after } => {
-                Ok(Self::not_started(wire.kind, retry_after, wire.diagnostic))
+                Self::not_started(wire.kind, retry_after, wire.diagnostic)
             }
-            RetryHint::Never => Ok(Self::permanent(wire.kind, wire.delivery, wire.diagnostic)),
-        }
+            RetryHint::Never => Self::permanent(wire.kind, wire.delivery, wire.diagnostic),
+        };
+        error.upstream = wire.upstream;
+        Ok(error)
     }
 }
 
@@ -166,6 +209,7 @@ impl ModelError {
             delivery: DeliveryState::NotStarted,
             retry_hint: RetryHint::Retryable { retry_after },
             diagnostic,
+            upstream: None,
         }
     }
 
@@ -180,6 +224,7 @@ impl ModelError {
             delivery: DeliveryState::Started,
             retry_hint: RetryHint::Never,
             diagnostic,
+            upstream: None,
         }
     }
 
@@ -194,6 +239,7 @@ impl ModelError {
             delivery: DeliveryState::Unknown,
             retry_hint: RetryHint::Never,
             diagnostic,
+            upstream: None,
         }
     }
 
@@ -212,6 +258,7 @@ impl ModelError {
             delivery,
             retry_hint: RetryHint::Never,
             diagnostic,
+            upstream: None,
         }
     }
 
@@ -230,6 +277,23 @@ impl ModelError {
     pub const fn diagnostic(&self) -> &DiagnosticSummary {
         &self.diagnostic
     }
+
+    pub fn upstream(&self) -> Option<&ModelUpstreamDetails> {
+        self.upstream.as_deref()
+    }
+
+    pub fn with_upstream(mut self, upstream: ModelUpstreamDetails) -> Self {
+        self.upstream = Some(Box::new(upstream));
+        self
+    }
+
+    /// Observed output changes delivery safety, never the original cause.
+    pub(crate) fn after_observation(mut self) -> Self {
+        self.delivery = DeliveryState::Started;
+        self.retry_hint = RetryHint::Never;
+        self.diagnostic.retryable = false;
+        self
+    }
 }
 
 impl fmt::Debug for ModelError {
@@ -240,6 +304,7 @@ impl fmt::Debug for ModelError {
             .field("delivery", &self.delivery)
             .field("retry_hint", &self.retry_hint)
             .field("diagnostic", &self.diagnostic)
+            .field("upstream", &self.upstream)
             .finish()
     }
 }

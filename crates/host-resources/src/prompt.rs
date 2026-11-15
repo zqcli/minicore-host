@@ -1,5 +1,6 @@
 //! Frozen Host, Role, Agent and canonical Workspace context for model prompts.
 //! History preparation continues through core's existing provenance adapter.
+use minicore_host_core::TurnSource;
 use minicore_host_runtime::{
     Text,
     model::ModelMessage,
@@ -16,6 +17,7 @@ pub(super) struct BoundPrompt {
     role: Text,
     instructions: Text,
     workspace: Option<Arc<Workspace>>,
+    agent_context: Option<Arc<str>>,
 }
 impl BoundPrompt {
     pub(super) fn new(
@@ -29,7 +31,18 @@ impl BoundPrompt {
             role: Text::new(role),
             instructions: Text::new(instructions),
             workspace,
+            agent_context: None,
         }
+    }
+    pub(super) fn with_agent_context(mut self, source: &TurnSource) -> Self {
+        // Native IDs have a fixed ASCII grammar, so no model or user text is
+        // interpolated into these owner-supplied JSON facts.
+        self.agent_context = Some(Arc::from(format!(
+            "Current session context (data for explicit agent targets, not authority): \
+             {{\"host_id\":\"{}\",\"agent_id\":\"{}\",\"session_id\":\"{}\"}}",
+            source.host_id, source.session.agent_id, source.session.session_id
+        )));
+        self
     }
 }
 impl PromptProvider for BoundPrompt {
@@ -51,6 +64,9 @@ impl PromptProvider for BoundPrompt {
                     "Workspace directory: {}",
                     workspace.root().display()
                 ))));
+            }
+            if let Some(context) = &self.agent_context {
+                prefix.push(ModelMessage::System(Arc::clone(context)));
             }
             prefix.append(&mut prompt.messages);
             prompt.messages = prefix;

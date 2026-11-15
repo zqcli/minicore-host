@@ -1,17 +1,177 @@
 //! Error classification follows MiniCore Agent's conservative delivery model.
-//! See PROVENANCE.md. Provider free-text and raw reqwest errors are never logged
-//! or copied into diagnostics (either can contain credentials or prompt text).
+//! See PROVENANCE.md. Only a credential-redacted provider message and selected
+//! source facts cross the model boundary. Raw responses and reqwest errors are
+//! never copied into diagnostics; diagnostic events do not record message text.
 
 use std::time::{Duration, Instant, SystemTime};
 
 use futures_util::StreamExt;
 use minicore_host_runtime::{
     error::{DiagnosticCategory, DiagnosticCode, DiagnosticSummary},
-    model::{DeliveryState, ModelCallContext, ModelError, ModelErrorKind},
+    model::{DeliveryState, ModelCallContext, ModelError, ModelErrorKind, ModelUpstreamDetails},
     value::Text,
 };
 use serde_json::Value;
 use tokio::time::Instant as TokioInstant;
+
+/// Response facts and the credential bound to this exact attempt. This remains
+/// provider-private and is never serialized or exposed by Debug.
+pub(crate) struct ResponseContext {
+    pub(crate) status: u16,
+    pub(crate) retry_at: Option<Instant>,
+    request_id: Option<String>,
+    authorization: reqwest::header::HeaderValue,
+}
+
+impl ResponseContext {
+    #[cfg(test)]
+    pub(crate) fn fixture(status: u16) -> Self {
+        let mut authorization: reqwest::header::HeaderValue = "Bearer fixture-key".parse().unwrap();
+        authorization.set_sensitive(true);
+        Self {
+            status,
+            retry_at: None,
+            request_id: None,
+            authorization,
+        }
+    }
+
+    pub(crate) fn new(
+        response: &reqwest::Response,
+        authorization: &reqwest::header::HeaderValue,
+    ) -> Self {
+        let mut context = Self {
+            status: response.status().as_u16(),
+            retry_at: retry_after(response.headers()),
+            request_id: None,
+            authorization: authorization.clone(),
+        };
+        context.request_id = ["x-request-id", "request-id"]
+            .into_iter()
+            .find_map(|name| {
+                response
+                    .headers()
+                    .get(name)
+                    .and_then(|value| value.to_str().ok())
+            })
+            .and_then(|value| context.text(value));
+        context
+    }
+
+    pub(crate) fn text(&self, value: &str) -> Option<String> {
+        if value.trim().is_empty() {
+            return None;
+        }
+        // Redact before control escaping so a credential with punctuation is
+        // matched exactly. The sensitive header is the original Turn binding.
+        let credential = self
+            .authorization
+            .to_str()
+            .ok()
+            .and_then(|value| value.strip_prefix("Bearer "));
+        let value = match credential.filter(|value| !value.is_empty()) {
+            Some(credential) => value.replace(credential, "[REDACTED]"),
+            None => value.to_owned(),
+        };
+        // DiagnosticSummary accepts LF/TAB but no other control characters.
+        // Show those characters explicitly without dropping the useful message.
+        let mut safe = String::with_capacity(value.len());
+        for character in value.chars() {
+            if character.is_control() && !matches!(character, '\n' | '\t') {
+                safe.extend(character.escape_default());
+            } else {
+                safe.push(character);
+            }
+        }
+        Some(safe)
+    }
+
+    fn field(&self, value: Option<&Value>, name: &str) -> Option<String> {
+        value
+            .and_then(|value| value.get(name))
+            .and_then(Value::as_str)
+            .and_then(|value| self.text(value))
+    }
+
+    pub(crate) fn record_request_id(&mut self, value: Option<&str>) {
+        if self.request_id.is_none() {
+            self.request_id = value.and_then(|value| self.text(value));
+        }
+    }
+
+    fn diagnostic(&self, kind: ModelErrorKind, value: Option<&Value>) -> DiagnosticSummary {
+        self.diagnostic_with_message(kind, self.field(value, "message"), value)
+    }
+
+    fn diagnostic_with_message(
+        &self,
+        kind: ModelErrorKind,
+        message: Option<String>,
+        value: Option<&Value>,
+    ) -> DiagnosticSummary {
+        let mut message = match message {
+            Some(message) => format!("provider HTTP {}: {message}", self.status),
+            None => format!("provider HTTP {}: {kind:?}", self.status),
+        };
+        let details = self.details(value);
+        for (name, value) in [
+            ("provider_type", details.provider_type),
+            ("provider_code", details.provider_code),
+            ("request_id", details.request_id),
+        ] {
+            if let Some(value) = value {
+                message.push('\n');
+                message.push_str(name);
+                message.push_str(": ");
+                message.push_str(&value);
+            }
+        }
+        diagnostic_message(kind, Some(self.status), Some(message))
+    }
+
+    fn details(&self, value: Option<&Value>) -> ModelUpstreamDetails {
+        ModelUpstreamDetails {
+            http_status: Some(self.status),
+            provider_type: self.field(value, "type"),
+            provider_code: self.field(value, "code"),
+            request_id: self
+                .request_id
+                .clone()
+                .or_else(|| self.field(value, "request_id")),
+        }
+    }
+
+    pub(crate) fn attach(&self, error: ModelError) -> ModelError {
+        if error.upstream().is_some() {
+            error
+        } else {
+            let diagnostic = self.diagnostic(error.kind(), None);
+            let error = match *error.retry_hint() {
+                minicore_host_runtime::model::RetryHint::Never => {
+                    ModelError::permanent(error.kind(), error.delivery(), diagnostic)
+                }
+                minicore_host_runtime::model::RetryHint::Retryable { retry_after } => {
+                    ModelError::not_started(error.kind(), retry_after, diagnostic)
+                }
+            };
+            error.with_upstream(self.details(None))
+        }
+    }
+
+    pub(crate) fn incomplete(&self, reason: Option<&str>, seen: bool) -> ModelError {
+        let message = reason
+            .and_then(|value| self.text(value))
+            .map(|reason| format!("response incomplete: {reason}"));
+        let diagnostic =
+            self.diagnostic_with_message(ModelErrorKind::IncompleteResponse, message, None);
+        let error = if seen {
+            ModelError::started(ModelErrorKind::IncompleteResponse, diagnostic)
+        } else {
+            ModelError::unknown(ModelErrorKind::IncompleteResponse, diagnostic)
+        };
+        error.with_upstream(self.details(None))
+    }
+}
 
 pub(crate) fn local(kind: ModelErrorKind) -> ModelError {
     ModelError::permanent(kind, DeliveryState::NotStarted, diagnostic(kind, None))
@@ -43,6 +203,14 @@ pub(crate) fn send(error: reqwest::Error) -> ModelError {
 }
 
 fn diagnostic(kind: ModelErrorKind, status: Option<u16>) -> DiagnosticSummary {
+    diagnostic_message(kind, status, None)
+}
+
+fn diagnostic_message(
+    kind: ModelErrorKind,
+    status: Option<u16>,
+    message: Option<String>,
+) -> DiagnosticSummary {
     let code = match kind {
         ModelErrorKind::InvalidRequest | ModelErrorKind::ContextOverflow => {
             DiagnosticCode::InvalidConfiguration
@@ -56,10 +224,10 @@ fn diagnostic(kind: ModelErrorKind, status: Option<u16>) -> DiagnosticSummary {
         ModelErrorKind::Internal | ModelErrorKind::Panicked => DiagnosticCode::Internal,
         _ => DiagnosticCode::ModelUnavailable,
     };
-    let text = match status {
+    let text = message.unwrap_or_else(|| match status {
         Some(status) => format!("provider HTTP {status}: {kind:?}"),
         None => format!("provider request: {kind:?}"),
-    };
+    });
     DiagnosticSummary::new(code, DiagnosticCategory::Model, Text::new(text), false)
         .expect("static diagnostic is valid")
 }
@@ -120,60 +288,69 @@ fn structured_kind(error: &Value) -> Option<ModelErrorKind> {
     })
 }
 
-pub(crate) fn provider(
-    value: &Value,
-    seen: bool,
-    status: u16,
-    retry_at: Option<Instant>,
-) -> ModelError {
+pub(crate) fn provider(value: &Value, seen: bool, context: &ResponseContext) -> ModelError {
     let recognized = structured_kind(value);
-    let kind = recognized.unwrap_or(ModelErrorKind::ProviderUnavailable);
-    let diagnostic = diagnostic(kind, Some(status));
-    if seen {
-        return ModelError::started(kind, diagnostic);
-    }
-    match recognized {
-        Some(ModelErrorKind::RateLimited | ModelErrorKind::ProviderUnavailable) => {
-            ModelError::not_started(
-                kind,
-                retry_at.and_then(|at| at.checked_duration_since(Instant::now())),
-                diagnostic,
-            )
+    let kind = recognized.unwrap_or(ModelErrorKind::UpstreamUnclassified);
+    let diagnostic = context.diagnostic(kind, Some(value));
+    let error = if seen {
+        ModelError::started(kind, diagnostic)
+    } else {
+        match recognized {
+            Some(ModelErrorKind::RateLimited | ModelErrorKind::ProviderUnavailable) => {
+                ModelError::not_started(
+                    kind,
+                    context
+                        .retry_at
+                        .and_then(|at| at.checked_duration_since(Instant::now())),
+                    diagnostic,
+                )
+            }
+            Some(_) => ModelError::permanent(kind, DeliveryState::NotStarted, diagnostic),
+            None => ModelError::unknown(kind, diagnostic),
         }
-        Some(_) => ModelError::permanent(kind, DeliveryState::NotStarted, diagnostic),
-        None => ModelError::unknown(kind, diagnostic),
-    }
+    };
+    error.with_upstream(context.details(Some(value)))
 }
 
 pub(crate) async fn http(
     response: reqwest::Response,
     context: &ModelCallContext,
     deadline: TokioInstant,
+    authorization: &reqwest::header::HeaderValue,
 ) -> ModelError {
-    let status = response.status().as_u16();
-    let retry_at = retry_after(response.headers());
+    let mut source = ResponseContext::new(&response, authorization);
+    let status = source.status;
     let mut bytes = response.bytes_stream();
     let mut body = Vec::new();
     loop {
         let next = tokio::select! {
             biased;
-            _ = context.cancellation.cancelled() => return unknown(ModelErrorKind::Cancelled),
-            _ = tokio::time::sleep_until(deadline) => return unknown(ModelErrorKind::Timeout),
+            _ = context.cancellation.cancelled() => return source.attach(unknown(ModelErrorKind::Cancelled)),
+            _ = tokio::time::sleep_until(deadline) => return source.attach(unknown(ModelErrorKind::Timeout)),
             next = bytes.next() => next,
         };
         match next {
             Some(Ok(chunk)) => {
                 body.extend_from_slice(&chunk);
             }
-            Some(Err(error)) if error.is_timeout() => return unknown(ModelErrorKind::Timeout),
-            Some(Err(_)) => return unknown(ModelErrorKind::RequestOutcomeUnknown),
+            Some(Err(error)) if error.is_timeout() => {
+                return source.attach(unknown(ModelErrorKind::Timeout));
+            }
+            Some(Err(_)) => return source.attach(unknown(ModelErrorKind::RequestOutcomeUnknown)),
             None => break,
         }
     }
-    let recognized = serde_json::from_slice::<Value>(&body)
-        .ok()
+    let envelope = serde_json::from_slice::<Value>(&body).ok();
+    source.record_request_id(
+        envelope
+            .as_ref()
+            .and_then(|value| value.get("request_id"))
+            .and_then(Value::as_str),
+    );
+    let value = envelope
         .as_ref()
-        .and_then(|value| structured_kind(value.get("error").unwrap_or(value)));
+        .map(|value| value.get("error").unwrap_or(value));
+    let recognized = value.and_then(structured_kind);
     let (kind, delivery, retry) = match (status, recognized) {
         (_, Some(ModelErrorKind::QuotaExceeded)) => (
             ModelErrorKind::QuotaExceeded,
@@ -199,7 +376,7 @@ pub(crate) async fn http(
             true,
         ),
         (429, _) => (
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
             DeliveryState::Unknown,
             false,
         ),
@@ -210,20 +387,24 @@ pub(crate) async fn http(
             false,
         ),
         _ => (
-            recognized.unwrap_or(ModelErrorKind::ProviderUnavailable),
+            recognized.unwrap_or(ModelErrorKind::UpstreamUnclassified),
             DeliveryState::Unknown,
             false,
         ),
     };
-    if retry {
-        retryable(
+    let diagnostic = source.diagnostic(kind, value);
+    let error = if retry {
+        ModelError::not_started(
             kind,
-            retry_at.and_then(|at| at.checked_duration_since(Instant::now())),
-            Some(status),
+            source
+                .retry_at
+                .and_then(|at| at.checked_duration_since(Instant::now())),
+            diagnostic,
         )
     } else {
-        ModelError::permanent(kind, delivery, diagnostic(kind, Some(status)))
-    }
+        ModelError::permanent(kind, delivery, diagnostic)
+    };
+    error.with_upstream(source.details(value))
 }
 
 pub(crate) fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Instant> {
@@ -258,7 +439,8 @@ mod tests {
         use serde_json::json;
 
         let overload = json!({"type":"service_unavailable_error","code":"server_is_overloaded"});
-        let started = provider(&overload, true, 200, None);
+        let context = ResponseContext::fixture(200);
+        let started = provider(&overload, true, &context);
         assert_eq!(started.kind(), ModelErrorKind::ProviderUnavailable);
         assert_eq!(started.delivery(), DeliveryState::Started);
         assert_eq!(*started.retry_hint(), RetryHint::Never);
@@ -272,7 +454,7 @@ mod tests {
             json!({"type":"insufficient_quota","code":"server_is_overloaded"}),
             json!({"type":"server_is_overloaded","code":"insufficient_quota"}),
         ] {
-            let error = provider(&error, false, 200, None);
+            let error = provider(&error, false, &context);
             assert_eq!(error.kind(), ModelErrorKind::QuotaExceeded);
             assert_eq!(error.delivery(), DeliveryState::NotStarted);
             assert_eq!(*error.retry_hint(), RetryHint::Never);

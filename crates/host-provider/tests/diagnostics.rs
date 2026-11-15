@@ -168,7 +168,12 @@ async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_life
 
     let rejected = Fixture::start(vec![Reply::error(
         401,
-        "PRIVATE_PROVIDER_KEY PRIVATE_ERROR_BODY",
+        json!({"error": {
+            "message":"PRIVATE_PROVIDER_KEY PRIVATE_ERROR_BODY",
+            "type":"PRIVATE_ERROR_BODY", "code":"PRIVATE_ERROR_BODY",
+            "request_id":"PRIVATE_UPSTREAM_ID"
+        }})
+        .to_string(),
     )])
     .await;
     let rejected_model = provider(&rejected.endpoint);
@@ -188,6 +193,18 @@ async fn actual_provider_facts_keep_runtime_ids_privacy_and_harmless_output_life
     };
     assert_eq!(error.kind(), ModelErrorKind::AuthRejected);
     assert_eq!(error.delivery(), DeliveryState::NotStarted);
+    assert!(
+        error
+            .diagnostic()
+            .message()
+            .as_str()
+            .contains("[REDACTED] PRIVATE_ERROR_BODY")
+    );
+    assert!(
+        !serde_json::to_string(&error)
+            .unwrap()
+            .contains("PRIVATE_PROVIDER_KEY")
+    );
     assert_eq!(rejected.finish().await.len(), 1);
 
     let unknown = Fixture::start(vec![Reply::sse(response(false))]).await;

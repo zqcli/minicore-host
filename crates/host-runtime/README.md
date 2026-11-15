@@ -15,6 +15,13 @@ and panic isolation. Its returned report contains actual attempt count, retry
 wait, response or failure, usage, and partial output; observations do not supply
 these facts.
 
+`ModelError` keeps its adapter-sanitized readable cause in `diagnostic.message`.
+Optional `ModelUpstreamDetails` retains actual HTTP status, provider type/code and
+request ID without a raw response or recursive exception object. The driver
+preserves those facts when normalizing an observed error to Started/Never, when
+waiting for a permitted retry, and when returning partial output. Debug reports
+only source status and text sizes; explicit serialization carries the safe facts.
+
 `ModelCallParams` carries the owner's optional execution deadline. The driver
 combines it with the configured model timeout once per logical request and gives
 each provider attempt a `ModelCallContext` with that same effective deadline.
@@ -34,5 +41,5 @@ owned arguments. These internal changes preserve the serialized value formats.
 
 There is no spawned loop, independent control plane, input/history callback, or
 accumulated history report. `LoopId` remains a native correlation value so existing
-history records keep their format. See [SPEC 4.11.0](../../SPEC.md) and
+history records keep their format. See [SPEC 4.11.2](../../SPEC.md) and
 [Task 106](../../tasks/106-host-runtime/TASK.md).

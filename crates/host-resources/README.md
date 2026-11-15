@@ -17,6 +17,14 @@ Each caller keeps its own existing error contract: invalid Host configuration
 is distinct from missing Session resources. Shared prompt construction does not
 bind executable tools or create activation authority for compaction.
 
+An ordinary Turn selecting the actual built-in `agent` also binds the current
+Host, Agent and Session IDs from its owner-prepared Turn source. Its model
+requests include those read-only facts once, after Workspace context and before
+history; Host/Role/Agent instruction ordering stays unchanged. They let the
+model form its first explicit tool target and grant no authority. Unselected
+tools, external factories named `agent`, and compaction utility requests receive
+no such context. The facts are not written into conversation history.
+
 Each configured model requires an explicit `api`: `chat_completions` or
 `responses`. The builder constructs that exact provider without endpoint
 guessing, network probes or fallback. Model discovery includes the selected
@@ -43,6 +51,11 @@ inspect/wait actions are read-only exemptions; an external factory with the same
 name does not acquire them. Approval uses the existing Runtime interaction and
 `interaction.answer`, with no remembered allow-once decision. See
 [`approval.rs`](src/approval.rs) and the [actual-binary tests](../host-app/tests/tool_approval.rs).
+
+Malformed built-in agent arguments fail validation before approval or execution
+in every policy mode. The standard failed ToolResult preserves the safe field or
+constraint diagnostic; actual input values and unknown names are omitted. This
+is distinct from a read-only policy refusal or the user's approval denial.
 
 Production command bindings exclude configured model/network credential source
 names at each spawn. Successful publications accumulate names for the Host

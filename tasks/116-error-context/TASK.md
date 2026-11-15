@@ -57,8 +57,68 @@ does not depend on Host owner crates, and existing direct ownership remains.
 - Run locked formatting, strict Clippy, tests, doctests, strict rustdoc,
   repository scripts, test enumeration and existing platform/package CI.
 
-## Progress
+## Implementation
 
-SPEC and scope are recorded before the implementation checkpoint. Implementation
-and validation are in progress; no passing test or publication result is yet
-claimed. Exact commits, commands, outcomes and limits will be recorded here.
+- Provider extracts the known message and source fields from HTTP failures,
+  Chat SSE, Responses errors/failed responses and incomplete reasons. It redacts
+  the credential actually bound to the request before creating a ModelError.
+  Unicode, LF and TAB stay readable; other control characters are escaped.
+- Runtime keeps optional boxed ModelUpstreamDetails. Observed-output
+  normalization and serde retain the source. Host maps the same safe text to
+  Fault.message and the existing durable terminal reason. Fault 4210 and 3702
+  can carry the existing upstream-details schema with the added status/ID fields.
+- Unrecognized provider causes use UpstreamUnclassified/4299. Existing explicit
+  delivery evidence, retry ownership, cancellation and operation deadlines remain.
+  A real HTTP 408 in compaction retains the source rather than becoming a generic
+  timeout string. Unstructured bodies are not dumped into business errors.
+- Selected builtin agent prompts bind the current owner-minted identities once,
+  after Workspace and before history. This does not grant capability or invent a
+  target. External tools named agent and compaction do not gain this context.
+- InvalidInvocation and explicit Failed tool outcomes distinguish malformed
+  arguments from actual policy/approval denial. Safe field/constraint reasons
+  reach failed tool results; arbitrary invalid values and unknown names do not.
+- TUI retains startup/reload/shutdown causes, offers /error for the latest full
+  operation error, and opens failure details from the transcript. Its collapsed
+  failure wrapping and non-bash JSON head previews avoid allocating discarded
+  output; complete results remain available through native history and export.
+
+## Independent review
+
+The Host workers reviewed one another's changes. Review identified and repaired
+two specific issues before publication: HTTP 408 source loss in compaction, and
+a forged `, expected ...` suffix in an unknown field of the empty close_scope
+variant. Both now have focused regressions. Runtime's new source is boxed to
+preserve the small common error representation and strict Clippy checks.
+
+The agent worker also independently reviews the TUI. Its first pass identified
+async rename/send error entries which already knew their original target but
+did not bind that target to the new error view. Those entries and the same
+existing delete/default/export boundaries now retain their actual identities,
+with cross-Session message-dispatch regressions. Agent-operation failures retain
+their captured Agent ID. No control or acceptance lifecycle is added.
+
+## Validation and publication
+
+SPEC-first checkpoint: `d6d6a40af081bc91d649c03dd57ccb9a44bed2d0`.
+Host and TUI manifests/lockfile packages are 0.12.3. A structured comparison
+confirms all 225 Host and 272 TUI external locked packages are unchanged.
+SPEC 4.11.2 SHA-256 is
+`19fab2cf90270200430ca1b229a4839bfc17ea2862ea60a22f8e87ae3cdfbd56`.
+
+The full Host local gate passed: 1,255 uniquely enumerated Rust tests, seven
+doctests and 28 Python checks, formatting, strict Clippy and strict rustdoc.
+Commands: `./scripts/check.sh` and
+`cargo test --workspace --all-targets --locked --offline -- --list`.
+The TUI local Host-path integration gate passed before the last target-context
+regressions: 491 default tests passed and four existing opt-in/helper cases
+were ignored (495 enumerated), with formatting and strict Clippy/rustdoc.
+The final TUI gate will use the immutable published Host revision without a
+local path patch and include the last target-context regressions.
+
+Validation uses
+Rust 1.90.0, ordinary uid 1000, locked dependencies and a validation-only Linux
+subreaper so container PID 1 cannot strand process-cleanup test children. No
+production cleanup or test assertion is relaxed. Provider integration uses
+explicit loopback fixtures, not live credentials or live provider service.
+Exact implementation commits, final TUI test counts and platform/package CI
+outcomes follow after publication. No complete remote CI result is yet claimed.

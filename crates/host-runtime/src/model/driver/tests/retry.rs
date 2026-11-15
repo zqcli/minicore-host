@@ -86,12 +86,18 @@ async fn excessive_retry_after_started_unknown_and_nonretryable_do_not_retry() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn semantic_event_blocks_retry_and_normalizes_lying_not_started_error() {
+    let source = crate::model::ModelUpstreamDetails {
+        http_status: Some(200),
+        provider_type: Some("overloaded_error".into()),
+        provider_code: Some("server_overloaded".into()),
+        request_id: Some("req_observed".into()),
+    };
     let model = ScriptModel::new(
         descriptor(),
         vec![
             Behavior::Events(vec![
                 Ok(ModelEvent::text_delta("partial")),
-                Err(retryable_error(None)),
+                Err(retryable_error(None).with_upstream(source.clone())),
             ]),
             Behavior::Events(text_success("unexpected")),
         ],
@@ -114,6 +120,7 @@ async fn semantic_event_blocks_retry_and_normalizes_lying_not_started_error() {
     assert_eq!(error.kind(), ModelErrorKind::ProviderUnavailable);
     assert_eq!(error.delivery(), DeliveryState::Started);
     assert_eq!(error.retry_hint(), &RetryHint::Never);
+    assert_eq!(error.upstream(), Some(&source));
     assert_eq!(model.starts(), 1);
 }
 

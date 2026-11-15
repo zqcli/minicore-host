@@ -113,6 +113,11 @@ async fn external_scenario(name: &str, mode: ApprovalMode, decision: ApprovalAns
     send(&host, &caller, &target, "call registered fixture");
     let first = server.request().await;
     assert_eq!(first["tools"][0]["function"]["name"], name);
+    assert!(
+        !first
+            .to_string()
+            .contains("Current session context (data for explicit agent targets")
+    );
     if mode == ApprovalMode::Ask {
         let snapshot = pending(&host, &caller, &target).await;
         assert_eq!(executions.load(Ordering::Acquire), 0);
@@ -281,5 +286,90 @@ async fn external_factory_named_agent_keeps_mutating_semantics_in_every_mode() {
         ApprovalMode::Auto,
     ] {
         external_scenario("agent", mode, ApprovalAnswer::AllowOnce).await;
+    }
+}
+
+#[tokio::test]
+async fn malformed_builtin_agent_arguments_return_failed_details_without_approval_or_child_creation()
+ {
+    for mode in [
+        ApprovalMode::Ask,
+        ApprovalMode::Auto,
+        ApprovalMode::ReadOnly,
+    ] {
+        let mut server = Server::start(vec![
+            (
+                tool_answer(
+                    "invalid-agent",
+                    "agent",
+                    json!({"action":"create","resource":"session"}),
+                ),
+                None,
+            ),
+            (answer("invalid arguments recorded"), None),
+        ])
+        .await;
+        let builder = HostResourceBuilder::builtins().unwrap();
+        let mut configured = config(&server.endpoint);
+        configured.tools = selection(&["agent"]);
+        let host = Host::memory_configured(prepare(&builder, configured).await).unwrap();
+        let connection = host.connect().unwrap();
+        let caller = connection.caller();
+        let mut creation = request(selection(&["agent"]), None);
+        creation.config.session_defaults.execution.approval = mode;
+        let created = host.create_agent_async(&caller, creation).await.unwrap();
+        let target = SessionRef {
+            agent_id: created.agent_id.unwrap(),
+            session_id: created.session_id.unwrap(),
+        };
+        send(&host, &caller, &target, "exercise invalid arguments");
+        server.request().await;
+        let followup = server.request().await;
+        let output = followup["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .unwrap();
+        assert_eq!(output["tool_call_id"], "invalid-agent");
+        assert_eq!(
+            output["content"],
+            "invalid agent arguments: missing field `target`"
+        );
+        settled(&host, &caller, &target, 1).await;
+        let history = host.history(&caller, &target).unwrap();
+        let result = history
+            .iter()
+            .find_map(|item| match item {
+                HistoryItem::ToolResult(result) => Some(result),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(result.outcome, ToolResultOutcome::Failed);
+        assert!(
+            host.session_state(&caller, &target)
+                .unwrap()
+                .data
+                .pending_interactions
+                .is_empty()
+        );
+        let sessions = host
+            .sessions(
+                &caller,
+                &AgentRef {
+                    host_id: created.host_id,
+                    agent_id: target.agent_id.clone(),
+                },
+            )
+            .unwrap();
+        assert_eq!(sessions.len(), 1);
+        host.shutdown(
+            &caller,
+            HostShutdownRequest {
+                operation_id: OperationId::new().unwrap(),
+                strategy: HostShutdownStrategy::Force,
+            },
+        )
+        .unwrap();
     }
 }

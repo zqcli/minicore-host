@@ -93,11 +93,20 @@ pub enum ApprovalDecision {
 #[derive(Clone, Eq, PartialEq)]
 pub enum ToolDecision {
     Allow,
+    InvalidInvocation { reason: Text },
     Deny { reason: Text },
     RequireApproval { request: ApprovalRequest },
 }
 
 impl ToolDecision {
+    pub fn invalid_invocation(reason: impl AsRef<str>) -> Result<Self, ToolPolicyError> {
+        let decision = Self::InvalidInvocation {
+            reason: checked_policy_text(reason.as_ref())?,
+        };
+        decision.validate()?;
+        Ok(decision)
+    }
+
     pub fn deny(reason: impl AsRef<str>) -> Result<Self, ToolPolicyError> {
         let decision = Self::Deny {
             reason: checked_policy_text(reason.as_ref())?,
@@ -115,7 +124,9 @@ impl ToolDecision {
     pub fn validate(&self) -> Result<(), ToolPolicyError> {
         match self {
             Self::Allow => Ok(()),
-            Self::Deny { reason } => validate_policy_text(reason.as_str()),
+            Self::InvalidInvocation { reason } | Self::Deny { reason } => {
+                validate_policy_text(reason.as_str())
+            }
             Self::RequireApproval { request } => request.validate(),
         }
     }
@@ -125,6 +136,10 @@ impl fmt::Debug for ToolDecision {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Allow => formatter.write_str("Allow"),
+            Self::InvalidInvocation { reason } => formatter
+                .debug_struct("InvalidInvocation")
+                .field("reason_bytes", &reason.byte_len())
+                .finish(),
             Self::Deny { reason } => formatter
                 .debug_struct("Deny")
                 .field("reason_bytes", &reason.byte_len())

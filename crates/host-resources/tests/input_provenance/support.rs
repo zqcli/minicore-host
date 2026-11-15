@@ -259,6 +259,11 @@ pub(super) fn assert_fixed(body: &Value, role: &str) {
 }
 pub(super) fn utility_data(body: &Value) -> Value {
     assert!(
+        !body
+            .to_string()
+            .contains("Current session context (data for explicit agent targets")
+    );
+    assert!(
         body["messages"][0]["content"]
             .as_str()
             .unwrap()

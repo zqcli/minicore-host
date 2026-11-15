@@ -451,13 +451,13 @@ async fn runtime_is_the_only_retry_owner_and_only_recognized_rejections_retry() 
             429,
             json!({"error":{"message":"please retry"}}),
             1,
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
         ),
         (
             503,
             json!({"error":{"message":"please retry"}}),
             1,
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
         ),
         (
             500,
@@ -593,19 +593,26 @@ async fn official_overload_http_still_requires_attempt_and_time_budget() {
 
 #[tokio::test]
 async fn official_overload_http_does_not_authorize_unknown_delivery() {
-    for (status, error) in [
-        (503, json!({"type":"service_unavailable_error"})),
+    for (status, error, expected_kind) in [
+        (
+            503,
+            json!({"type":"service_unavailable_error"}),
+            ModelErrorKind::UpstreamUnclassified,
+        ),
         (
             503,
             json!({"type":"service_unavailable_error","code":"future_error"}),
+            ModelErrorKind::UpstreamUnclassified,
         ),
         (
             503,
             json!({"type":"future_error","code":"future_error","message":"server_is_overloaded"}),
+            ModelErrorKind::UpstreamUnclassified,
         ),
         (
             500,
             json!({"type":"service_unavailable_error","code":"server_is_overloaded"}),
+            ModelErrorKind::ProviderUnavailable,
         ),
     ] {
         let fixture = Fixture::start(vec![
@@ -615,7 +622,7 @@ async fn official_overload_http_does_not_authorize_unknown_delivery() {
         .await;
         let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         let failure = failure(&report);
-        assert_eq!(failure.kind(), ModelErrorKind::ProviderUnavailable);
+        assert_eq!(failure.kind(), expected_kind);
         assert_eq!(failure.delivery(), DeliveryState::Unknown, "{error}");
         assert_eq!(*failure.retry_hint(), RetryHint::Never, "{error}");
         assert_eq!(report.attempts, 1);
@@ -695,13 +702,13 @@ async fn typed_stream_decoding_preserves_structured_error_priority() {
         ),
         (
             r#"{"error":{"error":{"code":"rate_limit_exceeded"}}}"#,
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
             DeliveryState::Unknown,
             false,
         ),
         (
             r#"{"error":false,"choices":"bad"}"#,
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
             DeliveryState::Unknown,
             false,
         ),
@@ -1432,7 +1439,7 @@ async fn sse_retry_after_does_not_authorize_unknown_or_permanent_rejections() {
     let cases = [
         (
             json!({"error":{"type":"future_error","message":"rate_limit_error"}}),
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
             DeliveryState::Unknown,
         ),
         (
@@ -1956,7 +1963,7 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
             2,
         ),
         (429, "insufficient_quota", ModelErrorKind::QuotaExceeded, 1),
-        (429, "future_error", ModelErrorKind::ProviderUnavailable, 1),
+        (429, "future_error", ModelErrorKind::UpstreamUnclassified, 1),
     ] {
         let body = json!({"error":{"code":code,"message":private_message}}).to_string();
         assert!(body.len() > 262_144);
@@ -1976,10 +1983,13 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
         let error = rejection(&mut rejections).await;
         assert_eq!(error.kind(), expected_kind);
         assert!(
-            !serde_json::to_string(&error)
-                .unwrap()
-                .contains("private-provider-body")
+            error
+                .diagnostic()
+                .message()
+                .as_str()
+                .contains(&private_message)
         );
+        assert!(!format!("{error:?}").contains("private-provider-body"));
         let requests = fixture.finish().await;
         assert_eq!(requests.len(), attempts);
         if attempts == 2 {
@@ -2035,18 +2045,126 @@ async fn large_http_errors_do_not_relax_retry_wait_limits_or_parse_invalid_json(
         let error = failure(&report);
         if valid {
             assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+            assert_eq!(error.delivery(), DeliveryState::NotStarted);
             assert!(
                 matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(30))
             );
+            assert!(error.diagnostic().message().as_str().contains(&padding));
+            assert!(
+                serde_json::to_string(error)
+                    .unwrap()
+                    .contains("body-only-diagnostic")
+            );
+            assert_eq!(
+                error.upstream().unwrap().provider_code.as_deref(),
+                Some("rate_limit_exceeded")
+            );
         } else {
+            assert_eq!(error.kind(), ModelErrorKind::UpstreamUnclassified);
             assert_eq!(error.delivery(), DeliveryState::Unknown);
             assert_eq!(*error.retry_hint(), RetryHint::Never);
+            assert!(
+                !serde_json::to_string(error)
+                    .unwrap()
+                    .contains("body-only-diagnostic")
+            );
+            assert!(error.upstream().unwrap().provider_code.is_none());
         }
-        assert!(
-            !serde_json::to_string(&error)
-                .unwrap()
-                .contains("body-only-diagnostic")
-        );
+        assert!(!format!("{error:?}").contains("body-only-diagnostic"));
+        assert_eq!(error.upstream().unwrap().http_status, Some(429));
+        assert_eq!(report.attempts, 1);
         assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn http_rejection_preserves_safe_message_and_source_before_public_serialization() {
+    let fixture = Fixture::start(vec![Reply::Full {
+        status: 400,
+        content_type: "application/json",
+        headers: "X-Request-Id: req-fixture-not-a-real-key\r\n".into(),
+        body: json!({"error": {
+            "type": "type-fixture-not-a-real-key",
+            "code": "code-fixture-not-a-real-key",
+            "message": "Unsupported 参数 🐈\nKey fixture-not-a-real-key cannot use this option.\u{1b}[31m"
+        }}).to_string(),
+        fragment: 7,
+    }]).await;
+    let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+    let error = failure(&report);
+    assert_eq!(error.kind(), ModelErrorKind::InvalidRequest);
+    assert_eq!(error.delivery(), DeliveryState::NotStarted);
+    assert_eq!(*error.retry_hint(), RetryHint::Never);
+    assert_eq!(
+        error.diagnostic().message().as_str(),
+        "provider HTTP 400: Unsupported 参数 🐈\nKey [REDACTED] cannot use this option.\\u{1b}[31m\nprovider_type: type-[REDACTED]\nprovider_code: code-[REDACTED]\nrequest_id: req-[REDACTED]"
+    );
+    let source = error.upstream().unwrap();
+    assert_eq!(source.http_status, Some(400));
+    assert_eq!(source.provider_type.as_deref(), Some("type-[REDACTED]"));
+    assert_eq!(source.provider_code.as_deref(), Some("code-[REDACTED]"));
+    assert_eq!(source.request_id.as_deref(), Some("req-[REDACTED]"));
+    assert!(
+        !serde_json::to_string(error)
+            .unwrap()
+            .contains("fixture-not-a-real-key")
+    );
+    assert!(!format!("{error:?}").contains("Unsupported"));
+    assert_eq!(fixture.finish().await.len(), 1);
+}
+
+#[tokio::test]
+async fn chat_sse_rejection_and_fallback_keep_source_without_replaying_started_output() {
+    for prefix in [
+        String::new(),
+        frame(
+            json!({"role":"assistant", "content":"actual partial"}),
+            None,
+        ),
+    ] {
+        for malformed in [false, true] {
+            let mut value = json!({"error": {
+                "type":"future_provider_error", "code":"future_code",
+                "message":"Keep this 原因\nCheck the parameter.",
+                "request_id":"body-fixture-not-a-real-key"
+            }});
+            if malformed {
+                value["choices"] = json!(false);
+            }
+            let fixture =
+                Fixture::start(vec![Reply::sse(format!("{prefix}data: {value}\n\n"))]).await;
+            let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+            let error = failure(&report);
+            assert_eq!(error.kind(), ModelErrorKind::UpstreamUnclassified);
+            assert_eq!(
+                error.delivery(),
+                if prefix.is_empty() {
+                    DeliveryState::Unknown
+                } else {
+                    DeliveryState::Started
+                }
+            );
+            assert_eq!(*error.retry_hint(), RetryHint::Never);
+            assert!(
+                error
+                    .diagnostic()
+                    .message()
+                    .as_str()
+                    .contains("Keep this 原因\nCheck the parameter.")
+            );
+            let source = error.upstream().unwrap();
+            assert_eq!(source.http_status, Some(200));
+            assert_eq!(
+                source.provider_type.as_deref(),
+                Some("future_provider_error")
+            );
+            assert_eq!(source.provider_code.as_deref(), Some("future_code"));
+            assert_eq!(source.request_id.as_deref(), Some("body-[REDACTED]"));
+            if !prefix.is_empty() {
+                assert!(model_partial(&report).unwrap().content.iter().any(|part| matches!(part, AssistantPart::Text(text) if text.as_ref() == "actual partial")));
+            }
+            assert_eq!(report.attempts, 1);
+            assert_eq!(fixture.finish().await.len(), 1);
+        }
     }
 }

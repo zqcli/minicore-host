@@ -23,9 +23,8 @@ pub(super) struct Event {
     pub arguments: Option<String>,
     pub error: Option<Value>,
     pub code: Option<String>,
-    // Free text is never put in diagnostics, but its consumed type is checked.
-    #[serde(rename = "message")]
-    pub _message: Option<String>,
+    pub message: Option<String>,
+    pub request_id: Option<String>,
     #[serde(rename = "param")]
     pub _param: Option<String>,
 }
@@ -60,8 +59,9 @@ pub(super) struct ErrorEnvelope {
     pub _refusal: Option<IgnoredAny>,
     #[serde(rename = "arguments")]
     pub _arguments: Option<IgnoredAny>,
-    #[serde(rename = "message")]
-    pub _message: Option<IgnoredAny>,
+    // Only string values are extracted as messages by the error adapter.
+    pub message: Option<Value>,
+    pub request_id: Option<Value>,
     #[serde(rename = "param")]
     pub _param: Option<IgnoredAny>,
 }

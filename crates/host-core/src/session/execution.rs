@@ -853,7 +853,7 @@ pub(super) fn runtime_model_fault(error: &minicore_host_runtime::model::ModelErr
         }
         _ => FaultKind::TurnModelUpstreamUnclassified,
     };
-    let mut fault = Fault::new(kind, error.diagnostic().message().as_str());
+    let mut fault = model_fault_with_kind(kind, error);
     if kind.allows_retry_after_ms()
         && let minicore_host_runtime::model::RetryHint::Retryable {
             retry_after: Some(duration),
@@ -865,4 +865,22 @@ pub(super) fn runtime_model_fault(error: &minicore_host_runtime::model::ModelErr
             .expect("registered temporary model fault");
     }
     fault
+}
+
+pub(super) fn model_fault_with_kind(
+    kind: FaultKind,
+    error: &minicore_host_runtime::model::ModelError,
+) -> Fault {
+    let fault = Fault::new(kind, error.diagnostic().message().as_str());
+    match error.upstream() {
+        Some(source) => fault
+            .with_details(FaultDetails::Upstream(UpstreamDetails {
+                http_status: source.http_status,
+                provider_type: source.provider_type.clone(),
+                provider_code: source.provider_code.clone(),
+                request_id: source.request_id.clone(),
+            }))
+            .expect("model and compaction faults register upstream details"),
+        None => fault,
+    }
 }

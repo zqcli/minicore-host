@@ -106,7 +106,7 @@ fault_registry! {
     SessionInteractionNotPending = 3601, "SESSION_INTERACTION_NOT_PENDING", [Session], None, false;
     SessionInteractionAnswerInvalid = 3602, "SESSION_INTERACTION_ANSWER_INVALID", [Session], None, false;
     SessionCompactionNotFound = 3701, "SESSION_COMPACTION_NOT_FOUND", [Session, SessionLookup], None, false;
-    SessionCompactionFailed = 3702, "SESSION_COMPACTION_FAILED", [Session], None, false;
+    SessionCompactionFailed = 3702, "SESSION_COMPACTION_FAILED", [Session], Upstream, false;
     SessionWorkspaceUnavailable = 3801, "SESSION_WORKSPACE_UNAVAILABLE", [Session], None, false;
     SessionWorkspacePathInvalid = 3802, "SESSION_WORKSPACE_PATH_INVALID", [Session], None, false;
     SessionWorkspacePathNotFound = 3803, "SESSION_WORKSPACE_PATH_NOT_FOUND", [Session], None, false;
@@ -126,7 +126,7 @@ fault_registry! {
     TurnModelUpstreamOverloaded = 4202, "TURN_MODEL_UPSTREAM_OVERLOADED", [Turn, TurnModel, TurnModelUpstream], Upstream, true;
     TurnModelUpstreamQuotaExhausted = 4203, "TURN_MODEL_UPSTREAM_QUOTA_EXHAUSTED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
     TurnModelUpstreamAuthenticationFailed = 4204, "TURN_MODEL_UPSTREAM_AUTHENTICATION_FAILED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
-    TurnModelStreamInterrupted = 4210, "TURN_MODEL_STREAM_INTERRUPTED", [Turn, TurnModel, TurnModelStream], None, false;
+    TurnModelStreamInterrupted = 4210, "TURN_MODEL_STREAM_INTERRUPTED", [Turn, TurnModel, TurnModelStream], Upstream, false;
     TurnModelUpstreamUnclassified = 4299, "TURN_MODEL_UPSTREAM_UNCLASSIFIED", [Turn, TurnModel, TurnModelUpstream], Upstream, false;
     TurnInternalUnexpected = 4999, "TURN_INTERNAL_UNEXPECTED", [Turn], None, false;
 }
@@ -154,11 +154,15 @@ pub struct HistoryLoadDetails {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UpstreamDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
     /// Sanitized provider identifiers, never raw responses or credentials.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(untagged)]

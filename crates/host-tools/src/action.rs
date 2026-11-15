@@ -197,8 +197,7 @@ pub enum UpdateAction {
 
 impl AgentAction {
     pub fn parse(arguments: serde_json::Value) -> Result<Self, Fault> {
-        let action: Self =
-            serde_json::from_value(arguments).map_err(|error| invalid(error.to_string()))?;
+        let action: Self = serde_json::from_value(arguments).map_err(parse_error)?;
         action.validate()?;
         Ok(action)
     }
@@ -222,6 +221,40 @@ impl AgentAction {
             _ => Ok(()),
         }
     }
+}
+fn parse_error(error: serde_json::Error) -> Fault {
+    let message = error.to_string();
+    // Unknown names may contain arbitrary argument text, and an empty struct
+    // does not supply an expected-field suffix. Never parse those names back
+    // out of Serde's display message.
+    for (prefix, reason) in [
+        ("unknown field ", "arguments contain an unknown field"),
+        (
+            "unknown variant ",
+            "arguments contain an unsupported variant",
+        ),
+    ] {
+        if message.starts_with(prefix) {
+            return invalid(reason);
+        }
+    }
+    // These Serde diagnostics always end with the expectation from our DTO
+    // types. The supplied actual value must not appear in the public error.
+    for (prefix, reason) in [
+        ("invalid type: ", "arguments contain an invalid type"),
+        ("invalid value: ", "arguments contain an invalid value"),
+        ("invalid length ", "arguments contain an invalid length"),
+    ] {
+        if message.starts_with(prefix) {
+            return invalid(match message.rsplit_once(", expected ") {
+                Some((_, expected)) => format!("{reason}; expected {expected}"),
+                None => reason.to_owned(),
+            });
+        }
+    }
+    // The remaining custom deserializers use fixed local validation messages,
+    // including ID grammar, references and execution-setting constraints.
+    invalid(message)
 }
 impl InspectAction {
     pub fn validate(&self) -> Result<(), Fault> {

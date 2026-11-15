@@ -259,6 +259,14 @@ async fn call_model(
         Ok(response) => response,
         Err(failure) => {
             observation.usage = failure.usage;
+            // Adapter failures already carry the safe original reason and
+            // source, including a real HTTP 408. Keep it intact; cancellation
+            // and local deadlines without a response retain the utility kind.
+            if failure.error().upstream().is_some()
+                && failure.error().kind() != ModelErrorKind::Cancelled
+            {
+                return Err(CompactionError::Model(failure.into_error()));
+            }
             return Err(match failure.error().kind() {
                 ModelErrorKind::Cancelled => CompactionError::Cancelled,
                 ModelErrorKind::Timeout => CompactionError::Timeout,

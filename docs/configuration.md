@@ -1,6 +1,6 @@
 # JSON configuration directories
 
-Host 0.12.2 and SPEC 4.11.1 use one explicit configuration directory. Configuration
+Host 0.12.3 and SPEC 4.11.2 use one explicit configuration directory. Configuration
 files are UTF-8 standard JSON: no TOML, comments, legacy-file fallback or automatic
 migration. Runtime persistence stays in the separate data root.
 
@@ -104,8 +104,13 @@ declaration and reload.
 The instruction fields are `host.json.framework_instructions`, Role
 `instructions`, and Agent `instructions`. Each may be omitted or `""`; JSON
 `null` is invalid. Nonempty layers become separate System messages in the order
-Host, Role, Agent, Workspace, then conversation history/input. Role name and
-description are metadata. Tool selection remains in the tool fields.
+Host, Role, Agent, Workspace, then conversation history/input. When the selected
+tools include the builtin `agent`, ordinary requests also receive the current
+Host, Agent and Session IDs after Workspace and before history. The owner-bound
+IDs are read-only target facts, not permission grants or user configuration;
+they are not stored in history. Compaction requests do not receive this execution
+context. Role name and description are metadata. Tool selection remains in the
+tool fields.
 
 Session creation copies Role and Agent instructions. Changes to these Agent
 defaults affect new Sessions; existing Sessions require explicit updates.

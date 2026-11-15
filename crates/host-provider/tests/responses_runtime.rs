@@ -622,7 +622,7 @@ async fn responses_initial_errors_share_classification_and_retry_lower_bound() {
         ),
         (
             json!({"type":"error","code":"unrecognized"}),
-            ModelErrorKind::ProviderUnavailable,
+            ModelErrorKind::UpstreamUnclassified,
             DeliveryState::Unknown,
         ),
         (
@@ -640,6 +640,96 @@ async fn responses_initial_errors_share_classification_and_retry_lower_bound() {
         assert_eq!(*failure.error().retry_hint(), RetryHint::Never);
         assert_eq!(fixture.finish().await.len(), 1);
     }
+}
+
+#[tokio::test]
+async fn responses_error_and_failed_envelopes_preserve_safe_original_reasons() {
+    let message = "Model rejected 参数\nCredential fixture-not-a-real-key is invalid.";
+    for payload in [
+        json!({"type":"error","code":"invalid_api_key","message":message,"request_id":"event-fixture-not-a-real-key"}),
+        json!({"type":"error","response":false,"code":"invalid_api_key","message":message,"request_id":"event-fixture-not-a-real-key"}),
+        json!({"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[],"error":{"type":"authentication_error","code":"invalid_api_key","message":message,"request_id":"event-fixture-not-a-real-key"}}}),
+        json!({"type":"response.failed","response":{"id":"resp_failed","status":"failed","output":[{"type":"unsupported-output"}],"error":{"type":"authentication_error","code":"invalid_api_key","message":message,"request_id":"event-fixture-not-a-real-key"}}}),
+    ] {
+        let fixture = Fixture::start(vec![Reply::sse(format!("data: {payload}\n\n"))]).await;
+        let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+        assert_eq!(report.attempts, 1);
+        let failure = report.outcome.unwrap_err();
+        let error = failure.error();
+        assert_eq!(error.kind(), ModelErrorKind::AuthRejected);
+        assert!(
+            error
+                .diagnostic()
+                .message()
+                .as_str()
+                .contains("Model rejected 参数\nCredential [REDACTED] is invalid.")
+        );
+        let source = error.upstream().unwrap();
+        assert_eq!(source.http_status, Some(200));
+        assert_eq!(source.provider_code.as_deref(), Some("invalid_api_key"));
+        assert_eq!(source.request_id.as_deref(), Some("event-[REDACTED]"));
+        assert!(
+            !serde_json::to_string(error)
+                .unwrap()
+                .contains("fixture-not-a-real-key")
+        );
+        let started = payload["response"]["output"]
+            .as_array()
+            .is_some_and(|output| !output.is_empty());
+        assert_eq!(
+            error.delivery(),
+            if started {
+                DeliveryState::Started
+            } else {
+                DeliveryState::NotStarted
+            }
+        );
+        assert_eq!(*error.retry_hint(), RetryHint::Never);
+        assert_eq!(fixture.finish().await.len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn responses_incomplete_reason_is_readable_with_request_id_and_partial() {
+    let mut script = Script::new();
+    script.message("msg_incomplete", Some("commentary"), &["actual partial"]);
+    script
+        .events
+        .push(json!({"type":"response.incomplete","response":{
+            "id":"resp_fixture", "status":"incomplete", "output":script.output,
+            "incomplete_details":{"reason":"max_output_tokens fixture-not-a-real-key"}
+        }}));
+    let fixture = Fixture::start(vec![Reply::Full {
+        status: 200,
+        content_type: "text/event-stream",
+        headers: "X-Request-Id: req-incomplete\r\n".into(),
+        body: script.body(),
+        fragment: 7,
+    }])
+    .await;
+    let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+    assert_eq!(report.attempts, 1);
+    let failure = report.outcome.unwrap_err();
+    assert_eq!(failure.error().kind(), ModelErrorKind::IncompleteResponse);
+    assert_eq!(failure.error().delivery(), DeliveryState::Started);
+    assert_eq!(
+        failure.error().diagnostic().message().as_str(),
+        "provider HTTP 200: response incomplete: max_output_tokens [REDACTED]\nrequest_id: req-incomplete"
+    );
+    assert_eq!(
+        failure.error().upstream().unwrap().request_id.as_deref(),
+        Some("req-incomplete")
+    );
+    let partial = failure.partial.unwrap();
+    assert!(partial.content.iter().any(
+        |part| matches!(part, AssistantPart::Text(text) if text.as_ref() == "actual partial")
+    ));
+    assert!(
+        !serde_json::to_string(&partial)
+            .unwrap()
+            .contains("fixture-not-a-real-key")
+    );
+    assert_eq!(fixture.finish().await.len(), 1);
 }
 
 #[tokio::test]

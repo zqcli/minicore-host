@@ -1,9 +1,20 @@
 # Host tools
 
 The statically compiled `agent` tool reuses Runtime `ToolSpec`, `Tool`, and
-`ToolSet`. Its model inputs expose only the six actions in SPEC v4.11.0 §7.
+`ToolSet`. Its model inputs expose only the six actions in SPEC v4.11.2 §7.
 Identity, operation/message ID generation, source capabilities, and configuration
 revision selection are backend responsibilities, never model-supplied authority.
+
+Production ordinary prompts include the current Host/Agent/Session IDs only
+when the actual built-in agent tool is selected. The model still supplies an
+explicit business target; `CoreTurnPort` retains the owner-minted capability and
+checks ownership independently of those read-only prompt facts.
+
+`AgentAction::parse` retains actionable missing-field and validation constraints
+without echoing unknown names or invalid argument values. Production policy
+reports malformed invocations as failed tool results before approval or business
+execution. Direct callers receive `ToolExecutionOutcome::Failed` with the same
+diagnostic; valid actions continue through the selected approval policy.
 
 `TurnPort` is a narrow, Turn-bound owner integration boundary. Implementations
 must use a trusted internal capability minted by Session before input claiming,

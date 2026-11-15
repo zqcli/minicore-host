@@ -23,8 +23,7 @@ type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Sen
 
 pub(super) struct State {
     bytes: ByteStream,
-    status: u16,
-    retry_at: Option<std::time::Instant>,
+    error_context: error::ResponseContext,
     chunk: Bytes,
     offset: usize,
     parser: Parser,
@@ -99,13 +98,12 @@ impl State {
         cancellation: CancellationToken,
         deadline: Instant,
         model: String,
+        authorization: &reqwest::header::HeaderValue,
     ) -> Self {
-        let status = response.status().as_u16();
-        let retry_at = error::retry_after(response.headers());
+        let error_context = error::ResponseContext::new(&response, authorization);
         Self {
             bytes: Box::pin(response.bytes_stream()),
-            status,
-            retry_at,
+            error_context,
             chunk: Bytes::new(),
             offset: 0,
             parser: Parser::new(),
@@ -146,6 +144,12 @@ impl State {
                 // separate typed envelope still rejects repeated known fields.
                 let envelope: wire::ErrorEnvelope =
                     serde_json::from_str(frame).map_err(|_| self.malformed())?;
+                self.error_context.record_request_id(
+                    envelope
+                        .request_id
+                        .as_ref()
+                        .and_then(serde_json::Value::as_str),
+                );
                 let nested = if envelope.error.is_none()
                     && envelope.kind.as_deref() == Some("response.failed")
                 {
@@ -166,28 +170,24 @@ impl State {
                 };
                 let value = envelope.error.or(nested).or_else(|| {
                     (envelope.kind.as_deref() == Some("error"))
-                        .then(|| json!({"code":envelope.code}))
+                        .then(|| json!({"type":"error", "code":envelope.code, "message":envelope.message, "request_id":envelope.request_id}))
                 });
                 return Err(match value {
-                    Some(value) => error::provider(&value, self.seen, self.status, self.retry_at),
+                    Some(value) => error::provider(&value, self.seen, &self.error_context),
                     None => self.malformed(),
                 });
             }
         };
+        self.error_context
+            .record_request_id(event.request_id.as_deref());
         if let Some(value) = event.error.as_ref() {
-            return Err(error::provider(
-                value,
-                self.seen,
-                self.status,
-                self.retry_at,
-            ));
+            return Err(error::provider(value, self.seen, &self.error_context));
         }
         if event.kind == "error" {
             return Err(error::provider(
-                &json!({"code":event.code}),
+                &json!({"type":"error", "code":event.code, "message":event.message, "request_id":event.request_id}),
                 self.seen,
-                self.status,
-                self.retry_at,
+                &self.error_context,
             ));
         }
         if event.kind == "response.failed" {
@@ -196,7 +196,7 @@ impl State {
             // A first-frame structured rejection may still prove NotStarted;
             // response.created or any actual output forbids that inference.
             let seen = self.seen || !response.output.is_empty();
-            let failure = error::provider(value, seen, self.status, self.retry_at);
+            let failure = error::provider(value, seen, &self.error_context);
             self.terminal_metadata(&response, "failed")
                 .map_err(|_| self.malformed())?;
             self.seen = seen;
@@ -238,7 +238,13 @@ impl State {
                 let response = event.response.ok_or_else(|| self.malformed())?;
                 self.terminal_metadata(&response, "incomplete")
                     .map_err(|_| self.malformed())?;
-                return Err(error::stream(ModelErrorKind::IncompleteResponse, self.seen));
+                return Err(self.error_context.incomplete(
+                    response
+                        .incomplete_details
+                        .as_ref()
+                        .map(|details| details.reason.as_str()),
+                    self.seen,
+                ));
             }
             _ => Err(()),
         };
@@ -737,7 +743,11 @@ impl State {
         }
         self.response_id = Some(response.id.clone());
         self.terminal_status = Some(response.status.clone());
-        self.incomplete_details = response.incomplete_details.clone();
+        self.incomplete_details = response.incomplete_details.as_ref().and_then(|details| {
+            self.error_context
+                .text(&details.reason)
+                .map(|reason| wire::IncompleteDetails { reason })
+        });
         self.usage = response.usage.clone();
         self.runtime_usage = self
             .usage
@@ -851,6 +861,7 @@ impl State {
     }
 
     fn fail(&mut self, failure: ModelError) -> Result<ModelEvent, ModelError> {
+        let failure = self.error_context.attach(failure);
         self.pending.clear();
         self.done = true;
         if (self.seen || self.usage.is_some() || self.incomplete_tool_header.is_some())

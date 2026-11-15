@@ -175,6 +175,7 @@ fn kind(kind: ModelErrorKind) -> &'static str {
         ModelErrorKind::InvalidRequest => "invalid_request",
         ModelErrorKind::Unavailable => "unavailable",
         ModelErrorKind::ProviderUnavailable => "provider_unavailable",
+        ModelErrorKind::UpstreamUnclassified => "upstream_unclassified",
         ModelErrorKind::AuthMissing => "auth_missing",
         ModelErrorKind::AuthRejected => "auth_rejected",
         ModelErrorKind::RateLimited => "rate_limited",

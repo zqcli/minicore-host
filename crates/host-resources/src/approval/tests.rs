@@ -174,7 +174,7 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
 }
 
 #[tokio::test]
-async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
+async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
     for mode in [
         ApprovalMode::Ask,
         ApprovalMode::Auto,
@@ -193,9 +193,20 @@ async fn malformed_agent_and_name_mismatch_never_bypass_policy() {
                     .decide(request("agent", arguments).request())
                     .await
                     .unwrap(),
-                ToolDecision::Deny { .. }
+                ToolDecision::InvalidInvocation { .. }
             ));
         }
+        let ToolDecision::InvalidInvocation { reason } = policy
+            .decide(request("agent", json!({"action":"inspect"})).request())
+            .await
+            .unwrap()
+        else {
+            panic!("malformed input is distinct from a policy refusal")
+        };
+        assert_eq!(
+            reason.as_str(),
+            "invalid agent arguments: missing field `target`"
+        );
         let mut mismatched = request("read", json!({}));
         mismatched.spec = request("write", json!({})).spec;
         assert!(matches!(

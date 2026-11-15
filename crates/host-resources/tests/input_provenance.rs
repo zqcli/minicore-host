@@ -1,5 +1,7 @@
 //! Permanent regressions for the independently proven ordinary-input omission.
 //! No live-model quality claim: only provider replies are scripted.
+#[path = "input_provenance/agent_context.rs"]
+mod agent_context;
 #[allow(dead_code)]
 #[path = "support/production.rs"]
 mod base;

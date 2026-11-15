@@ -98,7 +98,12 @@ impl OpenAiChatModel {
         let body = request::encode(&self.provider_model, &self.descriptor, &request)?;
         let response = self.send(body, &context, diagnostic).await?;
         let deadline = TokioInstant::from_std(context.deadline);
-        let state = stream::State::new(response, context.cancellation, deadline);
+        let state = stream::State::new(
+            response,
+            context.cancellation,
+            deadline,
+            &self.authorization,
+        );
         // Initial explicit SSE rejections must reach start(), before Runtime
         // consumes a model event. Never retry a partially observed generation.
         let (first, state) = stream::next(state)
@@ -138,7 +143,7 @@ impl OpenAiChatModel {
         };
         diagnostic.response(response.status().as_u16());
         if !response.status().is_success() {
-            return Err(error::http(response, context, deadline).await);
+            return Err(error::http(response, context, deadline, &self.authorization).await);
         }
         let is_sse = response
             .headers()
@@ -147,7 +152,8 @@ impl OpenAiChatModel {
             .and_then(|value| value.split(';').next())
             .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
         if !is_sse {
-            return Err(error::unknown(ModelErrorKind::InvalidProviderResponse));
+            return Err(error::ResponseContext::new(&response, &self.authorization)
+                .attach(error::unknown(ModelErrorKind::InvalidProviderResponse)));
         }
         Ok(response)
     }

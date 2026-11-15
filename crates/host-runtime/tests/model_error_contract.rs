@@ -6,6 +6,45 @@ use minicore_host_runtime::value::Text;
 use serde_json::json;
 
 #[test]
+fn upstream_error_facts_round_trip_without_entering_debug_text() {
+    use minicore_host_runtime::model::ModelUpstreamDetails;
+    let error = ModelError::unknown(
+        ModelErrorKind::UpstreamUnclassified,
+        DiagnosticSummary::new(
+            DiagnosticCode::ModelUnavailable,
+            DiagnosticCategory::Model,
+            Text::new("provider HTTP 503: Original 原因\nFollow-up detail."),
+            false,
+        )
+        .unwrap(),
+    )
+    .with_upstream(ModelUpstreamDetails {
+        http_status: Some(503),
+        provider_type: Some("future_provider_type".into()),
+        provider_code: Some("future_provider_code".into()),
+        request_id: Some("actual_provider_request".into()),
+    });
+    let wire = serde_json::to_value(&error).unwrap();
+    assert_eq!(wire["upstream"]["http_status"], 503);
+    assert_eq!(
+        serde_json::from_value::<ModelError>(wire.clone()).unwrap(),
+        error
+    );
+    let debug = format!("{error:?}");
+    for text in [
+        "Original",
+        "future_provider_type",
+        "future_provider_code",
+        "actual_provider_request",
+    ] {
+        assert!(!debug.contains(text));
+    }
+    let mut unknown = wire;
+    unknown["upstream"]["response_body"] = json!("not a source field");
+    assert!(serde_json::from_value::<ModelError>(unknown).is_err());
+}
+
+#[test]
 fn model_errors_enforce_delivery_retry_and_panic_invariants() {
     let diag_unretryable = DiagnosticSummary::new(
         DiagnosticCode::ModelUnavailable,

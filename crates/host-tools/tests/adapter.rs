@@ -1,7 +1,7 @@
 //! Runtime tools plus explicit owner-port fixtures, not real Host integration.
 mod support;
 use minicore_host_protocol::*;
-use minicore_host_runtime::tools::{Tool, ToolError, ToolInvocation};
+use minicore_host_runtime::tools::{Tool, ToolError, ToolExecutionOutcome, ToolInvocation};
 use minicore_host_tools::*;
 use serde_json::json;
 use std::{
@@ -9,6 +9,32 @@ use std::{
     time::Duration,
 };
 use support::*;
+
+#[tokio::test]
+async fn malformed_arguments_return_failed_diagnostics_without_entering_an_owner() {
+    let port = FixtureTurn::new();
+    let tool = AgentTool::new(port.port(), ScopeManager::new());
+    let result = tool
+        .execute(
+            ToolInvocation::new(
+                "invalid-agent-call".parse().unwrap(),
+                "agent".parse().unwrap(),
+                json!({"action":"create","resource":"session"}),
+            )
+            .unwrap(),
+            context(),
+        )
+        .await
+        .unwrap();
+    let ToolExecutionOutcome::Failed(output) = result else {
+        panic!("invalid arguments cannot produce successful tool execution")
+    };
+    assert_eq!(
+        output.content().as_str(),
+        "invalid agent arguments: missing field `target`"
+    );
+    assert!(port.state.events.lock().unwrap().is_empty());
+}
 
 #[tokio::test]
 async fn create_without_text_only_creates_and_never_registers_delegation() {

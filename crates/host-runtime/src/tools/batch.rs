@@ -213,6 +213,16 @@ async fn run_tool_call(
     .await
     {
         PolicyStep::Allow => None,
+        PolicyStep::InvalidInvocation(reason) => {
+            return ToolStep::Result(output_result(
+                ctx.context.loop_id,
+                request_index,
+                call,
+                ToolResultOutcome::Failed,
+                ToolOutput::new(reason.as_str())
+                    .expect("validated invocation reason has valid text"),
+            ));
+        }
         PolicyStep::Denied(reason) => {
             return ToolStep::Result(denied_result(
                 ctx.context.loop_id,
@@ -268,10 +278,18 @@ async fn run_tool_call(
     )
     .await
     {
-        ToolPort::Completed(output) => ToolStep::Result(completed_result(
+        ToolPort::Completed(output) => ToolStep::Result(output_result(
             ctx.context.loop_id,
             request_index,
             call,
+            ToolResultOutcome::Success,
+            output,
+        )),
+        ToolPort::FailedWithOutput(output) => ToolStep::Result(output_result(
+            ctx.context.loop_id,
+            request_index,
+            call,
+            ToolResultOutcome::Failed,
             output,
         )),
         ToolPort::RequestInput(request) => {
@@ -320,6 +338,7 @@ async fn run_tool_call(
 
 enum PolicyStep {
     Allow,
+    InvalidInvocation(Text),
     Denied(Option<Text>),
     RequireApproval(ApprovalRequest),
     Cancelled,
@@ -361,6 +380,7 @@ async fn decide_policy(
             }
             match decision {
                 ToolDecision::Allow => PolicyStep::Allow,
+                ToolDecision::InvalidInvocation { reason } => PolicyStep::InvalidInvocation(reason),
                 ToolDecision::Deny { reason } => PolicyStep::Denied(Some(reason)),
                 ToolDecision::RequireApproval { request } => PolicyStep::RequireApproval(request),
             }
@@ -378,6 +398,7 @@ async fn decide_policy(
 
 enum ToolPort {
     Completed(ToolOutput),
+    FailedWithOutput(ToolOutput),
     RequestInput(ToolInputRequest),
     Failed,
     End(ToolBatchStop),
@@ -409,6 +430,9 @@ async fn run_tool_port(
     match result {
         PortCallOutcome::Returned(Ok(ToolExecutionOutcome::Completed(output))) => {
             ToolPort::Completed(output)
+        }
+        PortCallOutcome::Returned(Ok(ToolExecutionOutcome::Failed(output))) => {
+            ToolPort::FailedWithOutput(output)
         }
         PortCallOutcome::Returned(Ok(ToolExecutionOutcome::RequestInput(request)))
             if request.validate().is_ok() =>
@@ -480,10 +504,11 @@ async fn wait_interaction(
     result
 }
 
-fn completed_result(
+fn output_result(
     id: LoopId,
     request_index: u32,
     call: &ToolCall,
+    outcome: ToolResultOutcome,
     output: ToolOutput,
 ) -> ToolResultHistory {
     ToolResultHistory {
@@ -491,7 +516,7 @@ fn completed_result(
         request_index,
         call_id: call.tool_call_id().clone(),
         tool_name: call.name().clone(),
-        outcome: ToolResultOutcome::Success,
+        outcome,
         output,
     }
 }

@@ -8,7 +8,10 @@ invocations, retain actionable validation errors, and improve TUI diagnostics
 and bounded previews. Three collaboration workers were requested with
 `gpt-6-astra` / `max`; no Codex CLI is used. The existing missing-tool
 configuration and synthetic parallel-tool concerns are outside this scope.
-Validation and publication are pending; no new passing result is claimed.
+Host local validation passes 1,255 uniquely enumerated Rust tests, seven doctests,
+28 Python checks, formatting and strict Clippy/rustdoc. TUI's initial integration
+gate passes; the final immutable Host pin, added async target regressions and
+Linux/macOS/Windows package CI are being completed before delivery.
 
 ## Previous delivery: Host/TUI 0.12.2 (Task 115)
 

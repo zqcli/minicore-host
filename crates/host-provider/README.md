@@ -104,6 +104,21 @@ limit or does not fit the original deadline; the adapter never clamps the hint,
 waits or resends. A header does not make Unknown, Started, quota or authentication
 failures retryable.
 
+Provider errors retain their original `message` text after redacting the exact
+credential bound to the attempt. The existing diagnostic message carries an HTTP
+status prefix and present provider type/code/request-ID lines so Session's
+`Fault.message` and saved terminal `reason` remain useful to text-only clients.
+`ModelError.upstream` also retains `http_status`, `provider_type`, `provider_code`
+and `request_id` as separate facts. Request IDs come from `x-request-id` or
+`request-id` headers, then an error envelope when available. Unknown upstream
+causes use `UpstreamUnclassified`, not identified overload; the existing delivery
+and retry evidence is unchanged. Missing messages keep an explicit local summary;
+unstructured response bodies are not dumped. LF/TAB and Unicode are retained;
+other control characters are escaped visibly for Runtime's text contract.
+Transport logs and Debug continue to omit message and provider text. Responses
+incomplete reasons remain visible in the failure and credential-safe partial
+metadata; failed requests never authorize unfinished tools.
+
 ## Responses
 
 `OpenAiResponsesModel` shares the same HTTP client policy, SSE framing, error

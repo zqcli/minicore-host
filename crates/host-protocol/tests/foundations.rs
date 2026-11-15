@@ -274,6 +274,25 @@ fn typed_fault_details_and_wait_hints_are_not_retry_authorization() {
         .with_retry_after_ms(10)
         .unwrap();
     assert_eq!(upstream.retry_after_ms(), Some(10));
+    for kind in [
+        FaultKind::TurnModelUpstreamUnclassified,
+        FaultKind::TurnModelStreamInterrupted,
+        FaultKind::SessionCompactionFailed,
+    ] {
+        let fault = Fault::new(kind, "provider HTTP 400: Original 原因")
+            .with_details(FaultDetails::Upstream(UpstreamDetails {
+                http_status: Some(400),
+                provider_type: Some("provider [REDACTED]".into()),
+                provider_code: Some("original_code".into()),
+                request_id: Some("req_actual".into()),
+            }))
+            .unwrap();
+        assert_eq!(
+            serde_json::from_value::<Fault>(serde_json::to_value(&fault).unwrap()).unwrap(),
+            fault
+        );
+        assert!(fault.with_retry_after_ms(10).is_err());
+    }
     assert!(
         Fault::new(FaultKind::SessionHistoryLoadFailed, "corrupt")
             .with_details(FaultDetails::HistoryLoad(HistoryLoadDetails {

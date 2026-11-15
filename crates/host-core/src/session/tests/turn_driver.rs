@@ -6,6 +6,54 @@ use minicore_host_runtime::{
 };
 use std::time::Duration;
 
+#[tokio::test]
+async fn upstream_reason_and_source_survive_turn_result_state_and_saved_terminal() {
+    let error = upstream_rejection();
+    let model = Arc::new(RejectedModel {
+        descriptor: model(Vec::new()).descriptor.clone(),
+        error: error.clone(),
+        calls: AtomicUsize::new(0),
+    });
+    let fixture = setup(
+        Arc::new(Resources {
+            model: model.clone(),
+            tools: ToolSet::default(),
+        }),
+        |inner| inner,
+    );
+    send(&fixture, "upstream error fixture");
+    until(&fixture, |state| state.completed.len() == 1).await;
+    let result = fixture
+        .session
+        .state
+        .lock()
+        .unwrap()
+        .completed
+        .values()
+        .next()
+        .unwrap()
+        .result
+        .clone();
+    let fault = result.info.fault.as_ref().unwrap();
+    assert_eq!(fault.kind(), Some(FaultKind::TurnModelUpstreamUnclassified));
+    assert_eq!(fault.message(), error.diagnostic().message().as_str());
+    let Some(FaultDetails::Upstream(source)) = fault.details() else {
+        panic!("upstream details missing")
+    };
+    assert_eq!(source.http_status, Some(503));
+    assert_eq!(source.provider_type.as_deref(), Some("future_type"));
+    assert_eq!(source.provider_code.as_deref(), Some("future_code"));
+    assert_eq!(source.request_id.as_deref(), Some("req_original"));
+    let state = SessionController::turn_state(&result.info, 1);
+    assert_eq!(state.fault.as_ref(), Some(fault));
+    let saved = records(&fixture);
+    assert!(
+        matches!(&saved.last().unwrap().entry, HistoryEntry::TurnFinished { outcome: TurnOutcome::Failed, reason: Some(reason), .. } if reason == fault.message())
+    );
+    assert_eq!(result.info.persistence, PersistenceState::Persisted);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+}
+
 struct GatedPrompt {
     calls: AtomicUsize,
     entered: Semaphore,

@@ -10,6 +10,38 @@ use minicore_host_runtime::{
 use minicore_host_storage::testing::read_history_bytes;
 use std::time::Duration;
 
+#[tokio::test]
+async fn compaction_model_rejection_keeps_original_message_and_source() {
+    let error = upstream_rejection();
+    let model = Arc::new(RejectedModel {
+        descriptor: UtilityModel::new(Vec::new(), false).descriptor.clone(),
+        error: error.clone(),
+        calls: AtomicUsize::new(0),
+    });
+    let fixture = setup(
+        UtilityResources::new(model.clone(), ToolSet::default()),
+        |inner| inner,
+    );
+    seed(&fixture, false).await;
+    start(&fixture);
+    let activity = compacted(&fixture).await;
+    let CompactionState::Finished {
+        result: CompactionOutcome::Failed { fault },
+    } = &activity.state
+    else {
+        panic!("compaction should retain the upstream failure");
+    };
+    assert_eq!(fault.kind(), Some(FaultKind::SessionCompactionFailed));
+    assert_eq!(fault.message(), error.diagnostic().message().as_str());
+    let Some(FaultDetails::Upstream(source)) = fault.details() else {
+        panic!("upstream details missing")
+    };
+    assert_eq!(source.http_status, Some(503));
+    assert_eq!(source.request_id.as_deref(), Some("req_original"));
+    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(markers(&fixture), 0);
+}
+
 struct UtilityModel {
     descriptor: ModelDescriptor,
     utility_calls: AtomicUsize,

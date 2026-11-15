@@ -26,6 +26,7 @@ fn tool_call_id() -> ToolCallId {
 fn decision_kind(decision: &ToolDecision) -> &'static str {
     match decision {
         ToolDecision::Allow => "allow",
+        ToolDecision::InvalidInvocation { .. } => "invalid_invocation",
         ToolDecision::Deny { .. } => "deny",
         ToolDecision::RequireApproval { .. } => "require_approval",
     }
@@ -105,6 +106,7 @@ async fn policy_port_is_async_send_sync_and_returns_only_typed_decisions() {
     let approval = ApprovalRequest::new("approve deployment", ApprovalRisk::High).unwrap();
     let decisions = [
         ToolDecision::Allow,
+        ToolDecision::invalid_invocation("missing required field `target`").unwrap(),
         ToolDecision::deny("blocked by policy").unwrap(),
         ToolDecision::require_approval(approval.clone()).unwrap(),
     ];
@@ -175,6 +177,17 @@ fn policy_text_is_checked_at_the_exact_boundary_and_debug_is_redacted() {
         ToolDecision::deny(""),
         Err(ToolPolicyError::InvalidDecision)
     );
+    assert_eq!(
+        ToolDecision::invalid_invocation("bad\0reason"),
+        Err(ToolPolicyError::InvalidDecision)
+    );
+    assert_eq!(
+        ToolDecision::InvalidInvocation {
+            reason: Text::new(""),
+        }
+        .validate(),
+        Err(ToolPolicyError::InvalidDecision)
+    );
     assert!(ApprovalRequest::new(&exact, ApprovalRisk::Low).is_ok());
     let large_approval = ApprovalRequest::new(&oversized, ApprovalRisk::Medium).unwrap();
     assert_eq!(large_approval.prompt.as_str(), oversized);
@@ -200,6 +213,7 @@ fn policy_text_is_checked_at_the_exact_boundary_and_debug_is_redacted() {
     );
 
     let denial = ToolDecision::deny("private denial reason").unwrap();
+    let invalid = ToolDecision::invalid_invocation("private invalid argument reason").unwrap();
     let approval = ApprovalRequest::new("private approval prompt", ApprovalRisk::Medium).unwrap();
     let invocation = invocation("deploy", json!({"target": "production"}));
     let spec = spec("deploy", "deploy one release");
@@ -210,6 +224,7 @@ fn policy_text_is_checked_at_the_exact_boundary_and_debug_is_redacted() {
         Instant::now() + Duration::from_secs(30),
     );
     for (debug, secret) in [
+        (format!("{invalid:?}"), "private invalid argument reason"),
         (format!("{denial:?}"), "private denial reason"),
         (format!("{approval:?}"), "private approval prompt"),
         (format!("{request:?}"), "production"),

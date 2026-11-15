@@ -440,7 +440,13 @@ impl SessionController {
             Ok(candidate) => candidate,
             Err(error) => {
                 self.record_utility(binding, utility_loop, &error.utility_usage);
-                self.fail_compaction(binding, failure(error.error.to_string()));
+                let fault = match error.error {
+                    engine::CompactionError::Model(error) => {
+                        execution::model_fault_with_kind(FaultKind::SessionCompactionFailed, &error)
+                    }
+                    error => failure(error.to_string()),
+                };
+                self.fail_compaction(binding, fault);
                 return;
             }
         };

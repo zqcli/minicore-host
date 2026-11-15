@@ -337,8 +337,15 @@ impl Tool for AgentTool {
                     invocation.tool_call_id().as_str().to_owned(),
                 ),
             };
-            let action = AgentAction::parse(invocation.arguments)
-                .map_err(|_| ToolError::InvalidInvocation)?;
+            let action = match AgentAction::parse(invocation.arguments) {
+                Ok(action) => action,
+                Err(error) => {
+                    let output =
+                        ToolOutput::new(format!("invalid agent arguments: {}", error.message()))
+                            .map_err(|_| ToolError::Internal)?;
+                    return Ok(ToolExecutionOutcome::Failed(output));
+                }
+            };
             let startup = matches!(
                 &action,
                 AgentAction::Create(

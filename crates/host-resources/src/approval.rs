@@ -1,7 +1,7 @@
 //! Per-Turn execution policy. Reuses the three-mode policy from minicore-agent
 //! f36a873, with Host's validated six-action agent tool in place of old names.
 //! There is no approval cache or second interaction owner.
-use minicore_host_protocol::ApprovalMode;
+use minicore_host_protocol::{ApprovalMode, Fault};
 use minicore_host_runtime::tools::{
     ApprovalRequest, ApprovalRisk, ToolDecision, ToolPolicy, ToolPolicyError, ToolPolicyFuture,
     ToolPolicyRequest,
@@ -44,8 +44,14 @@ impl Policy {
         if request.invocation.tool_name() != request.spec.name() {
             return deny(INVALID_CALL_DENIAL);
         }
-        let Some(class) = self.classify(request) else {
-            return deny(INVALID_CALL_DENIAL);
+        let class = match self.classify(request) {
+            Ok(class) => class,
+            Err(error) => {
+                return ToolDecision::invalid_invocation(format!(
+                    "invalid agent arguments: {}",
+                    error.message()
+                ));
+            }
         };
         match (self.mode, class) {
             (ApprovalMode::Auto, _) | (_, ToolClass::ReadOnly) => Ok(ToolDecision::Allow),
@@ -61,26 +67,26 @@ impl Policy {
             }
         }
     }
-    fn classify(&self, request: &ToolPolicyRequest<'_>) -> Option<ToolClass> {
-        match request.invocation.tool_name().as_str() {
-            "read" if self.builtin_read => Some(ToolClass::ReadOnly),
-            "write" | "edit" | "apply_patch" | "bash" => Some(ToolClass::Mutating),
+    fn classify(&self, request: &ToolPolicyRequest<'_>) -> Result<ToolClass, Fault> {
+        Ok(match request.invocation.tool_name().as_str() {
+            "read" if self.builtin_read => ToolClass::ReadOnly,
+            "write" | "edit" | "apply_patch" | "bash" => ToolClass::Mutating,
             // Use the same parser and validation as dispatch, not an unchecked
             // action string that might conceal a mutating or invalid branch.
             "agent" if self.builtin_agent => {
-                match AgentAction::parse(request.invocation.arguments().clone()).ok()? {
-                    AgentAction::Inspect(_) | AgentAction::Wait(_) => Some(ToolClass::ReadOnly),
+                match AgentAction::parse(request.invocation.arguments().clone())? {
+                    AgentAction::Inspect(_) | AgentAction::Wait(_) => ToolClass::ReadOnly,
                     AgentAction::Create(_)
                     | AgentAction::Send(_)
                     | AgentAction::Update(_)
-                    | AgentAction::Control(_) => Some(ToolClass::Mutating),
+                    | AgentAction::Control(_) => ToolClass::Mutating,
                 }
             }
             // Runtime resolves a selected registered tool before invoking policy.
             // External effects are unknown, so treat them conservatively as
             // mutating rather than silently trusting a read-only declaration.
-            _ => Some(ToolClass::Mutating),
-        }
+            _ => ToolClass::Mutating,
+        })
     }
 }
 

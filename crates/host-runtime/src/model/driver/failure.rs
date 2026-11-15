@@ -173,7 +173,7 @@ pub(super) fn normalize_after_event(error: ModelError, observed_event: bool) -> 
     if observed_event
         && (error.delivery() != DeliveryState::Started || *error.retry_hint() != RetryHint::Never)
     {
-        ModelError::started(error.kind(), error.diagnostic().clone())
+        error.after_observation()
     } else {
         error
     }

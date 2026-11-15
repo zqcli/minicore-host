@@ -34,6 +34,7 @@ impl Model for UnusedModel {
 enum Action {
     Success,
     Failed,
+    FailedWithOutput,
     Hold,
     Input,
 }
@@ -83,6 +84,9 @@ impl Tool for TestTool {
                     ToolOutput::new("done").unwrap(),
                 )),
                 Action::Failed => Err(ToolError::Failed),
+                Action::FailedWithOutput => Ok(ToolExecutionOutcome::Failed(
+                    ToolOutput::new("missing required field `target`").unwrap(),
+                )),
                 Action::Hold => std::future::pending().await,
                 Action::Input => Ok(ToolExecutionOutcome::RequestInput(
                     ToolInputRequest::new("enter text", vec![], ToolInputAnswerKind::Text).unwrap(),
@@ -234,6 +238,53 @@ async fn batch_preserves_order_and_continues_after_an_ordinary_tool_failure() {
             ..
         })
     ));
+}
+
+#[tokio::test]
+async fn invocation_validation_failure_preserves_reason_without_approval_or_tool_execution() {
+    let tool = TestTool::new(vec![]);
+    let owner = Arc::new(TestOwner::default());
+    let report = run(
+        config(
+            tool.clone(),
+            Some(Arc::new(FixedPolicy(
+                ToolDecision::invalid_invocation("missing required field `target`").unwrap(),
+            ))),
+        ),
+        calls(1),
+        context(CancellationToken::new()),
+        owner.clone(),
+    )
+    .await;
+    assert!(report.stop.is_none());
+    assert!(tool.calls.lock().unwrap().is_empty());
+    assert!(owner.pending.lock().unwrap().is_none());
+    assert!(owner.finished.lock().unwrap().is_empty());
+    assert_eq!(report.results[0].outcome, ToolResultOutcome::Failed);
+    assert_eq!(
+        report.results[0].output.content().as_str(),
+        "missing required field `target`"
+    );
+}
+
+#[tokio::test]
+async fn explicit_failed_output_remains_failed_and_does_not_stop_the_next_tool() {
+    let tool = TestTool::new(vec![Action::FailedWithOutput, Action::Success]);
+    let report = run(
+        config(tool.clone(), None),
+        calls(2),
+        context(CancellationToken::new()),
+        Arc::new(TestOwner::default()),
+    )
+    .await;
+    assert!(report.stop.is_none());
+    assert_eq!(*tool.calls.lock().unwrap(), ["call_0", "call_1"]);
+    assert_eq!(report.results[0].outcome, ToolResultOutcome::Failed);
+    assert_eq!(
+        report.results[0].output.content().as_str(),
+        "missing required field `target`"
+    );
+    assert_eq!(report.results[1].outcome, ToolResultOutcome::Success);
 }
 
 #[tokio::test]

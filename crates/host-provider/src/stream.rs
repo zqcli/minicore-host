@@ -20,8 +20,7 @@ type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Sen
 
 pub(crate) struct State {
     bytes: ByteStream,
-    status: u16,
-    retry_at: Option<std::time::Instant>,
+    error_context: error::ResponseContext,
     chunk: Bytes,
     offset: usize,
     parser: Parser,
@@ -53,16 +52,15 @@ impl State {
         response: reqwest::Response,
         cancellation: CancellationToken,
         deadline: Instant,
+        authorization: &reqwest::header::HeaderValue,
     ) -> Self {
         // Retain response metadata before bytes_stream consumes the response.
         // An explicit first-frame rejection uses the same header lower bound
         // as an HTTP error. Runtime alone decides whether/how long to retry.
-        let status = response.status().as_u16();
-        let retry_at = error::retry_after(response.headers());
+        let error_context = error::ResponseContext::new(&response, authorization);
         Self {
             bytes: Box::pin(response.bytes_stream()),
-            status,
-            retry_at,
+            error_context,
             chunk: Bytes::new(),
             offset: 0,
             parser: Parser::new(),
@@ -86,6 +84,7 @@ impl State {
     }
 
     fn fail(&mut self, error: ModelError) -> Result<ModelEvent, ModelError> {
+        let error = self.error_context.attach(error);
         self.pending.clear();
         self.done = true;
         // Runtime's typed ToolCallStart requires a valid, complete ID/name.
@@ -133,19 +132,18 @@ impl State {
                 // never retry the normal chunk through a permissive Value tree.
                 let envelope: ErrorEnvelope =
                     serde_json::from_str(frame).map_err(|_| self.malformed())?;
+                self.error_context
+                    .record_request_id(envelope.request_id.as_ref().and_then(Value::as_str));
                 return Err(match envelope.error {
-                    Some(value) => error::provider(&value, self.seen, self.status, self.retry_at),
+                    Some(value) => error::provider(&value, self.seen, &self.error_context),
                     None => self.malformed(),
                 });
             }
         };
+        self.error_context
+            .record_request_id(chunk.request_id.as_ref().and_then(Value::as_str));
         if let Some(value) = chunk.error {
-            return Err(error::provider(
-                &value,
-                self.seen,
-                self.status,
-                self.retry_at,
-            ));
+            return Err(error::provider(&value, self.seen, &self.error_context));
         }
         // Receiving a provider choice, including its role-only header, proves
         // the generation has started even before text reaches Runtime.
@@ -423,6 +421,7 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
 
 #[derive(Deserialize)]
 struct Chunk {
+    request_id: Option<Value>,
     #[serde(default)]
     error: Option<Value>,
     #[serde(default)]
@@ -433,6 +432,7 @@ struct Chunk {
 }
 #[derive(Deserialize)]
 struct ErrorEnvelope {
+    request_id: Option<Value>,
     #[serde(default)]
     error: Option<Value>,
     // These fields are irrelevant to a rejection, but repeated envelope fields
@@ -552,8 +552,7 @@ mod tests {
         ] {
             let mut state = State {
                 bytes: Box::pin(futures_util::stream::empty()),
-                status: 200,
-                retry_at: None,
+                error_context: error::ResponseContext::fixture(200),
                 chunk: Bytes::new(),
                 offset: 0,
                 parser: Parser::new(),

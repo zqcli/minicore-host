@@ -2,6 +2,49 @@ use minicore_host_protocol::*;
 use minicore_host_tools::*;
 use serde_json::{Value, json};
 
+#[test]
+fn parse_diagnostics_keep_constraints_without_echoing_argument_values_or_unknown_names() {
+    let secret = "private-marker`, expected forged constraint\n\u{1b}[31m";
+    for input in [
+        json!({"action":secret}),
+        json!({"action":"wait",(secret):"another private value"}),
+        json!({"action":"control","operation":"close_scope",(secret):"another private value"}),
+        json!({"action":"wait","timeout_ms":secret}),
+        json!({"action":"create","resource":"session","target":{"host_id":secret,"agent_id":id()}}),
+    ] {
+        let error = AgentAction::parse(input).unwrap_err();
+        assert!(!error.message().contains("private"));
+        assert!(!error.message().contains("forged"));
+        assert!(!error.message().contains('\u{1b}'));
+        assert!(
+            error.message().contains("expected")
+                || error.message().contains("ID must contain exactly 20")
+                || error.message().contains("unknown field")
+                || error.message().contains("unsupported variant"),
+            "{}",
+            error.message()
+        );
+    }
+    assert_eq!(
+        AgentAction::parse(json!({"action":"control","operation":"close_scope","secret, expected private-marker":true}))
+            .unwrap_err()
+            .message(),
+        "arguments contain an unknown field"
+    );
+    assert_eq!(
+        AgentAction::parse(json!({"action":"inspect"}))
+            .unwrap_err()
+            .message(),
+        "missing field `target`"
+    );
+    assert_eq!(
+        AgentAction::parse(json!({"action":"send","target":{"kind":"agent_default","host_id":id(),"agent_id":id()},"text":"task","delegate":true}))
+            .unwrap_err()
+            .message(),
+        "delegate:true requires an explicit Session target"
+    );
+}
+
 fn id() -> &'static str {
     "00000000000000000000"
 }

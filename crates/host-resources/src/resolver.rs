@@ -34,6 +34,13 @@ impl ProductionResources {
             Some(selection) => Some(self.workspaces.bind(selection).await?),
             None => None,
         };
+        let agent_source = binding
+            .as_ref()
+            .filter(|_| {
+                self.tools.has_builtin_agent()
+                    && config.tools.iter().any(|tool| tool.name == "agent")
+            })
+            .map(|binding| binding.source().clone());
         let selected = if config.tools.is_empty() {
             ToolSet::default()
         } else {
@@ -55,12 +62,15 @@ impl ProductionResources {
                 self.tools.bind(&config.tools, port)?
             }
         };
-        let prompt = Arc::new(BoundPrompt::new(
+        let mut prompt = BoundPrompt::new(
             &self.framework,
             &config.role.instructions,
             &config.instructions,
             workspace,
-        ));
+        );
+        if let Some(source) = agent_source {
+            prompt = prompt.with_agent_context(&source);
+        }
         let execution = ExecutionConfig::new(
             self.models[&config.model].clone(),
             reasoning(config.reasoning),
@@ -70,7 +80,7 @@ impl ProductionResources {
                 self.tools.has_builtin_read(),
                 self.tools.has_builtin_agent(),
             ))),
-            prompt,
+            Arc::new(prompt),
         )
         .map_err(|error| session_invalid(error.to_string()))?;
         let settings = &config.execution;

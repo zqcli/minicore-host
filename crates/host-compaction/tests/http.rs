@@ -89,6 +89,68 @@ fn frame(delta: Value, finish: Option<&str>) -> String {
 mod http;
 
 #[tokio::test]
+async fn actual_http_408_compaction_keeps_provider_reason_and_source() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!(
+        "http://{}/v1/chat/completions",
+        listener.local_addr().unwrap()
+    );
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let request = http::read_request(&mut socket).await.body;
+        let body = json!({"error": {
+            "type":"request_timeout", "code":"gateway_deadline",
+            "message":"Provider deadline expired 原因\nCredential fixture-only-not-a-real-secret is not retried."
+        }}).to_string();
+        let response = format!(
+            "HTTP/1.1 408 Request Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Request-Id: req-timeout\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket.write_all(response.as_bytes()).await.unwrap();
+        request
+    });
+    let model = model(&endpoint);
+    let failure = generate(&plan(&model), &model, context())
+        .await
+        .unwrap_err();
+    let minicore_host_compaction::CompactionError::Model(error) = failure.error else {
+        panic!("HTTP 408 must retain its actual model error");
+    };
+    assert_eq!(
+        error.kind(),
+        minicore_host_runtime::model::ModelErrorKind::Timeout
+    );
+    assert_eq!(
+        error.delivery(),
+        minicore_host_runtime::model::DeliveryState::Unknown
+    );
+    assert_eq!(
+        *error.retry_hint(),
+        minicore_host_runtime::model::RetryHint::Never
+    );
+    assert!(
+        error
+            .diagnostic()
+            .message()
+            .as_str()
+            .contains("Provider deadline expired 原因\nCredential [REDACTED] is not retried.")
+    );
+    let source = error.upstream().unwrap();
+    assert_eq!(source.http_status, Some(408));
+    assert_eq!(source.provider_type.as_deref(), Some("request_timeout"));
+    assert_eq!(source.provider_code.as_deref(), Some("gateway_deadline"));
+    assert_eq!(source.request_id.as_deref(), Some("req-timeout"));
+    assert!(
+        !serde_json::to_string(&error)
+            .unwrap()
+            .contains("fixture-only-not-a-real-secret")
+    );
+    assert_eq!(failure.utility_usage.len(), 1);
+    assert!(!failure.utility_usage[0].completed);
+    assert!(server.await.unwrap().get("tools").is_none());
+}
+
+#[tokio::test]
 async fn actual_http_sse_summary_preserves_optional_usage_and_has_no_tools() {
     for reported in [false, true] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

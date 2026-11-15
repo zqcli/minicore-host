@@ -73,6 +73,7 @@ impl OpenAiResponsesModel {
             context.cancellation,
             TokioInstant::from_std(context.deadline),
             self.connection.provider_model.clone(),
+            &self.connection.authorization,
         );
         let (first, state) = stream::next(state)
             .await

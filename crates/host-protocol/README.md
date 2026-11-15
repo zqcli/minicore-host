@@ -1,6 +1,6 @@
 # MiniCore Host protocol foundation
 
-Shared value contracts for the unchanged v4.10.1 design in `../../SPEC.md`.
+Shared value contracts for the v4.11.2 design in `../../SPEC.md`.
 This crate does not implement Host services, authentication, execution, storage,
 transports, or TUI integration. A method's presence in the canonical catalog is
 not a claim that its handler is implemented.
@@ -57,6 +57,11 @@ root exports, validation, or the direct owners of business state.
   Details are typed and limited to relevant branches. Retry hints are not retry
   permission. `CallError` preserves client-side timeout/connection/protocol
   provenance rather than manufacturing server facts.
+- `UpstreamDetails` preserves safe provider type/code, HTTP status and request ID
+  on registered model, interrupted-stream and compaction failure branches.
+  The safe readable reason stays in `Fault.message`, including concise source
+  context for text-only clients; saved terminal history keeps that same reason.
+  Source metadata is not a retry authorization or a new error-storage service.
 
 ## Configuration
 

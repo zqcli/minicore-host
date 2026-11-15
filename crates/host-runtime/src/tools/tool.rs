@@ -245,6 +245,7 @@ impl<'de> Deserialize<'de> for ToolInvocation {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ToolExecutionOutcome {
     Completed(ToolOutput),
+    Failed(ToolOutput),
     RequestInput(ToolInputRequest),
 }
 

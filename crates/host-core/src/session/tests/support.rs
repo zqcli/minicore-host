@@ -7,6 +7,34 @@ pub(super) struct FixtureModel {
     pub(super) calls: AtomicUsize,
     pub(super) scripts: Mutex<VecDeque<Vec<ModelEvent>>>,
 }
+
+/// Explicit rejected model fixture; errors still pass through the real driver,
+/// Session claim, observation and journal boundaries.
+pub(super) struct RejectedModel {
+    pub(super) descriptor: ModelDescriptor,
+    pub(super) error: minicore_host_runtime::model::ModelError,
+    pub(super) calls: AtomicUsize,
+}
+impl Model for RejectedModel {
+    fn descriptor(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
+    fn start<'a>(&'a self, _: ModelRequest, _: ModelCallContext) -> ModelStartFuture<'a> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async { Err(self.error.clone()) })
+    }
+}
+
+pub(super) fn upstream_rejection() -> minicore_host_runtime::model::ModelError {
+    use minicore_host_runtime::model::{ModelError, ModelErrorKind, ModelUpstreamDetails};
+    ModelError::unknown(ModelErrorKind::UpstreamUnclassified,
+        DiagnosticSummary::new(DiagnosticCode::ModelUnavailable, DiagnosticCategory::Model,
+            Text::new("provider HTTP 503: Original 原因\nTry another parameter.\nprovider_type: future_type\nprovider_code: future_code\nrequest_id: req_original"), false).unwrap())
+        .with_upstream(ModelUpstreamDetails {
+            http_status: Some(503), provider_type: Some("future_type".into()),
+            provider_code: Some("future_code".into()), request_id: Some("req_original".into()),
+        })
+}
 impl Model for FixtureModel {
     fn descriptor(&self) -> &ModelDescriptor {
         &self.descriptor

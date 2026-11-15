@@ -9,7 +9,9 @@ mod response;
 mod retry;
 mod usage;
 
-pub use error::{DeliveryState, ModelError, ModelErrorKind, ModelValueError, RetryHint};
+pub use error::{
+    DeliveryState, ModelError, ModelErrorKind, ModelUpstreamDetails, ModelValueError, RetryHint,
+};
 pub use message::{AssistantPart, ModelMessage, ReasoningContent, ToolCall};
 pub use model_ref::{ModelRef, ModelRefError};
 pub use port::{Model, ModelCallContext, ModelDescriptor, ModelStartFuture, ModelStream};
