@@ -9,8 +9,10 @@ earlier minicore-agent work as the reference. The current project workflow
 updates the specification before production code, reviews independently and
 publishes verified work to dev without rewriting history.
 
-Status: specification checkpoint prepared; implementation and validation are
-pending. This record makes no repaired-build or native-terminal pass claim.
+Status: the provider repair and independent review are complete, and the full
+local Host gate passes at version 0.12.5. The TUI repair and focused tests are
+complete; its canonical Host pin, complete gate, native fixed-build comparison
+and published platform CI remain pending at this source checkpoint.
 
 ## Baseline and target
 
@@ -87,3 +89,41 @@ Run existing locked formatting, Clippy, tests, doctests, strict rustdoc, unique
 test enumeration and platform CI/package gates. Record exact commands, commits,
 counts and unavailable checks after execution. Earlier QA archives remain
 historical evidence and are not rewritten or relabelled as new passes.
+
+## Implementation and local Host verification
+
+The specification-only Host commit is
+`9c14da393b47fd7c65e136f3c6c60695736dfa43`; the TUI design checkpoint is
+`da8bb62fe1b947618a446562595424de856a3df9`. Both precede Rust implementation.
+
+The Responses adapter adds two constant-size state fields and twenty production
+lines at its existing validated append boundary. Four additional provider
+regressions compare observed, canonical, serialized and replayed reasoning,
+including raw snapshot failures and preserved ordinary text. The provider's
+95 tests and strict package Clippy pass. Independent Astra/max source review
+found no correctness issue requiring a change.
+
+The full Host `./scripts/check.sh` exits 0 with Rust 1.90.0, the committed lock
+and offline dependency resolution. It passes formatting, strict workspace
+Clippy, all workspace targets, seven doctests, strict rustdoc and 28 Python
+checks. `cargo test --workspace --all-targets --locked --offline -- --list`
+enumerates 1,259 unique Rust cases; storage subprocess output is not counted
+again. All fourteen local packages move to 0.12.5; the 225 external lock
+records remain identical to the 0.12.4 baseline. Storage schema and public
+events are unchanged.
+
+The TUI cache now separates only visible bodies, keeps zero-height identities
+and reuses unchanged body chunks. Narrow empty Assistants follow the same rule;
+partial markers and nonempty narrow rendering retain their existing behavior.
+Six focused layout/render regressions cover visibility, cache reuse, native
+history, folds, geometry, selection and internal whitespace. A separate real
+embedded-Host test observes reasoning through OutputBuffer and reopens durable
+history; it awaits the new Host pin. The focused frontend results are 52 passed
+and one existing ignored transcript case, plus 212 passed and two existing
+ignored UI cases. Independent source reviews found no actionable layout defect.
+
+New native evidence uses a declared local simulated Responses endpoint and real
+embedded Host/tool execution. The coordinator has reproduced both display
+defects on the protected 0.12.4 executable during streaming and after completion.
+Fixed-build and restart observations will be recorded in the final closeout;
+current fixture results are not a live-model access or quality claim.

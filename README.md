@@ -1,6 +1,6 @@
 # minicore-host
 
-Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.11.3.
+Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.11.4.
 
 The implementation contains strict contracts, native durable storage, Session-owned
 Turn execution, production HTTP/SSE resources, scoped observation/interaction adapters
@@ -30,7 +30,7 @@ Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for for
 Shared package metadata and dependency pins are declared in the root
 [Cargo.toml](Cargo.toml); members retain their own feature selections. The
 committed lockfile fixes the resolved graph. Runtime is now maintained directly
-in `crates/host-runtime`, at the same 0.12.4 workspace version. Its imported source
+in `crates/host-runtime`, at the same 0.12.5 workspace version. Its imported source
 checkpoint and the integrated validation are recorded in [Task106](tasks/106-host-runtime/TASK.md).
 
 ## Components

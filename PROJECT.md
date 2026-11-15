@@ -10,8 +10,12 @@ visible block spacing to the frontend while retaining canonical history
 identity, original provider replay items and meaningful internal whitespace.
 The specification checkpoint precedes implementation. The patch target is
 0.12.5 for both repositories, with no external dependency or schema change.
-Workers are requested with `gpt-6-astra` / `max`; implementation, independent
-review and new validation results are pending. Earlier reports remain frozen.
+Workers are requested with `gpt-6-astra` / `max`. Provider implementation and
+independent review are complete; the full local Host gate passes 1,259 unique
+Rust cases, seven doctests and 28 Python checks. The TUI layout repair and
+focused tests also pass independent review. Canonical dependency integration,
+the fixed native comparison and platform CI remain pending at this checkpoint.
+Earlier reports remain frozen.
 
 ## Previous delivery: Host/TUI 0.12.4 (Task 117)
 

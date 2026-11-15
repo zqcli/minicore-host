@@ -44,6 +44,8 @@ pub(super) struct State {
     incomplete_tool_header: Option<Item>,
     text: Normalized,
     reasoning: Normalized,
+    reasoning_source: Option<(usize, bool, usize)>,
+    reasoning_ends_newline: bool,
     refusal: bool,
 }
 
@@ -124,6 +126,8 @@ impl State {
             incomplete_tool_header: None,
             text: Normalized::default(),
             reasoning: Normalized::default(),
+            reasoning_source: None,
+            reasoning_ends_newline: false,
             refusal: false,
         }
     }
@@ -476,6 +480,22 @@ impl State {
         }
         part.raw.push(value)?;
         let refusal = part.kind == "refusal";
+        if reasoning && !value.is_empty() {
+            let source = (index, summary, part_index);
+            if self
+                .reasoning_source
+                .is_some_and(|previous| previous != source)
+                && !self.reasoning_ends_newline
+                && !value.starts_with(['\n', '\r'])
+            {
+                // Display separators belong to canonical reasoning, not the
+                // provider's raw part fingerprint or native replay item.
+                self.reasoning.push("\n")?;
+                self.pending.push_back(ModelEvent::reasoning_delta("\n"));
+            }
+            self.reasoning_source = Some(source);
+            self.reasoning_ends_newline = value.ends_with(['\n', '\r']);
+        }
         let range = if reasoning {
             self.reasoning.push(value)?
         } else {

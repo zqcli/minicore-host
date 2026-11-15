@@ -138,6 +138,12 @@ for handed-off text and arguments. It does not keep a second cumulative body or
 parse a completed argument object. A disagreeing snapshot fails rather than
 appending a suffix or replacing already observed output.
 
+Distinct nonempty reasoning parts/items are separated by one LF when neither
+side already supplies CR or LF. Same-part chunks concatenate; empty parts and
+repeated completion snapshots add no separator. Done-only reasoning follows the
+same rule. The emitted checksum covers these canonical line breaks, while raw
+part fingerprints and original replay items retain the provider's content.
+
 Only a valid `response.completed` terminal can complete the protocol. A failed
 or incomplete response, error event, `[DONE]` without a Responses completion,
 malformed event, interruption or EOF returns a failure with actual partial data.
