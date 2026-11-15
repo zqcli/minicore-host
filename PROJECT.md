@@ -1,6 +1,19 @@
 # MiniCore Host
 
-## Current delivery: Host/TUI 0.12.4 (Task 117)
+## In progress: Host/TUI 0.12.5 (Task 118)
+
+[Task 118](tasks/118-transcript-boundaries/TASK.md) repairs two reported display
+regressions: Responses reasoning parts lost their separators before reaching
+the TUI, and zero-row Assistant projections added an extra gap between tool
+cards. SPEC 4.11.4 assigns genuine reasoning boundaries to the provider and
+visible block spacing to the frontend while retaining canonical history
+identity, original provider replay items and meaningful internal whitespace.
+The specification checkpoint precedes implementation. The patch target is
+0.12.5 for both repositories, with no external dependency or schema change.
+Workers are requested with `gpt-6-astra` / `max`; implementation, independent
+review and new validation results are pending. Earlier reports remain frozen.
+
+## Previous delivery: Host/TUI 0.12.4 (Task 117)
 
 [Task 117](tasks/117-tui-functional-fixes/TASK.md) implements the three approved
 frontend repairs: pasted Find/Sessions/Models/Agents queries, forward-delete

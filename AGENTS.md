@@ -1,6 +1,6 @@
 # Engineering instructions
 
-- The complete design baseline is `SPEC.md` (v4.11.3, SHA-256 `21108befba6187fcc1355f9b11caae597c3d3f4b6611b5cea7e712c1f6e8b735`). Implement its ownership, execution, and acceptance contracts.
+- The complete design baseline is `SPEC.md` (v4.11.4, SHA-256 `e5d61422fa661b6730bb5d189e35259a99853ed2f9612af7c476ad1cf302c3e1`). Implement its ownership, execution, and acceptance contracts.
 - Develop on `dev` and short-lived topic branches/worktrees. Do not merge into `main` before independent review and required tests pass.
 - Follow the repository owner's current explicit publication authorization and applicable permissions. Confirm the exact destination and source checkpoint, preserve remote history, and never force-push.
 - Use descriptive English commit subjects in the exact `type(scope): summary` form, for example `feat(core): bind execution resources`. A scope is required. Do not add co-author trailers. Preserve already published commit history.
@@ -8,7 +8,7 @@
 - Keep direct ownership: Host -> Agent -> SessionController. The existing Session task owns and drives the whole Turn, prepares complete model requests, and calls internal Runtime model/tool primitives. Do not add cross-layer mutation shortcuts, capacity quotas, implicit retries, fake success, or fake integration data.
 - Keep Runtime in `crates/host-runtime` with a workspace path dependency and the committed Cargo.lock; pin external source dependencies. Runtime must not depend on Host owner crates. Providers remain in `host-provider`. Production results must come from real owners and execution primitives; name test doubles and never present them as live provider or TUI validation.
 - Remove the replaced standalone AgentLoop lifecycle, input/history callbacks, mutable loop configuration, and cumulative report reconciliation. Preserve native durable value formats and actual partial results; an internal LoopId correlation field does not restore a loop lifecycle. Ordinary and compaction requests share model-call safety; each compaction model call initially uses one attempt and explicit deadlines.
-- Task 117 coordinates the three frontend-owned repairs under SPEC 4.11.3: pasted overlay queries, forward-delete undo/redo and stable Session-picker IDs. Preserve Tasks 115/116 configuration, flat storage, error and agent-context contracts; add no backend fields or execution logic. Keep Runtime internal, pin the exact released Host revision in TUI, and do not modify the independent Web client.
+- Task 118 coordinates Responses reasoning boundaries in the provider and visible transcript spacing in TUI under SPEC 4.11.4. Preserve Tasks 115–117 configuration, flat storage, errors, agent context, editor and Session identity contracts. Add no public events, backend data fields, execution lifecycle or compatibility layer; keep Runtime internal, pin the exact released Host revision in TUI, and leave the independent Web client unchanged.
 - Never hold owner state locks across I/O or child calls. Accepted work must outlive a caller's wait.
 - Run formatting, lint, unit/integration tests, and documentation checks. Document checks that were not run or are blocked.
 - Count unique test cases with `cargo test --workspace --all-targets --locked -- --list`; nested storage subprocess probe output is not an additional test case.
