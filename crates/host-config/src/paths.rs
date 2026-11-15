@@ -1,4 +1,4 @@
-//! Startup path selection. No legacy environment or home-directory fallback.
+//! Startup path selection. Explicit configuration and data overrides are independent.
 use crate::invalid;
 use minicore_host_protocol::Fault;
 use std::path::{Path, PathBuf};
@@ -9,32 +9,41 @@ pub struct ConfigPaths {
     pub data_root: PathBuf,
 }
 
-/// Resolve explicit paths against the startup working directory. The default
-/// configuration is next to the executable; data defaults to its `data` child.
-/// This does not require either directory to exist and does not create files.
+/// Resolve explicit paths against the startup working directory. Omitted paths
+/// use the user's ~/.minicore root, independently of the other override.
 pub fn resolve_config_paths(
     config_override: Option<&Path>,
     data_override: Option<&Path>,
 ) -> Result<ConfigPaths, Fault> {
+    let defaults = if config_override.is_none() || data_override.is_none() {
+        Some(default_root()?)
+    } else {
+        None
+    };
     let config_dir = match config_override {
         Some(path) => absolute(path, "configuration directory")?,
-        None => {
-            let executable = std::env::current_exe()
-                .map_err(|error| invalid(format!("cannot locate executable: {error}")))?;
-            executable
-                .parent()
-                .ok_or_else(|| invalid("executable has no parent directory"))?
-                .join("config")
-        }
+        None => defaults.as_ref().expect("default root").join("config"),
     };
     let data_root = match data_override {
         Some(path) => absolute(path, "data root")?,
-        None => config_dir.join("data"),
+        None => defaults.as_ref().expect("default root").join("data"),
     };
     Ok(ConfigPaths {
         config_dir,
         data_root,
     })
+}
+
+fn default_root() -> Result<PathBuf, Fault> {
+    let name = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    let home = std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| invalid(format!("cannot determine user home from {name}")))?;
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err(invalid(format!("{name} must be an absolute directory")));
+    }
+    Ok(home.join(".minicore"))
 }
 
 fn absolute(path: &Path, label: &str) -> Result<PathBuf, Fault> {

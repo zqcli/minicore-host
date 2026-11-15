@@ -43,6 +43,12 @@ pub fn create_config_directory(
         .to_vec();
     let model: minicore_host_protocol::ModelRef =
         "provider/chat".parse().expect("literal model reference");
+    let log_dir = root
+        .parent()
+        .ok_or_else(|| invalid("configuration directory has no parent"))?
+        .join("logs");
+    std::fs::create_dir_all(&log_dir)
+        .map_err(|error| file_error(&log_dir, "create log directory", error))?;
     let host = HostConfig {
         name: "MiniCore Host".into(),
         models: vec![OpenAiModelSettings {
@@ -60,7 +66,7 @@ pub fn create_config_directory(
         workspace_roots: vec![workspace.clone()],
         logging: LogSettings {
             output: LogOutput::File {
-                path: utf8_path(&root.join("minicore-host.log"), "log file")?,
+                path: utf8_path(&log_dir.join("host.log"), "log file")?,
             },
             ..LogSettings::default()
         },

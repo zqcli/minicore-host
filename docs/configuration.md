@@ -26,9 +26,9 @@ are ignored.
 ## Startup
 
 Both executables accept `--config-dir PATH`. Relative paths are resolved against
-the startup working directory. The default is `config/` next to the executable.
+the startup working directory. The default is `~/.minicore/config`.
 `--data-root PATH` optionally selects another storage location; otherwise storage
-is `<config-dir>/data`. There is no home-directory or legacy environment fallback.
+is `~/.minicore/data`, independent of `--config-dir`. Missing home-directory information is an error; no executable-directory fallback is used.
 
 ```sh
 minicore-host --config-dir /absolute/minicore-config --stdio

@@ -7,8 +7,8 @@ Core re-exports the shared Host types for existing Rust embedding calls.
 
 `resolve_config_paths(config_override, data_override)` makes explicit paths
 absolute against the startup working directory. Without an override,
-configuration lives next to the executable in `config/`; data defaults to
-`<config-dir>/data`. Path selection does not create files or consult legacy
+configuration defaults to `~/.minicore/config`; data defaults to
+`~/.minicore/data`, independently. Path selection does not create files or consult legacy
 environment/home-directory rules.
 
 `load_config_directory(root)` reads `host.json`, `roles/*.json` and

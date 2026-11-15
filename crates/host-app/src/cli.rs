@@ -6,8 +6,8 @@ Usage: minicore-host [--config-dir PATH] [--data-root PATH] [--stdio]
                      [--tls-cert PATH --tls-key PATH]
        minicore-host --help
 
---config-dir PATH JSON configuration directory (default: executable directory/config).
---data-root PATH  Exclusive persistent Host data directory (default: config-dir/data).
+--config-dir PATH JSON configuration directory (default: ~/.minicore/config).
+--data-root PATH  Exclusive persistent Host data directory (default: ~/.minicore/data).
 --stdio           Serve trusted newline-delimited JSON-RPC on stdin/stdout.
 --tls-cert PATH   PEM certificate chain for the configured network.listen address.
 --tls-key PATH    PEM private key for that certificate (required with --tls-cert).
@@ -102,20 +102,17 @@ mod tests {
             .unwrap();
         let expected = std::path::absolute("settings").unwrap();
         assert_eq!(options.config_dir, expected);
-        assert_eq!(options.data_root, expected.join("data"));
+        assert_eq!(options.data_root, PathBuf::from(std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap()).join(".minicore/data"));
         let options = parse(&["--config-dir", "settings", "--data-root", "state"])
             .unwrap()
             .unwrap();
         assert_eq!(options.data_root, std::path::absolute("state").unwrap());
         let options = parse(&[]).unwrap().unwrap();
-        assert_eq!(
-            options.config_dir,
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("config")
-        );
+        let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+            .unwrap();
+        let root = PathBuf::from(home).join(".minicore");
+        assert_eq!(options.config_dir, root.join("config"));
+        assert_eq!(options.data_root, root.join("data"));
     }
 
     #[test]

@@ -150,15 +150,14 @@ fn malformed_unknown_and_incomplete_native_json_never_fall_back() {
 }
 
 #[test]
-fn path_selection_uses_executable_default_and_independent_explicit_paths() {
-    let expected = std::env::current_exe()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("config");
+fn path_selection_uses_home_defaults_and_independent_explicit_paths() {
+    let home = PathBuf::from(
+        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).unwrap(),
+    );
+    let root = home.join(".minicore");
     let paths = resolve_config_paths(None, None).unwrap();
-    assert_eq!(paths.config_dir, expected);
-    assert_eq!(paths.data_root, expected.join("data"));
+    assert_eq!(paths.config_dir, root.join("config"));
+    assert_eq!(paths.data_root, root.join("data"));
     let paths = resolve_config_paths(
         Some(Path::new("chosen-config")),
         Some(Path::new("chosen-data")),
@@ -168,10 +167,13 @@ fn path_selection_uses_executable_default_and_independent_explicit_paths() {
     assert_eq!(paths.config_dir, cwd.join("chosen-config"));
     assert_eq!(paths.data_root, cwd.join("chosen-data"));
     assert!(resolve_config_paths(Some(Path::new("")), None).is_err());
-    let root = tempfile::tempdir().unwrap();
-    let paths = resolve_config_paths(Some(root.path()), None).unwrap();
-    assert_eq!(paths.config_dir, root.path());
-    assert_eq!(paths.data_root, root.path().join("data"));
+    let config = tempfile::tempdir().unwrap();
+    let paths = resolve_config_paths(Some(config.path()), None).unwrap();
+    assert_eq!(paths.config_dir, config.path());
+    assert_eq!(paths.data_root, root.join("data"));
+    let paths = resolve_config_paths(None, Some(config.path())).unwrap();
+    assert_eq!(paths.config_dir, root.join("config"));
+    assert_eq!(paths.data_root, config.path());
 }
 
 #[test]
