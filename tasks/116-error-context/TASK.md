@@ -90,16 +90,41 @@ a forged `, expected ...` suffix in an unknown field of the empty close_scope
 variant. Both now have focused regressions. Runtime's new source is boxed to
 preserve the small common error representation and strict Clippy checks.
 
-The agent worker also independently reviews the TUI. Its first pass identified
+The agent worker also independently reviewed the TUI. Its first pass identified
 async rename/send error entries which already knew their original target but
 did not bind that target to the new error view. Those entries and the same
 existing delete/default/export boundaries now retain their actual identities,
 with cross-Session message-dispatch regressions. Agent-operation failures retain
-their captured Agent ID. No control or acceptance lifecycle is added.
+their captured Agent ID. Final targeted review found no unresolved blocking
+issue. No control or acceptance lifecycle is added.
 
 ## Validation and publication
 
-SPEC-first checkpoint: `d6d6a40af081bc91d649c03dd57ccb9a44bed2d0`.
+Published SPEC-first checkpoint:
+`2ce92dada73124478d8ba25a85b0958581cee019`.
+Published Host implementation/TUI pin:
+`dbaaa8175780759b84d26e0519aa4b27ced5f8f4`.
+Published TUI implementation:
+`0b7d4dc799fbe8c124661713bf8300fc3686ca78`.
+The implementation's source CI is
+[run 43688899390](https://github.com/zqcli/minicore-host/actions/runs/43688899390).
+TUI's source CI is
+[run 43689337362](https://github.com/zqcli/minicore-tui/actions/runs/43689337362).
+
+The local CLI had no GitHub write credential. Publication used the connected
+GitHub Git-data API, with author/committer `zqcli`, ordered specification and
+implementation commits, and a non-forced `dev` ref update requiring the original
+head. The specification tree `df3f259018867b249a53701a09fd514a6d40747e`
+and implementation tree `0c2720b1306569e75c07231208994754091f3834` exactly match
+the locally validated checkpoints `d6d6a40af081bc91d649c03dd57ccb9a44bed2d0`
+and `406df68e22257f6b8d4ca730d7930fdaeab35fa4`. Fetch and a zero-diff comparison
+verified the publication; those original local branches remain available.
+TUI used the same publication procedure: its tree
+`d5baf967b833e38b9807b4abfb42d86f266a6791` exactly matches the fully validated
+local checkpoint `6e7c05cdf4b811ab081cbef1391dc80e41067234`; fetch and a zero-diff
+comparison verified that result too. Both ref updates preserved the remote parent
+history and created no release tag.
+
 Host and TUI manifests/lockfile packages are 0.12.3. A structured comparison
 confirms all 225 Host and 272 TUI external locked packages are unchanged.
 SPEC 4.11.2 SHA-256 is
@@ -109,16 +134,40 @@ The full Host local gate passed: 1,255 uniquely enumerated Rust tests, seven
 doctests and 28 Python checks, formatting, strict Clippy and strict rustdoc.
 Commands: `./scripts/check.sh` and
 `cargo test --workspace --all-targets --locked --offline -- --list`.
-The TUI local Host-path integration gate passed before the last target-context
-regressions: 491 default tests passed and four existing opt-in/helper cases
-were ignored (495 enumerated), with formatting and strict Clippy/rustdoc.
-The final TUI gate will use the immutable published Host revision without a
-local path patch and include the last target-context regressions.
+The final TUI gate passed against the immutable published Host revision, without
+a local path patch, including all final target-context regressions: 493 default
+tests passed, four existing opt-in/helper cases were ignored (497 enumerated).
+The ignored cases are three optional performance measurements and the isolated
+production diagnostic subprocess helper, which integration tests invoke
+explicitly. Final commands were:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --locked --offline --all-targets -- -D warnings
+cargo test --locked --offline --all-targets
+cargo test --locked --offline --doc
+RUSTDOCFLAGS='-D warnings' cargo doc --locked --offline --no-deps
+cargo tree --locked --offline -p crossterm
+cargo test --locked --offline --all-targets -- --list
+```
+
+Strict lint/documentation gates passed, and the dependency tree contains exactly
+one crossterm version. Both metadata and Cargo.lock confirm all 13 embedded Host
+crates at 0.12.3 use the same `dbaaa8175780759b84d26e0519aa4b27ced5f8f4` Git source.
 
 Validation uses
 Rust 1.90.0, ordinary uid 1000, locked dependencies and a validation-only Linux
 subreaper so container PID 1 cannot strand process-cleanup test children. No
 production cleanup or test assertion is relaxed. Provider integration uses
 explicit loopback fixtures, not live credentials or live provider service.
-Exact implementation commits, final TUI test counts and platform/package CI
-outcomes follow after publication. No complete remote CI result is yet claimed.
+The exact source CI records are linked above. The handoff gate requires all nine
+Host jobs (quality, four native platform jobs and four package jobs) and all eight
+TUI jobs (quality, three native platform jobs and four package jobs) to succeed.
+Their immutable workflow records retain per-job results and downloadable package
+artifacts. This report records the independently enumerated local outcomes and
+source checkpoints without substituting local Linux tests for native platforms.
+
+The requested code and specification scope is complete. Publication is limited
+to `dev`, with unchanged schema-3 storage and no release tag or main merge.
+The separate Web client, missing agent tool declaration and synthetic parallel
+tool wrapper remain outside this approved repair batch.

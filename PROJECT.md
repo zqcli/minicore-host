@@ -1,6 +1,6 @@
 # MiniCore Host
 
-## Current work: Host/TUI 0.12.3 (Task 116)
+## Current delivery: Host/TUI 0.12.3 (Task 116)
 
 [Task 116](tasks/116-error-context/TASK.md) implements SPEC 4.11.2: preserve safe
 upstream error messages and source details, bind current identities for agent
@@ -9,9 +9,15 @@ and bounded previews. Three collaboration workers were requested with
 `gpt-6-astra` / `max`; no Codex CLI is used. The existing missing-tool
 configuration and synthetic parallel-tool concerns are outside this scope.
 Host local validation passes 1,255 uniquely enumerated Rust tests, seven doctests,
-28 Python checks, formatting and strict Clippy/rustdoc. TUI's initial integration
-gate passes; the final immutable Host pin, added async target regressions and
-Linux/macOS/Windows package CI are being completed before delivery.
+28 Python checks, formatting and strict Clippy/rustdoc. Final TUI validation against
+the immutable Git dependency passes 493 default tests, with four existing optional
+or explicitly invoked helper cases (497 enumerated), strict Clippy/rustdoc and a
+single crossterm version. All final async-target regressions are included.
+Host `dbaaa8175780759b84d26e0519aa4b27ced5f8f4` and TUI
+`0b7d4dc799fbe8c124661713bf8300fc3686ca78` are published on `dev`; the TUI embeds
+that exact Host commit. [Task 116](tasks/116-error-context/TASK.md) records source
+tree equivalence, unchanged external dependency graphs and the exact native
+Linux/macOS/Windows CI/package workflows. Publication creates no release tag.
 
 ## Previous delivery: Host/TUI 0.12.2 (Task 115)
 
