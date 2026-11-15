@@ -86,7 +86,21 @@ coordinated before editing. Runtime ownership and the existing UI are retained.
 
 - Fresh clean checkouts match both recorded remote `dev` heads.
 - SPEC rules and current configuration/storage/TUI contracts were inspected.
-- Rust 1.90.0 with rustfmt and Clippy was installed in the scratch runner to
-  match the repository toolchain. Native dependency fetching is in progress.
-- Specification changes passed read-only owner and TUI contract review before
-  implementation. Implementation and validation outcomes will be recorded here.
+- SPEC 4.11.1 was published first at `d95ab422`; the full schema-3
+  storage and file-reference implementation is not yet present on remote dev.
+- The prior 0.12.1 Linux quality-gate failure was traced to
+  `repeated_signals_do_not_force_paused_backlog_but_explicit_rpc_force_finishes`.
+  The process emitted `host.shutdown_requested` before the owner accepted
+  shutdown, allowing a subsequent `host.info` read to see `running`.
+  Commit `2c5de6bb` emits the event after successful acceptance; its Linux
+  quality gate passed in run 43669197785.
+- Commit `f064db49` updates shared startup defaults to independent
+  `~/.minicore/config` and `~/.minicore/data` paths, and places scaffold
+  logs in a sibling `logs/` directory. Commit `74b4808f` formats the
+  updated application path test. Cross-platform CI is pending.
+- TUI commits `32399085` and `11973145` flatten command templates and
+  make missing `host.json` the first-run condition; the latter fixes the
+  formatting failure from the first CI attempt.
+- Both repositories still report package version 0.12.1. Do not publish
+  0.12.2 or pin the new Host in TUI until schema-3 persistence, references,
+  validation and cross-platform CI are complete.
