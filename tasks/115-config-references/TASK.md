@@ -134,13 +134,50 @@ accepted-work shutdown. Snapshot changes are limited to the visible version.
 
 ### Publication boundary
 
-The normal CI workflows are retained unchanged. Linux, macOS ARM/Intel and
-Windows checks, standard-user Windows storage tests and release-package smoke
-checks must pass on the delivered sources. CI URLs and exact commit IDs accompany
-the delivery report. No external live model-provider test or interactive terminal
-manual acceptance is claimed; integration uses real owners and controlled
-loopback HTTP/SSE at the provider boundary.
+The normal CI workflows are retained unchanged. Their exact delivered
+checkpoints were independently verified on 2026-11-15:
+
+| Repository | Delivered 0.12.2 checkpoint | CI result |
+| --- | --- | --- |
+| Host | `2f149145304c7cf6fd3271da937000b6e8593cbd` | [Run 43676489905](https://github.com/zqcli/minicore-host/actions/runs/43676489905): all 9 jobs passed, attempt 1 |
+| TUI | `a7b2c0fab2fe43aa56a404a52364a4e351c2096b` | [Run 43676748923](https://github.com/zqcli/minicore-tui/actions/runs/43676748923): all 8 jobs passed, attempt 1 |
+
+Host checks include Linux quality, native Linux/macOS ARM/macOS Intel/Windows
+tests, standard-user Windows storage checks and four platform packages. TUI
+checks include quality, Linux/macOS/Windows tests and four platform packages.
+All 13 native Host entries in the delivered TUI lockfile pin the exact Host
+checkpoint above at version 0.12.2. Both workflow conclusions and each job were
+read directly from GitHub Actions, rather than inferred from local tests.
+
+No external live model-provider test or interactive terminal manual acceptance
+is claimed for this task; integration uses real owners and controlled loopback
+HTTP/SSE at the provider boundary.
 
 Temporary source/dependency export tooling is removed from the delivered tree.
 Public source files and pinned dependency archives were used only for isolated
 validation; no credentials or private runtime data were copied into artifacts.
+
+### Revalidation after subsequent deliveries
+
+The original parallel candidate remained unpublished when its publication call
+was interrupted. On resumption, `dev` already contained this completed delivery
+and later work: Host `de8c5ad2b3d3d7b6605d789d5fa3f9f5ae33d599` (0.12.5,
+SPEC 4.11.4) and TUI `27d6073e414098704b692b9f7040e529a08426ec` (0.12.6).
+The older candidate is not applied over those commits and versions are not
+repeated or rolled back.
+
+Three follow-up read-only reviewers were requested with `gpt-6-astra` and `max`
+for configuration owners, storage/path behavior and TUI integration. They
+confirmed the approved Task115 behavior in the current sources, existing test
+coverage and configuration guides; they did not rerun or claim new native
+tests. Optional performance observations and external native-record corruption
+scenarios were not turned into an unrelated rewrite of this completed task.
+
+Current TUI pins Host implementation `355d4b8bac4a3a634cd83a49fbf33fea7b67a262`;
+the later Host head differs only in Task118 documentation. The current source
+checkpoints also have successful complete CI: Host
+[43726944284](https://github.com/zqcli/minicore-host/actions/runs/43726944284)
+(9 jobs) and TUI
+[43733717562](https://github.com/zqcli/minicore-tui/actions/runs/43733717562)
+(8 jobs), both on attempt 1. This closeout updates only PROJECT.md and this task
+record, with no source, schema, version or dependency change.

@@ -138,11 +138,20 @@ Local Linux validation passed the full Host gate: formatting, strict Clippy,
 checks. TUI default tests passed (483 passed; three optional performance cases
 and one explicitly invoked subprocess helper excluded from the default run),
 with strict Clippy/rustdoc and real in-process Host integration.
-The normal Linux/macOS/Windows CI and native package jobs remain the final
-publication gates for each exact delivered revision. No release tag is created.
+The delivered Host source `2f149145304c7cf6fd3271da937000b6e8593cbd` passed
+all nine jobs in [CI 43676489905](https://github.com/zqcli/minicore-host/actions/runs/43676489905),
+including native Linux, both macOS architectures, Windows ordinary-user checks
+and four platform packages. TUI `a7b2c0fab2fe43aa56a404a52364a4e351c2096b`
+pins that exact Host source and passed all eight jobs in
+[CI 43676748923](https://github.com/zqcli/minicore-tui/actions/runs/43676748923).
+Both completed on attempt 1; their workflow conclusions and every job were
+independently checked on 2026-11-15. No release tag is created.
 The completion environment has no callable Astra/max subagent facility; the
 implementation and local validation were performed directly. Earlier requested
 worker settings are not evidence of effective execution in this environment.
+A subsequent three-worker read-only review, requested with `gpt-6-astra` / `max`,
+confirmed these configuration contracts remain implemented in Host 0.12.5 and
+TUI 0.12.6. The paused parallel candidate was not published over later work.
 
 ## Previous checkpoint: Host 0.12.1 integration (Task 114)
 
