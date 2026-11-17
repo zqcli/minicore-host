@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 pub struct OutputBuffer {
     source: OutputSource,
     channel: String,
+    retained_start: u64,
     text: String,
     pending: BTreeMap<u64, String>,
     required_end: u64,
@@ -19,6 +20,7 @@ impl OutputBuffer {
         Self {
             source,
             channel,
+            retained_start: 0,
             text: String::new(),
             pending: BTreeMap::new(),
             required_end: 0,
@@ -31,9 +33,30 @@ impl OutputBuffer {
     pub fn text(&self) -> &str {
         &self.text
     }
+    /// Absolute byte position of the retained UTF-8 suffix.
+    pub fn start(&self) -> u64 {
+        self.retained_start
+    }
+    /// Absolute contiguous observed watermark, unchanged by prefix discard.
+    pub fn end(&self) -> u64 {
+        self.retained_start + self.text.len() as u64
+    }
+    /// Explicitly discard only already observed contiguous content. This
+    /// bounds the retained text, not disjoint pending ranges awaiting gap reads.
+    /// Call again after merging more content when a bounded preview is desired.
+    pub fn retain_tail(&mut self, max_bytes: usize) {
+        let mut discard = self.text.len().saturating_sub(max_bytes);
+        while !self.text.is_char_boundary(discard) {
+            discard += 1;
+        }
+        if discard > 0 {
+            self.text = self.text[discard..].to_owned();
+            self.retained_start += discard as u64;
+        }
+    }
     /// A finish fact alone does not make a missing tail complete.
     pub fn is_complete(&self) -> bool {
-        self.finished && self.text.len() as u64 >= self.required_end
+        self.finished && self.end() >= self.required_end
     }
     pub fn position(&mut self, position: &OutputPosition) -> bool {
         if self.source != position.source || self.channel != position.channel {
@@ -45,7 +68,7 @@ impl OutputBuffer {
     /// Return the currently known fixed gap, never a growing-tail request.
     /// The caller may keep receiving events while the read is in flight.
     pub fn next_read(&self, max_bytes: u64) -> Option<TextReadRequest> {
-        let start = self.text.len() as u64;
+        let start = self.end();
         let end = self
             .pending
             .keys()
@@ -141,19 +164,19 @@ impl OutputBuffer {
         self.merge(data.start, data.end, &data.text)
     }
     fn merge(&mut self, start: u64, end: u64, text: &str) -> Result<(), CallError> {
-        verify_overlap(0, &self.text, start, text)?;
+        verify_overlap(self.retained_start, &self.text, start, text)?;
         for (&offset, held) in &self.pending {
             verify_overlap(offset, held, start, text)?;
         }
         self.required_end = self.required_end.max(end);
-        if start <= self.text.len() as u64 {
-            append_tail(&mut self.text, start, text)?;
+        if start <= self.end() {
+            append_tail(&mut self.text, self.retained_start, start, text)?;
             while let Some((&offset, _)) = self.pending.first_key_value() {
-                if offset > self.text.len() as u64 {
+                if offset > self.end() {
                     break;
                 }
                 let held = self.pending.remove(&offset).expect("first buffered range");
-                append_tail(&mut self.text, offset, &held)?;
+                append_tail(&mut self.text, self.retained_start, offset, &held)?;
             }
         } else if self
             .pending
@@ -165,8 +188,13 @@ impl OutputBuffer {
         Ok(())
     }
 }
-fn append_tail(held: &mut String, start: u64, text: &str) -> Result<(), CallError> {
-    let overlap = usize::try_from(held.len() as u64 - start)
+fn append_tail(
+    held: &mut String,
+    held_start: u64,
+    start: u64,
+    text: &str,
+) -> Result<(), CallError> {
+    let overlap = usize::try_from(held_start + held.len() as u64 - start)
         .map_err(|_| invalid("output range exceeds this platform"))?;
     if overlap < text.len() {
         held.push_str(

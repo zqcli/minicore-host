@@ -154,6 +154,7 @@ impl SessionController {
         turn: Option<&TurnInfo>,
     ) -> Record {
         let data = MessageEventData {
+            delegations: record.delegations.clone(),
             received_at: record.received_at,
             history_position: record.history_position,
             recorded_at: record.history_position.and_then(|position| {
@@ -807,6 +808,11 @@ impl SessionController {
             agent_id: agent_id.clone(),
             session_id: id.clone(),
             data: SessionStateData {
+                delegation: state
+                    .delegation
+                    .as_ref()
+                    .filter(|slot| slot.has_accepted())
+                    .map(|slot| Box::new(slot.association(state))),
                 owned_work: Self::owned_work(state),
                 end_reason: state.end_reason.clone(),
                 mode: state.info.mode,

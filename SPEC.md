@@ -1,4 +1,4 @@
-**设计基线：v4.11.4｜2026-11-15。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.11.5｜2026-11-17。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -1843,6 +1843,55 @@ resync_required 是某一订阅的结束通知，不是可调用接口。Host �
 Runtime 的实时进度和 ToolFinished 是观察信号，不替代完整结果交接；ToolFinished 中的 outcome 与 output_bytes 不能构造缺失的结果正文。Session 通过第 5 章的原语返回值及实际工具收尾取得结果后，沿本章既有完成事件提供；事件是否送达不决定工具结果、必要保存或委派收尾。实际工具结果由原语返回，实时观察按现有类型适配，不增加完整历史回调或工具专用公共 RPC。
 
 ## 工具与子执行的观察关联
+
+Task 119 fixes one agent card to the original accepted startup ToolCall. A later
+send to the same active delegation references that original card; a later
+delegation reusing the same child Session has a new first task MessageId and a
+new card. Targetless wait reports only its own waiting fact. Creating or sending
+returns acceptance while independent child execution continues.
+
+An agent operation returning a business Fault uses the existing failed tool
+outcome while retaining its unchanged `{error: Fault}` result body for the model.
+This is an ordinary tool failure, not a failure of the whole Turn. Partial
+creation receipts retain their typed step facts; already accepted child work
+is never rewritten as rejected or not executed.
+
+The serializable `DelegationAssociation` contains `parent`, `origin`, `child`,
+`task_message_id`, `accepted_message_ids`, `inputs`, and `completion`. `parent`
+is the original parent SessionRef and `origin` its original ToolCallRef; a bare
+ToolCallId is never globally unique. Each input range retains its actual TurnRef,
+all shared `message_ids`, and the `delegated_message_ids` subset. The child
+Session owns these facts and projects its current association through the
+existing `session.state` payload and state query. An accepted input may remain
+queued while a later steer binds first; no range is invented before actual
+binding. A busy reused Session's earlier unrelated Turns are excluded, while a
+shared Turn remains honestly shared.
+
+`completion` is present only after all owned input, execution and necessary
+save work have settled at the existing result handoff boundary. It contains
+actual per-Turn outcomes and faults plus explicitly discarded inputs, without
+child output bodies. It does not claim notification delivery or parent saving.
+An idle Session, a finished Turn, a model final, or successful startup ToolResult
+does not substitute for this fact. Acceptance and handoff update the original
+retained ToolCall association using normal state revisions; they neither reopen
+the ToolCall nor replace its immutable result. Child binding updates remain
+child-owned state. No new task entity, execution loop or event family is added.
+
+Native history records may carry `delegations` metadata alongside the existing
+unaltered Runtime value. Startup ToolResult records save the facts known at
+that boundary. A final notification carries the settled association through
+its actual parent message event and, when consumed, its native input record.
+The public HistoryRecordData and TurnHistoryItemData expose the same metadata. Reopening reads only
+these recorded anchor facts; older rows without them remain unlinked. This
+never restores scheduling, a delegation, an inbox or a missing child body.
+
+Clients observing a Host or Agent before dispatch can retain genuine fast-child
+events that arrive before startup acceptance. They reuse native child sources
+and subscriptions, with bounded presentation previews and truthful missing-data
+indicators. SDK clients may explicitly discard already observed output prefixes
+at UTF-8 boundaries while retaining absolute source offsets. A finish fact does
+not fill a missing tail, and preview retention does not change backend storage,
+output availability, execution or memory reclamation.
 
 启动调用首先关联父 Session、Turn 和 ToolCall。工具适配从实际创建／投递回执与委派登记取得子 Session、任务 MessageId 和实际执行范围，写入原 ToolCall 状态及查询载荷的适用分支；尚未产生的执行身份不补造，后续按真实事实补全。来源身份沿已有外层关联，子目标与任务使用已有引用，不在每项中复制整套父方身份。ToolOutput 保持现有文本结果，结构化观察关联由执行侧提供，客户端不解析结果正文猜测。
 

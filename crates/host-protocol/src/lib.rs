@@ -6,11 +6,13 @@
 
 #![forbid(unsafe_code)]
 
+mod collaboration;
 mod config;
 mod fault;
 mod id;
 mod ownership;
 
+pub use collaboration::*;
 pub use config::*;
 pub use fault::*;
 pub use id::*;

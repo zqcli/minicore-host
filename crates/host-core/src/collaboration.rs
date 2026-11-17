@@ -1,7 +1,9 @@
 //! Delegated completion, scope and cleanup permits that may outlive a Turn.
 use crate::{control::ConnectionRegistry, session::SessionController, *};
 use minicore_host_protocol::*;
-use serde::Serialize;
+pub use minicore_host_protocol::{
+    DelegationAssociation, DelegationInputRange, DelegationTerminalData, DelegationTurnOutcome,
+};
 use std::{
     future::Future,
     pin::Pin,
@@ -23,14 +25,6 @@ pub struct DelegationRegistration {
     pub task_message_id: MessageId,
     pub origin: ToolCallRef,
     pub temporary: bool,
-}
-#[derive(Clone, Debug, Serialize)]
-pub struct DelegationInputRange {
-    pub turn: TurnRef,
-    pub message_ids: Vec<MessageId>,
-    /// Inputs in this shared Turn that the Session accepted for this delegation.
-    /// Includes real bindings cancelled before the first model request.
-    pub delegated_message_ids: Vec<MessageId>,
 }
 #[derive(Clone, Debug)]
 pub struct DelegationCompletion {
@@ -130,6 +124,7 @@ pub(crate) struct DelegationState {
     pub(crate) access: Weak<ConnectionRegistry>,
     pub(crate) notified: AtomicBool,
     pub(crate) handed_off: AtomicBool,
+    pub(crate) terminal: std::sync::OnceLock<DelegationAssociation>,
     pub(crate) released: AtomicBool,
     pub(crate) close: tokio::sync::OnceCell<()>,
 }
@@ -265,10 +260,4 @@ impl CreationCleanupPermit {
             .close_internal_owned(&self.target, operation)
             .await
     }
-}
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct DelegationAssociation {
-    pub child: SessionRef,
-    pub task_message_id: MessageId,
 }

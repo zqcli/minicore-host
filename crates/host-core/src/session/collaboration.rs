@@ -11,6 +11,7 @@ pub(super) struct DelegationSlot {
     results: Vec<TurnResult>,
     inputs: Vec<DelegationInputRange>,
     discarded: Vec<MessageId>,
+    completion: Option<DelegationTerminalData>,
 }
 impl SessionController {
     pub(crate) fn register_scope_owned(
@@ -109,6 +110,7 @@ impl SessionController {
             access: Arc::downgrade(&self.access),
             notified: AtomicBool::new(false),
             handed_off: AtomicBool::new(false),
+            terminal: std::sync::OnceLock::new(),
             released: AtomicBool::new(false),
             close: tokio::sync::OnceCell::new(),
         });
@@ -122,6 +124,7 @@ impl SessionController {
             results: Vec::new(),
             inputs: Vec::new(),
             discarded: Vec::new(),
+            completion: None,
         });
         Ok(DelegationPermit { state: relation })
     }
@@ -131,7 +134,7 @@ impl SessionController {
         scope: &Arc<ScopeState>,
         source: SessionRef,
         message: MessageInput,
-    ) -> Result<(MessageAccepted, Record), Fault> {
+    ) -> Result<(MessageAccepted, Record, DelegationAssociation), Fault> {
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let mut state = self.state.lock().expect("Session mutex poisoned");
@@ -176,7 +179,14 @@ impl SessionController {
             .expect("registered slot")
             .accepted
             .insert(id);
-        Ok(receipt)
+        // Publish accepted association facts before the child can execute.
+        self.publish(&mut state);
+        let association = state
+            .delegation
+            .as_ref()
+            .expect("registered slot")
+            .association(&state);
+        Ok((receipt.0, receipt.1, association))
     }
     pub(crate) fn receive_notification_owned(
         self: &Arc<Self>,
@@ -197,13 +207,21 @@ impl SessionController {
                 "notification must not be empty",
             )
         })?;
-        self.accept_message_locked(
+        let delegations = vec![
+            relation
+                .terminal
+                .get()
+                .expect("actual result handed off")
+                .clone(),
+        ];
+        self.accept_message_with_delegations_locked(
             &mut state,
             message,
             runtime,
             MessageSource::Agent {
                 source: relation.registration.child.clone(),
             },
+            delegations,
         )
     }
     pub(crate) fn release_delegation_owned(
@@ -311,16 +329,48 @@ impl SessionController {
                 Arc::clone(&slot.sink),
                 DelegationCompletion {
                     results: std::mem::take(&mut slot.results),
-                    inputs: std::mem::take(&mut slot.inputs),
-                    discarded_inputs: std::mem::take(&mut slot.discarded),
+                    inputs: slot.inputs.clone(),
+                    discarded_inputs: slot.discarded.clone(),
                 },
                 data,
             );
+            slot.completion = Some(DelegationTerminalData {
+                turns: prepared
+                    .1
+                    .results
+                    .iter()
+                    .map(|result| DelegationTurnOutcome {
+                        turn: TurnRef {
+                            session_id: self.id.clone(),
+                            turn_id: result.info.id.clone(),
+                        },
+                        outcome: result.info.outcome.expect("settled delegated Turn"),
+                        fault: result.info.fault.clone(),
+                    })
+                    .collect(),
+                discarded_inputs: slot.discarded.clone(),
+            });
             slot.handed_off = true;
+            let relation = Arc::clone(&slot.relation);
+            let association = state
+                .delegation
+                .as_ref()
+                .expect("registered slot")
+                .association(&state);
+            relation
+                .terminal
+                .set(association.clone())
+                .expect("one delegation handoff");
             state.handoff_pending = true;
             self.publish(&mut state);
-            prepared
+            (prepared, relation, association)
         };
+        // The child owner has fixed its facts. Transfer only the small
+        // projection after releasing its lock; the parent owns its ToolCall.
+        if let Some(parent) = prepared.1.parent.upgrade() {
+            parent.record_delegation_owned(&prepared.1.registration.origin, &prepared.2);
+        }
+        let prepared = prepared.0;
         let result = std::panic::catch_unwind(AssertUnwindSafe(|| prepared.0.handoff(prepared.1)))
             .unwrap_or_else(|_| {
                 Err(Fault::new(
@@ -351,12 +401,27 @@ impl SessionController {
     pub(crate) fn record_delegation_owned(
         &self,
         origin: &ToolCallRef,
-        registration: &DelegationRegistration,
+        association: &DelegationAssociation,
     ) {
         let mut state = self.state.lock().expect("Session mutex poisoned");
         if state.reclaimed {
             return;
         }
+        let Some(record) = state
+            .output
+            .get(&origin.turn_id)
+            .and_then(|turn| turn.tools.get(&origin.tool_call_id))
+        else {
+            return;
+        };
+        if record.data.state.delegations.iter().any(|item| {
+            item.child == association.child
+                && item.task_message_id == association.task_message_id
+                && (item == association || item.completion.is_some())
+        }) {
+            return;
+        }
+        self.publish(&mut state);
         let revision = state.runner_revision;
         let load_id = state
             .active
@@ -376,17 +441,12 @@ impl SessionController {
         else {
             return;
         };
-        if !record.data.state.delegations.iter().any(|item| {
-            item.child == registration.child && item.task_message_id == registration.task_message_id
+        if let Some(current) = record.data.state.delegations.iter_mut().find(|item| {
+            item.child == association.child && item.task_message_id == association.task_message_id
         }) {
-            record
-                .data
-                .state
-                .delegations
-                .push(crate::DelegationAssociation {
-                    child: registration.child.clone(),
-                    task_message_id: registration.task_message_id.clone(),
-                });
+            *current = association.clone();
+        } else {
+            record.data.state.delegations.push(association.clone());
         }
         record.data.state.runner_revision = revision;
         self.access
@@ -405,8 +465,73 @@ impl SessionController {
                 },
             ));
     }
+
+    pub(crate) fn delegation_association_owned(
+        &self,
+        registration: &DelegationRegistration,
+    ) -> Option<DelegationAssociation> {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        Self::recorded_delegation(&state, registration)
+    }
+
+    fn recorded_delegation(
+        state: &SessionState,
+        registration: &DelegationRegistration,
+    ) -> Option<DelegationAssociation> {
+        state
+            .output
+            .get(&registration.origin.turn_id)?
+            .tools
+            .get(&registration.origin.tool_call_id)?
+            .data
+            .state
+            .delegations
+            .iter()
+            .find(|item| {
+                item.child == registration.child
+                    && item.task_message_id == registration.task_message_id
+            })
+            .cloned()
+    }
 }
 impl DelegationSlot {
+    pub(super) fn has_accepted(&self) -> bool {
+        !self.accepted.is_empty()
+    }
+    pub(super) fn association(&self, state: &SessionState) -> DelegationAssociation {
+        let registration = &self.relation.registration;
+        let mut inputs = self.inputs.clone();
+        if self.first_bound_turn.is_some()
+            && !self.handed_off
+            && let Some(active) = &state.active
+            && !inputs
+                .iter()
+                .any(|range| range.turn.turn_id == active.info.id)
+        {
+            inputs.push(DelegationInputRange {
+                turn: TurnRef {
+                    session_id: state.info.id.clone(),
+                    turn_id: active.info.id.clone(),
+                },
+                message_ids: active.bound_inputs.clone(),
+                delegated_message_ids: active
+                    .bound_inputs
+                    .iter()
+                    .filter(|id| self.accepted.contains(*id))
+                    .cloned()
+                    .collect(),
+            });
+        }
+        DelegationAssociation {
+            parent: registration.parent.clone(),
+            origin: registration.origin.clone(),
+            child: registration.child.clone(),
+            task_message_id: registration.task_message_id.clone(),
+            accepted_message_ids: self.accepted.iter().cloned().collect(),
+            inputs,
+            completion: self.completion.clone(),
+        }
+    }
     pub(super) fn record_bound(&mut self, id: &MessageId, turn: &TurnId) {
         // Either queue can supply the first real input for this relationship.
         // Retain the shared activity, not an exclusive result for its first message.

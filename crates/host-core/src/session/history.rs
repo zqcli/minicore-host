@@ -85,7 +85,31 @@ impl SessionController {
                         .as_ref()
                         .and_then(|rows| rows.get(position as usize))
                         .map_or(accepted_at, |row| row.recorded_at);
-                    HistoryRecord::at(self.id.clone(), position, recorded_at, entry)
+                    let delegations = state
+                        .readable_history
+                        .as_ref()
+                        .and_then(|rows| rows.get(position as usize))
+                        .map(|row| row.delegations.clone())
+                        .unwrap_or_else(|| match &entry {
+                            HistoryEntry::Runtime {
+                                turn_id,
+                                item: HistoryItem::ToolResult(result),
+                                ..
+                            } => state
+                                .output
+                                .get(turn_id)
+                                .and_then(|turn| {
+                                    turn.tools
+                                        .get(&ToolCallId(result.call_id.as_str().to_owned()))
+                                })
+                                .map(|tool| tool.data.state.delegations.clone())
+                                .unwrap_or_default(),
+                            _ => Vec::new(),
+                        });
+                    let mut record =
+                        HistoryRecord::at(self.id.clone(), position, recorded_at, entry);
+                    record.delegations = delegations;
+                    record
                 })
                 .collect::<Vec<_>>();
             let end = state.history.len() + items.len();

@@ -108,8 +108,19 @@ async fn update_uses_one_snapshot_and_never_retries_a_conflict() {
     let port = FixtureTurn::new();
     port.state.update_conflict.store(true, Ordering::Release);
     let tool = AgentTool::new(port.port(), ScopeManager::new());
-    let output=invoke(&tool,json!({"action":"update","resource":"agent","target":{"host_id":port.source.host_id,"agent_id":port.source.session.agent_id},"changes":{"model":"new-model","name":"renamed"}})).await;
-    assert!(output.get("error").is_some());
+    let result = tool.execute(ToolInvocation::new(
+        "fixture-call".parse().unwrap(), "agent".parse().unwrap(),
+        json!({"action":"update","resource":"agent","target":{"host_id":port.source.host_id,"agent_id":port.source.session.agent_id},"changes":{"model":"new-model","name":"renamed"}}),
+    ).unwrap(), context()).await.unwrap();
+    let ToolExecutionOutcome::Failed(output) = result else {
+        panic!("a business Fault must retain the native failed tool outcome");
+    };
+    let expected =
+        json!({"error":Fault::new(FaultKind::AgentConfigConflict, "fixture revision changed")});
+    assert_eq!(
+        output.content().as_str(),
+        serde_json::to_string(&expected).unwrap()
+    );
     assert_eq!(port.state.snapshot_reads.load(Ordering::Acquire), 1);
     let writes = port.state.writes.lock().unwrap();
     assert_eq!(writes.len(), 1);

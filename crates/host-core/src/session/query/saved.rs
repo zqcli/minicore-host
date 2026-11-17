@@ -112,6 +112,7 @@ pub(super) fn project_records(
                 })
             }
             _ => history.push(TurnHistoryItemData {
+                delegations: row.delegations.clone(),
                 position: row.position,
                 recorded_at: row.recorded_at,
                 response_index: row.response_index,

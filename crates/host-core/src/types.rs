@@ -75,10 +75,14 @@ pub struct MessageRecord {
     pub queue: InputQueue,
     pub order: u64,
     pub binding: MessageBinding,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<DelegationAssociation>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionStateData {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<Box<DelegationAssociation>>,
     pub owned_work: Box<crate::SessionOwnedWork>,
     pub end_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -258,6 +262,8 @@ pub struct HistoryRecordData {
     pub turn_id: Option<TurnId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_index: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<DelegationAssociation>,
     #[serde(flatten)]
     pub item: HistoryItemData,
 }

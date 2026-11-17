@@ -298,12 +298,12 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
             minicore_host_core::HostSettings {
                 name: "explicit deletion fixture".into(),
             },
-            resources,
+            resources.clone(),
         )
         .await
         .unwrap()
     } else {
-        Host::memory(resources).unwrap()
+        Host::memory(resources.clone()).unwrap()
     };
     let connection = host.connect().unwrap();
     let mut config = AgentConfig::default();
@@ -538,6 +538,45 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
         })
         .unwrap();
     assert_eq!(original_tool.output, tool.output);
+    let rows = host
+        .history_read(
+            &replacement.caller(),
+            &root,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap()
+        .data
+        .items;
+    let launch_row = rows.iter().find(|row| matches!(&row.item,
+        minicore_host_core::HistoryItemData::ToolResult { tool_call_id, .. } if tool_call_id.as_str() == "upstream-delegate")).unwrap();
+    assert_eq!(launch_row.delegations.len(), 1);
+    assert_eq!(launch_row.delegations[0].child, child);
+    assert_eq!(launch_row.delegations[0].parent, root);
+    assert!(launch_row.delegations[0].completion.is_none());
+    let notice_row = rows.iter().find(|row| matches!(&row.item,
+        minicore_host_core::HistoryItemData::User { in_reply_to: Some(id), .. } if id == &launch_row.delegations[0].task_message_id)).unwrap();
+    let terminal = notice_row.delegations[0].clone();
+    assert_eq!(terminal.origin, launch_row.delegations[0].origin);
+    assert_eq!(
+        terminal.completion.as_ref().unwrap().turns[0].outcome,
+        TurnOutcome::Completed
+    );
+    let projection = host
+        .toolcall_get(&replacement.caller(), &root, &terminal.origin)
+        .unwrap();
+    assert_eq!(
+        projection.data.state.delegations.as_slice(),
+        std::slice::from_ref(&terminal)
+    );
+    assert_eq!(
+        projection.data.state.state,
+        minicore_host_core::ToolCallState::Finished
+    );
     if delete_persistent {
         // The persistent child retains its own context after completion. Only
         // this explicit deletion closes/removes it, after the parent received
@@ -605,6 +644,51 @@ async fn run_host_delegation(create_agent: bool, delete_persistent: bool, delete
         })
         .await
         .unwrap();
+        drop(replacement);
+        drop(connection);
+        drop(host);
+        let reopened = Host::open_persistent(
+            &directory,
+            minicore_host_core::HostSettings {
+                name: "typed association cold read".into(),
+            },
+            resources,
+        )
+        .await
+        .unwrap();
+        let reader = reopened.connect().unwrap();
+        let cold = reopened
+            .history_read(
+                &reader.caller(),
+                &root,
+                &HistoryReadRequest {
+                    cursor: None,
+                    limit: 100,
+                    direction: HistoryDirection::Forward,
+                },
+            )
+            .await
+            .unwrap()
+            .data
+            .items;
+        assert_eq!(
+            serde_json::to_value(&cold).unwrap(),
+            serde_json::to_value(&rows).unwrap()
+        );
+        assert!(
+            reopened
+                .session_state(&reader.caller(), &root)
+                .unwrap()
+                .data
+                .delegation
+                .is_none()
+        );
+        assert!(
+            reopened.session_info(&reader.caller(), &child).is_err(),
+            "recorded anchors never restore removed child history"
+        );
+        drop(reader);
+        drop(reopened);
         // This path was generated and created by this test only.
         std::fs::remove_dir_all(directory).unwrap();
     }

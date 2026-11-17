@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.4. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
+Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.5. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
@@ -161,13 +161,16 @@ Memory Agent plus persistent Session is rejected; modes never silently change.
 
 ## JSONL schema
 
-Every record has exactly these outer fields:
+Every record has these outer fields:
 
 - `schema_version`: 3. Earlier and unknown versions fail explicitly without rewriting.
 - `session_id`: this Session's stable ID.
 - `position`: zero-based contiguous Session-local logical position, exposed unchanged by public record projections; it is neither a physical line number nor a pagination cursor.
 - `recorded_at`: the owner acceptance time in UTC RFC3339, preserved through original-save reconciliation.
 - `entry`: `{kind,data}` with one of the branches below.
+- Optional `delegations`: small typed observation facts actually captured with
+  a startup result or consumed final notification. Omission means no recorded
+  association; it neither restores a live delegation nor contains child output.
 
 | kind | data |
 | --- | --- |

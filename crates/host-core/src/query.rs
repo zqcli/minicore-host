@@ -56,6 +56,8 @@ pub struct TurnListSnapshot {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TurnHistoryItemData {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<DelegationAssociation>,
     pub position: u64,
     pub recorded_at: Timestamp,
     /// The actual public Turn index for complete model and tool records. User

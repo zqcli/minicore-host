@@ -506,6 +506,7 @@ fn unsupported_history_schema_has_original_position_and_is_unchanged() {
         vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())],
     );
     let second = HistoryRecord {
+        delegations: Vec::new(),
         recorded_at: minicore_host_protocol::Timestamp::now(),
         schema_version: 999,
         session_id: f.session.id().clone(),

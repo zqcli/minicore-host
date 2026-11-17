@@ -243,6 +243,40 @@ async fn actual_utf8_gap_reads_merge_late_overlaps_and_completion_before_tail() 
     assert_eq!(buffer.text(), "你好🙂尾");
     assert!(buffer.is_complete());
     assert!(buffer.next_read(4).is_none());
+    let mut preview = OutputBuffer::new(
+        OutputSource::Model {
+            source: source.clone(),
+        },
+        "text".into(),
+    );
+    preview.event(&deltas[0]).unwrap();
+    preview.retain_tail(2);
+    assert_eq!((preview.start(), preview.end(), preview.text()), (3, 3, ""));
+    preview.event(&completion).unwrap();
+    assert!(
+        !preview.is_complete(),
+        "discarding an observed prefix cannot fill a missing tail"
+    );
+    preview.event(&deltas[2]).unwrap();
+    let gap = preview.next_read(4).unwrap();
+    assert_eq!((gap.start, gap.end), (3, 10));
+    preview.event(&deltas[1]).unwrap();
+    preview.retain_tail(5);
+    assert_eq!(
+        (preview.start(), preview.end(), preview.text()),
+        (10, 13, "尾")
+    );
+    // A late gap read and overlapping replay below the retained start neither
+    // reintroduce discarded text nor change the absolute source watermark.
+    preview.model_read(&read).unwrap();
+    preview.event(&deltas[1]).unwrap();
+    preview.event(&deltas[2]).unwrap();
+    assert_eq!(
+        (preview.start(), preview.end(), preview.text()),
+        (10, 13, "尾")
+    );
+    assert!(preview.is_complete());
+    assert!(preview.next_read(4).is_none());
     let invalid = session
         .turn_output(
             source.turn.turn_id,

@@ -167,6 +167,16 @@ Registration is connection-bound and precedes per-owner baseline collection.
 Host/Agent/Session/Turn scopes continue covering later direct descendants.
 Dropping a handle or ending its connection never cancels Session work.
 
+Agent startup cards use typed `DelegationAssociation` facts, qualified by the
+original parent Session and ToolCall. `SessionStateData::delegation` exposes the
+child owner's accepted inputs and real shared Turn ranges. Optional completion
+comes only from the existing actual result handoff, never idle or a single
+finished Turn. Acceptance and handoff update the retained original ToolCall
+association without changing its result. Final notification messages carry the
+immutable settled facts, and native history rows expose the metadata actually
+saved with their startup result or later consumed notification. These views
+retain no child body, restore no execution and delay no memory reclamation.
+
 `turn_output_read` and `toolcall_output_read` use explicit UTF-8 `[start, end)`
 byte ranges. `end` is fixed for one catch-up operation; `max_bytes` chooses a
 page, rounding forward only when needed to return one complete UTF-8 character.

@@ -224,6 +224,193 @@ struct HandoffGate {
     changed: Condvar,
     completion: Mutex<Option<DelegationCompletion>>,
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice() {
+    let call = "delayed-start";
+    let mut tools = ToolSet::builder();
+    tools.register(CountTool {
+        spec: ToolSpec::new(
+            "count".parse().unwrap(),
+            "real owner fixture",
+            serde_json::json!({}),
+        )
+        .unwrap(),
+        calls: Arc::new(AtomicUsize::new(0)),
+    });
+    let parent = setup(
+        Arc::new(Resources {
+            model: model(vec![
+                vec![
+                    ModelEvent::ToolCallStart {
+                        tool_call_id: call.parse().unwrap(),
+                        tool_name: "count".parse().unwrap(),
+                    },
+                    ModelEvent::tool_call_arguments_delta(call.parse().unwrap(), "{}"),
+                    ModelEvent::ToolCallEnd {
+                        tool_call_id: call.parse().unwrap(),
+                    },
+                    ModelEvent::Finish {
+                        reason: ModelFinishReason::ToolCalls,
+                    },
+                ],
+                final_events("startup returned"),
+                final_events("notice consumed"),
+            ]),
+            tools: tools.build().unwrap(),
+        }),
+        |inner| inner,
+    );
+    send(&parent, "parent work");
+    until(&parent, |state| state.completed.len() == 1).await;
+    let caller = parent.connection.caller();
+    let parent_ref = SessionRef {
+        agent_id: parent.session.agent_id.clone(),
+        session_id: parent.session.id.clone(),
+    };
+    let turn_id = parent.session.state.lock().unwrap().completion_order[0].clone();
+    let origin = ToolCallRef {
+        turn_id,
+        tool_call_id: ToolCallId(call.into()),
+    };
+    let before = parent
+        .session
+        .tool_get(&caller, &origin.turn_id, &origin.tool_call_id)
+        .unwrap()
+        .1;
+    assert_eq!(before.state.state, crate::ToolCallState::Finished);
+    parent.session.pause(&caller).unwrap();
+    let scope = parent
+        .session
+        .register_scope_owned(Arc::new(ScopeGate {
+            entered: Semaphore::new(0),
+            release: Semaphore::new(1),
+        }))
+        .unwrap();
+    let child = SessionController::new(
+        SessionId::new().unwrap(),
+        parent.session.agent_id.clone(),
+        parent.session.host_id.clone(),
+        parent.session.incarnation.clone(),
+        SessionConfig::default(),
+        parent.access.clone(),
+        Arc::new(Resources {
+            model: model(vec![final_events("actual child result")]),
+            tools: ToolSet::default(),
+        }),
+        Arc::new(MemoryHistory),
+        vec![],
+        Arc::new(AtomicBool::new(true)),
+    );
+    child.publish_initial();
+    let input = MessageInput {
+        message_id: MessageId::new().unwrap(),
+        text: "child work".into(),
+        mode: MessageMode::FollowUp,
+        in_reply_to: None,
+    };
+    let registration = DelegationRegistration {
+        host_id: parent.session.host_id.clone(),
+        host_incarnation: parent.session.incarnation.clone(),
+        root: parent_ref.clone(),
+        parent: parent_ref.clone(),
+        child: SessionRef {
+            agent_id: child.agent_id.clone(),
+            session_id: child.id.clone(),
+        },
+        task_message_id: input.message_id.clone(),
+        origin: origin.clone(),
+        temporary: false,
+    };
+    let sink = Arc::new(HandoffGate {
+        entered: Semaphore::new(0),
+        released: Mutex::new(false),
+        changed: Condvar::new(),
+        completion: Mutex::new(None),
+    });
+    let permit = child
+        .register_delegation_owned(
+            registration.clone(),
+            Arc::downgrade(&parent.session),
+            scope.state.clone(),
+            sink.clone(),
+        )
+        .unwrap();
+    let (_, record, delayed_acceptance) = child
+        .receive_delegated_owned(&registration, &scope.state, parent_ref, input)
+        .unwrap();
+    record.emit();
+    child.wake_owned();
+    tokio::time::timeout(Duration::from_secs(5), sink.entered.acquire())
+        .await
+        .unwrap()
+        .unwrap()
+        .forget();
+    // The real child handoff wins while the captured acceptance projection is
+    // deliberately held back at exactly the outside-owner-lock boundary.
+    let terminal = parent
+        .session
+        .delegation_association_owned(&registration)
+        .unwrap();
+    assert_eq!(
+        terminal.completion.as_ref().unwrap().turns[0].outcome,
+        TurnOutcome::Completed
+    );
+    parent
+        .session
+        .record_delegation_owned(&origin, &delayed_acceptance);
+    assert_eq!(
+        parent
+            .session
+            .delegation_association_owned(&registration)
+            .unwrap(),
+        terminal
+    );
+    let after = parent
+        .session
+        .tool_get(&caller, &origin.turn_id, &origin.tool_call_id)
+        .unwrap()
+        .1;
+    assert!(after.state.runner_revision > before.state.runner_revision);
+    assert_eq!(
+        serde_json::to_value(&after.result).unwrap(),
+        serde_json::to_value(&before.result).unwrap()
+    );
+    *sink.released.lock().unwrap() = true;
+    sink.changed.notify_all();
+    let notice = MessageInput {
+        message_id: MessageId::new().unwrap(),
+        text: "actual final notice".into(),
+        mode: MessageMode::FollowUp,
+        in_reply_to: None,
+    };
+    let notice_id = notice.message_id.clone();
+    let accepted = permit.notify(notice).await.unwrap();
+    permit
+        .release(crate::DelegationDisposition::Notified(accepted))
+        .await
+        .unwrap();
+    let message = parent
+        .session
+        .state
+        .lock()
+        .unwrap()
+        .messages
+        .iter()
+        .find(|message| message.input.message_id == notice_id)
+        .unwrap()
+        .clone();
+    assert_eq!(
+        message.delegations.as_slice(),
+        std::slice::from_ref(&terminal)
+    );
+    parent.session.resume(&caller).unwrap();
+    until(&parent, |state| state.completed.len() == 2).await;
+    let saved = records(&parent);
+    let notice = saved.iter().find(|row| matches!(&row.entry, HistoryEntry::Input { message_id, .. } if message_id == &notice_id)).unwrap();
+    assert_eq!(notice.delegations, [terminal]);
+    assert!(saved.iter().any(|row| matches!(&row.entry, HistoryEntry::Runtime { item: HistoryItem::ToolResult(result), .. } if result.call_id.as_str() == call)));
+}
 impl DelegationSink for HandoffGate {
     fn handoff(&self, completion: DelegationCompletion) -> Result<(), Fault> {
         *self.completion.lock().unwrap() = Some(completion);

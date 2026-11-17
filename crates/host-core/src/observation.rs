@@ -228,6 +228,8 @@ pub enum InteractionResolution {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageEventData {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<DelegationAssociation>,
     pub received_at: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_position: Option<u64>,

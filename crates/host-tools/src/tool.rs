@@ -361,9 +361,9 @@ impl Tool for AgentTool {
             } else {
                 self.dispatch(action, origin, context).await
             };
-            let value = match result {
-                Ok(value) => value,
-                Err(ToolFailure::Fault(error)) => json!({"error":error}),
+            let (value, failed) = match result {
+                Ok(value) => (value, false),
+                Err(ToolFailure::Fault(error)) => (json!({"error":error}), true),
                 Err(ToolFailure::Cancelled) => return Err(ToolError::Cancelled),
                 Err(ToolFailure::TimedOut) => return Err(ToolError::TimedOut),
                 Err(ToolFailure::Invalid) => return Err(ToolError::InvalidInvocation),
@@ -371,7 +371,11 @@ impl Tool for AgentTool {
             let output =
                 ToolOutput::new(serde_json::to_string(&value).map_err(|_| ToolError::Internal)?)
                     .map_err(|_| ToolError::Internal)?;
-            Ok(ToolExecutionOutcome::Completed(output))
+            Ok(if failed {
+                ToolExecutionOutcome::Failed(output)
+            } else {
+                ToolExecutionOutcome::Completed(output)
+            })
         })
     }
 }

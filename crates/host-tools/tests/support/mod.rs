@@ -526,7 +526,8 @@ pub async fn invoke(tool: &dyn Tool, args: Value) -> Value {
         )
         .await
         .unwrap();
-    let ToolExecutionOutcome::Completed(output) = result else {
+    let (ToolExecutionOutcome::Completed(output) | ToolExecutionOutcome::Failed(output)) = result
+    else {
         panic!()
     };
     serde_json::from_str(output.content().as_str()).unwrap()

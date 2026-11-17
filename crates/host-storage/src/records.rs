@@ -1,8 +1,8 @@
 use crate::StorageError;
 use minicore_host_protocol::{
-    AgentConfig, AgentConfigurationSource, AgentId, ConfigRevision, HostId, MessageId, MessageMode,
-    MessageSource, SessionConfig, SessionId, SessionRef, StorageMode, Timestamp, TurnId,
-    TurnOutcome,
+    AgentConfig, AgentConfigurationSource, AgentId, ConfigRevision, DelegationAssociation, HostId,
+    MessageId, MessageMode, MessageSource, SessionConfig, SessionId, SessionRef, StorageMode,
+    Timestamp, TurnId, TurnOutcome,
 };
 use minicore_host_runtime::{
     LoopId,
@@ -350,6 +350,10 @@ pub struct HistoryRecord {
     pub session_id: SessionId,
     pub position: u64,
     pub recorded_at: Timestamp,
+    /// Observation facts saved at this record's acceptance boundary. They do
+    /// not alter native Runtime content or restore a delegation on load.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub delegations: Vec<DelegationAssociation>,
     pub entry: HistoryEntry,
 }
 impl HistoryRecord {
@@ -367,6 +371,7 @@ impl HistoryRecord {
             session_id,
             position,
             recorded_at,
+            delegations: Vec::new(),
             entry,
         }
     }

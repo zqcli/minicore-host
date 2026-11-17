@@ -9,6 +9,7 @@ pub(super) struct QueuedInput {
     pub(super) runtime: UserInput,
     pub(super) queue: InputQueue,
     pub(super) order: u64,
+    pub(super) delegations: Vec<DelegationAssociation>,
 }
 impl QueuedInput {
     pub(super) fn summary(&self) -> InputSummary {
@@ -68,6 +69,16 @@ impl SessionController {
         runtime: UserInput,
         source: MessageSource,
     ) -> Result<(MessageAccepted, Record), Fault> {
+        self.accept_message_with_delegations_locked(state, message, runtime, source, Vec::new())
+    }
+    pub(super) fn accept_message_with_delegations_locked(
+        self: &Arc<Self>,
+        state: &mut SessionState,
+        message: MessageInput,
+        runtime: UserInput,
+        source: MessageSource,
+        delegations: Vec<DelegationAssociation>,
+    ) -> Result<(MessageAccepted, Record), Fault> {
         Self::open(state)?;
         self.access.ensure_execution_owned()?;
         if state.host_stopping {
@@ -105,6 +116,7 @@ impl SessionController {
         let received_at = Timestamp::now();
         state.info.last_activity_at = state.info.last_activity_at.max(received_at);
         let entry = QueuedInput {
+            delegations: delegations.clone(),
             received_at,
             message: message.clone(),
             source: source.clone(),
@@ -113,6 +125,7 @@ impl SessionController {
             order,
         };
         state.messages.push(MessageRecord {
+            delegations,
             received_at,
             history_position: None,
             input: message.clone(),
@@ -290,7 +303,8 @@ impl SessionController {
                 .expect("loaded history")
                 .len() as u64;
             let recorded_at = Timestamp::now();
-            let record = HistoryRecord::at(self.id.clone(), position, recorded_at, entry);
+            let mut record = HistoryRecord::at(self.id.clone(), position, recorded_at, entry);
+            record.delegations = input.delegations;
             state.info.last_activity_at = state.info.last_activity_at.max(recorded_at);
             state
                 .readable_history

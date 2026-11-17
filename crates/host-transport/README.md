@@ -295,6 +295,12 @@ visible to the caller; already received text is preserved. It does not silently
 retry, resubscribe, retain source owners or invent missing content. Callers apply
 state snapshots by the documented controller/Runner revisions, not output offsets.
 
+Presentation clients can call `retain_tail(max_bytes)` after a merge to discard
+an already observed contiguous prefix at a UTF-8 boundary. `start()` and `end()`
+remain absolute source offsets; clipping does not fill missing data or change
+completion. This bounds the retained contiguous text only, not disjoint pending
+ranges awaiting gap reads. The default retains the complete observed prefix.
+
 Production process/configuration loading is assembled by `host-app`, not this
 transport library. Live-provider operation and actual TUI integration remain
 outside the validation described here.

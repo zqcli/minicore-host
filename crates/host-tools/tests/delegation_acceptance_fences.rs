@@ -62,12 +62,45 @@ async fn shared_range_with_real_tools(end: End) {
     let first_receipt = after_first.last_tool_result();
     assert_eq!(first_receipt["result"]["delivery"], "accepted");
     let first: MessageId = serde_json::from_value(first_receipt["message_id"].clone()).unwrap();
+    let original_tool = ToolCallRef {
+        turn_id: root.source.turn.turn_id.clone(),
+        tool_call_id: ToolCallId("delegate-first".into()),
+    };
+    let startup = f
+        .host
+        .toolcall_get(&f.connection.caller(), &parent, &original_tool)
+        .unwrap();
+    let initial = &startup.data.state.delegations[0];
+    assert_eq!(initial.parent, parent);
+    assert_eq!(initial.origin, original_tool);
+    assert_eq!(
+        initial.accepted_message_ids.as_slice(),
+        std::slice::from_ref(&first)
+    );
+    assert!(
+        initial.inputs.is_empty(),
+        "the busy child's unrelated Turn is not yet delegated"
+    );
+    assert!(initial.completion.is_none());
     after_first.tool("delegate-steer", json!({"action":"send", "target":target(&child), "text":"supplemental steer", "mode":"steer"}));
     let after_second = f.next(&parent).await;
     let supplemental_receipt = after_second.last_tool_result();
     assert_eq!(supplemental_receipt["result"]["delivery"], "accepted");
     let supplemental: MessageId =
         serde_json::from_value(supplemental_receipt["message_id"].clone()).unwrap();
+    let appended = f
+        .host
+        .toolcall_get(
+            &f.connection.caller(),
+            &parent,
+            &ToolCallRef {
+                turn_id: root.source.turn.turn_id.clone(),
+                tool_call_id: ToolCallId("delegate-steer".into()),
+            },
+        )
+        .unwrap();
+    assert_eq!(appended.data.state.delegations[0].origin, original_tool);
+    assert_eq!(appended.data.state.delegations[0].task_message_id, first);
     after_second.complete("launches accepted");
     f.finished(&root.source).await;
 
@@ -94,6 +127,22 @@ async fn shared_range_with_real_tools(end: End) {
             .binding,
         MessageBinding::Queued
     ));
+    let child_state = f
+        .host
+        .session_state(&f.connection.caller(), &child)
+        .unwrap();
+    let binding = child_state.data.delegation.unwrap();
+    assert_eq!(binding.inputs.len(), 1);
+    assert_eq!(binding.inputs[0].turn, old.source.turn);
+    assert_eq!(
+        binding.inputs[0].message_ids,
+        [unrelated.clone(), supplemental.clone()]
+    );
+    assert_eq!(
+        binding.inputs[0].delegated_message_ids.as_slice(),
+        std::slice::from_ref(&supplemental)
+    );
+    assert!(binding.completion.is_none());
     match end {
         End::RemoveFirst => {
             f.host
@@ -132,6 +181,17 @@ async fn shared_range_with_real_tools(end: End) {
                 })
             );
             assert!(f.calls.try_recv().is_err());
+            assert!(
+                f.host
+                    .session_state(&f.connection.caller(), &child)
+                    .unwrap()
+                    .data
+                    .delegation
+                    .unwrap()
+                    .completion
+                    .is_none(),
+                "a finished failed/cancelled Turn with preserved input is not delegation completion"
+            );
             assert!(f.host.session_info(&f.connection.caller(), &child).is_ok());
             assert!(matches!(
                 f.host
@@ -208,6 +268,27 @@ async fn shared_range_with_real_tools(end: End) {
         2
     };
     assert_eq!(notice["results"].as_array().unwrap().len(), count);
+    let completed = f
+        .host
+        .toolcall_get(&f.connection.caller(), &parent, &original_tool)
+        .unwrap();
+    let settled = &completed.data.state.delegations[0];
+    assert_eq!(settled.origin, original_tool);
+    assert_eq!(settled.inputs.len(), count);
+    assert_eq!(settled.completion.as_ref().unwrap().turns.len(), count);
+    assert_eq!(
+        serde_json::to_value(&settled.inputs).unwrap(),
+        notice["inputs"]
+    );
+    assert_eq!(
+        serde_json::to_value(&settled.completion.as_ref().unwrap().discarded_inputs).unwrap(),
+        notice["discarded_inputs"]
+    );
+    assert!(completed.data.state.runner_revision > startup.data.state.runner_revision);
+    assert_eq!(
+        completed.data.state.state,
+        minicore_host_core::ToolCallState::Finished
+    );
     assert_eq!(
         notice["results"][0]["turn_id"],
         json!(old.source.turn.turn_id)
@@ -252,6 +333,36 @@ async fn shared_range_with_real_tools(end: End) {
     assert_eq!(saved_launch, first_receipt);
     notified.complete("received one real notification");
     f.finished(&notified.source).await;
+    let rows = f
+        .host
+        .history_read(
+            &f.connection.caller(),
+            &parent,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap()
+        .data
+        .items;
+    let saved_start = rows.iter().find(|row| matches!(&row.item,
+        minicore_host_core::HistoryItemData::ToolResult { tool_call_id, .. } if tool_call_id == &original_tool.tool_call_id)).unwrap();
+    assert_eq!(saved_start.delegations[0].origin, original_tool);
+    assert!(
+        saved_start.delegations[0].completion.is_none(),
+        "startup history stays an acceptance fact"
+    );
+    let saved_notice = rows
+        .iter()
+        .find(|row| {
+            matches!(&row.item,
+        minicore_host_core::HistoryItemData::User { in_reply_to: Some(id), .. } if id == &first)
+        })
+        .unwrap();
+    assert_eq!(saved_notice.delegations, completed.data.state.delegations);
     assert!(f.calls.try_recv().is_err());
     assert_eq!(
         f.host.turns(&f.connection.caller(), &parent).unwrap().len(),
@@ -279,4 +390,128 @@ async fn real_agent_tool_retains_failed_shared_turn_until_preserved_inbox_settle
 #[tokio::test]
 async fn real_agent_tool_retains_cancelled_shared_turn_until_preserved_inbox_settles() {
     shared_range_with_real_tools(End::Cancel).await;
+}
+
+#[tokio::test]
+async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
+    let mut f = Fixture::new();
+    let parent = f.agent().await;
+    let child = f.agent().await;
+    let mut originals = Vec::new();
+    for number in 0..2 {
+        f.send(&parent, &format!("parent task {number}"));
+        let root = f.next(&parent).await;
+        f.send(&child, &format!("unrelated child task {number}"));
+        let unrelated = f.next(&child).await;
+        root.tool("start", json!({"action":"send", "target":target(&child), "text":format!("delegated task {number}"), "mode":"follow_up", "delegate":true}));
+        let accepted = f.next(&parent).await;
+        let origin = ToolCallRef {
+            turn_id: root.source.turn.turn_id.clone(),
+            tool_call_id: ToolCallId("start".into()),
+        };
+        let initial = f
+            .host
+            .toolcall_get(&f.connection.caller(), &parent, &origin)
+            .unwrap()
+            .data
+            .state
+            .delegations[0]
+            .clone();
+        assert!(initial.inputs.is_empty());
+        accepted.complete("accepted while child runs");
+        f.finished(&root.source).await;
+        unrelated.complete("unrelated finished");
+        let delegated = f.next(&child).await;
+        assert_ne!(delegated.source.turn, unrelated.source.turn);
+        delegated.complete("actual delegated result");
+        let notified = f.next(&parent).await;
+        notified.complete("notification consumed");
+        f.finished(&notified.source).await;
+        let mut states = f
+            .host
+            .session_states(&f.connection.caller(), &child)
+            .unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while states.snapshot().unwrap().data.delegation.is_some() {
+                states.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        let terminal = f
+            .host
+            .toolcall_get(&f.connection.caller(), &parent, &origin)
+            .unwrap()
+            .data
+            .state
+            .delegations[0]
+            .clone();
+        assert_eq!(terminal.inputs.len(), 1);
+        assert_eq!(terminal.inputs[0].turn, delegated.source.turn);
+        assert_eq!(
+            terminal.completion.as_ref().unwrap().turns[0].outcome,
+            TurnOutcome::Completed
+        );
+        originals.push((origin, terminal));
+    }
+    assert_ne!(
+        originals[0].1.task_message_id,
+        originals[1].1.task_message_id
+    );
+    assert_ne!(originals[0].0.turn_id, originals[1].0.turn_id);
+    assert_eq!(
+        originals[0].0.tool_call_id, originals[1].0.tool_call_id,
+        "ToolCallId alone is not a card identity"
+    );
+    let first = f
+        .host
+        .toolcall_get(&f.connection.caller(), &parent, &originals[0].0)
+        .unwrap();
+    assert_eq!(first.data.state.delegations[0], originals[0].1);
+    assert!(
+        !first.data.state.delegations[0]
+            .accepted_message_ids
+            .contains(&originals[1].1.task_message_id)
+    );
+}
+
+#[tokio::test]
+async fn rejected_agent_send_is_failed_tool_without_failing_parent_turn() {
+    let mut f = Fixture::new();
+    let parent = f.agent().await;
+    f.send(&parent, "attempt missing child");
+    let root = f.next(&parent).await;
+    let missing = SessionRef {
+        agent_id: parent.agent_id.clone(),
+        session_id: SessionId::new().unwrap(),
+    };
+    root.tool("rejected-send", json!({"action":"send", "target":target(&missing), "text":"cannot be accepted", "delegate":true}));
+    let continued = f.next(&parent).await;
+    let failed = f
+        .host
+        .toolcall_get(
+            &f.connection.caller(),
+            &parent,
+            &ToolCallRef {
+                turn_id: root.source.turn.turn_id.clone(),
+                tool_call_id: ToolCallId("rejected-send".into()),
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        failed.data.result.as_ref().unwrap().outcome,
+        minicore_host_runtime::tools::ToolResultOutcome::Failed
+    );
+    assert!(failed.data.state.delegations.is_empty());
+    assert!(continued.last_tool_result().get("error").is_some());
+    continued.complete("ordinary tool failure handled");
+    f.finished(&root.source).await;
+    assert_eq!(
+        f.host
+            .turn_result(&f.connection.caller(), &parent, &root.source.turn.turn_id)
+            .unwrap()
+            .info
+            .outcome,
+        Some(TurnOutcome::Completed)
+    );
 }

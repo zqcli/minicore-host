@@ -1,6 +1,26 @@
 # MiniCore Host
 
-## Current delivery: Host/TUI 0.12.5 (Task 118)
+## Current work: Host 0.12.6 / TUI 0.12.7 (Task 119)
+
+[Task 119](tasks/119-agent-cards/TASK.md) implements the approved original-startup
+agent card contract under SPEC 4.11.5. Existing Session owners expose typed
+accepted input ranges and true delegated settlement through current state,
+ToolCall and message observations. Native history retains the small recorded
+anchor facts alongside unchanged Runtime values; child output remains with its
+own Session. A later send references the original card, and a later delegation
+reusing that child Session receives a new anchor.
+
+The Host worker updates the shared facts, direct-owner projections, native
+history metadata, focused owner tests and SDK preview prefix discard. The
+separate TUI worker implements rendering and observation reuse. Both repository
+versions advance by one patch: Host 0.12.5 to 0.12.6 and TUI 0.12.6 to 0.12.7,
+with the external dependency graph unchanged.
+Workers were requested with `gpt-6-astra` / `max`; these are requested settings.
+Host implementation, independent owner review and the available-package local
+checks are complete. Full CI, integrated TUI acceptance, exact publication
+identities and the released TUI Host pin are not yet recorded.
+
+## Previous delivery: Host/TUI 0.12.5 (Task 118)
 
 [Task 118](tasks/118-transcript-boundaries/TASK.md) repairs two reported display
 regressions: Responses reasoning parts lost their separators before reaching

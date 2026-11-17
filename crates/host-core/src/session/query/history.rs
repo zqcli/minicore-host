@@ -324,6 +324,7 @@ impl HistoryRecordData {
             recorded_at: record.recorded_at,
             turn_id: record.entry.turn_id().cloned(),
             response_index,
+            delegations: record.delegations.clone(),
             item: HistoryItemData::from_entry(&record.entry)
                 .expect("every native record has a public projection"),
         }

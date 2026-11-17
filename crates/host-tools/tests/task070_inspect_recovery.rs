@@ -726,8 +726,31 @@ async fn actual_child_input_and_completion_notification_keep_sources_after_resta
     let child_history = history_rows(&f, &child).await;
     let child_expected = with_record_identity(child_expected, &child_history[0]);
     let parent_history = history_rows(&f, &parent).await;
-    let notification_expected =
+    let mut notification_expected =
         with_record_identity(notification_expected, parent_history.last().unwrap());
+    notification_expected["delegations"] = json!([DelegationAssociation {
+        parent: parent.clone(),
+        origin: ToolCallRef {
+            turn_id: start.source.turn.turn_id.clone(),
+            tool_call_id: ToolCallId("delegate-persistent".into()),
+        },
+        child: child.clone(),
+        task_message_id: child_input.message_id.clone(),
+        accepted_message_ids: vec![child_input.message_id.clone()],
+        inputs: vec![DelegationInputRange {
+            turn: child_call.source.turn.clone(),
+            message_ids: vec![child_input.message_id.clone()],
+            delegated_message_ids: vec![child_input.message_id.clone()],
+        }],
+        completion: Some(DelegationTerminalData {
+            turns: vec![DelegationTurnOutcome {
+                turn: child_call.source.turn.clone(),
+                outcome: TurnOutcome::Completed,
+                fault: None,
+            }],
+            discarded_inputs: vec![],
+        }),
+    }]);
     assert_eq!(child_history, vec![child_expected.clone()]);
     assert_eq!(
         result_rows(&f, &child_call.source).await,

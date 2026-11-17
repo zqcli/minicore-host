@@ -219,6 +219,7 @@ impl SessionController {
                 .iter()
                 .enumerate()
                 .map(|(position, item)| HistoryRecordData {
+                    delegations: Vec::new(),
                     position: position as u64,
                     recorded_at: created_at,
                     turn_id: None,
