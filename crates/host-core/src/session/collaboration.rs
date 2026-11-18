@@ -134,7 +134,15 @@ impl SessionController {
         scope: &Arc<ScopeState>,
         source: SessionRef,
         message: MessageInput,
-    ) -> Result<(MessageAccepted, Record, DelegationAssociation), Fault> {
+    ) -> Result<
+        (
+            MessageAccepted,
+            Record,
+            DelegationAssociation,
+            Weak<SessionController>,
+        ),
+        Fault,
+    > {
         let runtime = UserInput::text(&message.text)
             .map_err(|_| Fault::new(FaultKind::SessionInputInvalid, "input must not be empty"))?;
         let mut state = self.state.lock().expect("Session mutex poisoned");
@@ -181,12 +189,16 @@ impl SessionController {
             .insert(id);
         // Publish accepted association facts before the child can execute.
         self.publish(&mut state);
-        let association = state
+        let slot = state
             .delegation
             .as_ref()
-            .expect("registered slot")
-            .association(&state);
-        Ok((receipt.0, receipt.1, association))
+            .expect("registered slot");
+        Ok((
+            receipt.0,
+            receipt.1,
+            slot.association(&state),
+            slot.relation.parent.clone(),
+        ))
     }
     pub(crate) fn receive_notification_owned(
         self: &Arc<Self>,
@@ -468,30 +480,14 @@ impl SessionController {
 
     pub(crate) fn delegation_association_owned(
         &self,
-        registration: &DelegationRegistration,
+        relation: &Arc<DelegationState>,
     ) -> Option<DelegationAssociation> {
         let state = self.state.lock().expect("Session mutex poisoned");
-        Self::recorded_delegation(&state, registration)
-    }
-
-    fn recorded_delegation(
-        state: &SessionState,
-        registration: &DelegationRegistration,
-    ) -> Option<DelegationAssociation> {
         state
-            .output
-            .get(&registration.origin.turn_id)?
-            .tools
-            .get(&registration.origin.tool_call_id)?
-            .data
-            .state
-            .delegations
-            .iter()
-            .find(|item| {
-                item.child == registration.child
-                    && item.task_message_id == registration.task_message_id
-            })
-            .cloned()
+            .delegation
+            .as_ref()
+            .filter(|slot| slot.has_accepted() && Arc::ptr_eq(&slot.relation, relation))
+            .map(|slot| slot.association(&state))
     }
 }
 impl DelegationSlot {

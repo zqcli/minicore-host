@@ -16,9 +16,21 @@ separate TUI worker implements rendering and observation reuse. Both repository
 versions advance by one patch: Host 0.12.5 to 0.12.6 and TUI 0.12.6 to 0.12.7,
 with the external dependency graph unchanged.
 Workers were requested with `gpt-6-astra` / `max`; these are requested settings.
-Host implementation, independent owner review and the available-package local
-checks are complete. Full CI, integrated TUI acceptance, exact publication
-identities and the released TUI Host pin are not yet recorded.
+The original Host feature checkpoint `95cc1dd4a42d25372be7c3402c6cc4611f98fd15`
+passed all nine jobs in [CI run 44108519829](https://github.com/zqcli/minicore-host/actions/runs/44108519829).
+TUI `60c3a0f3420a24d8167df8114fc49a9f652fe3d5` failed compilation in
+[CI run 44110508243](https://github.com/zqcli/minicore-tui/actions/runs/44110508243);
+its tests did not run. Neither feature was integrated into `dev` at takeover.
+
+The November 18 continuation preserves these checkpoints and repairs the TUI
+compile failures, saved send references and bounded recent-preview recovery.
+Independent review also found that the new original-parent lookup incorrectly
+blocked valid sends after a temporary intermediate parent was reclaimed. The
+repair uses the existing child delegation permit and fixed terminal facts,
+without changing execution ownership or notification destinations. New native
+owner and frontend regressions are present, but Rust validation of the repairs
+is pending toolchain availability. Earlier green CI does not validate these
+changes; integration, publication and release acceptance remain pending.
 
 ## Previous delivery: Host/TUI 0.12.5 (Task 118)
 

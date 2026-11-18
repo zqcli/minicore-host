@@ -336,7 +336,7 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
             sink.clone(),
         )
         .unwrap();
-    let (_, record, delayed_acceptance) = child
+    let (_, record, delayed_acceptance, _) = child
         .receive_delegated_owned(&registration, &scope.state, parent_ref, input)
         .unwrap();
     record.emit();
@@ -348,10 +348,7 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
         .forget();
     // The real child handoff wins while the captured acceptance projection is
     // deliberately held back at exactly the outside-owner-lock boundary.
-    let terminal = parent
-        .session
-        .delegation_association_owned(&registration)
-        .unwrap();
+    let terminal = permit.association().unwrap();
     assert_eq!(
         terminal.completion.as_ref().unwrap().turns[0].outcome,
         TurnOutcome::Completed
@@ -362,9 +359,12 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
     assert_eq!(
         parent
             .session
-            .delegation_association_owned(&registration)
-            .unwrap(),
-        terminal
+            .tool_get(&caller, &origin.turn_id, &origin.tool_call_id)
+            .unwrap()
+            .1
+            .state
+            .delegations,
+        [terminal.clone()]
     );
     let after = parent
         .session
@@ -390,6 +390,7 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
         .release(crate::DelegationDisposition::Notified(accepted))
         .await
         .unwrap();
+    assert_eq!(permit.association(), Some(terminal.clone()));
     let message = parent
         .session
         .state

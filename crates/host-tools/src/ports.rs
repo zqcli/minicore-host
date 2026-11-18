@@ -81,13 +81,15 @@ pub trait TurnPort: Send + Sync + 'static {
     fn prepare_scope(&self, hooks: Arc<dyn ScopeHooks>) -> Result<Arc<dyn ScopePort>, Fault>;
     /// Actual association projection, not a second ToolCall lifecycle. The owner
     /// may keep it only while the original ToolCall remains retained.
-    fn record_delegation(&self, origin: &ToolCallRef, registration: &DelegationRegistration);
+    fn record_delegation(&self, origin: &ToolCallRef, association: &DelegationAssociation);
 }
 
 /// Independent, non-serializable permit tied to the registered relationship,
 /// not the parent's old Turn/Load/connection. The target owner enforces accepted
 /// vs. consumed task identity and uses the existing standard receive path.
 pub trait DelegationPort: Send + Sync + 'static {
+    /// Current accepted child facts, retained by this permit after handoff.
+    fn association(&self) -> Option<DelegationAssociation>;
     /// Send a new notification once to the original direct parent. Select steer
     /// if busy, follow_up if idle at the receive boundary. Respect paused,
     /// cancelling, closing, Host draining/stopping, and the scope closing token.

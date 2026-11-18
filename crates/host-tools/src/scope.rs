@@ -317,9 +317,10 @@ impl ScopeManager {
         if result.is_ok() {
             member.accepted.store(true, Ordering::Release);
             // Projection follows the real acceptance and must never turn an
-            // accepted message into an error implying non-execution. The owner
-            // reports a projection fault through its observation diagnostics.
-            port.record_delegation(&origin, &member.registration);
+            // accepted message into an error implying non-execution.
+            if let Some(association) = permit.association() {
+                port.record_delegation(&origin, &association);
+            }
         } else if !member.finishing.load(Ordering::Acquire) {
             // The owner's reject-before-accept contract makes this safe only for
             // a first task; additional rejected sends leave the original alive.

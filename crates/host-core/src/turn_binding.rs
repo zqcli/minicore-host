@@ -304,13 +304,10 @@ impl TurnCapability {
         }
         result
     }
-    pub fn record_delegation(&self, origin: &ToolCallRef, registration: &DelegationRegistration) {
-        if let Some(owner) = self.authority.owner.upgrade()
-            && let Ok(Some(association)) = self
-                .host()
-                .and_then(|host| host.delegation_association_owned(self, registration))
-        {
-            owner.record_delegation_owned(origin, &association);
+    /// Project facts read from the registered relationship's permit.
+    pub fn record_delegation(&self, origin: &ToolCallRef, association: &DelegationAssociation) {
+        if let Some(owner) = self.authority.owner.upgrade() {
+            owner.record_delegation_owned(origin, association);
         }
     }
 }

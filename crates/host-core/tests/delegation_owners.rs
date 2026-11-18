@@ -586,10 +586,15 @@ impl minicore_host_runtime::tools::Tool for FileDelegatingTool {
                 .cap
                 .prepare_delegation(relation.clone(), Arc::new(Sink(self.plan.sink.clone())))
                 .unwrap();
+            assert!(permit.association().is_none());
             self.cap.send_delegated(&relation, task).unwrap();
-            self.cap.record_delegation(&relation.origin, &relation);
-            self.plan.accepted.send((permit, relation)).unwrap();
+            self.plan
+                .accepted
+                .send((permit.clone(), relation.clone()))
+                .unwrap();
             self.plan.tool_gate.acquire().await.unwrap().forget();
+            self.cap
+                .record_delegation(&relation.origin, &permit.association().unwrap());
             Ok(
                 minicore_host_runtime::tools::ToolExecutionOutcome::Completed(
                     minicore_host_runtime::tools::ToolOutput::new("actual startup receipt")
@@ -682,6 +687,14 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
         .release(DelegationDisposition::Notified(receipt))
         .await
         .unwrap();
+    let settled = permit.association().unwrap();
+    assert_eq!(settled.parent, parent);
+    assert_eq!(settled.origin, relation.origin);
+    assert_eq!(settled.child, relation.child);
+    assert_eq!(
+        settled.completion.as_ref().unwrap().turns[0].outcome,
+        TurnOutcome::Completed
+    );
     gate.add_permits(1);
     recv(&mut f.starts).await;
     complete(&f.events[2], "parent summary");
@@ -691,6 +704,7 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
         .toolcall_get(&f.connection.caller(), &parent, &relation.origin)
         .unwrap();
     assert_eq!(record.data.state.delegations[0].child, relation.child);
+    assert_eq!(record.data.state.delegations, [settled]);
     assert!(record.data.result.is_some());
 }
 

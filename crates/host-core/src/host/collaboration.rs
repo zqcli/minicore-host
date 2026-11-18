@@ -39,10 +39,9 @@ impl Host {
     ) -> Result<MessageAccepted, Fault> {
         let caller = turn.caller()?;
         let source = self.session(&caller, &turn.source().session)?;
-        let parent = self.session(&caller, &registration.parent)?;
         let child = self.session(&caller, &registration.child)?;
         let scope = source.scope_owned(&registration.root)?;
-        let (result, record, association) = self.access.accept_execution(&caller, || {
+        let (result, record, association, parent) = self.access.accept_execution(&caller, || {
             scope.check_open()?;
             child.receive_delegated_owned(
                 registration,
@@ -51,20 +50,13 @@ impl Host {
                 input,
             )
         })?;
-        parent.record_delegation_owned(&registration.origin, &association);
+        // An intermediate parent may retire while its child still accepts work.
+        if let Some(parent) = parent.upgrade() {
+            parent.record_delegation_owned(&registration.origin, &association);
+        }
         record.emit();
         child.wake_owned();
         Ok(result)
-    }
-    pub(crate) fn delegation_association_owned(
-        &self,
-        turn: &TurnCapability,
-        registration: &DelegationRegistration,
-    ) -> Result<Option<DelegationAssociation>, Fault> {
-        let caller = turn.caller()?;
-        Ok(self
-            .session(&caller, &registration.parent)?
-            .delegation_association_owned(registration))
     }
     /// Narrow cleanup entry for the exact target already registered with a
     /// scope. Discovery still follows Host -> Agent -> Session, including close

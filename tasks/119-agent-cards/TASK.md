@@ -17,11 +17,48 @@ The coordinator owns publication and exact release commit mapping.
 - SPEC SHA-256: `4459dcbf395552e7e6bdab94ec322a93391d8a5a7d0721f1947afbfa7b929e2c`.
 - SPEC and AGENTS were updated before production code.
 
-Status: Host implementation and independent owner review are complete; the
-available-package local checks described below pass. No commit or publication
-has been performed by the Host worker. The coordinator owns feature CI and the
-final release checkpoint; their exact identities and results must be recorded
-before claiming release completion.
+Status: the original feature checkpoints were published, but delivery is not
+complete. Host `95cc1dd4a42d25372be7c3402c6cc4611f98fd15` passed all nine jobs
+in [CI run 44108519829](https://github.com/zqcli/minicore-host/actions/runs/44108519829).
+TUI `60c3a0f3420a24d8167df8114fc49a9f652fe3d5`, pinned to that Host revision,
+failed compilation in [CI run 44110508243](https://github.com/zqcli/minicore-tui/actions/runs/44110508243).
+Its tests, Rustdoc and dependency checks were not reached. Both versions remain
+the planned single patch increment; neither feature was in `dev` at takeover.
+
+## November 18 continuation
+
+The existing feature history is preserved in isolated checkouts. The original
+ChatGPT generation status could not be inspected; the published CI runs were
+finished, not queued or running. No duplicate implementation was started.
+
+Independent reviews identified these necessary corrections:
+
+- A temporary intermediate parent can be reclaimed while its delegated child
+  continues. Valid same-scope sends must not depend on looking up that original
+  parent. The child relation's existing weak parent permits optional original
+  card projection; the current sender records facts from the existing delegation
+  permit's child owner or fixed terminal association, including fast release.
+- TUI stable Rust compilation uses `Arc<str>::as_ref()` and an owned sanitized
+  label. Saved ToolResult delegation metadata is installed on the actual later
+  send as well as the original card, including late canonical history metadata.
+- Native baselines and late output cannot resurrect clipped old model responses
+  as the latest/final answer. Completed tool state does not recreate unpositioned
+  old preview blocks; finished baseline Turns release their transient buffers.
+- Large native bash/read results keep decoded newlines and actual recent output.
+  Generic JSON formatting retains its true bounded tail. Retained preview bodies
+  and formatting buffers are bounded; native JSON decoding can still use memory
+  proportional to the original result. No new decoder framework is introduced.
+
+Regression additions use real Host/Runtime ownership with explicit gated models
+for nested memory-parent reclamation, fast-child projection after release and
+40-round child baseline recovery. History-only send references, native result
+tails, Unicode clipping, rendered row budgets, internal blank lines and copy
+chrome have focused tests. These tests are added, not yet reported as passed.
+
+The current environment has no Rust toolchain. Formatting, compilation, strict
+Clippy, Rust tests, Rustdoc, package builds and terminal verification of these
+repairs remain unrun pending toolchain availability. Whitespace and the existing
+28 Python checks pass. No new push, merge, tag or release is part of this checkpoint.
 
 ## Owner changes
 
@@ -56,7 +93,7 @@ UTF-8 boundaries, overlap validation and missing-tail truth. This limits the
 contiguous preview text only. Disjoint pending gap ranges are not bounded by
 this method; normal full-transcript retention remains unchanged.
 
-## Validation
+## Original worker validation (before the published feature CI)
 
 All local Rust commands source `/workspace/scratch/ea58f4af9322/rust-env.sh` and
 use the pinned graph with `--locked --offline`.
@@ -101,5 +138,7 @@ No live external model, terminal UI or performance acceptance is claimed here.
 
 ## Next steps
 
-Publish an ordinary feature checkpoint for full CI, then let the coordinator
-record the exact released Host revision and corresponding TUI pin.
+Run the complete Host gate and the TUI gate against its exact repaired Host pin,
+resolve any actual failures, and record unique test counts and validation
+limits. Publish only within the owner's explicit authorization, then verify
+full CI on those exact commits before integration or release completion.

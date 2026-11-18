@@ -307,8 +307,8 @@ impl TurnPort for CoreTurnPort {
             Arc::new(CoreHooks(Arc::downgrade(&hooks))),
         )?)))
     }
-    fn record_delegation(&self, origin: &ToolCallRef, registration: &DelegationRegistration) {
-        self.capability.record_delegation(origin, registration);
+    fn record_delegation(&self, origin: &ToolCallRef, association: &DelegationAssociation) {
+        self.capability.record_delegation(origin, association);
     }
 }
 struct CoreCreationCleanup(core::CreationCleanupPermit);
@@ -319,6 +319,9 @@ impl CreationCleanup for CoreCreationCleanup {
 }
 struct CoreDelegationPort(core::DelegationPermit);
 impl DelegationPort for CoreDelegationPort {
+    fn association(&self) -> Option<DelegationAssociation> {
+        self.0.association()
+    }
     fn notify(&self, input: MessageInput) -> PortFuture<'_, MessageAccepted> {
         Box::pin(self.0.notify(input))
     }

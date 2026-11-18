@@ -135,6 +135,14 @@ pub struct DelegationPermit {
     pub(crate) state: Arc<DelegationState>,
 }
 impl DelegationPermit {
+    /// Read the child owner's current facts, or its fixed handoff after release.
+    pub fn association(&self) -> Option<DelegationAssociation> {
+        self.state
+            .child
+            .upgrade()
+            .and_then(|child| child.delegation_association_owned(&self.state))
+            .or_else(|| self.state.terminal.get().cloned())
+    }
     pub async fn notify(&self, input: MessageInput) -> Result<MessageAccepted, Fault> {
         let registration = &self.state.registration;
         let context = minicore_host_diagnostics::Context {

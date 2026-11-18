@@ -107,7 +107,7 @@ impl Tool for Delegate {
             assert_eq!(fault.kind(), Some(FaultKind::SessionInputInvalid));
             self.cap.send_delegated(&registration, task).unwrap();
             self.cap
-                .record_delegation(&registration.origin, &registration);
+                .record_delegation(&registration.origin, &permit.association().unwrap());
             self.plan
                 .accepted
                 .send((permit, registration, rejected))

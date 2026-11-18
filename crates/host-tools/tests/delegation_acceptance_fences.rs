@@ -3,7 +3,7 @@
 mod gated_host;
 #[path = "../../../tests/support/input_context.rs"]
 mod input_context;
-use gated_host::Fixture;
+use gated_host::{Fixture, ModelCall};
 use minicore_host_core::MessageBinding;
 use minicore_host_protocol::*;
 use minicore_host_runtime::{
@@ -13,6 +13,22 @@ use minicore_host_runtime::{
 use serde_json::{Value, json};
 
 impl Fixture {
+    async fn delegated_calls(&mut self, parent: &SessionRef) -> (ModelCall, ModelCall) {
+        let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            (self.calls.recv().await.unwrap(), self.calls.recv().await.unwrap())
+        })
+        .await
+        .expect("accepted startup and child must both reach their model");
+        let (parent_call, child_call) = if first.source.session == *parent {
+            (first, second)
+        } else {
+            (second, first)
+        };
+        assert_eq!(parent_call.source.session, *parent);
+        assert_ne!(child_call.source.session, *parent);
+        (parent_call, child_call)
+    }
+
     async fn agent(&self) -> SessionRef {
         let mut config = AgentConfig::default();
         config.session_defaults.tools = vec![ToolBinding {
@@ -39,6 +55,157 @@ impl Fixture {
         }
     }
 }
+
+#[tokio::test]
+async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed() {
+    let mut f = Fixture::new();
+    let root = f.agent().await;
+    let child = f.agent().await;
+    f.send(&root, "coordinate nested delegation");
+    let started = f.next(&root).await;
+    started.tool(
+        "temporary-parent",
+        json!({
+            "action":"create", "resource":"session",
+            "target":{"host_id":started.source.host_id, "agent_id":root.agent_id},
+            "mode":"memory", "text":"delegate independent work"
+        }),
+    );
+    let (root_call, intermediate_call) = f.delegated_calls(&root).await;
+    let intermediate = intermediate_call.source.session.clone();
+    let created = root_call.last_tool_result();
+    assert_eq!(created["session_id"], json!(intermediate.session_id));
+    assert_eq!(created["result"]["delivery"], "accepted");
+    intermediate_call.tool(
+        "nested-start",
+        json!({"action":"send", "target":target(&child), "text":"independent child task", "delegate":true}),
+    );
+    let (intermediate_call, child_call) = f.delegated_calls(&intermediate).await;
+    assert_eq!(child_call.source.session, child);
+    let first: MessageId = serde_json::from_value(
+        intermediate_call.last_tool_result()["message_id"].clone(),
+    )
+    .unwrap();
+    let origin = ToolCallRef {
+        turn_id: intermediate_call.source.turn.turn_id.clone(),
+        tool_call_id: ToolCallId("nested-start".into()),
+    };
+    let mut root_states = f
+        .host
+        .session_states(&f.connection.caller(), &root)
+        .unwrap();
+    intermediate_call.complete("intermediate finished before its child");
+    // Temporary close completes before its final notification is accepted.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while root_states.snapshot().unwrap().data.next_step.is_empty() {
+            root_states.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        f.host
+            .session_info(&f.connection.caller(), &intermediate)
+            .is_err()
+    );
+    let active = f
+        .host
+        .session_state(&f.connection.caller(), &child)
+        .unwrap()
+        .data
+        .delegation
+        .unwrap();
+    assert_eq!(active.parent, intermediate);
+    assert_eq!(active.origin, origin);
+    assert!(active.completion.is_none());
+
+    root_call.tool(
+        "supplement-after-retirement",
+        json!({"action":"send", "target":target(&child), "text":"root supplemental steer", "mode":"steer"}),
+    );
+    let root_call = f.next(&root).await;
+    let accepted = root_call.last_tool_result();
+    assert_eq!(accepted["result"]["delivery"], "accepted");
+    let supplemental: MessageId = serde_json::from_value(accepted["message_id"].clone()).unwrap();
+    let projected = f
+        .host
+        .toolcall_get(
+            &f.connection.caller(),
+            &root,
+            &ToolCallRef {
+                turn_id: root_call.source.turn.turn_id.clone(),
+                tool_call_id: ToolCallId("supplement-after-retirement".into()),
+            },
+        )
+        .unwrap();
+    let association = &projected.data.state.delegations[0];
+    assert_eq!(association.parent, intermediate);
+    assert_eq!(association.origin, origin);
+    assert_eq!(association.child, child);
+    assert_eq!(association.task_message_id, first);
+    assert_eq!(association.accepted_message_ids.len(), 2);
+    assert!(association.accepted_message_ids.contains(&supplemental));
+
+    child_call.tool(
+        "consume-supplement",
+        json!({"action":"inspect", "target":target(&child)}),
+    );
+    let continued = f.next(&child).await;
+    let received = f
+        .host
+        .message(&f.connection.caller(), &child, &supplemental)
+        .unwrap();
+    assert_eq!(received.input.text, "root supplemental steer");
+    assert_eq!(received.source, MessageSource::Agent { source: root.clone() });
+    assert!(matches!(received.binding, MessageBinding::Bound { turn_id } if turn_id == child_call.source.turn.turn_id));
+    root_call.complete("supplement accepted without replacing the original parent");
+    f.finished(&root_call.source).await;
+    let history = f
+        .host
+        .history_read(
+            &f.connection.caller(),
+            &root,
+            &HistoryReadRequest {
+                cursor: None,
+                limit: 100,
+                direction: HistoryDirection::Forward,
+            },
+        )
+        .await
+        .unwrap();
+    let saved = history.data.items.iter().find(|record| matches!(&record.item,
+        minicore_host_core::HistoryItemData::ToolResult { tool_call_id, .. }
+            if tool_call_id.as_str() == "supplement-after-retirement")).unwrap();
+    assert_eq!(saved.delegations.as_slice(), std::slice::from_ref(association));
+    continued.complete("actual child result after original parent retirement");
+    f.finished(&continued.source).await;
+    let mut child_states = f
+        .host
+        .session_states(&f.connection.caller(), &child)
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while child_states.snapshot().unwrap().data.delegation.is_some() {
+            child_states.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        f.host
+            .session_info(&f.connection.caller(), &intermediate)
+            .is_err()
+    );
+    assert!(f.calls.try_recv().is_err(), "final notification must not be redirected to the root");
+    assert_eq!(
+        f.host
+            .turn_result(&f.connection.caller(), &child, &continued.source.turn.turn_id)
+            .unwrap()
+            .info
+            .outcome,
+        Some(TurnOutcome::Completed)
+    );
+}
+
 fn target(session: &SessionRef) -> Value {
     json!({"kind":"session", "agent_id":session.agent_id, "session_id":session.session_id})
 }

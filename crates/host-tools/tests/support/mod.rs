@@ -369,7 +369,7 @@ impl TurnPort for FixtureTurn {
             state: Arc::clone(&self.state),
         }))
     }
-    fn record_delegation(&self, _: &ToolCallRef, _: &DelegationRegistration) {
+    fn record_delegation(&self, _: &ToolCallRef, _: &DelegationAssociation) {
         self.event("project_relation");
     }
 }
@@ -380,6 +380,18 @@ pub struct FixtureDelegation {
     pub accepted: Mutex<Vec<MessageId>>,
 }
 impl DelegationPort for FixtureDelegation {
+    fn association(&self) -> Option<DelegationAssociation> {
+        let accepted_message_ids = self.accepted.lock().unwrap().clone();
+        (!accepted_message_ids.is_empty()).then(|| DelegationAssociation {
+            parent: self.registration.parent.clone(),
+            origin: self.registration.origin.clone(),
+            child: self.registration.child.clone(),
+            task_message_id: self.registration.task_message_id.clone(),
+            accepted_message_ids,
+            inputs: Vec::new(),
+            completion: None,
+        })
+    }
     fn notify(&self, input: MessageInput) -> PortFuture<'_, MessageAccepted> {
         Box::pin(async move {
             self.state.events.lock().unwrap().push("notify".into());
