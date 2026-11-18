@@ -15,7 +15,10 @@ use serde_json::{Value, json};
 impl Fixture {
     async fn delegated_calls(&mut self, parent: &SessionRef) -> (ModelCall, ModelCall) {
         let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            (self.calls.recv().await.unwrap(), self.calls.recv().await.unwrap())
+            (
+                self.calls.recv().await.unwrap(),
+                self.calls.recv().await.unwrap(),
+            )
         })
         .await
         .expect("accepted startup and child must both reach their model");
@@ -82,10 +85,8 @@ async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed
     );
     let (intermediate_call, child_call) = f.delegated_calls(&intermediate).await;
     assert_eq!(child_call.source.session, child);
-    let first: MessageId = serde_json::from_value(
-        intermediate_call.last_tool_result()["message_id"].clone(),
-    )
-    .unwrap();
+    let first: MessageId =
+        serde_json::from_value(intermediate_call.last_tool_result()["message_id"].clone()).unwrap();
     let origin = ToolCallRef {
         turn_id: intermediate_call.source.turn.turn_id.clone(),
         tool_call_id: ToolCallId("nested-start".into()),
@@ -156,8 +157,15 @@ async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed
         .message(&f.connection.caller(), &child, &supplemental)
         .unwrap();
     assert_eq!(received.input.text, "root supplemental steer");
-    assert_eq!(received.source, MessageSource::Agent { source: root.clone() });
-    assert!(matches!(received.binding, MessageBinding::Bound { turn_id } if turn_id == child_call.source.turn.turn_id));
+    assert_eq!(
+        received.source,
+        MessageSource::Agent {
+            source: root.clone()
+        }
+    );
+    assert!(
+        matches!(received.binding, MessageBinding::Bound { turn_id } if turn_id == child_call.source.turn.turn_id)
+    );
     root_call.complete("supplement accepted without replacing the original parent");
     f.finished(&root_call.source).await;
     let history = f
@@ -173,10 +181,20 @@ async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed
         )
         .await
         .unwrap();
-    let saved = history.data.items.iter().find(|record| matches!(&record.item,
+    let saved = history
+        .data
+        .items
+        .iter()
+        .find(|record| {
+            matches!(&record.item,
         minicore_host_core::HistoryItemData::ToolResult { tool_call_id, .. }
-            if tool_call_id.as_str() == "supplement-after-retirement")).unwrap();
-    assert_eq!(saved.delegations.as_slice(), std::slice::from_ref(association));
+            if tool_call_id.as_str() == "supplement-after-retirement")
+        })
+        .unwrap();
+    assert_eq!(
+        saved.delegations.as_slice(),
+        std::slice::from_ref(association)
+    );
     continued.complete("actual child result after original parent retirement");
     f.finished(&continued.source).await;
     let mut child_states = f
@@ -195,10 +213,17 @@ async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed
             .session_info(&f.connection.caller(), &intermediate)
             .is_err()
     );
-    assert!(f.calls.try_recv().is_err(), "final notification must not be redirected to the root");
+    assert!(
+        f.calls.try_recv().is_err(),
+        "final notification must not be redirected to the root"
+    );
     assert_eq!(
         f.host
-            .turn_result(&f.connection.caller(), &child, &continued.source.turn.turn_id)
+            .turn_result(
+                &f.connection.caller(),
+                &child,
+                &continued.source.turn.turn_id
+            )
             .unwrap()
             .info
             .outcome,

@@ -363,8 +363,9 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
             .unwrap()
             .1
             .state
-            .delegations,
-        [terminal.clone()]
+            .delegations
+            .as_slice(),
+        std::slice::from_ref(&terminal)
     );
     let after = parent
         .session

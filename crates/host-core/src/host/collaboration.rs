@@ -41,15 +41,16 @@ impl Host {
         let source = self.session(&caller, &turn.source().session)?;
         let child = self.session(&caller, &registration.child)?;
         let scope = source.scope_owned(&registration.root)?;
-        let (result, record, association, parent) = self.access.accept_execution(&caller, || {
-            scope.check_open()?;
-            child.receive_delegated_owned(
-                registration,
-                &scope,
-                turn.source().session.clone(),
-                input,
-            )
-        })?;
+        let (result, record, association, parent) =
+            self.access.accept_execution(&caller, || {
+                scope.check_open()?;
+                child.receive_delegated_owned(
+                    registration,
+                    &scope,
+                    turn.source().session.clone(),
+                    input,
+                )
+            })?;
         // An intermediate parent may retire while its child still accepts work.
         if let Some(parent) = parent.upgrade() {
             parent.record_delegation_owned(&registration.origin, &association);

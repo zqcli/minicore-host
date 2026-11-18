@@ -28,9 +28,12 @@ Independent review also found that the new original-parent lookup incorrectly
 blocked valid sends after a temporary intermediate parent was reclaimed. The
 repair uses the existing child delegation permit and fixed terminal facts,
 without changing execution ownership or notification destinations. New native
-owner and frontend regressions are present, but Rust validation of the repairs
-is pending toolchain availability. Earlier green CI does not validate these
-changes; integration, publication and release acceptance remain pending.
+owner and frontend regressions are present. The complete local Host gate now
+passes 1,263 uniquely enumerated Rust cases, seven doctests and 28 Python checks,
+with formatting, strict Clippy and strict Rustdoc. The TUI exact-pin gate is a
+separate coordinator check. Earlier green CI does not validate these repairs;
+integration, publication, new cross-platform CI and release acceptance remain
+pending.
 
 ## Previous delivery: Host/TUI 0.12.5 (Task 118)
 

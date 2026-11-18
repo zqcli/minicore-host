@@ -189,10 +189,7 @@ impl SessionController {
             .insert(id);
         // Publish accepted association facts before the child can execute.
         self.publish(&mut state);
-        let slot = state
-            .delegation
-            .as_ref()
-            .expect("registered slot");
+        let slot = state.delegation.as_ref().expect("registered slot");
         Ok((
             receipt.0,
             receipt.1,

@@ -53,12 +53,35 @@ Regression additions use real Host/Runtime ownership with explicit gated models
 for nested memory-parent reclamation, fast-child projection after release and
 40-round child baseline recovery. History-only send references, native result
 tails, Unicode clipping, rendered row budgets, internal blank lines and copy
-chrome have focused tests. These tests are added, not yet reported as passed.
+chrome have focused tests. The four real-Host frontend card tests pass after
+correcting their original fixture: native model inputs include provenance headers,
+so parent/child calls are identified by loop identity and decoded input provenance,
+not by comparing the whole native message with a bare task string.
 
-The current environment has no Rust toolchain. Formatting, compilation, strict
-Clippy, Rust tests, Rustdoc, package builds and terminal verification of these
-repairs remain unrun pending toolchain availability. Whitespace and the existing
-28 Python checks pass. No new push, merge, tag or release is part of this checkpoint.
+### Continuation verification
+
+The owner approved installing the official Rust toolchains. On Linux with the
+repository-pinned Rust 1.90.0, the complete `scripts/check.sh` exits 0:
+
+- Formatting and workspace/all-target strict Clippy pass.
+- All 1,263 independently enumerated Rust test cases pass, with no ignored cases.
+  The count comes from `cargo test --workspace --all-targets --locked -- --list`,
+  not from summing nested subprocess test output.
+- All seven doctests, strict workspace Rustdoc and 28 Python checks pass.
+- The nested reclaimed-parent, fast released-child and delayed acceptance
+  regressions are included in that full run.
+- All 225 external lock records, the planned 0.12.6 package versions and the
+  SPEC hash above are unchanged.
+
+The first attempt found a test-only Clippy clone warning, then an environment
+failure because the default HOME was read-only. The equivalent slice assertion
+was corrected and the complete gate rerun with an isolated writable HOME. No
+configuration production behavior was changed to hide that environment limit.
+
+The repaired TUI uses current stable Rust and needs its complete exact-Host-pin
+quality and release-build checks separately. New cross-platform CI, a physical
+terminal session, a live external model and performance acceptance are not
+claimed by this local Host gate. No new push, merge, tag or release was performed.
 
 ## Owner changes
 
@@ -138,7 +161,6 @@ No live external model, terminal UI or performance acceptance is claimed here.
 
 ## Next steps
 
-Run the complete Host gate and the TUI gate against its exact repaired Host pin,
-resolve any actual failures, and record unique test counts and validation
-limits. Publish only within the owner's explicit authorization, then verify
+Keep the passing Host gate and finish the TUI gate against its exact repaired
+Host pin, recording unique test counts and validation limits. Publish only within the owner's explicit authorization, then verify
 full CI on those exact commits before integration or release completion.
