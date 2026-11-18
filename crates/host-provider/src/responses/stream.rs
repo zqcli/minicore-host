@@ -215,6 +215,16 @@ impl State {
         let result = match event.kind.as_str() {
             "response.created" => self.created(event.response.ok_or(())),
             "response.in_progress" => self.in_progress(event.response.ok_or(())),
+            "response.metadata" => {
+                if self.response_id.is_some()
+                    && event.response_id.as_deref() == self.response_id.as_deref()
+                    && self.terminal_status.is_none()
+                {
+                    Ok(())
+                } else {
+                    Err(())
+                }
+            }
             "response.output_item.added" => {
                 self.add_item(event.output_index.ok_or(()), event.item.ok_or(()))
             }

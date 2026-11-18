@@ -1,6 +1,8 @@
 //! Scripted loopback TCP fixtures exercising the production Responses adapter
 //! and real Runtime driver. These tests do not call a live model service.
 
+#[path = "responses_runtime/metadata.rs"]
+mod metadata;
 #[path = "responses_runtime/reasoning_boundaries.rs"]
 mod reasoning_boundaries;
 mod support;

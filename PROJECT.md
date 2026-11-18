@@ -1,6 +1,24 @@
 # MiniCore Host
 
-## Current work: Host/TUI 0.12.8 (Task 120)
+## Current work: Host 0.12.9 Responses metadata (Task 121)
+
+[Task 121](tasks/121-responses-metadata/TASK.md) accepts identity-matched
+`response.metadata` advisory events without relaxing the Responses completion
+barrier. Two isolated live TUI 0.12.8 requests reproduced rejection of this event
+immediately before a valid `response.completed`; removing only that frame made
+both captures pass the unchanged adapter. The fix preserves sequence, identity,
+error, snapshot and tool-execution checks, with seven synthetic regression tests.
+All fourteen Host package versions and internal requirements advance to 0.12.9;
+external dependency records and SPEC 4.11.5 remain unchanged.
+
+The owner authorizes a normal push to `origin/dev` and explicitly waives local
+tests for this small repair. Formatting and static diff/version review are
+performed; no new build, test, Clippy, Rustdoc or remote CI success is claimed.
+Earlier prototype verification is recorded separately in the task. TUI's Host
+pin, installed binaries and failure-paused Session scheduling are unchanged.
+No release tag or main merge is part of this task.
+
+## Previous checkpoint: Host/TUI 0.12.8 (Task 120)
 
 [Task 120](tasks/120-version-0128/TASK.md) aligns both repositories to 0.12.8
 without changing behavior. The verified `dev` baselines are Host

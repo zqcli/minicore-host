@@ -138,6 +138,11 @@ for handed-off text and arguments. It does not keep a second cumulative body or
 parse a completed argument object. A disagreeing snapshot fails rather than
 appending a suffix or replacing already observed output.
 
+`response.metadata` is accepted as an advisory extension only after the response
+has started and when its `response_id` matches the active response. Normal event
+sequence and error checks still apply. Its payload is not retained and cannot
+complete a response or authorize a tool. Other unknown event types still fail.
+
 Distinct nonempty reasoning parts/items are separated by one LF when neither
 side already supplies CR or LF. Same-part chunks concatenate; empty parts and
 repeated completion snapshots add no separator. Done-only reasoning follows the

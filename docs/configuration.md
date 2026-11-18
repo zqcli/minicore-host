@@ -1,6 +1,6 @@
 # JSON configuration directories
 
-Host 0.12.8 and SPEC 4.11.5 use one explicit configuration directory. Configuration
+Host 0.12.9 and SPEC 4.11.5 use one explicit configuration directory. Configuration
 files are UTF-8 standard JSON: no TOML, comments, legacy-file fallback or automatic
 migration. Runtime persistence stays in the separate data root.
 

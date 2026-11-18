@@ -11,6 +11,7 @@ pub(super) struct Event {
     pub kind: String,
     pub sequence_number: Option<u64>,
     pub response: Option<Response>,
+    pub response_id: Option<String>,
     pub output_index: Option<usize>,
     pub item_id: Option<String>,
     pub content_index: Option<usize>,
@@ -37,6 +38,8 @@ pub(super) struct ErrorEnvelope {
     pub code: Option<String>,
     #[serde(rename = "response")]
     pub _response: Option<IgnoredAny>,
+    #[serde(rename = "response_id")]
+    pub _response_id: Option<IgnoredAny>,
     #[serde(rename = "sequence_number")]
     pub _sequence_number: Option<IgnoredAny>,
     #[serde(rename = "output_index")]
