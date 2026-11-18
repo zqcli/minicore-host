@@ -1,6 +1,24 @@
 # MiniCore Host
 
-## Current work: Host 0.12.6 / TUI 0.12.7 (Task 119)
+## Current work: Host/TUI 0.12.8 (Task 120)
+
+[Task 120](tasks/120-version-0128/TASK.md) aligns both repositories to 0.12.8
+without changing behavior. The verified `dev` baselines are Host
+`02c7558b7eff324f2f83557305d921912a4dce74` and TUI
+`783ad1d954e74ff77afbabb0df6ac8f339a44829`. All fourteen Host packages and their
+internal dependency requirements advance from 0.12.6 to 0.12.8. TUI advances
+from 0.12.7, pins the resulting exact Host commit and updates its version headers.
+The 225 Host external lock records, all Rust source, schema 3 and SPEC 4.11.5
+remain unchanged. Historical task and release records retain their original
+versions. This work is local; no push, tag, merge or release is authorized here.
+
+The Rust 1.90.0 Host gate passes 1,263 uniquely enumerated Rust cases, seven
+doctests and 28 Python checks, plus formatting, strict Clippy and strict Rustdoc.
+Independent review confirms unchanged Rust source and external dependencies.
+The separate TUI exact-pin gate follows this fixed Host commit; no new remote CI,
+platform-package, live-provider or terminal-interaction acceptance is claimed.
+
+## Previous implementation: Host 0.12.6 / TUI 0.12.7 (Task 119)
 
 [Task 119](tasks/119-agent-cards/TASK.md) implements the approved original-startup
 agent card contract under SPEC 4.11.5. Existing Session owners expose typed
