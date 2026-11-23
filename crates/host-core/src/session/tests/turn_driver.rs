@@ -51,7 +51,8 @@ async fn upstream_reason_and_source_survive_turn_result_state_and_saved_terminal
         matches!(&saved.last().unwrap().entry, HistoryEntry::TurnFinished { outcome: TurnOutcome::Failed, reason: Some(reason), .. } if reason == fault.message())
     );
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
-    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    // A transient 503 is retried within the configured attempts, then reported.
+    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
 }
 
 struct GatedPrompt {

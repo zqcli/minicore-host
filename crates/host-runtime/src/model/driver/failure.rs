@@ -49,15 +49,19 @@ impl RetryPolicySnapshot {
         failure: &AttemptFailure,
         deadline: TokioInstant,
     ) -> Option<Duration> {
-        if attempt + 1 >= self.max_attempts
-            || failure.observed_event
-            || failure.error.delivery() != DeliveryState::NotStarted
-        {
+        // Shown output would be replayed; reported usage would be lost.
+        if attempt + 1 >= self.max_attempts || failure.emitted_output || failure.usage.is_some() {
             return None;
         }
         let retry_after = match failure.error.retry_hint() {
-            RetryHint::Retryable { retry_after } => *retry_after,
-            RetryHint::Never => return None,
+            RetryHint::Retryable { retry_after }
+                if !failure.observed_event
+                    && failure.error.delivery() == DeliveryState::NotStarted =>
+            {
+                *retry_after
+            }
+            _ if transient(&failure.error) => None,
+            _ => return None,
         };
         let delay = self.delay_for_retry(attempt, retry_after)?;
         if retry_fits(deadline, delay) {
@@ -111,6 +115,7 @@ impl ModelDriverFailure {
 pub(super) struct AttemptFailure {
     pub(super) error: ModelError,
     pub(super) observed_event: bool,
+    pub(super) emitted_output: bool,
     pub(super) deadline_source: Option<DeadlineSource>,
     partial: Option<Box<ModelPartial>>,
     usage: Option<crate::model::Usage>,
@@ -121,6 +126,7 @@ impl AttemptFailure {
         Self {
             error,
             observed_event,
+            emitted_output: false,
             deadline_source: None,
             partial: None,
             usage: None,
@@ -135,6 +141,7 @@ impl AttemptFailure {
         Self {
             error,
             observed_event,
+            emitted_output: false,
             deadline_source: Some(source),
             partial: None,
             usage: None,
@@ -158,6 +165,31 @@ impl AttemptFailure {
         self.usage = usage;
         self.partial = partial.map(Box::new);
         self
+    }
+}
+
+/// A model request has no side effect beyond its cost, so a failure that may
+/// have reached the provider is still retried when it is transient and no
+/// output was shown. Request, credential, quota and context faults are final.
+fn transient(error: &ModelError) -> bool {
+    match error.kind() {
+        ModelErrorKind::RateLimited
+        | ModelErrorKind::ProviderUnavailable
+        | ModelErrorKind::Unavailable
+        | ModelErrorKind::TransportUnavailable
+        | ModelErrorKind::Timeout
+        | ModelErrorKind::StreamInterrupted
+        | ModelErrorKind::RequestOutcomeUnknown => true,
+        ModelErrorKind::UpstreamUnclassified => error
+            .upstream()
+            .and_then(|upstream| upstream.http_status)
+            .is_some_and(|status| {
+                matches!(
+                    status,
+                    408 | 425 | 429 | 500 | 502 | 503 | 504 | 520..=524 | 529
+                )
+            }),
+        _ => false,
     }
 }
 

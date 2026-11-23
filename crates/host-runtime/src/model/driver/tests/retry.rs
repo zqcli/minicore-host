@@ -38,7 +38,7 @@ async fn not_started_errors_retry_with_exact_attempts_and_delays() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn excessive_retry_after_started_unknown_and_nonretryable_do_not_retry() {
+async fn excessive_retry_after_and_nonretryable_do_not_retry() {
     let diag = DiagnosticSummary::new(
         DiagnosticCode::ModelUnavailable,
         DiagnosticCategory::Model,
@@ -52,13 +52,18 @@ async fn excessive_retry_after_started_unknown_and_nonretryable_do_not_retry() {
             Some(Duration::from_secs(31)),
             diag.clone(),
         ),
-        ModelError::started(ModelErrorKind::ProviderUnavailable, diag.clone()),
-        ModelError::unknown(ModelErrorKind::ProviderUnavailable, diag.clone()),
         ModelError::permanent(
             ModelErrorKind::AuthRejected,
             DeliveryState::NotStarted,
-            diag,
+            diag.clone(),
         ),
+        ModelError::unknown(ModelErrorKind::UpstreamUnclassified, diag.clone()).with_upstream(
+            crate::model::ModelUpstreamDetails {
+                http_status: Some(400),
+                ..Default::default()
+            },
+        ),
+        ModelError::unknown(ModelErrorKind::UpstreamUnclassified, diag),
     ];
     for error in cases {
         let expected = error.kind();
@@ -310,4 +315,55 @@ async fn one_driver_allows_true_concurrent_model_calls() {
     assert_eq!(model.starts(), 2);
     assert!(matches!(first.parts(), [AssistantPart::Text(_)]));
     assert!(matches!(second.parts(), [AssistantPart::Text(_)]));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn transient_failures_without_shown_output_retry_whatever_their_delivery() {
+    let diag = DiagnosticSummary::new(
+        DiagnosticCode::ModelUnavailable,
+        DiagnosticCategory::Model,
+        Text::new("test model error"),
+        false,
+    )
+    .expect("valid diagnostic text");
+    let bad_gateway = crate::model::ModelUpstreamDetails {
+        http_status: Some(502),
+        ..Default::default()
+    };
+    let cases = vec![
+        Behavior::StartError(ModelError::started(
+            ModelErrorKind::ProviderUnavailable,
+            diag.clone(),
+        )),
+        Behavior::StartError(ModelError::unknown(
+            ModelErrorKind::RequestOutcomeUnknown,
+            diag.clone(),
+        )),
+        Behavior::StartError(
+            ModelError::unknown(ModelErrorKind::UpstreamUnclassified, diag.clone())
+                .with_upstream(bad_gateway),
+        ),
+        Behavior::Events(vec![Err(ModelError::unknown(
+            ModelErrorKind::StreamInterrupted,
+            diag,
+        ))]),
+    ];
+    for failure in cases {
+        let model = ScriptModel::new(
+            descriptor(),
+            vec![failure, Behavior::Events(text_success("retried"))],
+        );
+        let driver = model.driver(&with_retry(RetryPolicySnapshot::new(2, Duration::ZERO)));
+        let (progress, _receiver) = progress_channel();
+        let response = driver
+            .run(
+                request(),
+                context(CancellationToken::new(), Duration::from_secs(30)),
+                &progress,
+            )
+            .await
+            .unwrap();
+        assert_text(&response, "retried");
+        assert_eq!(model.starts(), 2);
+    }
 }

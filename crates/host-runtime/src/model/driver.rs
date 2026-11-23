@@ -347,6 +347,7 @@ impl<'a> ModelDriver<'a> {
                             AttemptFailure::new(error, assembler.observed_event)
                         })?;
                         if let Some(progress_event) = progress_event {
+                            assembler.emitted_output = true;
                             observer(match progress_event {
                                 ModelDriverProgress::TextDelta(text) => {
                                     ModelCallEvent::TextDelta(text)
@@ -382,7 +383,8 @@ impl<'a> ModelDriver<'a> {
             }
         }
         .await;
-        result.map_err(|failure: AttemptFailure| {
+        result.map_err(|mut failure: AttemptFailure| {
+            failure.emitted_output = assembler.emitted_output;
             let usage = assembler.usage();
             failure.with_observation(usage, assembler.into_partial(request_index))
         })

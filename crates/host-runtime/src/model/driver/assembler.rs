@@ -25,6 +25,8 @@ pub(super) struct Assembler<'a> {
     provider_replay: Option<ProviderReplay>,
     finish_reason: Option<ModelFinishReason>,
     pub(super) observed_event: bool,
+    /// Text or reasoning was forwarded to observers; a retry would replay it.
+    pub(super) emitted_output: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -56,6 +58,7 @@ impl<'a> Assembler<'a> {
             provider_replay: None,
             finish_reason: None,
             observed_event: false,
+            emitted_output: false,
         }
     }
 

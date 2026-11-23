@@ -737,31 +737,37 @@ async fn responses_incomplete_reason_is_readable_with_request_id_and_partial() {
 }
 
 #[tokio::test]
-async fn responses_created_then_rejection_never_retries() {
+async fn responses_created_then_rejection_retries_while_nothing_was_shown() {
     let mut script = Script::new();
     script
         .events
         .push(json!({"type":"error","code":"rate_limit_exceeded"}));
-    let fixture = Fixture::start(vec![Reply::sse(script.body())]).await;
+    let fixture = Fixture::start((0..3).map(|_| Reply::sse(script.body())).collect()).await;
     let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
-    assert_eq!(report.attempts, 1);
+    // Every configured attempt is used, then the last rejection is reported.
+    assert_eq!(report.attempts, 3);
     assert_eq!(
         report.outcome.unwrap_err().error().delivery(),
         DeliveryState::Started
     );
-    assert_eq!(fixture.finish().await.len(), 1);
+    assert_eq!(fixture.finish().await.len(), 3);
 }
 
 #[tokio::test]
-async fn responses_failure_envelope_output_evidence_forbids_retry() {
+async fn responses_failure_envelope_without_shown_output_is_retried() {
     let reply = json!({"type":"response.failed","response":{"id":"resp_failed","status":"failed","error":{"code":"rate_limit_exceeded"},"output":[{"type":"unsupported-output"}]}});
-    let fixture = Fixture::start(vec![Reply::sse(format!("data: {reply}\n\n"))]).await;
+    let fixture = Fixture::start(
+        (0..3)
+            .map(|_| Reply::sse(format!("data: {reply}\n\n")))
+            .collect(),
+    )
+    .await;
     let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
-    assert_eq!(report.attempts, 1);
+    assert_eq!(report.attempts, 3);
     let failure = report.outcome.unwrap_err();
     assert_eq!(failure.error().kind(), ModelErrorKind::RateLimited);
     assert_eq!(failure.error().delivery(), DeliveryState::Started);
-    assert_eq!(fixture.finish().await.len(), 1);
+    assert_eq!(fixture.finish().await.len(), 3);
 }
 
 #[tokio::test]

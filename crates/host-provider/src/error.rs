@@ -367,19 +367,13 @@ pub(crate) async fn http(
             DeliveryState::NotStarted,
             false,
         ),
-        (429, Some(ModelErrorKind::RateLimited)) => {
-            (ModelErrorKind::RateLimited, DeliveryState::NotStarted, true)
-        }
         (503 | 529, Some(ModelErrorKind::ProviderUnavailable)) => (
             ModelErrorKind::ProviderUnavailable,
             DeliveryState::NotStarted,
             true,
         ),
-        (429, _) => (
-            ModelErrorKind::UpstreamUnclassified,
-            DeliveryState::Unknown,
-            false,
-        ),
+        // A 429 rejects the request before processing whatever its body says.
+        (429, _) => (ModelErrorKind::RateLimited, DeliveryState::NotStarted, true),
         (408, _) => (ModelErrorKind::Timeout, DeliveryState::Unknown, false),
         (400..=499, _) => (
             recognized.unwrap_or(ModelErrorKind::InvalidRequest),

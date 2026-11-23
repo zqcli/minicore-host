@@ -427,7 +427,7 @@ async fn malformed_or_truncated_stream_never_becomes_success_or_retries() {
 }
 
 #[tokio::test]
-async fn runtime_is_the_only_retry_owner_and_only_recognized_rejections_retry() {
+async fn runtime_is_the_only_retry_owner_and_retries_transient_rejections_only() {
     let cases = [
         (
             429,
@@ -450,20 +450,26 @@ async fn runtime_is_the_only_retry_owner_and_only_recognized_rejections_retry() 
         (
             429,
             json!({"error":{"message":"please retry"}}),
-            1,
-            ModelErrorKind::UpstreamUnclassified,
+            2,
+            ModelErrorKind::RateLimited,
         ),
         (
             503,
             json!({"error":{"message":"please retry"}}),
-            1,
+            2,
             ModelErrorKind::UpstreamUnclassified,
         ),
         (
             500,
             json!({"error":{"type":"overloaded_error"}}),
-            1,
+            2,
             ModelErrorKind::ProviderUnavailable,
+        ),
+        (
+            400,
+            json!({"error":{"message":"bad request"}}),
+            1,
+            ModelErrorKind::InvalidRequest,
         ),
         (
             401,
@@ -592,7 +598,7 @@ async fn official_overload_http_still_requires_attempt_and_time_budget() {
 }
 
 #[tokio::test]
-async fn official_overload_http_does_not_authorize_unknown_delivery() {
+async fn unrecognized_overload_http_keeps_unknown_delivery_and_is_retried_as_transient() {
     for (status, error, expected_kind) in [
         (
             503,
@@ -617,16 +623,18 @@ async fn official_overload_http_does_not_authorize_unknown_delivery() {
     ] {
         let fixture = Fixture::start(vec![
             Reply::error(status, json!({"error":error}).to_string()),
-            Reply::sse(final_text("must not happen")),
+            Reply::error(status, json!({"error":error}).to_string()),
         ])
         .await;
         let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
         let failure = failure(&report);
         assert_eq!(failure.kind(), expected_kind);
-        assert_eq!(failure.delivery(), DeliveryState::Unknown, "{error}");
-        assert_eq!(*failure.retry_hint(), RetryHint::Never, "{error}");
-        assert_eq!(report.attempts, 1);
-        assert_eq!(fixture.finish().await.len(), 1);
+        if expected_kind == ModelErrorKind::UpstreamUnclassified {
+            assert_eq!(failure.delivery(), DeliveryState::Unknown, "{error}");
+            assert_eq!(*failure.retry_hint(), RetryHint::Never, "{error}");
+        }
+        assert_eq!(report.attempts, 2);
+        assert_eq!(fixture.finish().await.len(), 2);
     }
 }
 
@@ -654,14 +662,15 @@ async fn a_model_start_alone_never_retries() {
 }
 
 #[tokio::test]
-async fn sse_error_retry_requires_no_prior_provider_choice_even_role_only() {
+async fn sse_error_retry_requires_that_no_text_was_shown() {
     let error_frame = format!(
         "data: {}\n\n",
         json!({"error":{"code":"rate_limit_exceeded"}})
     );
     for (prefix, expected) in [
         (String::new(), 2),
-        (frame(json!({"role":"assistant"}), None), 1),
+        // A role-only chunk shows nothing, so replaying the request is invisible.
+        (frame(json!({"role":"assistant"}), None), 2),
         (frame(json!({"content":"partial"}), None), 1),
     ] {
         let fixture = Fixture::start(vec![
@@ -1474,14 +1483,11 @@ async fn sse_retry_after_does_not_authorize_unknown_or_permanent_rejections() {
 }
 
 #[tokio::test]
-async fn sse_retry_after_does_not_authorize_replay_after_role_or_text() {
-    for (prefix, partial) in [
-        (frame(json!({"role":"assistant"}), None), None),
-        (
-            frame(json!({"content":"preserve partial"}), None),
-            Some("preserve partial"),
-        ),
-    ] {
+async fn sse_retry_after_does_not_authorize_replay_after_text() {
+    for (prefix, partial) in [(
+        frame(json!({"content":"preserve partial"}), None),
+        Some("preserve partial"),
+    )] {
         let fixture = Fixture::start(vec![
             sse_rejection(
                 "Retry-After-ms: 1\r\n",
@@ -1963,7 +1969,7 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
             2,
         ),
         (429, "insufficient_quota", ModelErrorKind::QuotaExceeded, 1),
-        (429, "future_error", ModelErrorKind::UpstreamUnclassified, 1),
+        (429, "future_error", ModelErrorKind::RateLimited, 2),
     ] {
         let body = json!({"error":{"code":code,"message":private_message}}).to_string();
         assert!(body.len() > 262_144);
@@ -2060,9 +2066,12 @@ async fn large_http_errors_do_not_relax_retry_wait_limits_or_parse_invalid_json(
                 Some("rate_limit_exceeded")
             );
         } else {
-            assert_eq!(error.kind(), ModelErrorKind::UpstreamUnclassified);
-            assert_eq!(error.delivery(), DeliveryState::Unknown);
-            assert_eq!(*error.retry_hint(), RetryHint::Never);
+            // A 429 is a rejection whatever its body; the wait limit still applies.
+            assert_eq!(error.kind(), ModelErrorKind::RateLimited);
+            assert_eq!(error.delivery(), DeliveryState::NotStarted);
+            assert!(
+                matches!(error.retry_hint(), RetryHint::Retryable { retry_after: Some(delay) } if *delay > Duration::from_secs(30))
+            );
             assert!(
                 !serde_json::to_string(error)
                     .unwrap()
