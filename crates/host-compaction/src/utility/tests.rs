@@ -338,3 +338,43 @@ async fn invalid_next_group_is_rejected_before_finishing_an_oversized_chunk() {
     assert!(failure.utility_usage.is_empty());
     assert!(fixture.requests.lock().unwrap().is_empty());
 }
+
+#[test]
+fn only_a_summarized_newest_request_is_carried_verbatim() {
+    let user = |text: &str| {
+        HistoryItem::User(minicore_host_runtime::UserHistory {
+            loop_id: LoopId::new().unwrap(),
+            kind: minicore_host_runtime::UserMessageKind::Prompt,
+            input: minicore_host_runtime::UserInput::text(text).unwrap(),
+        })
+    };
+    let note = |text: &str| {
+        HistoryItem::Summary(SummaryHistory {
+            content: Text::new(text),
+        })
+    };
+    let result = || {
+        HistoryItem::ToolResult(ToolResultHistory {
+            loop_id: LoopId::new().unwrap(),
+            request_index: 1,
+            call_id: "call_1".parse().unwrap(),
+            tool_name: "read".parse().unwrap(),
+            outcome: ToolResultOutcome::Success,
+            output: ToolOutput::new("ok").unwrap(),
+        })
+    };
+    let mut plan = plan(
+        ReasoningPreference::High,
+        ModelLimits::new(None, None).unwrap(),
+    );
+    plan.source.items = vec![user("old"), note("a"), user("重构分段日志"), result()].into();
+    plan.covered_end = 3;
+    assert_eq!(covered_current_request(&plan), Some("重构分段日志"));
+    // An idle history ends with an answer, not a tool result.
+    plan.source.items = vec![user("old"), note("a"), user("重构分段日志"), note("b")].into();
+    assert_eq!(covered_current_request(&plan), None);
+    plan.source.items = vec![user("old"), note("a"), note("b"), user("newer")].into();
+    assert_eq!(covered_current_request(&plan), None);
+    plan.source.items = vec![note("a"), note("b"), note("c"), result()].into();
+    assert_eq!(covered_current_request(&plan), None);
+}

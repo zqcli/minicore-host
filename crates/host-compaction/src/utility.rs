@@ -4,7 +4,7 @@ use crate::{
     source::group_data,
 };
 use minicore_host_runtime::{
-    SummaryHistory, Text,
+    HistoryItem, SummaryHistory, Text,
     model::{
         AssistantPart, Model, ModelCallContext, ModelCallParams, ModelDriver, ModelDriverConfig,
         ModelErrorKind, ModelFinishReason, ModelMessage, ModelRequest, Usage,
@@ -159,7 +159,13 @@ async fn generate_inner(
         position = end;
     }
     check_active(&context)?;
-    let summary = previous.ok_or(CompactionError::InvalidHistory)?;
+    let mut summary = previous.ok_or(CompactionError::InvalidHistory)?;
+    if let Some(request) = covered_current_request(plan) {
+        summary.content = Text::new(format!(
+            "{}\n\n## Current user request (verbatim)\n{request}\n\n{CONTINUE_NOTE}",
+            summary.content.as_str()
+        ));
+    }
     let request = plan.project(&summary)?;
     let after_tokens = estimate_request_tokens(&request)?;
     if after_tokens >= plan.estimate.input_tokens {
@@ -174,6 +180,31 @@ async fn generate_inner(
         after_tokens,
         utility_usage: Vec::new(),
     })
+}
+
+const CONTINUE_NOTE: &str = "Earlier messages, including this request, were compacted while it was being worked on. Continue that work from where it stopped instead of ending with a status report, and keep replying in the language of the request.";
+
+/// The newest user input when it falls inside the summarized prefix while a
+/// Turn is still between tool calls. A summary alone loses the wording of the
+/// request that Turn is serving; an idle history has no work to continue.
+fn covered_current_request(plan: &CompactionPlan) -> Option<&str> {
+    let items = &plan.source.items;
+    if !matches!(items.last(), Some(HistoryItem::ToolResult(_)))
+        || items[plan.covered_end..]
+            .iter()
+            .any(|item| matches!(item, HistoryItem::User(_)))
+    {
+        return None;
+    }
+    items[..plan.covered_end]
+        .iter()
+        .rev()
+        .find_map(|item| match item {
+            HistoryItem::User(user) => match &user.input {
+                minicore_host_runtime::UserInput::Text(text) => Some(text.as_str()),
+            },
+            _ => None,
+        })
 }
 
 /// The exact validated JSON is counted inside the outer request string and
