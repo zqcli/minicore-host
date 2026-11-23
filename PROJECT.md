@@ -1,6 +1,17 @@
 # MiniCore Host
 
-## Current work: Host 0.12.9 Responses metadata (Task 121)
+## Current work: Host/TUI 0.12.11 (Task 122)
+
+[Task 122](tasks/122-version-01211/TASK.md) fixes the confirmed findings of a
+long-running TUI test: transient model failures retry while nothing was shown,
+mid-turn compaction keeps the active request, tool failures carry their reason
+and local operations report failed outcomes, bash output reaching the model is
+bounded with an explicit omission count, and the agent tool defaults its
+targets and inherits the caller's settings. SPEC advances to 4.11.6. The Host
+gate passes 1,269 of 1,274 enumerated cases; the one failure needs `/bin/kill`,
+which this container lacks. This work is local; no push, tag, merge or release.
+
+## Previous work: Host 0.12.9 Responses metadata (Task 121)
 
 [Task 121](tasks/121-responses-metadata/TASK.md) accepts identity-matched
 `response.metadata` advisory events without relaxing the Responses completion
