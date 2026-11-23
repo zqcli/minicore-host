@@ -29,8 +29,15 @@ fn parse_diagnostics_keep_constraints_without_echoing_argument_values_or_unknown
         AgentAction::parse(json!({"action":"control","operation":"close_scope","secret, expected private-marker":true}))
             .unwrap_err()
             .message(),
-        "arguments contain an unknown field"
+        "arguments contain an unknown field; this action accepts `action`, `operation`"
     );
+    let misplaced = AgentAction::parse(
+        json!({"action":"create","resource":"session","model":"private-marker","text":"task"}),
+    )
+    .unwrap_err();
+    assert!(misplaced.message().contains("`settings`"));
+    assert!(misplaced.message().contains("go inside settings"));
+    assert!(!misplaced.message().contains("private"));
     assert_eq!(
         AgentAction::parse(json!({"action":"inspect"}))
             .unwrap_err()

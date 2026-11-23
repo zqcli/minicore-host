@@ -19,7 +19,7 @@ async fn malformed_arguments_return_failed_diagnostics_without_entering_an_owner
             ToolInvocation::new(
                 "invalid-agent-call".parse().unwrap(),
                 "agent".parse().unwrap(),
-                json!({"action":"create","resource":"session"}),
+                json!({"action":"create","resource":"agent","mode":"memory"}),
             )
             .unwrap(),
             context(),
@@ -31,7 +31,7 @@ async fn malformed_arguments_return_failed_diagnostics_without_entering_an_owner
     };
     assert_eq!(
         output.content().as_str(),
-        "invalid agent arguments: missing field `target`"
+        "invalid agent arguments: missing field `name`"
     );
     assert!(port.state.events.lock().unwrap().is_empty());
 }
@@ -45,6 +45,28 @@ async fn create_without_text_only_creates_and_never_registers_delegation() {
     assert!(output.get("message_id").is_none());
     assert_eq!(*port.state.events.lock().unwrap(), vec!["create_agent"]);
 }
+#[tokio::test]
+async fn sessions_default_to_the_callers_agent_and_inherit_its_session_settings() {
+    let port = FixtureTurn::new();
+    let tool = AgentTool::new(port.port(), ScopeManager::new());
+    invoke(&tool, json!({"action":"create","resource":"session"})).await;
+    let explicit = json!({"action":"create","resource":"session","settings":{"reasoning":"high"}});
+    invoke(&tool, explicit).await;
+    let creates = port.state.session_creates.lock().unwrap().clone();
+    let caller = SessionConfig::default();
+    for (request, reasoning) in creates
+        .iter()
+        .zip([caller.reasoning, ReasoningPreference::High])
+    {
+        assert_eq!(request.target.host_id, port.source.host_id);
+        assert_eq!(request.target.agent_id, port.source.session.agent_id);
+        let settings = &request.overrides.as_ref().unwrap().0;
+        assert_eq!(settings.model.as_ref(), Some(&caller.model));
+        assert_eq!(settings.reasoning, Some(reasoning));
+        assert_eq!(settings.execution.as_ref(), Some(&caller.execution));
+    }
+}
+
 #[tokio::test]
 async fn create_registers_receiver_before_acceptance_and_returns_real_facts() {
     let port = FixtureTurn::new();

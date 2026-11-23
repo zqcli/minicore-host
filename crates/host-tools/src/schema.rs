@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 pub fn agent_tool_spec() -> ToolSpec {
     static SPEC: LazyLock<ToolSpec> = LazyLock::new(|| {
         ToolSpec::new("agent".parse().expect("static tool name"),
-        "Create, send to, inspect, update or control Agents and Sessions in this Host. Creation with text and send with delegate:true start independent work and return acceptance; completion arrives as a new message. wait waits for consumable input in this Session, not a particular child.",
+        "Create, send to, inspect, update or control Agents and Sessions in this Host. To delegate, create a Session with text: omit target to use your own Agent; it inherits your model, reasoning, approval policy and workspace unless settings override them. A new Agent copies your Agent unless from_agent_id names another. model, reasoning, instructions, tools, workspace and execution go inside settings. Creation with text and send with delegate:true start independent work and return acceptance (with the child's agent_id and session_id); completion arrives as a new message. wait waits for consumable input in this Session, not a particular child.",
         schema()).expect("static agent tool declaration is valid")
     });
     SPEC.clone()
@@ -97,12 +97,12 @@ fn schema() -> Value {
         branch(
             "create",
             json!({"resource":{"const":"agent"},"target":reference("host_target"),"name":{"type":"string","minLength":1},"mode":reference("mode"),"from_agent_id":id,"settings":reference("settings"),"text":text}),
-            &["resource", "target", "name", "mode"],
+            &["resource", "name", "mode"],
         ),
         branch(
             "create",
             json!({"resource":{"const":"session"},"target":reference("agent_ref"),"mode":reference("mode"),"settings":reference("settings"),"text":text}),
-            &["resource", "target"],
+            &["resource"],
         ),
         branch(
             "send",

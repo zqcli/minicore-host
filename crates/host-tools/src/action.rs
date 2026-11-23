@@ -25,7 +25,13 @@ pub struct HostTarget {
 #[serde(tag = "resource", rename_all = "snake_case", deny_unknown_fields)]
 pub enum CreateAction {
     Agent {
-        target: HostTarget,
+        /// Omitted: this Host.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        target: Option<HostTarget>,
         name: String,
         mode: StorageMode,
         #[serde(
@@ -48,7 +54,13 @@ pub enum CreateAction {
         text: Option<String>,
     },
     Session {
-        target: AgentRef,
+        /// Omitted: the calling Agent.
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        target: Option<AgentRef>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -197,7 +209,22 @@ pub enum UpdateAction {
 
 impl AgentAction {
     pub fn parse(arguments: serde_json::Value) -> Result<Self, Fault> {
-        let action: Self = serde_json::from_value(arguments).map_err(parse_error)?;
+        let accepted = accepted_fields(&arguments);
+        let action: Self = serde_json::from_value(arguments).map_err(|error| {
+            let fault = parse_error(error);
+            match &accepted {
+                Some(fields) if fault.message() == UNKNOWN_FIELD => {
+                    let mut message = format!("{UNKNOWN_FIELD}; this action accepts {fields}");
+                    if fields.contains("`settings`") {
+                        message.push_str(
+                            "; model, reasoning, instructions, role, tools, workspace and execution go inside settings",
+                        );
+                    }
+                    invalid(message)
+                }
+                _ => fault,
+            }
+        })?;
         action.validate()?;
         Ok(action)
     }
@@ -222,13 +249,40 @@ impl AgentAction {
         }
     }
 }
+const UNKNOWN_FIELD: &str = "arguments contain an unknown field";
+
+/// The field names this call's own schema branch accepts, chosen by its
+/// action/resource/operation constants. Only schema text is returned, never
+/// argument text, so a forged field name cannot shape the diagnostic.
+fn accepted_fields(arguments: &serde_json::Value) -> Option<String> {
+    let spec = crate::agent_tool_spec();
+    let branches = spec.input_schema().get("oneOf")?.as_array()?.clone();
+    let branch = branches.iter().find(|branch| {
+        ["action", "resource", "operation"].iter().all(|key| {
+            match branch["properties"]
+                .get(*key)
+                .and_then(|value| value.get("const"))
+            {
+                Some(expected) => arguments.get(*key) == Some(expected),
+                None => true,
+            }
+        })
+    })?;
+    let names: Vec<String> = branch["properties"]
+        .as_object()?
+        .keys()
+        .map(|name| format!("`{name}`"))
+        .collect();
+    Some(names.join(", "))
+}
+
 fn parse_error(error: serde_json::Error) -> Fault {
     let message = error.to_string();
     // Unknown names may contain arbitrary argument text, and an empty struct
     // does not supply an expected-field suffix. Never parse those names back
     // out of Serde's display message.
     for (prefix, reason) in [
-        ("unknown field ", "arguments contain an unknown field"),
+        ("unknown field ", UNKNOWN_FIELD),
         (
             "unknown variant ",
             "arguments contain an unsupported variant",

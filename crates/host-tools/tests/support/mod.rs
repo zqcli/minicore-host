@@ -64,6 +64,7 @@ pub struct FixtureState {
     pub snapshot_reads: AtomicUsize,
     pub writes: Mutex<Vec<AgentUpdateCandidate>>,
     pub update_conflict: AtomicBool,
+    pub session_creates: Mutex<Vec<SessionCreate>>,
 }
 pub struct FixtureTurn {
     pub source: ToolSource,
@@ -176,6 +177,11 @@ impl TurnPort for FixtureTurn {
             self.check_active()?;
             assert!(request.initial_message.is_none());
             self.event("create_session");
+            self.state
+                .session_creates
+                .lock()
+                .unwrap()
+                .push(request.clone());
             Ok(SessionCreateReceipt {
                 kind: SessionCreateKind::SessionCreate,
                 host_id: self.source.host_id.clone(),

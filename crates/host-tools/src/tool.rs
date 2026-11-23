@@ -144,24 +144,26 @@ impl AgentTool {
                 settings,
                 text,
             } => {
-                if target.host_id != self.port.source().host_id {
+                let host_id = self.port.source().host_id.clone();
+                if target.is_some_and(|target| target.host_id != host_id) {
                     return Err(Fault::new(
                         FaultKind::HostOwnershipMismatch,
                         "target is not this Host",
                     ));
                 }
-                let source = match from_agent_id {
-                    Some(agent_id) => {
-                        self.port
-                            .agent_snapshot(&AgentRef {
-                                host_id: target.host_id,
-                                agent_id,
-                            })?
-                            .config
-                    }
-                    None => AgentConfig::default(),
-                };
-                let config = agent_config_from_settings(&source, &settings.unwrap_or_default())?;
+                // Without an explicit source the new Agent copies its creator,
+                // so it has a usable model instead of empty defaults.
+                let caller_agent = self.port.source().session.agent_id.clone();
+                let same_agent = from_agent_id.as_ref().is_none_or(|id| id == &caller_agent);
+                let source = self
+                    .port
+                    .agent_snapshot(&AgentRef {
+                        host_id,
+                        agent_id: from_agent_id.unwrap_or(caller_agent),
+                    })?
+                    .config;
+                let settings = self.inherited(same_agent, settings)?;
+                let config = agent_config_from_settings(&source, &settings)?;
                 let initial = initial(text)?;
                 let request = AgentCreate {
                     operation_id: OperationId::new().map_err(id_fault)?,
@@ -193,6 +195,7 @@ impl AgentTool {
                                 .clone()
                                 .ok_or_else(missing_created_id)?,
                         };
+                        self.title_child(&child, &input.text).await;
                         match self
                             .scopes
                             .send(
@@ -231,11 +234,17 @@ impl AgentTool {
                 text,
             } => {
                 let initial = initial(text)?;
+                let own = AgentRef {
+                    host_id: self.port.source().host_id.clone(),
+                    agent_id: self.port.source().session.agent_id.clone(),
+                };
+                let target = target.unwrap_or_else(|| own.clone());
+                let settings = self.inherited(target == own, settings)?;
                 let request = SessionCreate {
                     operation_id: OperationId::new().map_err(id_fault)?,
                     target,
                     mode,
-                    overrides: settings.map(SessionOverrides),
+                    overrides: (!settings.is_empty()).then_some(SessionOverrides(settings)),
                     initial_message: None,
                 };
                 let CreatedForDelegation {
@@ -261,6 +270,7 @@ impl AgentTool {
                                 .ok_or_else(missing_created_id)?,
                         };
                         let temporary = cleanup.is_some();
+                        self.title_child(&child, &input.text).await;
                         match self
                             .scopes
                             .send(
@@ -293,6 +303,59 @@ impl AgentTool {
                 encoded(receipt)
             }
         }
+    }
+    /// Names an untitled delegated Session after its task's first line, so
+    /// Session lists show what each child is doing. Best effort: delegation
+    /// does not depend on the title.
+    async fn title_child(&self, child: &SessionRef, task: &str) {
+        let title: String = task
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .unwrap_or_default()
+            .chars()
+            .take(60)
+            .collect();
+        let Ok(snapshot) = self.port.session_snapshot(child) else {
+            return;
+        };
+        if title.is_empty() || snapshot.title.is_some() {
+            return;
+        }
+        let changes = SessionChanges {
+            title: NullablePatch::Set(title),
+            settings: SessionConfigPatch::default(),
+        };
+        if let Ok(candidate) = snapshot.apply(&changes) {
+            let _ = self.port.update_session(child.clone(), candidate).await;
+        }
+    }
+    /// A delegated Session starts from the caller's current execution policy
+    /// and workspace, so a child cannot silently block on approvals its parent
+    /// no longer asks for. The same Agent also keeps the caller's model and
+    /// reasoning. Explicit settings always win.
+    fn inherited(
+        &self,
+        same_agent: bool,
+        explicit: Option<SessionConfigPatch>,
+    ) -> Result<SessionConfigPatch, Fault> {
+        let caller = self
+            .port
+            .session_snapshot(&self.port.source().session)?
+            .config;
+        let explicit = explicit.unwrap_or_default();
+        Ok(SessionConfigPatch {
+            model: explicit.model.or(same_agent.then_some(caller.model)),
+            reasoning: explicit
+                .reasoning
+                .or(same_agent.then_some(caller.reasoning)),
+            execution: explicit.execution.or(Some(caller.execution)),
+            workspace: match (explicit.workspace, caller.workspace) {
+                (NullablePatch::Unchanged, Some(workspace)) => NullablePatch::Set(workspace),
+                (explicit, _) => explicit,
+            },
+            ..explicit
+        })
     }
     async fn wait(&self, request: WaitAction, context: ToolContext) -> Result<Value, ToolFailure> {
         let business_deadline = request

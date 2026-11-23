@@ -302,7 +302,7 @@ async fn malformed_builtin_agent_arguments_return_failed_details_without_approva
                 tool_answer(
                     "invalid-agent",
                     "agent",
-                    json!({"action":"create","resource":"session"}),
+                    json!({"action":"create","resource":"agent","mode":"memory"}),
                 ),
                 None,
             ),
@@ -334,7 +334,7 @@ async fn malformed_builtin_agent_arguments_return_failed_details_without_approva
         assert_eq!(output["tool_call_id"], "invalid-agent");
         assert_eq!(
             output["content"],
-            "invalid agent arguments: missing field `target`"
+            "invalid agent arguments: missing field `name`"
         );
         settled(&host, &caller, &target, 1).await;
         let history = host.history(&caller, &target).unwrap();
