@@ -324,13 +324,13 @@ async fn run_tool_call(
                 _ => ToolStep::End(internal_failure()),
             }
         }
-        ToolPort::Failed => ToolStep::Result(terminal_tool_result(
+        ToolPort::Failed(reason) => ToolStep::Result(terminal_tool_result(
             ctx.context.loop_id,
             request_index,
             call.tool_call_id(),
             call.name(),
             ToolResultOutcome::Failed,
-            "tool failed",
+            &reason,
         )),
         ToolPort::End(path) => ToolStep::End(path),
     }
@@ -400,7 +400,8 @@ enum ToolPort {
     Completed(ToolOutput),
     FailedWithOutput(ToolOutput),
     RequestInput(ToolInputRequest),
-    Failed,
+    /// The reason is shown to the model and the user; a bare failure cannot be corrected.
+    Failed(String),
     End(ToolBatchStop),
 }
 
@@ -439,14 +440,19 @@ async fn run_tool_port(
         {
             ToolPort::RequestInput(request)
         }
-        PortCallOutcome::Returned(Ok(ToolExecutionOutcome::RequestInput(_))) => ToolPort::Failed,
+        PortCallOutcome::Returned(Ok(ToolExecutionOutcome::RequestInput(_))) => {
+            ToolPort::Failed("tool failed: it requested invalid user input".into())
+        }
         PortCallOutcome::Cancelled => ToolPort::End(ToolBatchStop::Cancelled),
         PortCallOutcome::DeadlineExceeded(DeadlineSource::Turn) => {
             ToolPort::End(ToolBatchStop::Deadline)
         }
-        PortCallOutcome::Returned(Err(_))
-        | PortCallOutcome::DeadlineExceeded(DeadlineSource::Port)
-        | PortCallOutcome::Panicked => ToolPort::Failed,
+        PortCallOutcome::Returned(Err(error)) => ToolPort::Failed(format!("tool failed: {error}")),
+        PortCallOutcome::DeadlineExceeded(DeadlineSource::Port) => ToolPort::Failed(format!(
+            "tool failed: no result within the {}s tool timeout",
+            ctx.context.tool_timeout.as_secs()
+        )),
+        PortCallOutcome::Panicked => ToolPort::Failed("tool failed: the tool panicked".into()),
         PortCallOutcome::InvalidDeadline(_) => ToolPort::End(internal_failure()),
     }
 }
@@ -560,7 +566,7 @@ fn terminal_tool_result(
     call_id: &ToolCallId,
     tool_name: &ToolName,
     outcome: ToolResultOutcome,
-    message: &'static str,
+    message: &str,
 ) -> ToolResultHistory {
     ToolResultHistory {
         loop_id: id,
@@ -568,6 +574,6 @@ fn terminal_tool_result(
         call_id: call_id.clone(),
         tool_name: tool_name.clone(),
         outcome,
-        output: ToolOutput::new(message).expect("static tool output has valid text"),
+        output: ToolOutput::new(message).expect("tool failure text is valid"),
     }
 }

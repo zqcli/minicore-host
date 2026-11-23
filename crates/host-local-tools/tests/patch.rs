@@ -105,10 +105,13 @@ async fn patch_schema_requires_business_arguments_and_rejects_owner_spoofing() {
         json!({"path":"file","patch":12}),
         json!({"path":"file","patch":"@@ -1 +1 @@\n-old\n+new\n","session_id":"spoof"}),
     ] {
-        assert_eq!(
-            invoke(&tools, "apply_patch", input).await,
-            Err(ToolError::InvalidInvocation)
-        );
+        match invoke(&tools, "apply_patch", input).await {
+            Ok(result) => {
+                assert_eq!(result["status"], "failed");
+                assert!(!result.to_string().contains("spoof"));
+            }
+            Err(error) => assert_eq!(error, ToolError::InvalidInvocation),
+        }
     }
     assert_eq!(fs::read(root.path().join("file")).unwrap(), b"old\n");
     assert!(records.edits.lock().unwrap().is_empty());

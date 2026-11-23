@@ -261,9 +261,14 @@ async fn binary_tools_produce_exact_files_native_results_and_canonical_sources()
     assert_eq!(result["data"]["info"]["persistence"], "persisted");
     assert_eq!(result["data"]["info"]["cleanup_faults"], json!([]));
     let before = history(&mut app.process, &target).await;
-    for id in ["write", "read", "edit", "rejected-edit", "bash"] {
+    for id in ["write", "read", "edit", "bash"] {
         assert_eq!(history_result(&before, id)["outcome"], "success");
     }
+    // A rejected edit is reported as failed, with its structured reason.
+    assert_eq!(
+        history_result(&before, "rejected-edit")["outcome"],
+        "failed"
+    );
     assert_eq!(
         serde_json::from_str::<Value>(
             history_result(&before, "bash")["output"]["content"]

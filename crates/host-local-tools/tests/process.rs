@@ -96,7 +96,7 @@ async fn runtime_nonzero_exit_preserves_complete_stdout_stderr_and_side_effects_
 }
 
 #[tokio::test]
-async fn full_large_and_binary_output_never_uses_hidden_tail_truncation() {
+async fn large_output_reaches_the_model_as_marked_head_and_tail() {
     let (_root, tools, _) = fixture().await;
     let output = invoke(
         &tools,
@@ -105,10 +105,13 @@ async fn full_large_and_binary_output_never_uses_hidden_tail_truncation() {
     )
     .await
     .unwrap();
-    assert_eq!(
-        output["stdout"]["output"]["data"].as_str().unwrap().len(),
-        100000
-    );
+    // Records keep every byte (see the streaming test); the model's copy
+    // says how much of the middle it omits.
+    let data = output["stdout"]["output"]["data"].as_str().unwrap();
+    assert!(data.len() < 40_000);
+    assert!(data.starts_with("xxxx") && data.ends_with("xxxx"));
+    assert!(data.contains("bytes omitted"));
+    assert!(output["stdout"]["omitted_bytes"].as_u64().unwrap() > 60_000);
     assert_eq!(
         output["stderr"]["output"],
         json!({"encoding":"bytes","data":[255,0]})

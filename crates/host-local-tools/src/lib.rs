@@ -92,20 +92,23 @@ impl Tool for LocalTool {
             } = invocation;
             let prepared = (|| {
                 if &tool_name != self.spec.name() {
-                    return Err(ToolError::InvalidInvocation);
+                    return Err(Err(ToolError::InvalidInvocation));
                 }
-                check(&context)?;
-                Action::parse(self.spec.name().as_str(), arguments)
+                check(&context).map_err(Err)?;
+                Action::parse(self.spec.name().as_str(), arguments).map_err(|message| {
+                    // The model can only correct arguments it is told about.
+                    rejected("invalid_arguments", format!("invalid arguments: {message}"))
+                })
             })();
             let action = match prepared {
                 Ok(action) => action,
-                Err(error) => {
+                Err(result) => {
                     // Rejection happened before an actual worker was started.
                     self.binding
                         .sink
                         .complete(&id, true)
                         .map_err(|_| ToolError::Internal)?;
-                    return Err(error);
+                    return result;
                 }
             };
             let binding = Arc::clone(&self.binding);
@@ -162,8 +165,8 @@ enum Action {
 }
 
 impl Action {
-    fn parse(name: &str, value: Value) -> Result<Self, ToolError> {
-        let invalid = |_| ToolError::InvalidInvocation;
+    fn parse(name: &str, value: Value) -> Result<Self, String> {
+        let invalid = |error: serde_json::Error| describe(&error.to_string());
         match name {
             "read" => serde_json::from_value(value)
                 .map(Self::Read)
@@ -180,9 +183,28 @@ impl Action {
             "bash" => serde_json::from_value(value)
                 .map(Self::Bash)
                 .map_err(invalid),
-            _ => Err(ToolError::InvalidInvocation),
+            _ => Err(format!("unknown local tool {name}")),
         }
     }
+}
+
+/// Serde's diagnostic, without echoing an unknown name or a supplied value:
+/// those are model text. The expected names come from our own input types.
+fn describe(message: &str) -> String {
+    for prefix in [
+        "unknown field",
+        "unknown variant",
+        "invalid type",
+        "invalid value",
+    ] {
+        if message.starts_with(prefix) {
+            return match message.rsplit_once(", expected ") {
+                Some((_, expected)) => format!("{prefix}; expected {expected}"),
+                None => prefix.to_owned(),
+            };
+        }
+    }
+    message.to_owned()
 }
 
 fn check(context: &ToolContext) -> Result<(), ToolError> {
@@ -202,6 +224,19 @@ fn completed(value: impl serde::Serialize) -> Result<ToolExecutionOutcome, ToolE
     ))
 }
 
+/// A failed operation keeps its structured body but is reported as failed, so
+/// the model and every frontend see the same outcome.
 fn business_error(code: &str, message: impl AsRef<str>) -> Result<ToolExecutionOutcome, ToolError> {
-    completed(json!({"status":"failed","error":{"code":code,"message":message.as_ref()}}))
+    rejected(code, message)
+}
+
+fn rejected(code: &str, message: impl AsRef<str>) -> Result<ToolExecutionOutcome, ToolError> {
+    failed(json!({"status":"failed","error":{"code":code,"message":message.as_ref()}}))
+}
+
+fn failed(value: impl serde::Serialize) -> Result<ToolExecutionOutcome, ToolError> {
+    let text = serde_json::to_string(&value).map_err(|_| ToolError::Internal)?;
+    Ok(ToolExecutionOutcome::Failed(
+        ToolOutput::new(text).map_err(|_| ToolError::Internal)?,
+    ))
 }

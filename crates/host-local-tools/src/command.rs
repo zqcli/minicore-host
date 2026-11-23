@@ -123,6 +123,7 @@ mod native {
             CommandStream {
                 output: self.bytes.into(),
                 complete: self.complete,
+                omitted_bytes: 0,
             }
         }
     }
@@ -350,9 +351,10 @@ mod native {
         }
         match status {
             CommandStatus::Cancelled => Err(ToolError::Cancelled),
-            CommandStatus::TimedOut => Err(ToolError::TimedOut),
+            // Output gathered before the deadline explains what the command was doing.
+            CommandStatus::TimedOut => crate::failed(result.for_model()),
             CommandStatus::Failed => Err(ToolError::Internal),
-            CommandStatus::Exited => completed(result),
+            CommandStatus::Exited => completed(result.for_model()),
         }
     }
 }

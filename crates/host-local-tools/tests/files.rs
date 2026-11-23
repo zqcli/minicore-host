@@ -1,6 +1,9 @@
 mod support;
 use minicore_host_local_tools::*;
-use minicore_host_runtime::{ExecutionOptions, ToolCallId, tools::ToolError};
+use minicore_host_runtime::{
+    ExecutionOptions, ToolCallId,
+    tools::{ToolError, ToolExecutionOutcome},
+};
 use minicore_host_workspace::{EditOutcome, FileSnapshot, Workspace};
 use serde_json::json;
 use std::{fs, sync::Arc, time::Duration};
@@ -74,17 +77,17 @@ async fn explicit_read_range_has_no_old_line_or_byte_cap() {
 }
 
 #[tokio::test]
-async fn read_requires_range_and_rejects_non_utf8_without_lossy_success() {
+async fn read_defaults_its_range_and_rejects_non_utf8_without_lossy_success() {
     let (root, tools, _) = fixture().await;
     fs::write(root.path().join("binary"), [0xff, 0xfe]).unwrap();
-    assert_eq!(
-        invoke(&tools, "read", json!({"path":"binary"})).await,
-        Err(ToolError::InvalidInvocation)
-    );
-    assert_eq!(
-        invoke(&tools, "read", json!({"path":"binary","limit":0})).await,
-        Err(ToolError::InvalidInvocation)
-    );
+    let defaulted = invoke(&tools, "read", json!({"path":"binary"}))
+        .await
+        .unwrap();
+    assert_eq!(defaulted["error"]["code"], "invalid_path_or_content");
+    let empty = invoke(&tools, "read", json!({"path":"binary","limit":0}))
+        .await
+        .unwrap();
+    assert_eq!(empty["error"]["code"], "invalid_arguments");
     assert_eq!(
         invoke(&tools, "read", json!({"path":"binary","limit":1}))
             .await
@@ -156,8 +159,9 @@ async fn model_cannot_supply_owner_identity_and_unknown_tool_is_absent() {
             "write",
             json!({"path":"file","content":"x","turn_id":"spoof"})
         )
-        .await,
-        Err(ToolError::InvalidInvocation)
+        .await
+        .unwrap()["error"],
+        json!({"code":"invalid_arguments","message":"invalid arguments: unknown field; expected `path` or `content`"})
     );
     assert_eq!(
         invoke(
@@ -165,8 +169,9 @@ async fn model_cannot_supply_owner_identity_and_unknown_tool_is_absent() {
             "bash",
             json!({"command":"true","session_id":"spoof"})
         )
-        .await,
-        Err(ToolError::InvalidInvocation)
+        .await
+        .unwrap()["error"]["code"],
+        "invalid_arguments"
     );
     tools.finish().await;
 }
@@ -523,14 +528,11 @@ async fn rejected_before_worker_start_reports_actual_cleanup_without_waiting_for
                 context,
             )
             .await;
-        assert_eq!(
-            result.unwrap_err(),
-            if cancelled {
-                ToolError::Cancelled
-            } else {
-                ToolError::InvalidInvocation
-            }
-        );
+        if cancelled {
+            assert_eq!(result.unwrap_err(), ToolError::Cancelled);
+        } else {
+            assert!(matches!(result, Ok(ToolExecutionOutcome::Failed(_))));
+        }
         assert_eq!(
             records.completions.lock().unwrap().last(),
             Some(&(id.to_owned(), true))

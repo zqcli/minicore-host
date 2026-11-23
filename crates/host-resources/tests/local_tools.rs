@@ -60,7 +60,11 @@ fn native_result<'a>(history: &'a [HistoryItem], id: &str) -> &'a ToolResultHist
 }
 fn result_json(history: &[HistoryItem], id: &str) -> Value {
     let result = native_result(history, id);
-    assert_eq!(result.outcome, ToolResultOutcome::Success);
+    // A failed operation keeps the same structured body; its status says which.
+    assert!(matches!(
+        result.outcome,
+        ToolResultOutcome::Success | ToolResultOutcome::Failed
+    ));
     serde_json::from_str(result.output.content().as_str()).unwrap()
 }
 fn call(turn: &TurnId, id: &str) -> ToolCallRef {

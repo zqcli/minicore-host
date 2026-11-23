@@ -104,7 +104,9 @@ pub async fn invoke(tools: &LocalTools, name: &str, arguments: Value) -> Result<
             context(),
         )
         .await?;
-    let ToolExecutionOutcome::Completed(output) = output else {
+    // Failed operations keep the same structured body as completed ones.
+    let (ToolExecutionOutcome::Completed(output) | ToolExecutionOutcome::Failed(output)) = output
+    else {
         panic!("unexpected interaction")
     };
     Ok(serde_json::from_str(output.content().as_str()).unwrap())

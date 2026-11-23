@@ -18,13 +18,13 @@ static LOCAL_TOOL_SPECS: LazyLock<[ToolSpec; 5]> = LazyLock::new(|| {
     [
         spec(
             "read",
-            "Read an explicit line range from a UTF-8 workspace file, or an explicit sorted range of directory entries. No hidden output truncation.",
+            "Read a line range from a UTF-8 workspace file, or a sorted range of directory entries. Paths are workspace-relative. limit defaults to 2000; next_offset reports the remaining range, so nothing is hidden.",
             json!({
                 "path":{"type":"string"},
                 "offset":{"type":"integer","minimum":1,"default":1},
-                "limit":{"type":"integer","minimum":1,"description":"Number of lines or directory entries requested."}
+                "limit":{"type":"integer","minimum":1,"default":2000,"description":"Number of lines or directory entries requested."}
             }),
-            &["path", "limit"],
+            &["path"],
         ),
         spec(
             "edit",

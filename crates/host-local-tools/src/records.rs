@@ -68,6 +68,58 @@ pub struct CommandStream {
     pub output: OutputData,
     /// True only after a real EOF, not after a read failure or stopped reader.
     pub complete: bool,
+    /// Bytes left out of the middle of `output` in the model's copy. Owner
+    /// records always carry the complete output and leave this at zero.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub omitted_bytes: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+/// Bytes the model sees verbatim from each end of one stream.
+const MODEL_STREAM_EDGE: usize = 16 * 1024;
+
+impl CommandStream {
+    /// The head and tail of a long stream. A command's complete output stays
+    /// in its owner record; the model copy must not exhaust the context.
+    pub fn for_model(&self) -> Self {
+        let bytes = self.output.as_bytes();
+        if bytes.len() <= 2 * MODEL_STREAM_EDGE {
+            return self.clone();
+        }
+        let (head, tail) = match &self.output {
+            OutputData::Utf8(text) => {
+                let mut head = MODEL_STREAM_EDGE;
+                while !text.is_char_boundary(head) {
+                    head -= 1;
+                }
+                let mut tail = text.len() - MODEL_STREAM_EDGE;
+                while !text.is_char_boundary(tail) {
+                    tail += 1;
+                }
+                (head, tail)
+            }
+            OutputData::Bytes(bytes) => (MODEL_STREAM_EDGE, bytes.len() - MODEL_STREAM_EDGE),
+        };
+        let omitted = tail - head;
+        let mut kept = bytes[..head].to_vec();
+        if matches!(self.output, OutputData::Utf8(_)) {
+            kept.extend_from_slice(
+                format!(
+                    "\n[… {omitted} bytes omitted; redirect to a file and read it in ranges …]\n"
+                )
+                .as_bytes(),
+            );
+        }
+        kept.extend_from_slice(&bytes[tail..]);
+        Self {
+            output: kept.into(),
+            complete: self.complete,
+            omitted_bytes: omitted as u64,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -95,6 +147,16 @@ pub struct CommandResult {
     pub stderr: CommandStream,
     pub file_changes: CommandFileChanges,
     pub cleanup_errors: Vec<String>,
+}
+
+impl CommandResult {
+    pub fn for_model(&self) -> Self {
+        Self {
+            stdout: self.stdout.for_model(),
+            stderr: self.stderr.for_model(),
+            ..self.clone()
+        }
+    }
 }
 
 /// A capability already bound by the real Session owner to one Turn/execution.
@@ -139,5 +201,35 @@ impl LocalToolSink for NoopLocalToolSink {
     }
     fn command(&self, _: &ToolCallId, _: &CommandResult) -> Result<(), RecordError> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod model_copy_tests {
+    use super::*;
+
+    #[test]
+    fn long_streams_keep_head_and_tail_on_character_boundaries() {
+        let text = format!("{}{}", "开".repeat(20_000), "end");
+        let stream = CommandStream {
+            output: OutputData::Utf8(text.clone()),
+            complete: true,
+            omitted_bytes: 0,
+        };
+        let copy = stream.for_model();
+        let OutputData::Utf8(kept) = &copy.output else {
+            panic!("UTF-8 output stays text");
+        };
+        assert!(kept.starts_with("开开") && kept.ends_with("开end"));
+        assert!(kept.contains("bytes omitted"));
+        assert!(copy.omitted_bytes > 0);
+        assert!(kept.len() < 2 * MODEL_STREAM_EDGE + 200);
+        let short = CommandStream {
+            output: OutputData::Utf8("ok".into()),
+            complete: true,
+            omitted_bytes: 0,
+        };
+        assert_eq!(short.for_model(), short);
+        assert!(!serde_json::to_string(&short).unwrap().contains("omitted"));
     }
 }

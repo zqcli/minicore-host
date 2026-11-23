@@ -24,10 +24,16 @@ pub(crate) struct ReadInput {
     path: String,
     #[serde(default = "first")]
     offset: usize,
+    #[serde(default = "default_limit")]
     limit: usize,
 }
 fn first() -> usize {
     1
+}
+/// A page size, not a truncation: the result reports `next_offset` when more remain.
+pub(crate) const DEFAULT_READ_LIMIT: usize = 2000;
+fn default_limit() -> usize {
+    DEFAULT_READ_LIMIT
 }
 
 #[derive(Deserialize)]
@@ -80,7 +86,7 @@ impl Failure {
     fn result(self) -> Result<ToolExecutionOutcome, ToolError> {
         match self {
             Self::Control(error) => Err(error),
-            other => completed(json!({"status":"failed","error":other.value()})),
+            other => crate::failed(json!({"status":"failed","error":other.value()})),
         }
     }
 }
@@ -129,7 +135,7 @@ pub(crate) async fn read(
     context: ToolContext,
 ) -> Result<ToolExecutionOutcome, ToolError> {
     if input.offset == 0 || input.limit == 0 {
-        return Err(ToolError::InvalidInvocation);
+        return crate::rejected("invalid_arguments", "offset and limit must be at least 1");
     }
     let result =
         tokio::task::spawn_blocking(move || read_sync(&binding.workspace, input, &context))
@@ -426,9 +432,14 @@ fn mutate_sync(
                     return Err(Failure::Invalid("edit target is binary"));
                 }
                 let count = source.match_indices(&input.old_text).count();
-                if count == 0 || (count > 1 && !input.replace_all) {
+                if count == 0 {
                     return Err(Failure::Conflict(
-                        "edit requires exactly one match, or replace_all for multiple matches",
+                        "old_text was not found; read the file again and copy the exact text",
+                    ));
+                }
+                if count > 1 && !input.replace_all {
+                    return Err(Failure::Conflict(
+                        "old_text matches more than once; add surrounding context or set replace_all",
                     ));
                 }
                 let bytes = source
@@ -438,7 +449,9 @@ fn mutate_sync(
             }
             Mutation::Patch(input) => {
                 let FileSnapshot::Content(bytes) = &before else {
-                    return Err(Failure::Invalid("patch target does not exist"));
+                    return Err(Failure::Invalid(
+                        "apply_patch only updates an existing file; create new files with write",
+                    ));
                 };
                 let source = std::str::from_utf8(bytes)
                     .map_err(|_| Failure::Invalid("patch target is not UTF-8"))?;
@@ -519,7 +532,7 @@ fn mutate_sync(
     match result {
         Ok(value) => completed(value),
         Err(Failure::Control(error)) => Err(error),
-        Err(error) => completed(
+        Err(error) => crate::failed(
             json!({"status":"failed","write_outcome":if applied { "applied" } else { "not_applied" },"error":error.value()}),
         ),
     }
