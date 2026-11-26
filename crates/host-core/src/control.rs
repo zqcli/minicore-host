@@ -124,17 +124,50 @@ impl AccessKey {
     }
 }
 
+/// Live summary of authenticated network connections on this Host.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct NetworkStatus {
+    pub connections: usize,
+    pub operator_is_network: bool,
+}
+
 struct ConnectionIdentity {
     number: u64,
     network: bool,
     validity: tokio::sync::watch::Sender<bool>,
 }
 struct RegistryState {
-    network_key: Option<AccessKey>,
+    config_network_key: Option<AccessKey>,
+    override_network_key: Option<AccessKey>,
     next_number: u64,
     connections: HashMap<u64, Weak<ConnectionIdentity>>,
     operator: Option<u64>,
     revision: u64,
+}
+impl RegistryState {
+    fn effective_network_key(&self) -> Option<&AccessKey> {
+        self.override_network_key
+            .as_ref()
+            .or(self.config_network_key.as_ref())
+    }
+    fn network_status(&self) -> NetworkStatus {
+        let mut connections = 0usize;
+        let mut operator_is_network = false;
+        for (number, stored) in &self.connections {
+            if let Some(identity) = stored.upgrade()
+                && identity.network
+            {
+                connections += 1;
+                if self.operator == Some(*number) {
+                    operator_is_network = true;
+                }
+            }
+        }
+        NetworkStatus {
+            connections,
+            operator_is_network,
+        }
+    }
 }
 
 pub(crate) struct ConnectionRegistry {
@@ -143,6 +176,7 @@ pub(crate) struct ConnectionRegistry {
     incarnation: HostIncarnation,
     host: std::sync::OnceLock<Weak<crate::Host>>,
     state: Mutex<RegistryState>,
+    network_status: tokio::sync::watch::Sender<NetworkStatus>,
     // Admission fences, not a second lifecycle owner. Updated only by Host.
     host_phase: AtomicU8,
     execution_enabled: Arc<AtomicBool>,
@@ -160,6 +194,7 @@ impl ConnectionRegistry {
         })
     }
     pub(crate) fn new(host_id: HostId, incarnation: HostIncarnation) -> Arc<Self> {
+        let (network_status, _) = tokio::sync::watch::channel(NetworkStatus::default());
         Arc::new(Self {
             observation: crate::observation::ObservationHub::new(),
             host_id,
@@ -167,14 +202,23 @@ impl ConnectionRegistry {
             host: std::sync::OnceLock::new(),
             host_phase: AtomicU8::new(0),
             execution_enabled: Arc::new(AtomicBool::new(true)),
+            network_status,
             state: Mutex::new(RegistryState {
-                network_key: None,
+                config_network_key: None,
+                override_network_key: None,
                 next_number: 0,
                 connections: HashMap::new(),
                 operator: None,
                 revision: 0,
             }),
         })
+    }
+    pub(crate) fn network_status(&self) -> NetworkStatus {
+        let state = self.state.lock().expect("connection mutex poisoned");
+        state.network_status()
+    }
+    pub(crate) fn subscribe_network_status(&self) -> tokio::sync::watch::Receiver<NetworkStatus> {
+        self.network_status.subscribe()
     }
     pub(crate) fn connect(self: &Arc<Self>) -> Result<ConnectionHandle, Fault> {
         let mut state = self.state.lock().expect("connection mutex poisoned");
@@ -191,8 +235,7 @@ impl ConnectionRegistry {
     ) -> Result<ConnectionHandle, Fault> {
         let mut state = self.state.lock().expect("connection mutex poisoned");
         if !state
-            .network_key
-            .as_ref()
+            .effective_network_key()
             .is_some_and(|key| key.matches(supplied_key))
         {
             return Err(Fault::new(
@@ -201,7 +244,9 @@ impl ConnectionRegistry {
             ));
         }
         let connection = self.register(&mut state, true)?;
+        let status = state.network_status();
         drop(state);
+        self.network_status.send_replace(status);
         if connection.initial.can_operate {
             self.publish_control_change();
         }
@@ -209,13 +254,42 @@ impl ConnectionRegistry {
     }
     pub(crate) fn require_network_enabled(&self) -> Result<(), Fault> {
         let state = self.state.lock().expect("connection mutex poisoned");
-        if state.network_key.is_none() {
+        if state.effective_network_key().is_none() {
             return Err(Fault::new(
                 FaultKind::HostAccessInvalid,
                 "network access is not configured",
             ));
         }
         Ok(())
+    }
+    fn keys_equal(left: Option<&AccessKey>, right: Option<&AccessKey>) -> bool {
+        match (left, right) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.matches(&b.0),
+            _ => false,
+        }
+    }
+    fn revoke_network_connections(&self, state: &mut RegistryState) {
+        let mut released_operator = false;
+        let operator = state.operator;
+        state.connections.retain(|number, stored| {
+            if let Some(identity) = stored.upgrade() {
+                if !identity.network {
+                    return true;
+                }
+                identity.validity.send_replace(false);
+                self.observation.close_connection(identity.number);
+            }
+            released_operator |= operator == Some(*number);
+            false
+        });
+        if released_operator {
+            state.operator = None;
+            state.revision = state
+                .revision
+                .checked_add(1)
+                .expect("control revision exhausted");
+        }
     }
     /// The embedding owner prepares/validates configuration outside this lock.
     /// `publish` must only check versions and commit prepared state: no I/O,
@@ -231,40 +305,117 @@ impl ConnectionRegistry {
         if let Some(caller) = caller {
             self.check(&state, caller, true)?;
         }
-        let changed = match (&state.network_key, &candidate) {
-            (None, None) => false,
-            (Some(old), Some(new)) => !old.matches(&new.0),
-            _ => true,
-        };
         let result = publish()?;
+        let before_matches = {
+            let new_effective = state.override_network_key.as_ref().or(candidate.as_ref());
+            Self::keys_equal(state.effective_network_key(), new_effective)
+        };
+        state.config_network_key = candidate;
+        let changed = !before_matches;
         if changed {
-            state.network_key = candidate;
-            let mut released_operator = false;
-            let operator = state.operator;
-            state.connections.retain(|number, stored| {
-                if let Some(identity) = stored.upgrade() {
-                    if !identity.network {
-                        return true;
-                    }
-                    identity.validity.send_replace(false);
-                    self.observation.close_connection(identity.number);
-                }
-                released_operator |= operator == Some(*number);
-                false
-            });
-            if released_operator {
-                state.operator = None;
-                state.revision = state
-                    .revision
-                    .checked_add(1)
-                    .expect("control revision exhausted");
-            }
+            self.revoke_network_connections(&mut state);
         }
+        let status = state.network_status();
         drop(state);
         if changed {
+            self.network_status.send_replace(status);
             self.publish_control_change();
         }
         Ok(result)
+    }
+    /// Set or clear an embedded runtime network access key override.
+    /// When `Some`, this key takes precedence over `config_network_key` so
+    /// a `host.reload` without a configured key does not drop an active
+    /// embedded remote session.
+    pub(crate) fn set_network_override(&self, candidate: Option<String>) -> Result<(), Fault> {
+        let candidate = candidate.map(AccessKey::new).transpose()?;
+        let mut state = self.state.lock().expect("connection mutex poisoned");
+        let before_matches = {
+            let new_effective = candidate.as_ref().or(state.config_network_key.as_ref());
+            Self::keys_equal(state.effective_network_key(), new_effective)
+        };
+        state.override_network_key = candidate;
+        let changed = !before_matches;
+        if changed {
+            self.revoke_network_connections(&mut state);
+        }
+        let status = state.network_status();
+        drop(state);
+        if changed {
+            self.network_status.send_replace(status);
+            self.publish_control_change();
+        }
+        Ok(())
+    }
+    /// Release operator control from a trusted local connection without closing
+    /// the connection or its subscriptions.
+    pub(crate) fn release_operator(&self, caller: &CallerContext) -> Result<(), Fault> {
+        let mut state = self.state.lock().expect("connection mutex poisoned");
+        self.check(&state, caller, false)?;
+        let identity = caller.identity.as_ref().ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostAccessInvalid,
+                "only a local connection can release operator control",
+            )
+        })?;
+        if identity.network {
+            return Err(Fault::new(
+                FaultKind::HostAccessInvalid,
+                "only a local connection can release operator control",
+            ));
+        }
+        let released = state.operator == Some(identity.number);
+        if released {
+            state.operator = None;
+            state.revision = state
+                .revision
+                .checked_add(1)
+                .expect("control revision exhausted");
+        }
+        let status = state.network_status();
+        drop(state);
+        if released {
+            self.network_status.send_replace(status);
+            self.publish_control_change();
+        }
+        Ok(())
+    }
+    /// Reclaim operator control for a trusted local connection when no other
+    /// connection holds operator control.
+    pub(crate) fn reclaim_operator(&self, caller: &CallerContext) -> Result<(), Fault> {
+        let mut state = self.state.lock().expect("connection mutex poisoned");
+        self.check(&state, caller, false)?;
+        let identity = caller.identity.as_ref().ok_or_else(|| {
+            Fault::new(
+                FaultKind::HostAccessInvalid,
+                "only a local connection can reclaim operator control",
+            )
+        })?;
+        if identity.network {
+            return Err(Fault::new(
+                FaultKind::HostAccessInvalid,
+                "only a local connection can reclaim operator control",
+            ));
+        }
+        if state.operator == Some(identity.number) {
+            return Ok(());
+        }
+        if state.operator.is_some() {
+            return Err(Fault::new(
+                FaultKind::HostAccessReadOnly,
+                "another connection currently holds operator control",
+            ));
+        }
+        state.operator = Some(identity.number);
+        state.revision = state
+            .revision
+            .checked_add(1)
+            .expect("control revision exhausted");
+        let status = state.network_status();
+        drop(state);
+        self.network_status.send_replace(status);
+        self.publish_control_change();
+        Ok(())
     }
     fn publish_control_change(&self) {
         if let Some(host) = self.host.get().and_then(Weak::upgrade) {
@@ -336,7 +487,11 @@ impl ConnectionRegistry {
                 .checked_add(1)
                 .expect("control revision exhausted");
         }
+        let status = identity.network.then(|| state.network_status());
         drop(state);
+        if let Some(status) = status {
+            self.network_status.send_replace(status);
+        }
         if released_operator {
             self.publish_control_change();
         }
@@ -678,5 +833,81 @@ mod network_tests {
                 .kind(),
             Some(FaultKind::HostAccessInvalid)
         );
+    }
+
+    #[test]
+    fn local_operator_handoff_reclaim_and_override_survive_config_reload() {
+        let registry = registry();
+        let local = registry.connect().unwrap();
+        assert!(local.initial_info().can_operate);
+        assert_eq!(
+            registry.network_status(),
+            NetworkStatus {
+                connections: 0,
+                operator_is_network: false,
+            }
+        );
+
+        // Set embedded runtime override key and release local operator.
+        registry.set_network_override(Some(FIRST.into())).unwrap();
+        registry.release_operator(&local.caller()).unwrap();
+        assert_eq!(
+            registry
+                .accept(&local.caller(), || Ok(()))
+                .unwrap_err()
+                .kind(),
+            Some(FaultKind::HostAccessReadOnly)
+        );
+
+        // Remote client connects and receives operator control.
+        let remote = registry.connect_network(FIRST).unwrap();
+        assert!(remote.initial_info().can_operate);
+        assert_eq!(
+            registry.network_status(),
+            NetworkStatus {
+                connections: 1,
+                operator_is_network: true,
+            }
+        );
+
+        // A config reload publishing `None` keeps the runtime override active.
+        registry.publish_network(None, None, || Ok(())).unwrap();
+        assert!(registry.accept(&remote.caller(), || Ok(())).is_ok());
+
+        // Local cannot reclaim while remote still holds operator.
+        assert_eq!(
+            registry
+                .reclaim_operator(&local.caller())
+                .unwrap_err()
+                .kind(),
+            Some(FaultKind::HostAccessReadOnly)
+        );
+        // Network connection cannot call release_operator.
+        assert_eq!(
+            registry
+                .release_operator(&remote.caller())
+                .unwrap_err()
+                .kind(),
+            Some(FaultKind::HostAccessInvalid)
+        );
+
+        // Clearing runtime override kicks remote and allows local to reclaim.
+        registry.set_network_override(None).unwrap();
+        assert_eq!(
+            registry.network_status(),
+            NetworkStatus {
+                connections: 0,
+                operator_is_network: false,
+            }
+        );
+        assert_eq!(
+            registry
+                .read(&remote.caller(), || Ok(()))
+                .unwrap_err()
+                .kind(),
+            Some(FaultKind::HostAccessInvalid)
+        );
+        registry.reclaim_operator(&local.caller()).unwrap();
+        assert!(registry.accept(&local.caller(), || Ok(())).is_ok());
     }
 }

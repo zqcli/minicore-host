@@ -106,6 +106,48 @@ impl HostClient {
             Connection::Rpc(rpc) => rpc.initial_info(),
         }
     }
+    /// Return the embedded `Host` when this client is an in-process connection.
+    pub fn host(&self) -> Option<Arc<Host>> {
+        match &self.connection {
+            Connection::Local(local) => Some(Arc::clone(&local.host)),
+            Connection::Rpc(_) => None,
+        }
+    }
+    /// Release operator control for an in-process local connection without
+    /// closing the connection or its event subscriptions.
+    pub fn release_operator(&self) -> Result<(), CallError> {
+        match &self.connection {
+            Connection::Local(local) => local
+                .host
+                .release_operator(&local.handle.caller())
+                .map_err(CallError::Business),
+            Connection::Rpc(_) => Err(CallError::Business(Fault::new(
+                FaultKind::HostAccessInvalid,
+                "operator release is only available on an in-process connection",
+            ))),
+        }
+    }
+    /// Reclaim operator control for an in-process local connection when no
+    /// other connection currently holds operator control.
+    pub fn reclaim_operator(&self) -> Result<(), CallError> {
+        match &self.connection {
+            Connection::Local(local) => local
+                .host
+                .reclaim_operator(&local.handle.caller())
+                .map_err(CallError::Business),
+            Connection::Rpc(_) => Err(CallError::Business(Fault::new(
+                FaultKind::HostAccessInvalid,
+                "operator reclaim is only available on an in-process connection",
+            ))),
+        }
+    }
+    /// Live summary of authenticated network clients when connected in-process.
+    pub fn network_status(&self) -> minicore_host_core::NetworkStatus {
+        match &self.connection {
+            Connection::Local(local) => local.host.network_status(),
+            Connection::Rpc(_) => minicore_host_core::NetworkStatus::default(),
+        }
+    }
     /// End this actual connection, including its clones and pending observations.
     /// Already accepted business work remains with the Host and direct owners.
     pub fn close(&self) {

@@ -32,4 +32,4 @@ pub use operations::SUPPORTED_METHODS;
 pub use output::OutputBuffer;
 pub use rpc::serve_stdio;
 pub use tokio_rustls::rustls as tls;
-pub use wss::serve_wss;
+pub use wss::{load_tls_server_config, serve_ws, serve_wss};

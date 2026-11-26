@@ -93,6 +93,27 @@ fn protocol(message: &str) -> CallError {
     }
 }
 
+/// Load a PEM certificate chain and private key into a rustls `ServerConfig`.
+pub fn load_tls_server_config(
+    cert: &std::path::Path,
+    key: &std::path::Path,
+) -> Result<Arc<ServerConfig>, &'static str> {
+    use tokio_rustls::rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+    let certs = CertificateDer::pem_file_iter(cert)
+        .map_err(|_| "cannot read TLS certificate chain")?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "invalid TLS certificate chain")?;
+    if certs.is_empty() {
+        return Err("TLS certificate chain is empty");
+    }
+    let key = PrivateKeyDer::from_pem_file(key).map_err(|_| "cannot read TLS private key")?;
+    ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(certs, key)
+        .map(Arc::new)
+        .map_err(|_| "TLS certificate and key are invalid or mismatched")
+}
+
 /// Serve authenticated WSS over a listener and TLS configuration supplied by a
 /// trusted embedding process. Host network access must be explicitly configured
 /// before this call. This does not assemble a process, load credentials, expose
@@ -128,6 +149,34 @@ pub async fn serve_wss(
                 // A peer's malformed handshake or disconnect belongs to that
                 // connection. It never disables access for other peers.
                 let _connection_result = joined.map_err(|_| connection_error("WSS connection task terminated unexpectedly"))?;
+            }
+        }
+    }
+}
+
+/// Serve authenticated plain WebSocket over a TCP listener (IPv4 or IPv6),
+/// intended for loopback or reverse-proxy / edge TLS termination (such as
+/// Cloudflare orange cloud terminating WSS to a local WS origin). Host network
+/// access must be explicitly configured before this call; every connection
+/// still requires `initialize { "access_key": "..." }`.
+pub async fn serve_ws(host: Arc<Host>, listener: TcpListener) -> Result<(), CallError> {
+    host.require_network_access()?;
+    let mut connections = JoinSet::new();
+    loop {
+        tokio::select! {
+            accepted = listener.accept() => {
+                let (socket, _) = accepted.map_err(connection_error)?;
+                let host = Arc::clone(&host);
+                connections.spawn(async move {
+                    let socket = accept_async_with_config(socket, Some(websocket_config()))
+                        .await
+                        .map_err(websocket_error)?;
+                    let (reader, writer) = split(socket);
+                    serve_frames(host, reader, writer, Initialization::Network).await
+                });
+            }
+            Some(joined) = connections.join_next(), if !connections.is_empty() => {
+                let _connection_result = joined.map_err(|_| connection_error("WS connection task terminated unexpectedly"))?;
             }
         }
     }

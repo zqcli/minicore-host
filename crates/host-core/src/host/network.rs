@@ -1,6 +1,6 @@
 //! Host-owned network authentication and configuration publication boundary.
 use super::Host;
-use crate::control::{CallerContext, ConnectionHandle};
+use crate::control::{CallerContext, ConnectionHandle, NetworkStatus};
 use minicore_host_protocol::Fault;
 
 impl Host {
@@ -12,6 +12,38 @@ impl Host {
     /// The process must finish configuration before starting a WSS listener.
     pub fn configure_network_access(&self, access_key: Option<String>) -> Result<(), Fault> {
         self.access.publish_network(None, access_key, || Ok(()))
+    }
+
+    /// Set or clear an embedded runtime network access override (e.g. TUI `/remote`).
+    /// While `Some`, this key takes precedence over `host.json`'s configured key so
+    /// `host.reload` does not disconnect an active embedded remote session.
+    /// Passing `None` clears the override and revokes network connections if the
+    /// effective access key changes.
+    pub fn set_network_access_override(&self, access_key: Option<String>) -> Result<(), Fault> {
+        self.access.set_network_override(access_key)
+    }
+
+    /// Release operator control from a trusted local connection so an incoming
+    /// connection (such as a remote Web client) can acquire operator control.
+    pub fn release_operator(&self, caller: &CallerContext) -> Result<(), Fault> {
+        self.access.release_operator(caller)
+    }
+
+    /// Reclaim operator control for a trusted local connection once no other
+    /// connection holds operator control.
+    pub fn reclaim_operator(&self, caller: &CallerContext) -> Result<(), Fault> {
+        self.access.reclaim_operator(caller)
+    }
+
+    /// Return the current count of live authenticated network connections and
+    /// whether one of them holds operator control.
+    pub fn network_status(&self) -> NetworkStatus {
+        self.access.network_status()
+    }
+
+    /// Subscribe to live updates of authenticated network connection status.
+    pub fn subscribe_network_status(&self) -> tokio::sync::watch::Receiver<NetworkStatus> {
+        self.access.subscribe_network_status()
     }
 
     /// Trusted compatibility hook for embedding-owned publication.

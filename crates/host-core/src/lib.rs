@@ -36,7 +36,7 @@ pub use backend::{
     HistoryBackend, HistoryReadFuture, JournalHistory, LoadFuture, MemoryHistory, SaveFuture,
 };
 mod resources;
-pub use control::{CallerContext, ConnectionHandle};
+pub use control::{CallerContext, ConnectionHandle, NetworkStatus};
 pub use host::{Host, HostProcessControl, HostProcessSnapshot, WorkspaceSnapshot};
 pub use resources::{
     BoundCompactionResources, BoundResources, CompactionResourceFuture, ResourceFuture,
