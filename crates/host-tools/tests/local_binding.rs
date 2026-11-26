@@ -525,14 +525,15 @@ async fn rejected_candidate_cannot_execute_prepared_local_tool() {
 async fn registry_selection_restricts_both_model_declarations_and_actual_execution() {
     let root = TemporaryDirectory::new();
     let resources = resources(
-        vec![
-            Some(Call {
-                id: "unselected",
-                name: "write",
-                arguments: json!({"path":"forbidden","content":"never"}),
-            }),
-            None,
-        ],
+        (0..4)
+            .map(|_| {
+                Some(Call {
+                    id: "unselected",
+                    name: "write",
+                    arguments: json!({"path":"forbidden","content":"never"}),
+                })
+            })
+            .collect(),
         false,
         false,
     );

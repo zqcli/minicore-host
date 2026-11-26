@@ -170,7 +170,7 @@ async fn real_partial_is_saved_as_partial_without_fabricated_assistant() {
     let result = state.completed.values().next().unwrap();
     assert_eq!(result.partials.len(), 1);
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
-    assert!(state.failure_paused);
+    assert!(!state.failure_paused);
 }
 
 #[tokio::test]

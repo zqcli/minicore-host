@@ -10,6 +10,7 @@ mod schema;
 mod scope;
 
 pub use environment::{CommandEnvironment, InheritCommandEnvironment};
+pub use files::{ResolvedPolicyPath, resolve_policy_path};
 pub use records::*;
 pub use schema::local_tool_specs;
 pub use scope::LocalToolCompletion;

@@ -2,17 +2,211 @@ use crate::action::{invalid, validate_name};
 use minicore_host_protocol::*;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
+/// Partial compaction settings for `agent` tool calls; omitted fields inherit from base.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompactionSettingsPatch {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub enabled: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub trigger_percent: Option<u8>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub target_percent: Option<u8>,
+}
+impl CompactionSettingsPatch {
+    pub fn apply_to(
+        &self,
+        base: &CompactionSettings,
+    ) -> Result<CompactionSettings, ValidationError> {
+        let candidate = CompactionSettings {
+            enabled: self.enabled.unwrap_or(base.enabled),
+            trigger_percent: self.trigger_percent.unwrap_or(base.trigger_percent),
+            target_percent: self.target_percent.unwrap_or(base.target_percent),
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+}
+
+/// Partial execution settings for `agent` tool calls; omitted fields inherit from base.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ExecutionSettingsPatch {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub approval: Option<ApprovalMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub prompt_timeout_ms: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub model_timeout_ms: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub policy_timeout_ms: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub tool_timeout_ms: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub model_retry_attempts: Option<u8>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub model_retry_base_delay_ms: Option<u64>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub compaction: Option<CompactionSettingsPatch>,
+}
+impl ExecutionSettingsPatch {
+    pub fn apply_to(&self, base: &ExecutionSettings) -> Result<ExecutionSettings, ValidationError> {
+        let compaction = match &self.compaction {
+            Some(patch) => patch.apply_to(&base.compaction)?,
+            None => base.compaction.clone(),
+        };
+        let candidate = ExecutionSettings {
+            approval: self.approval.unwrap_or(base.approval),
+            prompt_timeout_ms: self.prompt_timeout_ms.unwrap_or(base.prompt_timeout_ms),
+            model_timeout_ms: self.model_timeout_ms.unwrap_or(base.model_timeout_ms),
+            policy_timeout_ms: self.policy_timeout_ms.unwrap_or(base.policy_timeout_ms),
+            tool_timeout_ms: self.tool_timeout_ms.unwrap_or(base.tool_timeout_ms),
+            model_retry_attempts: self
+                .model_retry_attempts
+                .unwrap_or(base.model_retry_attempts),
+            model_retry_base_delay_ms: self
+                .model_retry_base_delay_ms
+                .unwrap_or(base.model_retry_base_delay_ms),
+            compaction,
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+}
+
+/// Settings patch accepted by the `agent` tool; allows partial `execution` overrides.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSettingsPatch {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub role: Option<Role>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub instructions: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub model: Option<ModelRef>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub reasoning: Option<ReasoningPreference>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub tools: Option<Vec<ToolBinding>>,
+    #[serde(default, skip_serializing_if = "NullablePatch::is_unchanged")]
+    pub workspace: NullablePatch<WorkspaceRef>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub execution: Option<ExecutionSettingsPatch>,
+}
+impl AgentSettingsPatch {
+    pub fn is_empty(&self) -> bool {
+        self.role.is_none()
+            && self.instructions.is_none()
+            && self.model.is_none()
+            && self.reasoning.is_none()
+            && self.tools.is_none()
+            && self.workspace.is_unchanged()
+            && self.execution.is_none()
+    }
+    pub fn resolve(
+        &self,
+        base_execution: &ExecutionSettings,
+    ) -> Result<SessionConfigPatch, ValidationError> {
+        let execution = self
+            .execution
+            .as_ref()
+            .map(|patch| patch.apply_to(base_execution))
+            .transpose()?;
+        Ok(SessionConfigPatch {
+            role: self.role.clone(),
+            instructions: self.instructions.clone(),
+            model: self.model.clone(),
+            reasoning: self.reasoning,
+            tools: self.tools.clone(),
+            workspace: self.workspace.clone(),
+            execution,
+        })
+    }
+}
+
 /// `settings` and config changes use exactly the owner's allowed values.
 /// A metadata field is parsed separately so unknown config fields remain errors.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct AgentChanges {
     pub name: Option<String>,
-    pub settings: SessionConfigPatch,
+    pub settings: AgentSettingsPatch,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionChanges {
     pub title: NullablePatch<String>,
-    pub settings: SessionConfigPatch,
+    pub settings: AgentSettingsPatch,
 }
 impl AgentChanges {
     pub fn validate(&self) -> Result<(), Fault> {
@@ -22,6 +216,9 @@ impl AgentChanges {
         if let Some(name) = &self.name {
             validate_name(name)?;
         }
+        self.settings
+            .resolve(&ExecutionSettings::default())
+            .map_err(|error| invalid(error.to_string()))?;
         Ok(())
     }
 }
@@ -33,6 +230,9 @@ impl SessionChanges {
         if let NullablePatch::Set(title) = &self.title {
             validate_name(title)?;
         }
+        self.settings
+            .resolve(&ExecutionSettings::default())
+            .map_err(|error| invalid(error.to_string()))?;
         Ok(())
     }
 }
@@ -141,9 +341,13 @@ pub struct SessionUpdateCandidate {
 impl AgentConfigSnapshot {
     pub fn apply(&self, changes: &AgentChanges) -> Result<AgentUpdateCandidate, Fault> {
         changes.validate()?;
+        let settings = changes
+            .settings
+            .resolve(&self.config.session_defaults.execution)
+            .map_err(|error| Fault::new(FaultKind::AgentConfigInvalid, error.to_string()))?;
         Ok(AgentUpdateCandidate {
             expected_revision: self.config_revision,
-            config: agent_config_from_settings(&self.config, &changes.settings)?,
+            config: agent_config_from_settings(&self.config, &settings)?,
             name: changes.name.clone().unwrap_or_else(|| self.name.clone()),
         })
     }
@@ -151,11 +355,15 @@ impl AgentConfigSnapshot {
 impl SessionConfigSnapshot {
     pub fn apply(&self, changes: &SessionChanges) -> Result<SessionUpdateCandidate, Fault> {
         changes.validate()?;
+        let settings = changes
+            .settings
+            .resolve(&self.config.execution)
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
         Ok(SessionUpdateCandidate {
             expected_revision: self.config_revision,
             config: self
                 .config
-                .apply_patch(&changes.settings)
+                .apply_patch(&settings)
                 .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?,
             title: match &changes.title {
                 NullablePatch::Unchanged => self.title.clone(),

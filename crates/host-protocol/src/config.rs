@@ -65,7 +65,6 @@ pub enum ApprovalMode {
     Auto,
     #[default]
     Ask,
-    ReadOnly,
 }
 
 validated_dto!(Role, RoleWire, "RoleWire" {
@@ -154,7 +153,7 @@ impl Default for ExecutionSettings {
             model_timeout_ms: 600_000,
             policy_timeout_ms: 30_000,
             tool_timeout_ms: 1_800_000,
-            model_retry_attempts: 2,
+            model_retry_attempts: 4,
             model_retry_base_delay_ms: 100,
             compaction: CompactionSettings::default(),
         }

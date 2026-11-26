@@ -40,9 +40,12 @@ impl AgentTool {
                 .await
                 .map_err(Into::into),
             AgentAction::Send(request) => {
+                // All inter-agent sends use steer so messages to an active
+                // Session are never trapped in next_turn behind a long Turn.
+                let _ = request.mode;
                 let input = MessageInput {
                     message_id: MessageId::new().map_err(id_fault)?,
-                    mode: request.mode,
+                    mode: MessageMode::Steer,
                     text: request.text,
                     in_reply_to: request.in_reply_to,
                 };
@@ -324,7 +327,7 @@ impl AgentTool {
         }
         let changes = SessionChanges {
             title: NullablePatch::Set(title),
-            settings: SessionConfigPatch::default(),
+            settings: AgentSettingsPatch::default(),
         };
         if let Ok(candidate) = snapshot.apply(&changes) {
             let _ = self.port.update_session(child.clone(), candidate).await;
@@ -333,17 +336,21 @@ impl AgentTool {
     /// A delegated Session starts from the caller's current execution policy
     /// and workspace, so a child cannot silently block on approvals its parent
     /// no longer asks for. The same Agent also keeps the caller's model and
-    /// reasoning. Explicit settings always win.
+    /// reasoning. Explicit settings always win; partial execution overrides
+    /// merge onto the caller's execution settings.
     fn inherited(
         &self,
         same_agent: bool,
-        explicit: Option<SessionConfigPatch>,
+        explicit: Option<AgentSettingsPatch>,
     ) -> Result<SessionConfigPatch, Fault> {
         let caller = self
             .port
             .session_snapshot(&self.port.source().session)?
             .config;
-        let explicit = explicit.unwrap_or_default();
+        let explicit = explicit
+            .unwrap_or_default()
+            .resolve(&caller.execution)
+            .map_err(|error| Fault::new(FaultKind::SessionConfigInvalid, error.to_string()))?;
         Ok(SessionConfigPatch {
             model: explicit.model.or(same_agent.then_some(caller.model)),
             reasoning: explicit
@@ -358,21 +365,17 @@ impl AgentTool {
         })
     }
     async fn wait(&self, request: WaitAction, context: ToolContext) -> Result<Value, ToolFailure> {
-        let business_deadline = request
-            .timeout_ms
-            .map(|ms| {
-                Instant::now()
-                    .checked_add(Duration::from_millis(ms))
-                    .ok_or(ToolFailure::Invalid)
-            })
-            .transpose()?;
-        let deadline =
-            business_deadline.map_or(context.deadline, |business| business.min(context.deadline));
+        const DEFAULT_WAIT_TIMEOUT_MS: u64 = 60_000;
+        let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS);
+        let business_deadline = Instant::now()
+            .checked_add(Duration::from_millis(timeout_ms))
+            .ok_or(ToolFailure::Invalid)?;
+        let deadline = business_deadline.min(context.deadline);
         tokio::select! {
             biased;
             _=context.cancellation.cancelled()=>Err(ToolFailure::Cancelled),
             _=tokio::time::sleep_until(deadline.into())=>{
-                if business_deadline.is_some_and(|business|business<=context.deadline) { Ok(json!({"status":"timed_out"})) }
+                if business_deadline <= context.deadline { Ok(json!({"status":"timed_out"})) }
                 else { Err(ToolFailure::TimedOut) }
             },
             result=self.port.wait_input()=>{result?;Ok(json!({"status":"input_available"}))}

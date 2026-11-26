@@ -96,7 +96,7 @@ async fn runtime_nonzero_exit_preserves_complete_stdout_stderr_and_side_effects_
 }
 
 #[tokio::test]
-async fn large_output_reaches_the_model_as_marked_head_and_tail() {
+async fn large_output_reaches_the_model_as_marked_head_and_tail_with_spilled_log() {
     let (_root, tools, _) = fixture().await;
     let output = invoke(
         &tools,
@@ -106,22 +106,36 @@ async fn large_output_reaches_the_model_as_marked_head_and_tail() {
     .await
     .unwrap();
     // Records keep every byte (see the streaming test); the model's copy
-    // says how much of the middle it omits.
+    // keeps 8 KiB head + 8 KiB tail and spills the complete output to a log file.
     let data = output["stdout"]["output"]["data"].as_str().unwrap();
-    assert!(data.len() < 40_000);
+    assert!(data.len() < 18_000, "model copy len={}", data.len());
     assert!(data.starts_with("xxxx") && data.ends_with("xxxx"));
     assert!(data.contains("bytes omitted"));
-    assert!(output["stdout"]["omitted_bytes"].as_u64().unwrap() > 60_000);
+    assert!(output["stdout"]["omitted_bytes"].as_u64().unwrap() > 80_000);
+    let saved_path = output["stdout"]["full_output_path"]
+        .as_str()
+        .expect("truncated stream must spill full output");
+    assert!(data.contains(saved_path));
+    assert_eq!(fs::read(saved_path).unwrap().len(), 100_000);
+    // The spilled file is directly inspectable via read.
+    let inspected = invoke(&tools, "read", json!({"path": saved_path, "limit": 5}))
+        .await
+        .unwrap();
+    assert_eq!(inspected["status"], "ok");
+    assert_eq!(inspected["text"].as_str().unwrap().len(), 100_000);
+    let _ = fs::remove_file(saved_path);
+
     assert_eq!(
         output["stderr"]["output"],
         json!({"encoding":"bytes","data":[255,0]})
     );
     assert_eq!(output["stderr"]["complete"], true);
+    assert!(output["stderr"].get("full_output_path").is_none());
     tools.finish().await;
 }
 
 #[tokio::test]
-async fn bound_workspace_and_relative_cwd_never_change_process_cwd() {
+async fn bound_workspace_and_external_cwd_never_change_process_cwd() {
     let (root, tools, _) = fixture().await;
     let process_cwd = std::env::current_dir().unwrap();
     fs::create_dir(root.path().join("sub")).unwrap();
@@ -138,10 +152,33 @@ async fn bound_workspace_and_relative_cwd_never_change_process_cwd() {
         fs::canonicalize(root.path().join("sub")).unwrap()
     );
     assert_eq!(std::env::current_dir().unwrap(), process_cwd);
+
+    // Cross-workspace cwd (relative '..' or absolute) is supported at the tool boundary.
+    let parent_out = invoke(&tools, "bash", json!({"command":command,"cwd":".."}))
+        .await
+        .unwrap();
+    assert_eq!(parent_out["status"], "exited");
     assert_eq!(
-        invoke(&tools, "bash", json!({"command":"true","cwd":"../"}))
-            .await
-            .unwrap()["status"],
+        fs::canonicalize(
+            parent_out["stdout"]["output"]["data"]
+                .as_str()
+                .unwrap()
+                .trim()
+        )
+        .unwrap(),
+        fs::canonicalize(root.path().parent().unwrap()).unwrap()
+    );
+    assert_eq!(std::env::current_dir().unwrap(), process_cwd);
+
+    // Non-existent cwd still fails cleanly.
+    assert_eq!(
+        invoke(
+            &tools,
+            "bash",
+            json!({"command":"true","cwd":"nonexistent-dir-xyz"})
+        )
+        .await
+        .unwrap()["status"],
         "failed"
     );
     tools.finish().await;

@@ -71,7 +71,7 @@ impl Default for ExecutionOptions {
             model_timeout: Duration::from_secs(10 * 60),
             policy_timeout: Duration::from_secs(30),
             tool_timeout: Duration::from_secs(30 * 60),
-            model_retry_attempts: 2,
+            model_retry_attempts: 4,
             model_retry_base_delay: Duration::from_millis(100),
         }
     }

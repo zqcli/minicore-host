@@ -233,7 +233,19 @@ pub(super) fn take_batch(
 ) -> Vec<QueuedInput> {
     let mut batch = state.next_step.drain(..).collect::<Vec<_>>();
     if new_turn && let Some(input) = state.next_turn.pop_front() {
+        let is_agent = matches!(input.source, MessageSource::Agent { .. });
         batch.push(input);
+        if is_agent {
+            while state
+                .next_turn
+                .front()
+                .is_some_and(|next| matches!(next.source, MessageSource::Agent { .. }))
+            {
+                if let Some(next) = state.next_turn.pop_front() {
+                    batch.push(next);
+                }
+            }
+        }
     }
     for input in &batch {
         mark_message(

@@ -312,9 +312,22 @@ impl SessionController {
                 (batch, records, context)
             };
             diagnostic::emit(records);
-            self.run_turn(turn_id, batch, resources)
+            let outcome = self
+                .run_turn(turn_id, batch, resources)
                 .instrument(context.span())
                 .await;
+            if outcome == TurnOutcome::Failed {
+                let mut state = self.state.lock().expect("Session mutex poisoned");
+                let previous = state.lifecycle;
+                Self::finish_memory_close(&mut state);
+                state.driver_running = false;
+                self.publish(&mut state);
+                let closed = self.closed_record(&state, previous);
+                drop(state);
+                diagnostic::emit(closed);
+                self.handoff_delegation_owned();
+                return;
+            }
         }
     }
     pub(super) fn preparation_failed(&self, fault: Fault) {
@@ -354,7 +367,7 @@ impl SessionController {
         turn_id: TurnId,
         batch: Vec<QueuedInput>,
         resources: BoundResources,
-    ) {
+    ) -> TurnOutcome {
         let records = {
             let mut state = self.state.lock().expect("Session mutex poisoned");
             let records = self.accept_bound_inputs(&mut state, batch);
@@ -382,6 +395,7 @@ impl SessionController {
             )
         });
         self.finish_turn(&turn_id, outcome, fault).await;
+        outcome
     }
 
     async fn run_steps(
@@ -759,9 +773,6 @@ impl SessionController {
             return;
         };
         let newly_claimed = active.claim_terminal(outcome, fault);
-        if active.info.outcome == Some(TurnOutcome::Failed) {
-            state.failure_paused = true;
-        }
         self.publish(&mut state);
         let record = self.terminal_claim_record(&state, newly_claimed);
         let scheduling = self.scheduling_record(&state, previous, "finalizing", None);

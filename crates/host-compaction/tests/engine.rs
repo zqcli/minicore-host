@@ -809,7 +809,7 @@ async fn provider_failure_preserves_real_error_usage_and_never_retries() {
         };
         assert_eq!(error.error, CompactionError::Model(expected));
         assert_eq!(error.utility_usage[0].usage, started.then_some(usage));
-        assert_eq!(model.requests.lock().unwrap().len(), 1);
+        assert_eq!(model.requests.lock().unwrap().len(), 4);
     }
 }
 

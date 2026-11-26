@@ -94,10 +94,12 @@ by editing `host.json` and calling `host.reload`. A browser's selected
 path is a path on the Host machine.
 
 Session `execution.approval` defaults to `"ask"`, including when omitted.
-Mutating calls request approval with `allow_once`/`deny` answers; builtin
-`read` and `agent` inspect/wait do not. `"auto"` and `"read_only"` are explicit
-alternatives. The policy stays frozen through the current Turn. See
-[resource assembly](../host-resources/README.md) for policy and binding details.
+Mutating calls and outside-workspace calls request approval with
+`allow_once`/`deny` answers; builtin `read` (inside the workspace or spilled
+tool output logs) and `agent` inspect/wait do not. `"auto"` permits inside- and
+outside-workspace tool calls without approval prompts. The policy stays frozen
+through the current Turn. See [resource assembly](../host-resources/README.md)
+for policy and binding details.
 
 Production bash children omit configured model/network credential environment
 names, including previously published names for this Host lifetime. This is

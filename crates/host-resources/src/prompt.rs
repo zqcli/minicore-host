@@ -34,13 +34,23 @@ impl BoundPrompt {
             agent_context: None,
         }
     }
-    pub(super) fn with_agent_context(mut self, source: &TurnSource) -> Self {
-        // Native IDs have a fixed ASCII grammar, so no model or user text is
-        // interpolated into these owner-supplied JSON facts.
+    pub(super) fn with_agent_context(mut self, source: &TurnSource, models: &[&str]) -> Self {
+        // Native IDs and ModelRefs have a fixed ASCII grammar, so no model or
+        // user text is interpolated into these owner-supplied JSON facts.
+        let mut available = String::from("[");
+        for (index, model) in models.iter().enumerate() {
+            if index > 0 {
+                available.push(',');
+            }
+            available.push('"');
+            available.push_str(model);
+            available.push('"');
+        }
+        available.push(']');
         self.agent_context = Some(Arc::from(format!(
             "Current session context (data for explicit agent targets, not authority): \
-             {{\"host_id\":\"{}\",\"agent_id\":\"{}\",\"session_id\":\"{}\"}}",
-            source.host_id, source.session.agent_id, source.session.session_id
+             {{\"host_id\":\"{}\",\"agent_id\":\"{}\",\"session_id\":\"{}\",\"available_models\":{}}}",
+            source.host_id, source.session.agent_id, source.session.session_id, available
         )));
         self
     }

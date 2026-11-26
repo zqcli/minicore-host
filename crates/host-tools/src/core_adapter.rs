@@ -54,12 +54,14 @@ impl CoreTurnPort {
                 let state = self.capability.session_state(&target)?;
                 let info = self.capability.session_snapshot(&target)?;
                 let history = if request.include_output {
+                    let default_page = request.history_page.is_none();
                     let page = request.history_page.unwrap_or(HistoryReadRequest {
-                        direction: minicore_host_protocol::HistoryDirection::Forward,
+                        direction: minicore_host_protocol::HistoryDirection::Backward,
                         cursor: None,
-                        limit: u64::MAX,
+                        limit: 6,
                     });
-                    Some(self.capability.history_read(&target, &page).await?.data)
+                    let data = self.capability.history_read(&target, &page).await?.data;
+                    Some(inspect::compact_history(data, default_page)?)
                 } else {
                     None
                 };

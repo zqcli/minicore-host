@@ -1,8 +1,7 @@
-use super::apply::{HunkRange, PatchContent, PatchLineKind, ResolvedHunk, add, sub};
-use minicore_host_runtime::tools::{ToolContext, ToolError};
+use super::apply::{HunkRange, PatchContent, PatchError, PatchLineKind, ResolvedHunk, add, sub};
+use minicore_host_runtime::tools::ToolContext;
 
 use crate::check;
-use std::path::{Component, Path};
 
 pub(super) const NO_NEWLINE_AT_END: &str = "\\ No newline at end of file";
 
@@ -10,33 +9,43 @@ pub(super) fn parse_unified_patch<'a>(
     path: &str,
     patch: &'a str,
     context: &ToolContext,
-) -> Result<Vec<ResolvedHunk<'a>>, ToolError> {
+) -> Result<Vec<ResolvedHunk<'a>>, PatchError> {
     check(context)?;
     let mut parser = PatchLines::new(patch);
-    let mut first = parser.next().ok_or(ToolError::InvalidInvocation)?;
+    let mut first = parser.next().ok_or(PatchError::Invalid("patch is empty"))?;
     if first.starts_with("diff --git ") || first.starts_with("index ") {
         if first.starts_with("diff --git ") {
-            first = parser.next().ok_or(ToolError::InvalidInvocation)?;
+            first = parser.next().ok_or(PatchError::Invalid(
+                "incomplete diff header: expected '--- ' after 'diff --git'",
+            ))?;
         }
         if first.starts_with("index ") {
-            first = parser.next().ok_or(ToolError::InvalidInvocation)?;
+            first = parser.next().ok_or(PatchError::Invalid(
+                "incomplete diff header: expected '--- ' after 'index'",
+            ))?;
         }
         // Git metadata is informational; the ---/+++ paths still authorize
         // the single file this patch may change.
         if !first.starts_with("--- ") {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "expected '--- <path>' header after diff metadata (binary patches are not supported)",
+            ));
         }
     }
     let mut next_hunk = if strip_transport_ending(first).starts_with("--- ") {
         let original = parse_header_path(first, "--- ", context)?;
         let modified = parse_header_path(
-            parser.next().ok_or(ToolError::InvalidInvocation)?,
+            parser.next().ok_or(PatchError::Invalid(
+                "missing '+++ <path>' header after '--- '",
+            ))?,
             "+++ ",
             context,
         )?;
         validate_header_path(&original, path, "a/")?;
         validate_header_path(&modified, path, "b/")?;
-        parser.next().ok_or(ToolError::InvalidInvocation)?
+        parser.next().ok_or(PatchError::Invalid(
+            "patch has file headers but no '@@' hunks",
+        ))?
     } else {
         first
     };
@@ -49,7 +58,9 @@ pub(super) fn parse_unified_patch<'a>(
         check(context)?;
         let (old_range, new_range) = parse_hunk_header(strip_transport_ending(next_hunk))?;
         if old_range.index < previous_old_end || new_range.index < previous_new_end {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "patch hunks overlap or are out of order",
+            ));
         }
         previous_old_end = old_range.end;
         previous_new_end = new_range.end;
@@ -68,7 +79,11 @@ pub(super) fn parse_unified_patch<'a>(
                 parser.finish(context)?;
                 break;
             }
-            Some(_) => return Err(ToolError::InvalidInvocation),
+            Some(_) => {
+                return Err(PatchError::Invalid(
+                    "unexpected trailing content or second file header; apply_patch accepts only a single-file patch",
+                ));
+            }
             None => break,
         }
     }
@@ -95,11 +110,13 @@ impl<'a> PatchLines<'a> {
         self.peeked
     }
 
-    pub(super) fn finish(&mut self, context: &ToolContext) -> Result<(), ToolError> {
+    pub(super) fn finish(&mut self, context: &ToolContext) -> Result<(), PatchError> {
         while let Some(line) = self.next() {
             check(context)?;
             if !strip_transport_ending(line).is_empty() {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Invalid(
+                    "unexpected trailing content after patch end",
+                ));
             }
         }
         Ok(())
@@ -110,7 +127,7 @@ impl<'a> PatchLines<'a> {
     }
 }
 
-pub(super) fn make_hunk_range(index: usize, count: usize) -> Result<HunkRange, ToolError> {
+pub(super) fn make_hunk_range(index: usize, count: usize) -> Result<HunkRange, PatchError> {
     let end = add(index, count)?;
     Ok(HunkRange { index, count, end })
 }
@@ -120,34 +137,42 @@ fn parse_hunk_contents<'a>(
     expected_old: usize,
     expected_new: usize,
     context: &ToolContext,
-) -> Result<Vec<PatchContent<'a>>, ToolError> {
+) -> Result<Vec<PatchContent<'a>>, PatchError> {
     let mut contents = Vec::new();
     let mut old_count = 0usize;
     let mut new_count = 0usize;
     while old_count < expected_old || new_count < expected_new {
         check(context)?;
-        let raw = parser.next().ok_or(ToolError::InvalidInvocation)?;
+        let raw = parser.next().ok_or(PatchError::Invalid(
+            "unified diff hunk ended early: line count does not match its '@@' header",
+        ))?;
         let line = strip_transport_ending(raw);
         if line == NO_NEWLINE_AT_END {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "unexpected '\\ No newline at end of file' without a preceding hunk line",
+            ));
         }
         let mut content = parse_patch_content(line)?;
         let (old, new) = content.kind.delta();
         old_count = add(old_count, old)?;
         new_count = add(new_count, new)?;
         if old_count > expected_old || new_count > expected_new {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "unified diff hunk exceeds line counts declared in its '@@' header",
+            ));
         }
         consume_no_newline(parser, &mut content)?;
         contents.push(content);
     }
     if contents.is_empty() {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "empty patch hunk: each '@@' hunk must include context or change lines",
+        ));
     }
     Ok(contents)
 }
 
-pub(super) fn parse_patch_content(line: &str) -> Result<PatchContent<'_>, ToolError> {
+pub(super) fn parse_patch_content(line: &str) -> Result<PatchContent<'_>, PatchError> {
     let (kind, text) = if line.is_empty() {
         (PatchLineKind::Context, "")
     } else if let Some(text) = line.strip_prefix(' ') {
@@ -157,7 +182,9 @@ pub(super) fn parse_patch_content(line: &str) -> Result<PatchContent<'_>, ToolEr
     } else if let Some(text) = line.strip_prefix('+') {
         (PatchLineKind::Add, text)
     } else {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "invalid patch line prefix: every hunk line must start with ' ', '-', or '+'",
+        ));
     };
     Ok(PatchContent {
         kind,
@@ -168,9 +195,11 @@ pub(super) fn parse_patch_content(line: &str) -> Result<PatchContent<'_>, ToolEr
     })
 }
 
-fn mark_no_newline(content: &mut PatchContent<'_>) -> Result<(), ToolError> {
+fn mark_no_newline(content: &mut PatchContent<'_>) -> Result<(), PatchError> {
     if content.old_no_newline || content.new_no_newline {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "duplicate '\\ No newline at end of file' marker",
+        ));
     }
     match content.kind {
         PatchLineKind::Context => {
@@ -183,39 +212,51 @@ fn mark_no_newline(content: &mut PatchContent<'_>) -> Result<(), ToolError> {
     Ok(())
 }
 
-pub(super) fn parse_hunk_header(header: &str) -> Result<(HunkRange, HunkRange), ToolError> {
-    let header = header
-        .strip_prefix("@@ ")
-        .ok_or(ToolError::InvalidInvocation)?;
-    let closing = header.find(" @@").ok_or(ToolError::InvalidInvocation)?;
+pub(super) fn parse_hunk_header(header: &str) -> Result<(HunkRange, HunkRange), PatchError> {
+    let header = header.strip_prefix("@@ ").ok_or(PatchError::Invalid(
+        "invalid hunk header: expected '@@ -start[,count] +start[,count] @@'",
+    ))?;
+    let closing = header.find(" @@").ok_or(PatchError::Invalid(
+        "invalid hunk header: missing closing ' @@'",
+    ))?;
     let ranges = &header[..closing];
     let suffix = &header[closing + 3..];
     if suffix.contains('\0') || (!suffix.is_empty() && !suffix.starts_with(' ')) {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "invalid hunk header suffix after closing '@@'",
+        ));
     }
-    let (old, new) = ranges.split_once(' ').ok_or(ToolError::InvalidInvocation)?;
+    let (old, new) = ranges.split_once(' ').ok_or(PatchError::Invalid(
+        "invalid hunk header: expected '-old +new' ranges",
+    ))?;
     if old.contains(' ') || new.contains(' ') {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "invalid hunk header: unexpected space inside line ranges",
+        ));
     }
     Ok((parse_hunk_range(old, '-')?, parse_hunk_range(new, '+')?))
 }
 
-fn parse_hunk_range(range: &str, prefix: char) -> Result<HunkRange, ToolError> {
-    let range = range
-        .strip_prefix(prefix)
-        .ok_or(ToolError::InvalidInvocation)?;
+fn parse_hunk_range(range: &str, prefix: char) -> Result<HunkRange, PatchError> {
+    let range = range.strip_prefix(prefix).ok_or(PatchError::Invalid(
+        "invalid hunk header range prefix (expected '-' then '+')",
+    ))?;
     let (start, count) = range.split_once(',').unwrap_or((range, "1"));
     if !is_decimal(start) || !is_decimal(count) {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "invalid hunk header: line numbers and counts must be unsigned integers",
+        ));
     }
     let start = start
         .parse::<usize>()
-        .map_err(|_| ToolError::InvalidInvocation)?;
+        .map_err(|_| PatchError::Invalid("patch hunk line number overflow"))?;
     let count = count
         .parse::<usize>()
-        .map_err(|_| ToolError::InvalidInvocation)?;
+        .map_err(|_| PatchError::Invalid("patch hunk line count overflow"))?;
     if start == 0 && count != 0 {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "invalid hunk header: start line 0 is only allowed when line count is 0",
+        ));
     }
     let index = if count == 0 { start } else { sub(start, 1)? };
     let end = add(index, count)?;
@@ -227,11 +268,15 @@ fn is_decimal(value: &str) -> bool {
     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
 }
 
-fn parse_header_path(line: &str, prefix: &str, context: &ToolContext) -> Result<String, ToolError> {
+fn parse_header_path(
+    line: &str,
+    prefix: &str,
+    context: &ToolContext,
+) -> Result<String, PatchError> {
     let line = strip_transport_ending(line);
-    let value = line
-        .strip_prefix(prefix)
-        .ok_or(ToolError::InvalidInvocation)?;
+    let value = line.strip_prefix(prefix).ok_or(PatchError::Invalid(
+        "expected matching '--- ' and '+++ ' file headers",
+    ))?;
     let path = if value.starts_with('"') {
         decode_quoted_path(value, context)?
     } else {
@@ -241,12 +286,12 @@ fn parse_header_path(line: &str, prefix: &str, context: &ToolContext) -> Result<
             .to_owned()
     };
     if path.is_empty() || path.contains('\0') {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid("patch header path is empty or invalid"));
     }
     Ok(path)
 }
 
-fn decode_quoted_path(value: &str, context: &ToolContext) -> Result<String, ToolError> {
+fn decode_quoted_path(value: &str, context: &ToolContext) -> Result<String, PatchError> {
     let bytes = value.as_bytes();
     let mut decoded = Vec::with_capacity(bytes.len());
     let mut index = 1usize;
@@ -261,7 +306,9 @@ fn decode_quoted_path(value: &str, context: &ToolContext) -> Result<String, Tool
             }
             b'\\' => {
                 index += 1;
-                let escaped = *bytes.get(index).ok_or(ToolError::InvalidInvocation)?;
+                let escaped = *bytes.get(index).ok_or(PatchError::Invalid(
+                    "invalid escape sequence in quoted patch header path",
+                ))?;
                 match escaped {
                     b'\\' | b'"' => {
                         decoded.push(escaped);
@@ -290,14 +337,21 @@ fn decode_quoted_path(value: &str, context: &ToolContext) -> Result<String, Tool
                             value = value
                                 .checked_mul(8)
                                 .and_then(|value| value.checked_add(u16::from(bytes[index] - b'0')))
-                                .ok_or(ToolError::InvalidInvocation)?;
+                                .ok_or(PatchError::Invalid(
+                                    "invalid octal escape in quoted patch header path",
+                                ))?;
                             index += 1;
                             digits += 1;
                         }
-                        decoded
-                            .push(u8::try_from(value).map_err(|_| ToolError::InvalidInvocation)?);
+                        decoded.push(u8::try_from(value).map_err(|_| {
+                            PatchError::Invalid("invalid octal byte in quoted patch header path")
+                        })?);
                     }
-                    _ => return Err(ToolError::InvalidInvocation),
+                    _ => {
+                        return Err(PatchError::Invalid(
+                            "unsupported escape sequence in quoted patch header path",
+                        ));
+                    }
                 }
             }
             byte => {
@@ -307,11 +361,12 @@ fn decode_quoted_path(value: &str, context: &ToolContext) -> Result<String, Tool
         }
     }
     if !closed || (index < bytes.len() && bytes[index] != b'\t') {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid("unterminated quoted patch header path"));
     }
-    let path = String::from_utf8(decoded).map_err(|_| ToolError::InvalidInvocation)?;
+    let path = String::from_utf8(decoded)
+        .map_err(|_| PatchError::Invalid("quoted patch header path is not valid UTF-8"))?;
     if path.contains('\0') {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid("patch header path contains NUL"));
     }
     Ok(path)
 }
@@ -320,25 +375,16 @@ pub(super) fn validate_header_path(
     header: &str,
     tool_path: &str,
     prefix: &str,
-) -> Result<(), ToolError> {
+) -> Result<(), PatchError> {
     let candidate = if header == tool_path {
         header
     } else {
         header.strip_prefix(prefix).unwrap_or(header)
     };
-    let path = Path::new(candidate);
-    if candidate != tool_path
-        || candidate.is_empty()
-        || candidate.contains('\0')
-        || path.is_absolute()
-        || path.components().any(|component| {
-            matches!(
-                component,
-                Component::ParentDir | Component::RootDir | Component::Prefix(_)
-            )
-        })
-    {
-        return Err(ToolError::InvalidInvocation);
+    if candidate != tool_path || candidate.is_empty() || candidate.contains('\0') {
+        return Err(PatchError::Invalid(
+            "patch header path does not match the 'path' argument (Add/Delete/Move and multi-file patches are not supported)",
+        ));
     }
     Ok(())
 }
@@ -353,7 +399,7 @@ pub(super) fn strip_transport_ending(line: &str) -> &str {
 pub(super) fn consume_no_newline(
     parser: &mut PatchLines<'_>,
     content: &mut PatchContent<'_>,
-) -> Result<(), ToolError> {
+) -> Result<(), PatchError> {
     if parser
         .peek()
         .is_some_and(|line| strip_transport_ending(line) == NO_NEWLINE_AT_END)
@@ -364,7 +410,9 @@ pub(super) fn consume_no_newline(
             .peek()
             .is_some_and(|line| strip_transport_ending(line) == NO_NEWLINE_AT_END)
         {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "duplicate '\\ No newline at end of file' marker",
+            ));
         }
     }
     Ok(())

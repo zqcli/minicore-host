@@ -133,7 +133,7 @@ async fn same_text_user_and_peer_keep_actual_source_reply_and_bytes_across_resta
         peer_stored["entry"]["data"]["in_reply_to"],
         original.as_str()
     );
-    assert_eq!(peer_stored["entry"]["data"]["mode"], "follow_up");
+    assert_eq!(peer_stored["entry"]["data"]["mode"], "steer");
     assert_eq!(
         peer_stored["entry"]["data"]["user"]["input"]["text"],
         "identical raw text"
@@ -521,7 +521,12 @@ async fn stored_partial_is_not_fabricated_into_later_complete_model_context() {
         "before partial",
         None,
     );
-    fixture.next().await.finish(format!("data: {}\n\n",json!({"choices":[{"index":0,"delta":{"content":"partial-only-marker"},"finish_reason":null}]})));
+    for _ in 0..4 {
+        fixture.next().await.finish(format!(
+            "data: {}\n\n",
+            json!({"choices":[{"index":0,"delta":{"content":"partial-only-marker"},"finish_reason":null}]})
+        ));
+    }
     let first = settled(&host, &caller, &target, 1).await.remove(0);
     assert_eq!(first.outcome, Some(TurnOutcome::Failed));
     let result = host.turn_result(&caller, &target, &first.id).unwrap();

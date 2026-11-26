@@ -10,7 +10,7 @@ async fn eof_delivery_depends_on_whether_an_event_was_observed() {
         ),
     ] {
         let model = ScriptModel::new(descriptor(), vec![Behavior::Events(events)]);
-        let driver = model.driver(&ModelDriverConfig::default());
+        let driver = model.driver(&with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)));
         let (progress, _receiver) = progress_channel();
         let error = driver
             .run(
@@ -469,7 +469,7 @@ async fn tool_arguments_use_centralized_json_depth_and_node_validation() {
             Ok(args(id.clone(), &nested)),
             Ok(end(id.clone())),
         ],
-        ModelDriverConfig::default(),
+        with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)),
     )
     .await
     .unwrap_err();

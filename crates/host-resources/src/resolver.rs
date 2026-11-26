@@ -62,6 +62,9 @@ impl ProductionResources {
                 self.tools.bind(&config.tools, port)?
             }
         };
+        let workspace_root = workspace
+            .as_ref()
+            .map(|workspace| workspace.root().to_path_buf());
         let mut prompt = BoundPrompt::new(
             &self.framework,
             &config.role.instructions,
@@ -69,7 +72,12 @@ impl ProductionResources {
             workspace,
         );
         if let Some(source) = agent_source {
-            prompt = prompt.with_agent_context(&source);
+            let models: Vec<&str> = self
+                .models
+                .keys()
+                .map(minicore_host_protocol::ModelRef::as_str)
+                .collect();
+            prompt = prompt.with_agent_context(&source, &models);
         }
         let execution = ExecutionConfig::new(
             self.models[&config.model].clone(),
@@ -79,6 +87,7 @@ impl ProductionResources {
                 config.execution.approval,
                 self.tools.has_builtin_read(),
                 self.tools.has_builtin_agent(),
+                workspace_root,
             ))),
             Arc::new(prompt),
         )
@@ -147,10 +156,22 @@ impl ResourceResolver for ProductionResources {
         config
             .validate()
             .map_err(|error| session_invalid(error.to_string()))?;
-        let model = self
-            .models
-            .get(&config.model)
-            .ok_or_else(|| missing(format!("model {} is not configured", config.model)))?;
+        let model = self.models.get(&config.model).ok_or_else(|| {
+            let available: Vec<&str> = self
+                .models
+                .keys()
+                .map(minicore_host_protocol::ModelRef::as_str)
+                .collect();
+            if available.is_empty() {
+                missing(format!("model {} is not configured", config.model))
+            } else {
+                missing(format!(
+                    "model {} is not configured (available: {})",
+                    config.model,
+                    available.join(", ")
+                ))
+            }
+        })?;
         if !model
             .descriptor()
             .supports_reasoning(reasoning(config.reasoning))

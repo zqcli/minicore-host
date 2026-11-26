@@ -13,19 +13,21 @@ fn approval_defaults_and_old_execution_configs_are_ask() {
 }
 
 #[test]
-fn approval_has_only_three_explicit_values_and_cannot_be_null() {
-    for (mode, text) in [
-        (ApprovalMode::Auto, "auto"),
-        (ApprovalMode::Ask, "ask"),
-        (ApprovalMode::ReadOnly, "read_only"),
-    ] {
+fn approval_has_only_two_explicit_values_and_cannot_be_null() {
+    for (mode, text) in [(ApprovalMode::Auto, "auto"), (ApprovalMode::Ask, "ask")] {
         let mut value = json!(ExecutionSettings::default());
         value["approval"] = json!(text);
         let actual: ExecutionSettings = serde_json::from_value(value.clone()).unwrap();
         assert_eq!(actual.approval, mode);
         assert_eq!(json!(actual), value);
     }
-    for invalid in [json!(null), json!(true), json!("allow"), json!("read-only")] {
+    for invalid in [
+        json!(null),
+        json!(true),
+        json!("allow"),
+        json!("read_only"),
+        json!("read-only"),
+    ] {
         let mut value = json!(ExecutionSettings::default());
         value["approval"] = invalid;
         assert!(serde_json::from_value::<ExecutionSettings>(value).is_err());
@@ -38,16 +40,16 @@ fn approval_has_only_three_explicit_values_and_cannot_be_null() {
 #[test]
 fn approval_follows_whole_execution_replacement_and_session_copy() {
     let mut agent = AgentConfig::default();
-    agent.session_defaults.execution.approval = ApprovalMode::ReadOnly;
+    agent.session_defaults.execution.approval = ApprovalMode::Auto;
     let original = SessionConfig::from_agent(&agent, &SessionOverrides::default()).unwrap();
-    assert_eq!(original.execution.approval, ApprovalMode::ReadOnly);
+    assert_eq!(original.execution.approval, ApprovalMode::Auto);
     let mut replacement = json!(ExecutionSettings::default());
     replacement.as_object_mut().unwrap().remove("approval");
     let patch: SessionConfigPatch =
         serde_json::from_value(json!({"execution":replacement})).unwrap();
     let updated = original.apply_patch(&patch).unwrap();
     assert_eq!(updated.execution.approval, ApprovalMode::Ask);
-    assert_eq!(original.execution.approval, ApprovalMode::ReadOnly);
+    assert_eq!(original.execution.approval, ApprovalMode::Auto);
     assert!(
         serde_json::from_value::<SessionConfigPatch>(json!({"execution":{"approval":"auto"}}))
             .is_err()

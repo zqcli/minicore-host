@@ -25,7 +25,7 @@ async fn finish_then_stream_error_is_not_success_or_retryable_after_observation(
             Behavior::Events(text_success("unexpected retry")),
         ],
     );
-    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(4, Duration::ZERO)));
+    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)));
     let (progress, _receiver) = progress_channel();
     let error = driver
         .run(
@@ -145,7 +145,7 @@ async fn event_then_stream_poll_panic_is_started_dropped_and_never_retried() {
             Behavior::Events(text_success("unexpected retry")),
         ],
     );
-    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(4, Duration::ZERO)));
+    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)));
     let (progress, mut progress_rx) = progress_channel();
     let error = driver
         .run(

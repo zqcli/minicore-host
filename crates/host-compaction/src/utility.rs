@@ -75,7 +75,7 @@ async fn generate_inner(
     }
     let driver = ModelDriver::new(
         model,
-        ModelDriverConfig::new(remaining, 1, Duration::from_millis(100)),
+        ModelDriverConfig::new(remaining, 4, Duration::from_millis(250)),
     )?;
     if driver.descriptor() != &plan.descriptor {
         return Err(CompactionError::ModelChanged);
@@ -252,9 +252,32 @@ fn utility_request(
         ],
         vec![],
         *plan.original.limits(),
-        plan.original.reasoning(),
+        compaction_reasoning(plan.original.reasoning(), &plan.descriptor),
     )
     .map_err(|_| CompactionError::InvalidResponse)
+}
+
+fn compaction_reasoning(
+    original: minicore_host_runtime::model::ReasoningPreference,
+    descriptor: &minicore_host_runtime::model::ModelDescriptor,
+) -> minicore_host_runtime::model::ReasoningPreference {
+    use minicore_host_runtime::model::ReasoningPreference;
+    if matches!(
+        original,
+        ReasoningPreference::Disabled | ReasoningPreference::Low
+    ) {
+        return original;
+    }
+    for preferred in [
+        ReasoningPreference::Low,
+        ReasoningPreference::Disabled,
+        ReasoningPreference::Medium,
+    ] {
+        if descriptor.supports_reasoning(preferred) {
+            return preferred;
+        }
+    }
+    original
 }
 
 fn check_active(context: &ModelCallContext) -> Result<(), CompactionError> {

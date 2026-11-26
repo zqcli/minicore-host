@@ -177,11 +177,11 @@ async fn model_cannot_supply_owner_identity_and_unknown_tool_is_absent() {
 }
 
 #[tokio::test]
-async fn write_protects_directories_traversal_and_git_metadata() {
+async fn write_protects_directories_and_git_metadata() {
     let (root, tools, _) = fixture().await;
     fs::create_dir(root.path().join("directory")).unwrap();
     fs::write(root.path().join("directory/keep"), "kept").unwrap();
-    for path in ["directory", "../escape", "/absolute", ".git/config", ""] {
+    for path in ["directory", ".git/config", "../repo/.git/config", ""] {
         assert_eq!(
             invoke(&tools, "write", json!({"path":path,"content":"bad"}))
                 .await
@@ -196,9 +196,79 @@ async fn write_protects_directories_traversal_and_git_metadata() {
     tools.finish().await;
 }
 
+#[tokio::test]
+async fn cross_workspace_read_write_edit_and_patch_skip_workspace_edit_journal() {
+    let (root, tools, records) = fixture().await;
+    let outside = tempfile::TempDir::new().unwrap();
+    let target = outside.path().join("sub/ext.txt");
+    let target_str = target.to_string_lossy().into_owned();
+
+    let written = invoke(
+        &tools,
+        "write",
+        json!({"path": target_str, "content": "line1\nline2\n"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(written["status"], "applied");
+    assert_eq!(fs::read_to_string(&target).unwrap(), "line1\nline2\n");
+
+    let edited = invoke(
+        &tools,
+        "edit",
+        json!({"path": target_str, "old_text": "line2", "new_text": "line2-edited"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(edited["status"], "applied");
+    assert_eq!(edited["replacements"], 1);
+
+    let patch = format!(
+        "*** Begin Patch\n*** Update File: {target_str}\n@@\n-line1\n+line1-patched\n*** End Patch\n"
+    );
+    let patched = invoke(
+        &tools,
+        "apply_patch",
+        json!({"path": target_str, "patch": patch}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(patched["status"], "applied");
+
+    let read = invoke(&tools, "read", json!({"path": target_str, "limit": 10}))
+        .await
+        .unwrap();
+    assert_eq!(read["text"], "line1-patched\nline2-edited\n");
+
+    // Outside-workspace mutations must not record invalid paths into workspace EditJournal.
+    assert!(records.edits.lock().unwrap().is_empty());
+
+    // Absolute paths that resolve inside the workspace still record edits with relative paths.
+    let inside_abs = root
+        .path()
+        .join("inside.txt")
+        .to_string_lossy()
+        .into_owned();
+    let inside_written = invoke(
+        &tools,
+        "write",
+        json!({"path": inside_abs, "content": "in-ws"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(inside_written["status"], "applied");
+    assert_eq!(inside_written["path"], "inside.txt");
+    {
+        let edits = records.edits.lock().unwrap();
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].1.path, "inside.txt");
+    }
+    tools.finish().await;
+}
+
 #[cfg(unix)]
 #[tokio::test]
-async fn symlinks_do_not_escape_reads_or_redirect_writes_and_permissions_survive() {
+async fn symlinks_do_not_redirect_writes_and_permissions_survive() {
     use std::os::unix::fs::{PermissionsExt, symlink};
     let (root, tools, _) = fixture().await;
     let outside = tempfile::TempDir::new().unwrap();
@@ -214,8 +284,8 @@ async fn symlinks_do_not_escape_reads_or_redirect_writes_and_permissions_survive
     assert_eq!(
         invoke(&tools, "read", json!({"path":"outside/secret","limit":1}))
             .await
-            .unwrap()["status"],
-        "failed"
+            .unwrap()["text"],
+        "secret"
     );
     assert_eq!(
         invoke(&tools, "read", json!({"path":"inside","limit":1}))
@@ -290,7 +360,7 @@ async fn windows_aliases_and_junctions_cannot_redirect_file_operations() {
             .unwrap();
         assert_eq!(result["status"], "failed", "{path}: {result}");
     }
-    for path in ["file:stream", "file.", "file ", "outside/secret"] {
+    for path in ["file:stream", "file.", "file "] {
         let result = invoke(&tools, "read", json!({"path":path,"limit":1}))
             .await
             .unwrap();

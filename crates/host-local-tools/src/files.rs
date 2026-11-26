@@ -91,40 +91,130 @@ impl Failure {
     }
 }
 
-pub(crate) fn normalize(path: &str, root: bool) -> Result<PathBuf, &'static str> {
+/// Resolved path classified against the bound workspace root for approval policy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedPolicyPath {
+    pub path: PathBuf,
+    pub in_workspace: bool,
+}
+
+pub(crate) fn canonicalize_best_effort(candidate: &Path) -> PathBuf {
+    if let Ok(real) = fs::canonicalize(candidate) {
+        return real;
+    }
+    let mut comps: Vec<Component<'_>> = candidate.components().collect();
+    let mut tail: Vec<Component<'_>> = Vec::new();
+    while let Some(last) = comps.pop() {
+        tail.push(last);
+        if comps.is_empty() {
+            break;
+        }
+        let prefix: PathBuf = comps.iter().collect();
+        if let Ok(mut real) = fs::canonicalize(&prefix) {
+            for comp in tail.into_iter().rev() {
+                match comp {
+                    Component::Normal(part) => real.push(part),
+                    Component::ParentDir => {
+                        real.pop();
+                    }
+                    Component::CurDir | Component::RootDir | Component::Prefix(_) => {}
+                }
+            }
+            return real;
+        }
+    }
+    let mut out = PathBuf::new();
+    for comp in candidate.components() {
+        match comp {
+            Component::Prefix(prefix) => out.push(prefix.as_os_str()),
+            Component::RootDir => out.push(comp.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::Normal(part) => out.push(part),
+        }
+    }
+    out
+}
+
+/// Resolve a tool path argument relative to `workspace_root` (or directly if
+/// absolute) and report whether its canonical target stays inside the workspace.
+pub fn resolve_policy_path(
+    workspace_root: &Path,
+    raw: &str,
+) -> Result<ResolvedPolicyPath, &'static str> {
+    if raw.contains('\0') {
+        return Err("path contains NUL");
+    }
+    let canonical_root = canonicalize_best_effort(workspace_root);
+    let candidate = if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        canonical_root.join(raw)
+    };
+    let path = canonicalize_best_effort(&candidate);
+    let in_workspace = path.starts_with(&canonical_root);
+    Ok(ResolvedPolicyPath { path, in_workspace })
+}
+
+fn validate_path_str(path: &str, allow_empty: bool) -> Result<(), &'static str> {
     if path.contains('\0') {
         return Err("path contains NUL");
     }
+    if path.is_empty() && !allow_empty {
+        return Err("file path is empty");
+    }
+    #[cfg(windows)]
+    for part in Path::new(path).components() {
+        if let Component::Normal(name) = part
+            && name
+                .to_str()
+                .is_none_or(|name| name.contains(':') || name.ends_with(['.', ' ']))
+        {
+            return Err("alternate streams and ambiguous Windows paths are not supported");
+        }
+    }
+    Ok(())
+}
+
+fn is_git_metadata_name(name: &std::ffi::OsStr) -> bool {
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        name == ".git"
+    }
+    #[cfg(any(windows, target_os = "macos"))]
+    {
+        name.to_str()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".git"))
+    }
+}
+
+fn normalize_workspace_relative(path: &str) -> Result<PathBuf, &'static str> {
     let mut relative = PathBuf::new();
     for part in Path::new(path).components() {
         match part {
-            Component::Normal(name) => {
-                #[cfg(windows)]
-                if name
-                    .to_str()
-                    .is_none_or(|name| name.contains(':') || name.ends_with(['.', ' ']))
-                {
-                    return Err("alternate streams and ambiguous Windows paths are not supported");
-                }
-                relative.push(name);
-            }
+            Component::Normal(name) => relative.push(name),
             Component::CurDir => (),
             _ => return Err("path must be relative and cannot contain '..'"),
         }
     }
-    if relative.as_os_str().is_empty() && !root {
+    if relative.as_os_str().is_empty() {
         return Err("file path is empty");
     }
     Ok(relative)
 }
 
 pub(crate) fn directory(workspace: &Workspace, path: &str) -> io::Result<PathBuf> {
-    let relative = normalize(path, true).map_err(io::Error::other)?;
-    let target = fs::canonicalize(workspace.root().join(relative))?;
-    if !target.starts_with(workspace.root()) || !target.is_dir() {
-        return Err(io::Error::other(
-            "cwd must be a directory inside the bound workspace",
-        ));
+    validate_path_str(path, true).map_err(io::Error::other)?;
+    let candidate = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        workspace.root().join(path)
+    };
+    let target = fs::canonicalize(candidate)?;
+    if !target.is_dir() {
+        return Err(io::Error::other("cwd must be an existing directory"));
     }
     Ok(target)
 }
@@ -153,11 +243,13 @@ fn read_sync(
     context: &ToolContext,
 ) -> Result<Value, Failure> {
     check(context)?;
-    let relative = normalize(&input.path, true).map_err(Failure::Invalid)?;
-    let target = fs::canonicalize(workspace.root().join(&relative))?;
-    if !target.starts_with(workspace.root()) {
-        return Err(Failure::Invalid("path leaves the workspace"));
-    }
+    validate_path_str(&input.path, true).map_err(Failure::Invalid)?;
+    let candidate = if Path::new(&input.path).is_absolute() {
+        PathBuf::from(&input.path)
+    } else {
+        workspace.root().join(&input.path)
+    };
+    let target = fs::canonicalize(candidate)?;
     let metadata = fs::metadata(&target)?;
     if metadata.is_dir() {
         let mut entries = Vec::new();
@@ -317,20 +409,26 @@ async fn mutate(
     .map_err(|_| ToolError::Internal)?
 }
 
-fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), Failure> {
-    let relative = normalize(path, false).map_err(Failure::Invalid)?;
+struct WriteTarget {
+    display_path: String,
+    target: PathBuf,
+    in_workspace: bool,
+}
+
+fn validate_in_workspace_write(
+    workspace: &Workspace,
+    relative: &Path,
+) -> Result<WriteTarget, Failure> {
+    if relative.as_os_str().is_empty() {
+        return Err(Failure::Invalid("target is not a regular file"));
+    }
+    let full = workspace.root().join(relative);
     let mut target = workspace.root().to_path_buf();
     for component in relative.components() {
         let Component::Normal(name) = component else {
-            unreachable!()
+            return Err(Failure::Invalid("invalid path component"));
         };
-        #[cfg(not(any(windows, target_os = "macos")))]
-        let git_metadata = name == ".git";
-        #[cfg(any(windows, target_os = "macos"))]
-        let git_metadata = name
-            .to_str()
-            .is_some_and(|name| name.eq_ignore_ascii_case(".git"));
-        if git_metadata {
+        if is_git_metadata_name(name) {
             return Err(Failure::Invalid("writes to Git metadata are not supported"));
         }
         target.push(name);
@@ -340,10 +438,10 @@ fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), 
                     "writes through symlinks are not supported",
                 ));
             }
-            Ok(metadata) if target != workspace.root().join(&relative) && !metadata.is_dir() => {
+            Ok(metadata) if target != full && !metadata.is_dir() => {
                 return Err(Failure::Invalid("parent is not a directory"));
             }
-            Ok(metadata) if target == workspace.root().join(&relative) && !metadata.is_file() => {
+            Ok(metadata) if target == full && !metadata.is_file() => {
                 return Err(Failure::Invalid("target is not a regular file"));
             }
             Ok(_) => (),
@@ -356,7 +454,89 @@ fn write_target(workspace: &Workspace, path: &str) -> Result<(String, PathBuf), 
         .ok_or(Failure::Invalid("non-UTF-8 path"))?;
     #[cfg(windows)]
     let path = path.replace('\\', "/");
-    Ok((path.to_owned(), target))
+    Ok(WriteTarget {
+        display_path: path.to_owned(),
+        target,
+        in_workspace: true,
+    })
+}
+
+fn write_target(workspace: &Workspace, path: &str) -> Result<WriteTarget, Failure> {
+    validate_path_str(path, false).map_err(Failure::Invalid)?;
+    if let Ok(relative) = normalize_workspace_relative(path) {
+        return validate_in_workspace_write(workspace, &relative);
+    }
+    for component in Path::new(path).components() {
+        if let Component::Normal(name) = component
+            && is_git_metadata_name(name)
+        {
+            return Err(Failure::Invalid("writes to Git metadata are not supported"));
+        }
+    }
+    let candidate = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        workspace.root().join(path)
+    };
+    match fs::symlink_metadata(&candidate) {
+        Ok(metadata) if is_link(&metadata) => {
+            return Err(Failure::Invalid(
+                "writes through symlinks are not supported",
+            ));
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(Failure::Invalid("target is not a regular file"));
+        }
+        Ok(_) => (),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
+    }
+    let target = canonicalize_best_effort(&candidate);
+    if target.parent().is_none() {
+        return Err(Failure::Invalid("target is not a regular file"));
+    }
+    for component in target.components() {
+        if let Component::Normal(name) = component
+            && is_git_metadata_name(name)
+        {
+            return Err(Failure::Invalid("writes to Git metadata are not supported"));
+        }
+    }
+    if let Ok(relative) = target.strip_prefix(workspace.root()) {
+        return validate_in_workspace_write(workspace, relative);
+    }
+    match fs::symlink_metadata(&target) {
+        Ok(metadata) if is_link(&metadata) => {
+            return Err(Failure::Invalid(
+                "writes through symlinks are not supported",
+            ));
+        }
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(Failure::Invalid("target is not a regular file"));
+        }
+        Ok(_) => (),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
+    }
+    for ancestor in target.ancestors().skip(1) {
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(Failure::Invalid("parent is not a directory"));
+            }
+            Ok(_) => break,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let display_path = target
+        .to_str()
+        .ok_or(Failure::Invalid("non-UTF-8 path"))?
+        .to_owned();
+    Ok(WriteTarget {
+        display_path,
+        target,
+        in_workspace: false,
+    })
 }
 
 fn is_link(metadata: &fs::Metadata) -> bool {
@@ -410,7 +590,12 @@ fn mutate_sync(
     context: &ToolContext,
 ) -> Result<ToolExecutionOutcome, ToolError> {
     check(context)?;
-    let (path, target) = match write_target(&binding.workspace, input.path()) {
+    let raw_path = input.path().to_owned();
+    let WriteTarget {
+        display_path: path,
+        target,
+        in_workspace,
+    } = match write_target(&binding.workspace, &raw_path) {
         Ok(value) => value,
         Err(error) => return error.result(),
     };
@@ -465,10 +650,9 @@ fn mutate_sync(
                     context,
                 )
                 .map_err(|error| match error {
-                    ToolError::Failed => Failure::Conflict(
-                        "patch contents or positions do not match the existing file",
-                    ),
-                    other => Failure::Control(other),
+                    crate::patch::PatchError::Invalid(message) => Failure::Invalid(message),
+                    crate::patch::PatchError::Conflict(message) => Failure::Conflict(message),
+                    crate::patch::PatchError::Control(other) => Failure::Control(other),
                 })?;
                 (replacement.into_bytes(), None)
             }
@@ -493,7 +677,7 @@ fn mutate_sync(
         check(context)?;
         // Detect a changed target before committing. No cross-process lock or
         // hostile concurrent filesystem mutation is claimed by this local tool.
-        write_target(&binding.workspace, &path)?;
+        write_target(&binding.workspace, &raw_path)?;
         if capture(&target, Some(context))? != before {
             return Err(Failure::Conflict(
                 "target changed before atomic replacement",
@@ -510,25 +694,29 @@ fn mutate_sync(
         windows::sync_directory(parent)?;
         Ok(json!({"status":"applied","path":path,"bytes":bytes.len(),"replacements":replacements}))
     })();
-    // This capture is cleanup after an attempted mutation. Cancellation cannot
-    // erase or pretend to roll back an already committed file replacement.
-    let after = capture(&target, None).unwrap_or(FileSnapshot::Unknown);
-    binding
-        .sink
-        .edit(
-            id,
-            CapturedEdit {
-                path,
-                before,
-                after,
-                outcome: if applied {
-                    EditOutcome::Applied
-                } else {
-                    EditOutcome::NotApplied
+    // Record workspace-scoped edits in the bound Session's EditJournal.
+    // Outside-workspace edits skip the workspace-relative journal.
+    if in_workspace {
+        // This capture is cleanup after an attempted mutation. Cancellation cannot
+        // erase or pretend to roll back an already committed file replacement.
+        let after = capture(&target, None).unwrap_or(FileSnapshot::Unknown);
+        binding
+            .sink
+            .edit(
+                id,
+                CapturedEdit {
+                    path,
+                    before,
+                    after,
+                    outcome: if applied {
+                        EditOutcome::Applied
+                    } else {
+                        EditOutcome::NotApplied
+                    },
                 },
-            },
-        )
-        .map_err(|_| ToolError::Internal)?;
+            )
+            .map_err(|_| ToolError::Internal)?;
+    }
     match result {
         Ok(value) => completed(value),
         Err(Failure::Control(error)) => Err(error),

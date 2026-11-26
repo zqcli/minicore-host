@@ -124,6 +124,7 @@ mod native {
                 output: self.bytes.into(),
                 complete: self.complete,
                 omitted_bytes: 0,
+                full_output_path: None,
             }
         }
     }
@@ -352,9 +353,9 @@ mod native {
         match status {
             CommandStatus::Cancelled => Err(ToolError::Cancelled),
             // Output gathered before the deadline explains what the command was doing.
-            CommandStatus::TimedOut => crate::failed(result.for_model()),
+            CommandStatus::TimedOut => crate::failed(result.for_model_spilled(&id)),
             CommandStatus::Failed => Err(ToolError::Internal),
-            CommandStatus::Exited => completed(result.for_model()),
+            CommandStatus::Exited => completed(result.for_model_spilled(&id)),
         }
     }
 }

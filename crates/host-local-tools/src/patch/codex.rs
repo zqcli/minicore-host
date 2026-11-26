@@ -1,12 +1,12 @@
 use super::apply::{
-    HunkRange, LineEnding, PatchContent, PatchLineKind, ResolvedHunk, SourceLine, add,
+    HunkRange, LineEnding, PatchContent, PatchError, PatchLineKind, ResolvedHunk, SourceLine, add,
     preferred_line_ending, sub,
 };
 use super::unified::{
     NO_NEWLINE_AT_END, PatchLines, consume_no_newline, make_hunk_range, parse_hunk_header,
     parse_patch_content, strip_transport_ending, validate_header_path,
 };
-use minicore_host_runtime::tools::{ToolContext, ToolError};
+use minicore_host_runtime::tools::ToolContext;
 
 use crate::check;
 use std::collections::HashMap;
@@ -37,7 +37,7 @@ pub(super) fn parse_and_resolve_codex_patch<'a>(
     patch: &'a str,
     source: &[SourceLine<'a>],
     context: &ToolContext,
-) -> Result<Vec<ResolvedHunk<'a>>, ToolError> {
+) -> Result<Vec<ResolvedHunk<'a>>, PatchError> {
     let codex_hunks = parse_codex_patch(path, patch, context)?;
     let total_hunks = codex_hunks.len();
     let mut resolved = Vec::with_capacity(total_hunks);
@@ -54,7 +54,9 @@ pub(super) fn parse_and_resolve_codex_patch<'a>(
     for (index, hunk) in codex_hunks.into_iter().enumerate() {
         check(context)?;
         if hunk.end_of_file && index + 1 != total_hunks {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "'*** End of File' may only appear on the final hunk",
+            ));
         }
         let header_only = hunk.contents.is_empty();
         let mut old_contents = Vec::new();
@@ -67,10 +69,13 @@ pub(super) fn parse_and_resolve_codex_patch<'a>(
         let (old_count, new_count) = codex_content_counts(&hunk.contents, context)?;
         let start = if header_only {
             let CodexLocator::Anchor(Some(anchor)) = &hunk.locator else {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Invalid(
+                    "empty patch hunk: each '@@' hunk without an anchor must include context or change lines",
+                ));
             };
-            find_unique_codex_anchor(source, source_cursor, anchor, context)?
-                .ok_or(ToolError::Failed)?
+            find_unique_codex_anchor(source, source_cursor, anchor, context)?.ok_or(
+                PatchError::Conflict("patch '@@' anchor was not found in the file"),
+            )?
         } else {
             locate_codex_hunk(
                 &hunk.locator,
@@ -83,13 +88,17 @@ pub(super) fn parse_and_resolve_codex_patch<'a>(
             )?
         };
         if start < source_cursor || (!header_only && previous_start == Some(start)) {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "patch hunks overlap or are out of order",
+            ));
         }
         if let CodexLocator::Range { new, .. } = &hunk.locator {
             let skipped = sub(start, source_cursor)?;
             let expected_new = add(output_cursor, skipped)?;
             if new.index != expected_new {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Invalid(
+                    "patch hunk '+new' line offset does not match preceding hunks",
+                ));
             }
         }
         let skipped = sub(start, source_cursor)?;
@@ -125,42 +134,56 @@ fn parse_codex_patch<'a>(
     path: &str,
     patch: &'a str,
     context: &ToolContext,
-) -> Result<Vec<CodexHunk<'a>>, ToolError> {
+) -> Result<Vec<CodexHunk<'a>>, PatchError> {
     let mut parser = PatchLines::new(patch);
-    let begin = parser.next().ok_or(ToolError::InvalidInvocation)?;
+    let begin = parser.next().ok_or(PatchError::Invalid("patch is empty"))?;
     if strip_transport_ending(begin) != CODEX_BEGIN_PATCH {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid(
+            "patch must start with '*** Begin Patch'",
+        ));
     }
-    let update = parser.next().ok_or(ToolError::InvalidInvocation)?;
+    let update = parser.next().ok_or(PatchError::Invalid(
+        "expected '*** Update File: <path>' after '*** Begin Patch'",
+    ))?;
     let header_path = strip_transport_ending(update)
         .strip_prefix(CODEX_UPDATE_FILE)
-        .ok_or(ToolError::InvalidInvocation)?;
+        .ok_or(PatchError::Invalid(
+            "apply_patch only supports a single '*** Update File: <path>' block (Add/Delete/Move are not supported)",
+        ))?;
     validate_header_path(header_path, path, "")?;
 
     let mut hunks = Vec::new();
     loop {
         check(context)?;
-        let raw = parser.next().ok_or(ToolError::InvalidInvocation)?;
+        let raw = parser.next().ok_or(PatchError::Invalid(
+            "unterminated patch: missing '*** End Patch'",
+        ))?;
         let line = strip_transport_ending(raw);
         if line == CODEX_END_PATCH {
             if hunks
                 .last()
                 .is_none_or(|hunk: &CodexHunk<'_>| hunk.contents.is_empty())
             {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Invalid(
+                    "patch has no effective hunk lines before '*** End Patch'",
+                ));
             }
             parser.finish(context)?;
             return Ok(hunks);
         }
         if !line.starts_with("@@") {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "expected '@@' hunk header or '*** End Patch' (Move/multi-file directives are not supported)",
+            ));
         }
         let locator = parse_codex_locator(line)?;
         let mut contents = Vec::new();
         let mut end_of_file = false;
         loop {
             check(context)?;
-            let raw = parser.peek().ok_or(ToolError::InvalidInvocation)?;
+            let raw = parser.peek().ok_or(PatchError::Invalid(
+                "unterminated hunk: missing '*** End Patch'",
+            ))?;
             let line = strip_transport_ending(raw);
             if line == CODEX_END_PATCH || line.starts_with("@@") {
                 break;
@@ -170,10 +193,19 @@ fn parse_codex_patch<'a>(
                 end_of_file = true;
                 break;
             }
-            if line.starts_with("***") || line == NO_NEWLINE_AT_END {
-                return Err(ToolError::InvalidInvocation);
+            if line.starts_with("***") {
+                return Err(PatchError::Invalid(
+                    "unexpected '***' directive inside hunk; apply_patch supports only a single '*** Update File' block",
+                ));
             }
-            let raw = parser.next().ok_or(ToolError::InvalidInvocation)?;
+            if line == NO_NEWLINE_AT_END {
+                return Err(PatchError::Invalid(
+                    "unexpected '\\ No newline at end of file' without a preceding hunk line",
+                ));
+            }
+            let raw = parser.next().ok_or(PatchError::Invalid(
+                "unterminated hunk: missing '*** End Patch'",
+            ))?;
             let line = strip_transport_ending(raw);
             let mut content = parse_patch_content(line)?;
             consume_no_newline(&mut parser, &mut content)?;
@@ -182,7 +214,9 @@ fn parse_codex_patch<'a>(
         if contents.is_empty()
             && (end_of_file || !matches!(&locator, CodexLocator::Anchor(Some(_))))
         {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "empty patch hunk: each '@@' hunk must include context/change lines (' ', '-', '+')",
+            ));
         }
         hunks.push(CodexHunk {
             locator,
@@ -192,10 +226,10 @@ fn parse_codex_patch<'a>(
     }
 }
 
-fn parse_codex_locator(line: &str) -> Result<CodexLocator<'_>, ToolError> {
+fn parse_codex_locator(line: &str) -> Result<CodexLocator<'_>, PatchError> {
     let rest = line
         .strip_prefix("@@")
-        .ok_or(ToolError::InvalidInvocation)?;
+        .ok_or(PatchError::Invalid("expected '@@' hunk header"))?;
     let header = rest.trim();
     if header.is_empty() {
         return Ok(CodexLocator::Anchor(None));
@@ -205,7 +239,7 @@ fn parse_codex_locator(line: &str) -> Result<CodexLocator<'_>, ToolError> {
         return Ok(CodexLocator::Range { old, new });
     }
     if header.contains('\0') {
-        return Err(ToolError::InvalidInvocation);
+        return Err(PatchError::Invalid("patch '@@' anchor contains NUL"));
     }
     Ok(CodexLocator::Anchor(Some(header)))
 }
@@ -213,7 +247,7 @@ fn parse_codex_locator(line: &str) -> Result<CodexLocator<'_>, ToolError> {
 fn codex_content_counts(
     contents: &[PatchContent<'_>],
     context: &ToolContext,
-) -> Result<(usize, usize), ToolError> {
+) -> Result<(usize, usize), PatchError> {
     let mut old_count = 0usize;
     let mut new_count = 0usize;
     for content in contents {
@@ -233,19 +267,25 @@ fn locate_codex_hunk(
     codex_source: &CodexSource<'_, '_>,
     search_start: usize,
     context: &ToolContext,
-) -> Result<usize, ToolError> {
+) -> Result<usize, PatchError> {
     let source = codex_source.lines;
     match locator {
         CodexLocator::Range { old, new } => {
             if old.count != old_count || new.count != new_count {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Invalid(
+                    "patch hunk line count does not match its '@@ -old +new @@' header",
+                ));
             }
             let end = add(old.index, old.count)?;
             if end > source.len() || (end_of_file && end != source.len()) {
-                return Err(ToolError::Failed);
+                return Err(PatchError::Conflict(
+                    "patch contents or positions do not match the existing file",
+                ));
             }
             if !codex_contents_match_at(old_contents, source, old.index, context)? {
-                return Err(ToolError::Failed);
+                return Err(PatchError::Conflict(
+                    "patch contents or positions do not match the existing file",
+                ));
             }
             Ok(old.index)
         }
@@ -254,31 +294,39 @@ fn locate_codex_hunk(
                 let start = source
                     .len()
                     .checked_sub(old_count)
-                    .ok_or(ToolError::Failed)?;
+                    .ok_or(PatchError::Conflict(
+                        "patch contents or positions do not match the existing file",
+                    ))?;
                 if !codex_contents_match_at(old_contents, source, start, context)? {
-                    return Err(ToolError::Failed);
+                    return Err(PatchError::Conflict(
+                        "patch contents or positions do not match the existing file",
+                    ));
                 }
                 return Ok(start);
             }
             if old_count == 0 {
                 let Some(anchor) = anchor else {
-                    return Err(ToolError::Failed);
+                    return Err(PatchError::Conflict(
+                        "addition-only hunk requires an '@@ <anchor>' line or surrounding context",
+                    ));
                 };
                 let Some(anchor_line) =
                     find_unique_codex_anchor(source, search_start, anchor, context)?
                 else {
-                    return Err(ToolError::Failed);
+                    return Err(PatchError::Conflict(
+                        "patch '@@' anchor was not found in the file",
+                    ));
                 };
-                return anchor_line
-                    .checked_add(1)
-                    .ok_or(ToolError::InvalidInvocation);
+                return add(anchor_line, 1);
             }
 
             let match_start = if let Some(anchor) = anchor {
                 let Some(anchor_line) =
                     find_unique_codex_anchor(source, search_start, anchor, context)?
                 else {
-                    return Err(ToolError::Failed);
+                    return Err(PatchError::Conflict(
+                        "patch '@@' anchor was not found in the file",
+                    ));
                 };
                 anchor_line
             } else {
@@ -292,7 +340,9 @@ fn locate_codex_hunk(
                 context,
             )?
             else {
-                return Err(ToolError::Failed);
+                return Err(PatchError::Conflict(
+                    "patch contents or positions do not match the existing file",
+                ));
             };
             Ok(start)
         }
@@ -304,13 +354,15 @@ fn find_unique_codex_anchor(
     start: usize,
     anchor: &str,
     context: &ToolContext,
-) -> Result<Option<usize>, ToolError> {
+) -> Result<Option<usize>, PatchError> {
     let mut found = None;
     for (index, line) in source.iter().enumerate().skip(start) {
         check(context)?;
         if line.text.contains(anchor) {
             if found.is_some() {
-                return Err(ToolError::InvalidInvocation);
+                return Err(PatchError::Conflict(
+                    "patch '@@' anchor matches more than once; use a more specific anchor or add surrounding context",
+                ));
             }
             found = Some(index);
         }
@@ -321,7 +373,7 @@ fn find_unique_codex_anchor(
 fn codex_source_index<'a>(
     source: &[SourceLine<'a>],
     context: &ToolContext,
-) -> Result<HashMap<&'a str, Vec<usize>>, ToolError> {
+) -> Result<HashMap<&'a str, Vec<usize>>, PatchError> {
     let mut index = HashMap::new();
     for (line_index, line) in source.iter().enumerate() {
         check(context)?;
@@ -339,7 +391,7 @@ fn find_unique_codex_match<'a>(
     source_index: &HashMap<&'a str, Vec<usize>>,
     start: usize,
     context: &ToolContext,
-) -> Result<Option<usize>, ToolError> {
+) -> Result<Option<usize>, PatchError> {
     if pattern.is_empty() {
         return Ok(None);
     }
@@ -347,7 +399,9 @@ fn find_unique_codex_match<'a>(
     for (offset, content) in pattern.iter().enumerate() {
         check(context)?;
         if content.old_no_newline && no_newline_offset.replace(offset).is_some() {
-            return Err(ToolError::InvalidInvocation);
+            return Err(PatchError::Invalid(
+                "multiple '\\ No newline at end of file' markers in one hunk",
+            ));
         }
     }
 
@@ -389,7 +443,9 @@ fn find_unique_codex_match<'a>(
                     .is_some_and(|line| line.ending == LineEnding::None)
             }) {
                 if found.is_some() {
-                    return Err(ToolError::InvalidInvocation);
+                    return Err(PatchError::Conflict(
+                        "patch hunk matches more than once; add more surrounding context lines to make it unique",
+                    ));
                 }
                 found = Some(candidate);
             }
@@ -402,7 +458,7 @@ fn find_unique_codex_match<'a>(
 fn codex_pattern_prefix(
     pattern: &[PatchContent<'_>],
     context: &ToolContext,
-) -> Result<Vec<usize>, ToolError> {
+) -> Result<Vec<usize>, PatchError> {
     let mut prefix = vec![0usize; pattern.len()];
     let mut matched = 0usize;
     for index in 1..pattern.len() {
@@ -424,7 +480,7 @@ fn codex_contents_match_at(
     source: &[SourceLine<'_>],
     start: usize,
     context: &ToolContext,
-) -> Result<bool, ToolError> {
+) -> Result<bool, PatchError> {
     for (source_index, content) in (start..).zip(contents.iter()) {
         check(context)?;
         let Some(line) = source.get(source_index) else {
@@ -444,14 +500,16 @@ fn mark_codex_source_endings(
     start: usize,
     preferred_ending: LineEnding,
     context: &ToolContext,
-) -> Result<(), ToolError> {
+) -> Result<(), PatchError> {
     let mut source_lines = source.iter().skip(start);
     for index in 0..contents.len() {
         check(context)?;
         if matches!(contents[index].kind, PatchLineKind::Add) {
             continue;
         }
-        let line = source_lines.next().ok_or(ToolError::Failed)?;
+        let line = source_lines.next().ok_or(PatchError::Conflict(
+            "patch contents or positions do not match the existing file",
+        ))?;
         if line.ending == LineEnding::None {
             contents[index].old_no_newline = true;
             if matches!(contents[index].kind, PatchLineKind::Context)
@@ -471,7 +529,7 @@ fn mark_codex_result_no_newline(
     contents: &mut [PatchContent<'_>],
     new_count: usize,
     context: &ToolContext,
-) -> Result<(), ToolError> {
+) -> Result<(), PatchError> {
     if new_count != 0 {
         for content in contents.iter_mut().rev() {
             check(context)?;

@@ -296,8 +296,14 @@ async fn shared_range_with_real_tools(end: End) {
     after_second.complete("launches accepted");
     f.finished(&root.source).await;
 
-    // The real agent tool runs in T0. Runtime consumes M2 at the next request,
-    // while the earlier follow-up M1 must remain queued for a different Turn.
+    if matches!(end, End::RemoveFirst) {
+        f.host
+            .remove_input(&f.connection.caller(), &child, &first)
+            .unwrap();
+    }
+
+    // All agent(send) calls deliver via steer (next_step), so the busy child
+    // consumes accepted delegated messages at the very next step in T0.
     old.tool(
         "inspect-shared-child",
         json!({"action":"inspect", "target":target(&child)}),
@@ -312,13 +318,30 @@ async fn shared_range_with_real_tools(end: End) {
         matches!(f.host.message(&f.connection.caller(), &child, &supplemental).unwrap().binding,
         MessageBinding::Bound { turn_id } if turn_id == old.source.turn.turn_id)
     );
-    assert!(matches!(
-        f.host
-            .message(&f.connection.caller(), &child, &first)
-            .unwrap()
-            .binding,
-        MessageBinding::Queued
-    ));
+    if matches!(end, End::RemoveFirst) {
+        assert!(matches!(
+            f.host
+                .message(&f.connection.caller(), &child, &first)
+                .unwrap()
+                .binding,
+            MessageBinding::Removed
+        ));
+    } else {
+        assert!(
+            matches!(f.host.message(&f.connection.caller(), &child, &first).unwrap().binding,
+            MessageBinding::Bound { turn_id } if turn_id == old.source.turn.turn_id)
+        );
+    }
+    let expected_all: Vec<MessageId> = if matches!(end, End::RemoveFirst) {
+        vec![unrelated.clone(), supplemental.clone()]
+    } else {
+        vec![unrelated.clone(), first.clone(), supplemental.clone()]
+    };
+    let expected_delegated: Vec<MessageId> = if matches!(end, End::RemoveFirst) {
+        vec![supplemental.clone()]
+    } else {
+        vec![first.clone(), supplemental.clone()]
+    };
     let child_state = f
         .host
         .session_state(&f.connection.caller(), &child)
@@ -326,25 +349,12 @@ async fn shared_range_with_real_tools(end: End) {
     let binding = child_state.data.delegation.unwrap();
     assert_eq!(binding.inputs.len(), 1);
     assert_eq!(binding.inputs[0].turn, old.source.turn);
-    assert_eq!(
-        binding.inputs[0].message_ids,
-        [unrelated.clone(), supplemental.clone()]
-    );
-    assert_eq!(
-        binding.inputs[0].delegated_message_ids.as_slice(),
-        std::slice::from_ref(&supplemental)
-    );
+    assert_eq!(binding.inputs[0].message_ids, expected_all);
+    assert_eq!(binding.inputs[0].delegated_message_ids, expected_delegated);
     assert!(binding.completion.is_none());
     match end {
-        End::RemoveFirst => {
-            f.host
-                .remove_input(&f.connection.caller(), &child, &first)
-                .unwrap();
-            continuation.complete("actual supplemental answer");
-        }
-        End::Complete => continuation.complete("actual supplemental answer"),
+        End::RemoveFirst | End::Complete => continuation.complete("actual supplemental answer"),
         End::Cancel | End::Fail => {
-            f.host.pause(&f.connection.caller(), &child).unwrap();
             continuation
                 .events
                 .send(ModelEvent::text_delta(
@@ -359,6 +369,11 @@ async fn shared_range_with_real_tools(end: End) {
             // EOF without Finish is a real Runtime model failure, not a
             // manufactured owner result. Cancellation uses the actual handle.
             drop(continuation);
+            if matches!(end, End::Fail) {
+                for _ in 1..4 {
+                    drop(f.next(&child).await);
+                }
+            }
             f.finished(&old.source).await;
             let result = f
                 .host
@@ -372,49 +387,7 @@ async fn shared_range_with_real_tools(end: End) {
                     TurnOutcome::Failed
                 })
             );
-            assert!(f.calls.try_recv().is_err());
-            assert!(
-                f.host
-                    .session_state(&f.connection.caller(), &child)
-                    .unwrap()
-                    .data
-                    .delegation
-                    .unwrap()
-                    .completion
-                    .is_none(),
-                "a finished failed/cancelled Turn with preserved input is not delegation completion"
-            );
-            assert!(f.host.session_info(&f.connection.caller(), &child).is_ok());
-            assert!(matches!(
-                f.host
-                    .message(&f.connection.caller(), &child, &first)
-                    .unwrap()
-                    .binding,
-                MessageBinding::Queued
-            ));
-            assert!(
-                f.host
-                    .session_state(&f.connection.caller(), &parent)
-                    .unwrap()
-                    .data
-                    .next_turn
-                    .is_empty()
-            );
-            f.host.resume(&f.connection.caller(), &child).unwrap();
         }
-    }
-    if !matches!(end, End::RemoveFirst) {
-        let follow_up = f.next(&child).await;
-        assert_ne!(follow_up.source.turn, old.source.turn);
-        assert!(
-            f.host
-                .session_state(&f.connection.caller(), &parent)
-                .unwrap()
-                .data
-                .next_turn
-                .is_empty()
-        );
-        follow_up.complete("actual initial follow-up answer");
     }
     let notified = f.next(&parent).await;
     assert_ne!(notified.source.turn, root.source.turn);
@@ -446,28 +419,20 @@ async fn shared_range_with_real_tools(end: End) {
     assert_eq!(notice["origin"]["tool_call_id"], "delegate-first");
     assert_eq!(notice["status"], "ended");
     assert_eq!(notice["inputs"][0]["turn"], json!(old.source.turn));
-    assert_eq!(
-        notice["inputs"][0]["message_ids"],
-        json!([unrelated, supplemental.clone()])
-    );
+    assert_eq!(notice["inputs"][0]["message_ids"], json!(expected_all));
     assert_eq!(
         notice["inputs"][0]["delegated_message_ids"],
-        json!([supplemental])
+        json!(expected_delegated)
     );
-    let count = if matches!(end, End::RemoveFirst) {
-        1
-    } else {
-        2
-    };
-    assert_eq!(notice["results"].as_array().unwrap().len(), count);
+    assert_eq!(notice["results"].as_array().unwrap().len(), 1);
     let completed = f
         .host
         .toolcall_get(&f.connection.caller(), &parent, &original_tool)
         .unwrap();
     let settled = &completed.data.state.delegations[0];
     assert_eq!(settled.origin, original_tool);
-    assert_eq!(settled.inputs.len(), count);
-    assert_eq!(settled.completion.as_ref().unwrap().turns.len(), count);
+    assert_eq!(settled.inputs.len(), 1);
+    assert_eq!(settled.completion.as_ref().unwrap().turns.len(), 1);
     assert_eq!(
         serde_json::to_value(&settled.inputs).unwrap(),
         notice["inputs"]
@@ -496,11 +461,6 @@ async fn shared_range_with_real_tools(end: End) {
     if matches!(end, End::RemoveFirst) {
         assert_eq!(notice["discarded_inputs"], json!([first]));
     } else {
-        assert_eq!(notice["inputs"][1]["message_ids"], json!([first]));
-        assert_eq!(
-            notice["results"][1]["output"],
-            json!(["actual initial follow-up answer"])
-        );
         assert_eq!(notice["discarded_inputs"], json!([]));
     }
     let child_result = f
@@ -614,7 +574,7 @@ async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
         f.finished(&root.source).await;
         unrelated.complete("unrelated finished");
         let delegated = f.next(&child).await;
-        assert_ne!(delegated.source.turn, unrelated.source.turn);
+        assert_eq!(delegated.source.turn, unrelated.source.turn);
         delegated.complete("actual delegated result");
         let notified = f.next(&parent).await;
         notified.complete("notification consumed");
@@ -705,5 +665,127 @@ async fn rejected_agent_send_is_failed_tool_without_failing_parent_turn() {
             .info
             .outcome,
         Some(TurnOutcome::Completed)
+    );
+}
+
+#[tokio::test]
+async fn child_send_to_running_parent_always_steers_and_wakes_wait() {
+    async fn next_pair(
+        f: &mut Fixture,
+        first_session: &SessionRef,
+        second_session: &SessionRef,
+    ) -> (ModelCall, ModelCall) {
+        let mut first = None;
+        let mut second = None;
+        for _ in 0..2 {
+            let call = tokio::time::timeout(std::time::Duration::from_secs(5), f.calls.recv())
+                .await
+                .expect("actual owner must progress")
+                .unwrap();
+            if &call.source.session == first_session && first.is_none() {
+                first = Some(call);
+            } else if &call.source.session == second_session && second.is_none() {
+                second = Some(call);
+            } else {
+                panic!(
+                    "unexpected concurrent call session: {:?}",
+                    call.source.session
+                );
+            }
+        }
+        (first.unwrap(), second.unwrap())
+    }
+
+    let mut f = Fixture::new();
+    let parent = f.agent().await;
+    let child = f.agent().await;
+    f.send(&parent, "coordinate child");
+    let root = f.next(&parent).await;
+    root.tool(
+        "delegate-child",
+        json!({"action":"send", "target":target(&child), "text":"do work", "delegate":true}),
+    );
+    let (parent_waiting, child_turn) = next_pair(&mut f, &parent, &child).await;
+    // Parent calls agent(wait) while child is running.
+    parent_waiting.tool("wait-child", json!({"action":"wait", "timeout_ms":5000}));
+
+    // Child sends without specifying `mode`: must deliver via `steer` (`next_step`),
+    // wake `agent(wait)` immediately, and never sit stranded in `parent.next_turn`.
+    child_turn.tool(
+        "report-default",
+        json!({"action":"send", "target":target(&parent), "text":"mid-turn coordination note"}),
+    );
+    let (parent_woke, child_after_first) = next_pair(&mut f, &parent, &child).await;
+    assert_eq!(
+        child_after_first.last_tool_result()["result"]["delivery"],
+        "accepted"
+    );
+    assert_eq!(
+        child_after_first.last_tool_result()["result"]["queue"],
+        "next-step"
+    );
+    assert_eq!(parent_woke.source.turn, root.source.turn);
+    assert_eq!(
+        parent_woke.last_tool_result(),
+        json!({"status": "input_available"})
+    );
+    assert!(
+        parent_woke
+            .request
+            .messages()
+            .iter()
+            .any(|msg| matches!(msg, ModelMessage::User(text) if text.contains("mid-turn coordination note"))),
+        "steered child message must be bound into the running parent Turn immediately"
+    );
+
+    // Even an explicit legacy `mode: "follow_up"` on agent(send) routes through `steer`.
+    child_after_first.tool(
+        "report-legacy-mode",
+        json!({"action":"send", "target":target(&parent), "mode":"follow_up", "text":"second coordination note"}),
+    );
+    let child_after_second = f.next(&child).await;
+    assert_eq!(
+        child_after_second.last_tool_result()["result"]["queue"],
+        "next-step"
+    );
+    child_after_second.complete("child done");
+    f.finished(&child_turn.source).await;
+    // Wait until the child's completion notification has also been delivered to parent.
+    let mut parent_states = f
+        .host
+        .session_states(&f.connection.caller(), &parent)
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while parent_states.snapshot().unwrap().data.next_step.len() < 2 {
+            parent_states.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("both legacy-mode send and completion notification must arrive in next_step");
+
+    // Parent's response absorbs both steered messages in the same Turn.
+    parent_woke.complete("parent initial answer");
+    let parent_followup = f.next(&parent).await;
+    assert_eq!(parent_followup.source.turn, root.source.turn);
+    assert!(parent_followup.request.messages().iter().any(
+        |msg| matches!(msg, ModelMessage::User(text) if text.contains("second coordination note"))
+    ));
+    assert!(
+        parent_followup
+            .request
+            .messages()
+            .iter()
+            .any(|msg| matches!(msg, ModelMessage::User(text) if text.contains("child done")))
+    );
+    parent_followup.complete("parent final answer");
+    f.finished(&root.source).await;
+    assert!(
+        f.host
+            .session_state(&f.connection.caller(), &parent)
+            .unwrap()
+            .data
+            .next_turn
+            .is_empty(),
+        "no stale child send may remain stranded in next_turn after parent Turn finishes"
     );
 }

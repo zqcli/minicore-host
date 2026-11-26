@@ -84,7 +84,14 @@ impl Model for TestModel {
 fn driver(model: &dyn Model) -> ModelDriver<'_> {
     ModelDriver::new(
         model,
-        ModelDriverConfig::new(Duration::from_secs(60), 2, Duration::from_millis(100)),
+        ModelDriverConfig::new(Duration::from_secs(60), 1, Duration::from_millis(100)),
+    )
+    .unwrap()
+}
+fn retrying_driver(model: &dyn Model) -> ModelDriver<'_> {
+    ModelDriver::new(
+        model,
+        ModelDriverConfig::new(Duration::from_secs(60), 4, Duration::from_millis(100)),
     )
     .unwrap()
 }
@@ -373,7 +380,7 @@ async fn incomplete_second_request_has_original_index_without_reclassifying_firs
 }
 
 #[tokio::test]
-async fn usage_without_content_survives_failure_and_prevents_retry() {
+async fn usage_without_content_survives_failure_when_attempts_exhausted() {
     let usage = Usage::new(8, 0, 0);
     let model = TestModel::new(vec![
         Behavior::Events(vec![
@@ -446,7 +453,7 @@ async fn report_retains_attempts_and_retry_wait_when_observer_panics() {
         text_success(),
     ]);
     let mut events = Vec::new();
-    let report = driver(&model)
+    let report = retrying_driver(&model)
         .call(
             request(),
             context(0, CancellationToken::new(), Duration::from_secs(120)),

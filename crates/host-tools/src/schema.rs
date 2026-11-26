@@ -6,7 +6,7 @@ use std::sync::LazyLock;
 pub fn agent_tool_spec() -> ToolSpec {
     static SPEC: LazyLock<ToolSpec> = LazyLock::new(|| {
         ToolSpec::new("agent".parse().expect("static tool name"),
-        "Create, send to, inspect, update or control Agents and Sessions in this Host. To delegate, create a Session with text: omit target to use your own Agent; it inherits your model, reasoning, approval policy and workspace unless settings override them. A new Agent copies your Agent unless from_agent_id names another. model, reasoning, instructions, tools, workspace and execution go inside settings. Creation with text and send with delegate:true start independent work and return acceptance (with the child's agent_id and session_id); completion arrives as a new message. wait waits for consumable input in this Session, not a particular child.",
+        "Create, send to, inspect, update or control Agents and Sessions in this Host. To delegate, create a Session with text: omit target to use your own Agent; it inherits your model, reasoning, approval policy and workspace unless settings override them (settings.execution allows partial field overrides; choose model IDs from available_models in session context). A new Agent copies your Agent unless from_agent_id names another. model, reasoning, instructions, tools, workspace and execution go inside settings. Creation with text and send with delegate:true start independent work and return acceptance (with the child's agent_id and session_id); the child's final Turn output is handed off automatically to the parent as a new message, so delegated children should NOT call send back to their parent for routine progress updates. All send calls deliver immediately as steer (injected at the next step when the target is busy, or starting a new Turn when idle). Subagents should avoid unnecessary further nested delegation. wait waits for consumable input in this Session, returns immediately on input_available, and defaults to 60000ms when timeout_ms is omitted (prefer omitting timeout_ms or 30000-120000ms instead of 1000ms short-polling). Session inspect with include_output:true returns the latest bounded tail of history when history_page is omitted.",
         schema()).expect("static agent tool declaration is valid")
     });
     SPEC.clone()
@@ -43,20 +43,12 @@ fn schema() -> Value {
     );
     let compaction = object(
         json!({"enabled":{"type":"boolean"},"trigger_percent":{"type":"integer","minimum":1,"maximum":100},"target_percent":{"type":"integer","minimum":1,"maximum":99}}),
-        &["enabled", "trigger_percent", "target_percent"],
+        &[],
     );
     let positive = json!({"type":"integer","minimum":1});
     let execution = object(
-        json!({"approval":{"enum":["auto","ask","read_only"],"default":"ask"},"prompt_timeout_ms":positive,"model_timeout_ms":{"type":"integer","minimum":1,"maximum":86400000},"policy_timeout_ms":positive,"tool_timeout_ms":positive,"model_retry_attempts":{"type":"integer","minimum":1,"maximum":4},"model_retry_base_delay_ms":{"type":"integer","minimum":1,"maximum":30000},"compaction":compaction}),
-        &[
-            "prompt_timeout_ms",
-            "model_timeout_ms",
-            "policy_timeout_ms",
-            "tool_timeout_ms",
-            "model_retry_attempts",
-            "model_retry_base_delay_ms",
-            "compaction",
-        ],
+        json!({"approval":{"enum":["auto","ask"],"default":"ask"},"prompt_timeout_ms":positive,"model_timeout_ms":{"type":"integer","minimum":1,"maximum":86400000},"policy_timeout_ms":positive,"tool_timeout_ms":positive,"model_retry_attempts":{"type":"integer","minimum":1,"maximum":4},"model_retry_base_delay_ms":{"type":"integer","minimum":1,"maximum":30000},"compaction":compaction}),
+        &[],
     );
     let settings_properties = json!({
         "role":role,
@@ -106,7 +98,7 @@ fn schema() -> Value {
         ),
         branch(
             "send",
-            json!({"target":message_target,"text":text,"mode":{"enum":["follow_up","steer"],"default":"follow_up"},"delegate":boolean,"in_reply_to":id}),
+            json!({"target":message_target,"text":text,"mode":{"enum":["steer"],"default":"steer"},"delegate":boolean,"in_reply_to":id}),
             &["target", "text"],
         ),
         branch(

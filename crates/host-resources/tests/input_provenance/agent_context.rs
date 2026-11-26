@@ -70,7 +70,12 @@ async fn first_agent_call_uses_only_bound_http_context_and_receives_real_child_c
     let identity = current_context(&first.body);
     assert_eq!(
         identity,
-        json!({"host_id":created.host_id,"agent_id":parent.agent_id,"session_id":parent.session_id})
+        json!({
+            "host_id": created.host_id,
+            "agent_id": parent.agent_id,
+            "session_id": parent.session_id,
+            "available_models": ["custom/provider/chat"],
+        })
     );
     let messages = first.body["messages"].as_array().unwrap();
     assert_eq!(messages.len(), 6);

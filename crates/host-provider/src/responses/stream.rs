@@ -132,22 +132,23 @@ impl State {
         }
     }
 
-    fn malformed(&self) -> ModelError {
-        error::stream(ModelErrorKind::InvalidProviderResponse, self.seen)
+    fn malformed(&self, reason: &str) -> ModelError {
+        self.error_context.malformed(reason, self.seen)
     }
 
     fn handle(&mut self, frame: &[u8]) -> Result<(), ModelError> {
         if frame == b"[DONE]" {
             return Err(error::stream(ModelErrorKind::IncompleteResponse, self.seen));
         }
-        let frame = std::str::from_utf8(frame).map_err(|_| self.malformed())?;
+        let frame =
+            std::str::from_utf8(frame).map_err(|_| self.malformed("non-UTF-8 SSE frame"))?;
         let event = match serde_json::from_str::<Event>(frame) {
             Ok(event) => event,
             Err(_) => {
                 // Rejections take precedence over malformed normal fields. A
                 // separate typed envelope still rejects repeated known fields.
-                let envelope: wire::ErrorEnvelope =
-                    serde_json::from_str(frame).map_err(|_| self.malformed())?;
+                let envelope: wire::ErrorEnvelope = serde_json::from_str(frame)
+                    .map_err(|_| self.malformed("unparseable SSE event JSON"))?;
                 self.error_context.record_request_id(
                     envelope
                         .request_id
@@ -158,7 +159,7 @@ impl State {
                     && envelope.kind.as_deref() == Some("response.failed")
                 {
                     let response = serde_json::from_str::<wire::FailedEnvelope>(frame)
-                        .map_err(|_| self.malformed())?
+                        .map_err(|_| self.malformed("invalid response.failed payload"))?
                         .response;
                     if let Some(response) = response {
                         self.seen |= response
@@ -178,7 +179,7 @@ impl State {
                 });
                 return Err(match value {
                     Some(value) => error::provider(&value, self.seen, &self.error_context),
-                    None => self.malformed(),
+                    None => self.malformed("unrecognized SSE error envelope"),
                 });
             }
         };
@@ -195,24 +196,32 @@ impl State {
             ));
         }
         if event.kind == "response.failed" {
-            let response = event.response.ok_or_else(|| self.malformed())?;
-            let value = response.error.as_ref().ok_or_else(|| self.malformed())?;
+            let response = event
+                .response
+                .ok_or_else(|| self.malformed("response.failed missing response"))?;
+            let value = response
+                .error
+                .as_ref()
+                .ok_or_else(|| self.malformed("response.failed missing error"))?;
             // A first-frame structured rejection may still prove NotStarted;
             // response.created or any actual output forbids that inference.
             let seen = self.seen || !response.output.is_empty();
             let failure = error::provider(value, seen, &self.error_context);
             self.terminal_metadata(&response, "failed")
-                .map_err(|_| self.malformed())?;
+                .map_err(|_| self.malformed("response.failed metadata mismatch"))?;
             self.seen = seen;
             return Err(failure);
         }
-        let sequence = event.sequence_number.ok_or_else(|| self.malformed())?;
+        let sequence = event
+            .sequence_number
+            .ok_or_else(|| self.malformed("missing sequence_number"))?;
         if self.sequence.is_some_and(|previous| sequence <= previous) {
-            return Err(self.malformed());
+            return Err(self.malformed("non-monotonic sequence_number"));
         }
         self.sequence = Some(sequence);
         self.seen = true;
-        let result = match event.kind.as_str() {
+        let kind = event.kind.clone();
+        let result = match kind.as_str() {
             "response.created" => self.created(event.response.ok_or(())),
             "response.in_progress" => self.in_progress(event.response.ok_or(())),
             "response.metadata" => {
@@ -249,9 +258,11 @@ impl State {
             "response.function_call_arguments.done" => self.arguments_done(&event),
             "response.completed" => self.complete(event.response.ok_or(())),
             "response.incomplete" => {
-                let response = event.response.ok_or_else(|| self.malformed())?;
+                let response = event
+                    .response
+                    .ok_or_else(|| self.malformed("response.incomplete missing response"))?;
                 self.terminal_metadata(&response, "incomplete")
-                    .map_err(|_| self.malformed())?;
+                    .map_err(|_| self.malformed("response.incomplete metadata mismatch"))?;
                 return Err(self.error_context.incomplete(
                     response
                         .incomplete_details
@@ -260,9 +271,11 @@ impl State {
                     self.seen,
                 ));
             }
-            _ => Err(()),
+            _ => {
+                return Err(self.malformed(&format!("unexpected SSE event {kind}")));
+            }
         };
-        result.map_err(|_| self.malformed())
+        result.map_err(|_| self.malformed(&format!("invalid payload in {kind}")))
     }
 
     fn response_identity(&self, response: &Response) -> Result<(), ()> {
@@ -650,12 +663,13 @@ impl State {
         let incomplete = !terminal && item.status.as_deref() == Some("incomplete");
         match &output.body {
             Body::Message { phase, content } => {
+                // Non-terminal `output_item.done` may finalize a provisional
+                // phase set on `output_item.added` (e.g. final_answer -> commentary).
                 if (!incomplete && content.is_empty())
                     || item.kind != "message"
                     || item.role.as_deref() != Some("assistant")
                     || (!incomplete && item.status.as_deref() != Some("completed"))
                     || !wire::valid_phase(item.phase.as_deref())
-                    || (phase.is_some() && phase != &item.phase)
                     || (terminal && phase != &item.phase)
                     || item.summary.is_some()
                     || item.encrypted_content.is_some()
@@ -709,6 +723,15 @@ impl State {
                     let mut expected = native.as_ref().ok_or(())?.clone();
                     if expected.encrypted_content.is_none() {
                         expected.encrypted_content = item.encrypted_content.clone();
+                    }
+                    if expected.status.is_none() {
+                        expected.status = item.status.clone();
+                    }
+                    if expected.content.is_none() && item.content.as_deref() == Some(&[]) {
+                        expected.content = item.content.clone();
+                    }
+                    if expected.content.as_deref() == Some(&[]) && item.content.is_none() {
+                        expected.content = None;
                     }
                     if expected != *item {
                         return Err(());

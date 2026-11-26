@@ -126,7 +126,7 @@ fn branch_specific_fields_and_nullability_are_strict() {
         json!({"action":"update","resource":"agent","target":agent(),"changes":{"mode":"memory"}}),
         json!({"action":"update","resource":"agent","target":agent(),"changes":{"name":null}}),
         json!({"action":"update","resource":"session","target":session(),"changes":{"model":null}}),
-        json!({"action":"update","resource":"session","target":session(),"changes":{"execution":{"tool_timeout_ms":1000}}}),
+        json!({"action":"update","resource":"session","target":session(),"changes":{"execution":{"tool_timeout_ms":0}}}),
         json!({"action":"inspect","target":{"kind":"turn","agent_id":id(),"session_id":id(),"turn_id":id()},"include_config":true}),
         json!({"action":"inspect","target":{"kind":"receipt","host_id":id(),"operation_id":id()},"include_output":true}),
     ];
@@ -136,13 +136,22 @@ fn branch_specific_fields_and_nullability_are_strict() {
             "accepted {input}"
         );
     }
+    assert!(
+        AgentAction::parse(json!({
+            "action": "create",
+            "resource": "session",
+            "settings": {"execution": {"approval": "auto"}},
+            "text": "auto check"
+        }))
+        .is_ok()
+    );
 }
 #[test]
 fn defaults_are_business_defaults_and_wait_has_no_implicit_timeout() {
     let AgentAction::Send(send) = AgentAction::parse(valid_calls()[2].clone()).unwrap() else {
         panic!()
     };
-    assert_eq!(send.mode, MessageMode::FollowUp);
+    assert_eq!(send.mode, MessageMode::Steer);
     assert!(!send.delegate);
     let AgentAction::Wait(wait) = AgentAction::parse(json!({"action":"wait"})).unwrap() else {
         panic!()
@@ -329,7 +338,7 @@ fn execution_schema_exposes_approval_with_the_same_omission_default_as_dispatch(
     let execution = &spec.input_schema()["$defs"]["settings"]["properties"]["execution"];
     assert_eq!(
         execution["properties"]["approval"]["enum"],
-        json!(["auto", "ask", "read_only"])
+        json!(["auto", "ask"])
     );
     assert_eq!(execution["properties"]["approval"]["default"], "ask");
     assert!(
@@ -338,7 +347,7 @@ fn execution_schema_exposes_approval_with_the_same_omission_default_as_dispatch(
             .unwrap()
             .contains(&json!("approval"))
     );
-    for mode in ["auto", "ask", "read_only"] {
+    for mode in ["auto", "ask"] {
         let mut settings = json!(ExecutionSettings::default());
         settings["approval"] = json!(mode);
         AgentAction::parse(json!({"action":"update","resource":"session","target":{"agent_id":id(),"session_id":id()},"changes":{"execution":settings}})).unwrap();

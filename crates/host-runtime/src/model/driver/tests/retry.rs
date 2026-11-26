@@ -38,7 +38,7 @@ async fn not_started_errors_retry_with_exact_attempts_and_delays() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn excessive_retry_after_and_nonretryable_do_not_retry() {
+async fn excessive_retry_after_stops_and_ordinary_errors_retry_up_to_limit() {
     let diag = DiagnosticSummary::new(
         DiagnosticCode::ModelUnavailable,
         DiagnosticCategory::Model,
@@ -46,12 +46,34 @@ async fn excessive_retry_after_and_nonretryable_do_not_retry() {
         false,
     )
     .expect("valid diagnostic text");
+    // Excessive retry-after exceeds MAX_MODEL_RETRY_DELAY so it stops immediately.
+    let excessive = ModelError::not_started(
+        ModelErrorKind::ProviderUnavailable,
+        Some(Duration::from_secs(31)),
+        diag.clone(),
+    );
+    let model = ScriptModel::new(
+        descriptor(),
+        vec![
+            Behavior::StartError(excessive),
+            Behavior::Events(text_success("unexpected")),
+        ],
+    );
+    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(4, Duration::ZERO)));
+    let (progress, _receiver) = progress_channel();
+    let actual = driver
+        .run(
+            request(),
+            context(CancellationToken::new(), Duration::from_secs(30)),
+            &progress,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(actual.kind(), ModelErrorKind::ProviderUnavailable);
+    assert_eq!(model.starts(), 1);
+
+    // Every other model error retries up to max_attempts (4 = 1 initial + 3 retries) and stops.
     let cases = vec![
-        ModelError::not_started(
-            ModelErrorKind::ProviderUnavailable,
-            Some(Duration::from_secs(31)),
-            diag.clone(),
-        ),
         ModelError::permanent(
             ModelErrorKind::AuthRejected,
             DeliveryState::NotStarted,
@@ -70,8 +92,11 @@ async fn excessive_retry_after_and_nonretryable_do_not_retry() {
         let model = ScriptModel::new(
             descriptor(),
             vec![
+                Behavior::StartError(error.clone()),
+                Behavior::StartError(error.clone()),
+                Behavior::StartError(error.clone()),
                 Behavior::StartError(error),
-                Behavior::Events(text_success("unexpected")),
+                Behavior::Events(text_success("must not run 5th attempt")),
             ],
         );
         let driver = model.driver(&with_retry(RetryPolicySnapshot::new(4, Duration::ZERO)));
@@ -85,12 +110,12 @@ async fn excessive_retry_after_and_nonretryable_do_not_retry() {
             .await
             .unwrap_err();
         assert_eq!(actual.kind(), expected);
-        assert_eq!(model.starts(), 1);
+        assert_eq!(model.starts(), 4);
     }
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn semantic_event_blocks_retry_and_normalizes_lying_not_started_error() {
+async fn stream_error_after_partial_output_retries_and_normalizes_when_exhausted() {
     let source = crate::model::ModelUpstreamDetails {
         http_status: Some(200),
         provider_type: Some("overloaded_error".into()),
@@ -104,10 +129,31 @@ async fn semantic_event_blocks_retry_and_normalizes_lying_not_started_error() {
                 Ok(ModelEvent::text_delta("partial")),
                 Err(retryable_error(None).with_upstream(source.clone())),
             ]),
-            Behavior::Events(text_success("unexpected")),
+            Behavior::Events(text_success("recovered")),
         ],
     );
     let driver = model.driver(&with_retry(RetryPolicySnapshot::new(4, Duration::ZERO)));
+    let (progress, _progress_rx) = progress_channel();
+    let response = driver
+        .run(
+            request(),
+            context(CancellationToken::new(), Duration::from_secs(30)),
+            &progress,
+        )
+        .await
+        .unwrap();
+    assert_text(&response, "recovered");
+    assert_eq!(model.starts(), 2);
+
+    // Exhausting attempts still normalizes the final observed error.
+    let model = ScriptModel::new(
+        descriptor(),
+        vec![Behavior::Events(vec![
+            Ok(ModelEvent::text_delta("partial")),
+            Err(retryable_error(None).with_upstream(source.clone())),
+        ])],
+    );
+    let driver = model.driver(&with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)));
     let (progress, mut progress_rx) = progress_channel();
     let error = driver
         .run(
@@ -121,7 +167,6 @@ async fn semantic_event_blocks_retry_and_normalizes_lying_not_started_error() {
         progress_rx.try_recv(),
         Ok(ModelDriverProgress::TextDelta(delta)) if delta.as_str() == "partial"
     ));
-    assert!(progress_rx.try_recv().is_err());
     assert_eq!(error.kind(), ModelErrorKind::ProviderUnavailable);
     assert_eq!(error.delivery(), DeliveryState::Started);
     assert_eq!(error.retry_hint(), &RetryHint::Never);

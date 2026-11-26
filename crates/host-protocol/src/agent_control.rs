@@ -1,5 +1,5 @@
 //! Agent start/stop and default-Session control requests with their receipts.
-use crate::{AgentId, OperationId, SessionId, control_receipt};
+use crate::{AgentId, OperationId, SessionId};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

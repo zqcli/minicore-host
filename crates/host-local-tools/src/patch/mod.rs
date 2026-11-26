@@ -8,4 +8,4 @@ mod apply;
 mod codex;
 mod unified;
 
-pub(crate) use apply::apply_single_file_patch;
+pub(crate) use apply::{PatchError, apply_single_file_patch};

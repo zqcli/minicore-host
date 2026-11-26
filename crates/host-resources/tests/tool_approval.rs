@@ -250,15 +250,6 @@ async fn registered_external_ask_deny_does_not_execute() {
     .await;
 }
 #[tokio::test]
-async fn registered_external_read_only_does_not_execute() {
-    external_scenario(
-        "registered_external",
-        ApprovalMode::ReadOnly,
-        ApprovalAnswer::AllowOnce,
-    )
-    .await;
-}
-#[tokio::test]
 async fn registered_external_explicit_auto_executes() {
     external_scenario(
         "registered_external",
@@ -270,21 +261,13 @@ async fn registered_external_explicit_auto_executes() {
 
 #[tokio::test]
 async fn external_factory_named_read_keeps_mutating_semantics_in_every_mode() {
-    for mode in [
-        ApprovalMode::ReadOnly,
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-    ] {
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
         external_scenario("read", mode, ApprovalAnswer::AllowOnce).await;
     }
 }
 #[tokio::test]
 async fn external_factory_named_agent_keeps_mutating_semantics_in_every_mode() {
-    for mode in [
-        ApprovalMode::ReadOnly,
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-    ] {
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
         external_scenario("agent", mode, ApprovalAnswer::AllowOnce).await;
     }
 }
@@ -292,11 +275,7 @@ async fn external_factory_named_agent_keeps_mutating_semantics_in_every_mode() {
 #[tokio::test]
 async fn malformed_builtin_agent_arguments_return_failed_details_without_approval_or_child_creation()
  {
-    for mode in [
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-        ApprovalMode::ReadOnly,
-    ] {
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
         let mut server = Server::start(vec![
             (
                 tool_answer(

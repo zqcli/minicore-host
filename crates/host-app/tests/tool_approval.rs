@@ -49,11 +49,12 @@ async fn interactions(app: &App, target: &Value) -> ClientSubscription {
         .unwrap()
 }
 
-async fn pending(
+async fn pending_with_risk(
     app: &mut App,
     target: &Value,
     events: &mut ClientSubscription,
     call: &str,
+    expected_risk: ApprovalRiskData,
 ) -> (ToolCallIdentity, InteractionId) {
     let (source, id, request) = loop {
         if let ObservationEvent::Activity(ActivityEvent::InteractionRequested {
@@ -76,7 +77,7 @@ async fn pending(
     let InteractionRequestData::Approval { risk, .. } = request else {
         panic!("actual approval")
     };
-    assert_eq!(risk, ApprovalRiskData::Medium);
+    assert_eq!(risk, expected_risk);
     let snapshot = app
         .process
         .rpc("session.state", json!({"target":target}))
@@ -92,6 +93,15 @@ async fn pending(
     assert_eq!(waiting[0]["tool_call_id"], call);
     assert_eq!(waiting[0]["request"]["kind"], "approval");
     (source, id)
+}
+
+async fn pending(
+    app: &mut App,
+    target: &Value,
+    events: &mut ClientSubscription,
+    call: &str,
+) -> (ToolCallIdentity, InteractionId) {
+    pending_with_risk(app, target, events, call, ApprovalRiskData::Medium).await
 }
 
 fn answer_request(
@@ -269,157 +279,102 @@ async fn binary_omitted_approval_is_ask_and_allow_once_does_not_approve_the_next
 }
 
 #[tokio::test]
-async fn binary_read_only_blocks_local_and_agent_mutations_but_reads_inspects_and_waits() {
+async fn binary_cross_workspace_requires_approval_in_ask_and_allows_in_auto() {
     let mut provider = Provider::start().await;
-    let tools = ["read", "write", "edit", "apply_patch", "bash", "agent"];
+    let tools = ["read", "write", "bash"];
     let mut app = App::start(&provider, &tools).await;
-    let workspace = tempfile::tempdir().unwrap();
-    fs::write(workspace.path().join("input"), "original").unwrap();
-    let target = create(
-        &mut app,
-        workspace.path(),
-        &tools,
-        Some(ApprovalMode::ReadOnly),
-    )
-    .await;
-    let victim = create(
-        &mut app,
-        workspace.path(),
-        &["agent"],
-        Some(ApprovalMode::ReadOnly),
-    )
-    .await;
-    let agent_ref = json!({"host_id":app.initial["host_id"],"agent_id":victim["agent_id"]});
-    let execution = ExecutionSettings {
-        approval: ApprovalMode::Auto,
-        compaction: CompactionSettings {
-            enabled: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let parent = tempfile::tempdir().unwrap();
+    let workspace = parent.path().join("ws");
+    let outside = parent.path().join("outside");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("ext.txt"), "external-value").unwrap();
+    let outside_file = outside.join("ext.txt").to_string_lossy().into_owned();
+    let outside_new = outside.join("created.txt").to_string_lossy().into_owned();
+
+    // Ask mode: outside read requires Medium approval; outside write requires High approval.
+    let ask_target = create(&mut app, &workspace, &tools, Some(ApprovalMode::Ask)).await;
+    let mut events = interactions(&app, &ask_target).await;
     app.process
-        .rpc("message.send", message(&target, "read-only policy matrix"))
+        .rpc("message.send", message(&ask_target, "cross-workspace ask"))
         .await;
-    let mut next = provider.request().await;
-    let turn = only_turn(&mut app.process, &target).await;
-    for (id, name, arguments) in [
-        (
-            "write",
-            "write",
-            json!({"path":"output","content":"must not write"}),
-        ),
-        (
-            "edit",
-            "edit",
-            json!({"path":"input","old_text":"original","new_text":"changed"}),
-        ),
-        (
-            "patch",
-            "apply_patch",
-            json!({"path":"input","patch":"*** Begin Patch\n*** Update File: input\n@@\n-original\n+changed\n*** End Patch\n"}),
-        ),
-        (
-            "bash",
-            "bash",
-            json!({"command":"printf executed > shell-output"}),
-        ),
-        (
-            "create-agent",
-            "agent",
-            json!({"action":"create","resource":"agent","target":{"host_id":app.initial["host_id"]},"name":"blocked","mode":"memory"}),
-        ),
-        (
-            "create-session",
-            "agent",
-            json!({"action":"create","resource":"session","target":agent_ref,"text":"blocked delegated execution"}),
-        ),
-        (
-            "send",
-            "agent",
-            json!({"action":"send","target":{"kind":"session","agent_id":victim["agent_id"],"session_id":victim["session_id"]},"text":"blocked send"}),
-        ),
-        (
-            "delegate",
-            "agent",
-            json!({"action":"send","target":{"kind":"session","agent_id":victim["agent_id"],"session_id":victim["session_id"]},"text":"blocked delegation","delegate":true}),
-        ),
-        (
-            "update-agent",
-            "agent",
-            json!({"action":"update","resource":"agent","target":agent_ref,"changes":{"name":"blocked rename"}}),
-        ),
-        (
-            "update-policy",
-            "agent",
-            json!({"action":"update","resource":"session","target":target,"changes":{"execution":execution}}),
-        ),
-        (
-            "cancel-session",
-            "agent",
-            json!({"action":"control","operation":"cancel_session","target":victim}),
-        ),
-        (
-            "close-session",
-            "agent",
-            json!({"action":"control","operation":"close_session","target":victim}),
-        ),
-        (
-            "close-scope",
-            "agent",
-            json!({"action":"control","operation":"close_scope"}),
-        ),
-    ] {
-        next.answer(tool(id, name, arguments));
-        next = provider.request().await;
-        call_outcome(&mut app, &target, &turn, id, "denied").await;
-    }
-    next.answer(tool("read", "read", json!({"path":"input","limit":1})));
     let next = provider.request().await;
-    assert_eq!(next.tool_result("read")["text"], "original");
-    next.answer(tool("inspect", "agent", json!({"action":"inspect","target":{"kind":"session","agent_id":victim["agent_id"],"session_id":victim["session_id"]},"include_config":true})));
-    let next = provider.request().await;
-    assert!(next.tool_result("inspect").get("error").is_none());
-    call_outcome(&mut app, &target, &turn, "inspect", "success").await;
+    let turn = only_turn(&mut app.process, &ask_target).await;
     next.answer(tool(
-        "wait",
-        "agent",
-        json!({"action":"wait","timeout_ms":0}),
+        "ext-read",
+        "read",
+        json!({"path": outside_file, "limit": 1}),
+    ));
+    let (source, id) = pending_with_risk(
+        &mut app,
+        &ask_target,
+        &mut events,
+        "ext-read",
+        ApprovalRiskData::Medium,
+    )
+    .await;
+    approve(
+        &mut app,
+        &ask_target,
+        &source,
+        &id,
+        ApprovalAnswer::AllowOnce,
+    )
+    .await;
+    let next = provider.request().await;
+    assert_eq!(next.tool_result("ext-read")["text"], "external-value");
+
+    next.answer(tool(
+        "ext-write",
+        "write",
+        json!({"path": outside_new, "content": "denied-write"}),
+    ));
+    let (source, id) = pending_with_risk(
+        &mut app,
+        &ask_target,
+        &mut events,
+        "ext-write",
+        ApprovalRiskData::High,
+    )
+    .await;
+    assert!(!outside.join("created.txt").exists());
+    approve(&mut app, &ask_target, &source, &id, ApprovalAnswer::Deny).await;
+    let next = provider.request().await;
+    call_outcome(&mut app, &ask_target, &turn, "ext-write", "denied").await;
+    assert!(!outside.join("created.txt").exists());
+    next.answer(answer("ask cross-workspace checks complete"));
+    complete(&mut app, &ask_target, &turn).await;
+
+    // Auto mode: outside read and outside write succeed without approval prompts.
+    let auto_target = create(&mut app, &workspace, &tools, Some(ApprovalMode::Auto)).await;
+    app.process
+        .rpc(
+            "message.send",
+            message(&auto_target, "cross-workspace auto"),
+        )
+        .await;
+    let next = provider.request().await;
+    let auto_turn = only_turn(&mut app.process, &auto_target).await;
+    next.answer(tool(
+        "auto-read",
+        "read",
+        json!({"path": outside_file, "limit": 1}),
     ));
     let next = provider.request().await;
-    assert_eq!(next.tool_result("wait")["status"], "timed_out");
+    assert_eq!(next.tool_result("auto-read")["text"], "external-value");
+    next.answer(tool(
+        "auto-write",
+        "write",
+        json!({"path": outside_new, "content": "auto-written"}),
+    ));
+    let next = provider.request().await;
+    assert_eq!(next.tool_result("auto-write")["status"], "applied");
     assert_eq!(
-        fs::read(workspace.path().join("input")).unwrap(),
-        b"original"
+        fs::read_to_string(outside.join("created.txt")).unwrap(),
+        "auto-written"
     );
-    assert!(!workspace.path().join("output").exists());
-    assert!(!workspace.path().join("shell-output").exists());
-    assert_eq!(
-        app.process
-            .rpc("session.get", json!({"target":target}))
-            .await["config"]["execution"]["approval"],
-        "read_only"
-    );
-    let victim_state = app
-        .process
-        .rpc("session.state", json!({"target":victim}))
-        .await;
-    assert_eq!(victim_state["data"]["lifecycle"], "open");
-    assert!(
-        victim_state["data"]["next_turn"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    assert!(
-        app.process.rpc("turn.list", json!({"target":victim})).await["data"]
-            .as_array()
-            .unwrap()
-            .is_empty()
-    );
-    no_agent_mutation(&mut app).await;
-    next.answer(answer("read-only checks complete"));
-    complete(&mut app, &target, &turn).await;
+    next.answer(answer("auto cross-workspace checks complete"));
+    complete(&mut app, &auto_target, &auto_turn).await;
     stop(app).await;
 }
 

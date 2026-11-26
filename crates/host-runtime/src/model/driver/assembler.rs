@@ -25,8 +25,6 @@ pub(super) struct Assembler<'a> {
     provider_replay: Option<ProviderReplay>,
     finish_reason: Option<ModelFinishReason>,
     pub(super) observed_event: bool,
-    /// Text or reasoning was forwarded to observers; a retry would replay it.
-    pub(super) emitted_output: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -58,7 +56,6 @@ impl<'a> Assembler<'a> {
             provider_replay: None,
             finish_reason: None,
             observed_event: false,
-            emitted_output: false,
         }
     }
 
@@ -67,7 +64,10 @@ impl<'a> Assembler<'a> {
         event: ModelEvent,
     ) -> Result<Option<ModelDriverProgress>, ModelError> {
         if self.finish_reason.is_some() {
-            return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+            return Err(assembler_error(
+                ModelErrorKind::InvalidProviderResponse,
+                "invalid model provider response (event after finish)",
+            ));
         }
         match event {
             ModelEvent::TextDelta { delta } => {
@@ -101,17 +101,27 @@ impl<'a> Assembler<'a> {
                     .iter()
                     .any(|tool| tool.name() == &tool_name)
                 {
-                    return Err(assembler_error(ModelErrorKind::UnexpectedToolCall));
+                    return Err(assembler_error(
+                        ModelErrorKind::UnexpectedToolCall,
+                        "unexpected tool call in model response",
+                    ));
                 }
                 if self
                     .tools
                     .iter()
                     .any(|tool| tool.tool_call_id == tool_call_id)
                 {
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (duplicate tool_call_id)",
+                    ));
                 }
-                let call_index = u32::try_from(self.tools.len())
-                    .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))?;
+                let call_index = u32::try_from(self.tools.len()).map_err(|_| {
+                    assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (tool call index overflow)",
+                    )
+                })?;
                 let index = self.tools.len();
                 self.tools.push(ToolAssembly {
                     tool_call_id,
@@ -129,7 +139,10 @@ impl<'a> Assembler<'a> {
             } => {
                 let tool = self.tool_mut(&tool_call_id)?;
                 if tool.call.is_some() {
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (arguments delta after tool call end)",
+                    ));
                 }
                 if tool.arguments_text.is_empty() {
                     tool.arguments_text = delta;
@@ -141,10 +154,18 @@ impl<'a> Assembler<'a> {
             ModelEvent::ToolCallEnd { tool_call_id } => {
                 let tool = self.tool_mut(&tool_call_id)?;
                 if tool.call.is_some() || tool.arguments_text.is_empty() {
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (duplicate end or empty tool arguments)",
+                    ));
                 }
-                let arguments: Value = serde_json::from_str(&tool.arguments_text)
-                    .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))?;
+                let arguments: Value =
+                    serde_json::from_str(&tool.arguments_text).map_err(|_| {
+                        assembler_error(
+                            ModelErrorKind::InvalidProviderResponse,
+                            "invalid model provider response (malformed tool arguments JSON)",
+                        )
+                    })?;
                 tool.call = Some(
                     ToolCall::new(
                         tool.tool_call_id.clone(),
@@ -152,7 +173,12 @@ impl<'a> Assembler<'a> {
                         arguments,
                         tool.call_index,
                     )
-                    .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))?,
+                    .map_err(|_| {
+                        assembler_error(
+                            ModelErrorKind::InvalidProviderResponse,
+                            "invalid model provider response (tool arguments not JSON object)",
+                        )
+                    })?,
                 );
                 // Keep failed arguments verbatim, but release a completed call's raw allocation.
                 tool.arguments_text = String::new();
@@ -161,19 +187,28 @@ impl<'a> Assembler<'a> {
             ModelEvent::Usage { usage } => {
                 if self.usage.replace(usage).is_some() {
                     self.usage = None;
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (duplicate usage event)",
+                    ));
                 }
                 Ok(None)
             }
             ModelEvent::ProviderReplay { replay } => {
                 if self.provider_replay.replace(replay).is_some() {
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (duplicate provider_replay event)",
+                    ));
                 }
                 Ok(None)
             }
             ModelEvent::Finish { reason } => {
                 if self.tools.iter().any(|tool| tool.call.is_none()) {
-                    return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+                    return Err(assembler_error(
+                        ModelErrorKind::InvalidProviderResponse,
+                        "invalid model provider response (finish before tool call completed)",
+                    ));
                 }
                 self.finish_reason = Some(reason);
                 Ok(None)
@@ -196,17 +231,26 @@ impl<'a> Assembler<'a> {
             ))
             || (!has_tools && reason == ModelFinishReason::ToolCalls)
         {
-            return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+            return Err(assembler_error(
+                ModelErrorKind::InvalidProviderResponse,
+                "invalid model provider response (finish_reason conflicts with tool calls)",
+            ));
         }
         if matches!(
             reason,
             ModelFinishReason::ContentFiltered | ModelFinishReason::Refused
         ) && self.text.is_empty()
         {
-            return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+            return Err(assembler_error(
+                ModelErrorKind::InvalidProviderResponse,
+                "invalid model provider response (empty refusal/filter text)",
+            ));
         }
         if self.slots.is_empty() && self.provider_replay.is_none() {
-            return Err(assembler_error(ModelErrorKind::InvalidProviderResponse));
+            return Err(assembler_error(
+                ModelErrorKind::InvalidProviderResponse,
+                "invalid model provider response (empty response content)",
+            ));
         }
         let mut parts = Vec::with_capacity(self.slots.len());
         for slot in std::mem::take(&mut self.slots) {
@@ -221,7 +265,12 @@ impl<'a> Assembler<'a> {
                         None,
                         None,
                     )
-                    .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))?;
+                    .map_err(|_| {
+                        assembler_error(
+                            ModelErrorKind::InvalidProviderResponse,
+                            "invalid model provider response (invalid reasoning content)",
+                        )
+                    })?;
                     parts.push(AssistantPart::Reasoning(reasoning));
                 }
                 PartSlot::Tool(index) => {
@@ -239,7 +288,12 @@ impl<'a> Assembler<'a> {
             self.usage,
             self.provider_replay.take(),
         )
-        .map_err(|_| assembler_error(ModelErrorKind::InvalidProviderResponse))
+        .map_err(|_| {
+            assembler_error(
+                ModelErrorKind::InvalidProviderResponse,
+                "invalid model provider response (response validation failed)",
+            )
+        })
     }
 
     pub(super) fn usage(&self) -> Option<Usage> {
@@ -301,7 +355,12 @@ impl<'a> Assembler<'a> {
         self.tools
             .iter_mut()
             .find(|tool| &tool.tool_call_id == tool_call_id)
-            .ok_or_else(|| assembler_error(ModelErrorKind::InvalidProviderResponse))
+            .ok_or_else(|| {
+                assembler_error(
+                    ModelErrorKind::InvalidProviderResponse,
+                    "invalid model provider response (unknown tool_call_id)",
+                )
+            })
     }
 }
 
@@ -322,11 +381,7 @@ fn normalized_delta(delta: Text, ended_with_cr: &mut bool) -> Text {
     }
 }
 
-fn assembler_error(kind: ModelErrorKind) -> ModelError {
-    let message = match kind {
-        ModelErrorKind::UnexpectedToolCall => "unexpected tool call in model response",
-        _ => "invalid model provider response",
-    };
+fn assembler_error(kind: ModelErrorKind, message: &str) -> ModelError {
     let diagnostic = DiagnosticSummary::new(
         DiagnosticCode::ModelMalformedResponse,
         DiagnosticCategory::Model,

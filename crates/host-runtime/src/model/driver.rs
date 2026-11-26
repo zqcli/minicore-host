@@ -290,22 +290,19 @@ impl<'a> ModelDriver<'a> {
             _ = cancellation.cancelled() => {
                 return Err(AttemptFailure::new(
                     generated_error(ModelErrorKind::Cancelled, DeliveryState::Unknown),
-                    false,
                 ));
             }
             _ = &mut timeout => {
                 return Err(AttemptFailure::deadline(
                     generated_error(ModelErrorKind::Timeout, DeliveryState::Unknown),
-                    false,
                     deadline_source,
                 ));
             }
             result = &mut start => match result {
                 Ok(Ok(stream)) => stream,
-                Ok(Err(error)) => return Err(AttemptFailure::new(error, false)),
+                Ok(Err(error)) => return Err(AttemptFailure::new(error)),
                 Err(_) => return Err(AttemptFailure::new(
                     generated_error(ModelErrorKind::Panicked, DeliveryState::Unknown),
-                    false,
                 )),
             }
         };
@@ -325,7 +322,6 @@ impl<'a> ModelDriver<'a> {
                                 ModelErrorKind::Cancelled,
                                 observed_delivery(assembler.observed_event),
                             ),
-                            assembler.observed_event,
                         ));
                     }
                     _ = &mut timeout => {
@@ -334,7 +330,6 @@ impl<'a> ModelDriver<'a> {
                                 ModelErrorKind::Timeout,
                                 observed_delivery(assembler.observed_event),
                             ),
-                            assembler.observed_event,
                             deadline_source,
                         ));
                     }
@@ -343,11 +338,8 @@ impl<'a> ModelDriver<'a> {
                 match item {
                     Ok(Some(Ok(event))) => {
                         assembler.observed_event = true;
-                        let progress_event = assembler.push(event).map_err(|error| {
-                            AttemptFailure::new(error, assembler.observed_event)
-                        })?;
+                        let progress_event = assembler.push(event).map_err(AttemptFailure::new)?;
                         if let Some(progress_event) = progress_event {
-                            assembler.emitted_output = true;
                             observer(match progress_event {
                                 ModelDriverProgress::TextDelta(text) => {
                                     ModelCallEvent::TextDelta(text)
@@ -362,29 +354,22 @@ impl<'a> ModelDriver<'a> {
                     }
                     Ok(Some(Err(error))) => {
                         let error = normalize_after_event(error, assembler.observed_event);
-                        return Err(AttemptFailure::new(error, assembler.observed_event));
+                        return Err(AttemptFailure::new(error));
                     }
                     Ok(None) => {
-                        let observed_event = assembler.observed_event;
-                        return assembler
-                            .finish()
-                            .map_err(|error| AttemptFailure::new(error, observed_event));
+                        return assembler.finish().map_err(AttemptFailure::new);
                     }
                     Err(_) => {
-                        return Err(AttemptFailure::new(
-                            generated_error(
-                                ModelErrorKind::Panicked,
-                                observed_delivery(assembler.observed_event),
-                            ),
-                            assembler.observed_event,
-                        ));
+                        return Err(AttemptFailure::new(generated_error(
+                            ModelErrorKind::Panicked,
+                            observed_delivery(assembler.observed_event),
+                        )));
                     }
                 }
             }
         }
         .await;
-        result.map_err(|mut failure: AttemptFailure| {
-            failure.emitted_output = assembler.emitted_output;
+        result.map_err(|failure: AttemptFailure| {
             let usage = assembler.usage();
             failure.with_observation(usage, assembler.into_partial(request_index))
         })

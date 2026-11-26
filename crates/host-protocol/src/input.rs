@@ -1,8 +1,7 @@
 //! The Session owner's two queues and explicit removal of unconsumed input.
 use crate::{
     AgentId, ControllerRevision, HostId, HostIncarnation, InputQueue, MessageId, MessageInput,
-    MessageSource, OperationId, SessionId, ValidationError, control_receipt, invalid,
-    validated_dto,
+    MessageSource, OperationId, SessionId, ValidationError, invalid,
 };
 use serde::{Deserialize, Serialize};
 

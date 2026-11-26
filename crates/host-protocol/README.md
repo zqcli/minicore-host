@@ -89,8 +89,8 @@ resources, changing process cwd or granting permissions. Production owners must
 perform this check and appropriate version/state checks before publishing values.
 
 Supported execution settings include Runtime timeouts/retry values, compaction
-and per-Turn tool approval. `execution.approval` defaults to `ask`; `auto` and
-`read_only` are explicit alternatives. No event capacity, tool-round cap, entity
+and per-Turn tool approval. `execution.approval` defaults to `ask`, with `auto`
+as the explicit alternative. No event capacity, tool-round cap, entity
 limit, input-size limit or application quota is introduced. The inherited Runtime ModelRef grammar
 (1–256 bytes) and model retry/deadline legal ranges are documented constraints of
 that dependency, not new Host admission controls.

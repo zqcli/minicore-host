@@ -45,17 +45,19 @@ Successful publication replaces one immutable resource snapshot and changes netw
 ## Tool policy and credentials
 
 `SessionConfig.execution.approval` is frozen per Turn: omitted/`ask` requests
-approval for each mutating call, `auto` permits it without that interaction, and
-`read_only` rejects it. Only the actual builtin `read` and builtin `agent`
-inspect/wait actions are read-only exemptions; an external factory with the same
-name does not acquire them. Approval uses the existing Runtime interaction and
+approval for each mutating call and for outside-workspace tool calls (except
+reading MiniCore's spilled tool output logs), while `auto` permits inside- and
+outside-workspace tool calls without interaction. Only the actual builtin `read`
+(inside workspace or spilled output logs) and builtin `agent` inspect/wait
+actions are exempt in `ask` mode; an external factory with the same name does
+not acquire them. Approval uses the existing Runtime interaction and
 `interaction.answer`, with no remembered allow-once decision. See
 [`approval.rs`](src/approval.rs) and the [actual-binary tests](../host-app/tests/tool_approval.rs).
 
 Malformed built-in agent arguments fail validation before approval or execution
 in every policy mode. The standard failed ToolResult preserves the safe field or
 constraint diagnostic; actual input values and unknown names are omitted. This
-is distinct from a read-only policy refusal or the user's approval denial.
+is distinct from the user's approval denial.
 
 Production command bindings exclude configured model/network credential source
 names at each spawn. Successful publications accumulate names for the Host

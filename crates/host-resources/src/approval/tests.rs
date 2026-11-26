@@ -47,21 +47,14 @@ fn assert_mode_decision(mode: ApprovalMode, decision: ToolDecision, read_only: b
         (ApprovalMode::Ask, false, ToolDecision::RequireApproval { request }) => {
             assert_eq!(request.risk, ApprovalRisk::Medium);
         }
-        (ApprovalMode::ReadOnly, false, ToolDecision::Deny { reason }) => {
-            assert_eq!(reason.as_str(), READ_ONLY_DENIAL);
-        }
         other => panic!("unexpected policy decision: {other:?}"),
     }
 }
 
 #[tokio::test]
-async fn ordinary_and_external_tools_follow_the_three_mode_table() {
-    for mode in [
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-        ApprovalMode::ReadOnly,
-    ] {
-        let policy = Policy::new(mode, true, true);
+async fn ordinary_and_external_tools_follow_the_two_mode_table() {
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
+        let policy = Policy::new(mode, true, true, None);
         for name in [
             "read",
             "write",
@@ -153,12 +146,8 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
     ] {
         actions.push((json!({"action":"inspect","target":target}), true));
     }
-    for mode in [
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-        ApprovalMode::ReadOnly,
-    ] {
-        let policy = Policy::new(mode, true, true);
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
+        let policy = Policy::new(mode, true, true, None);
         for (arguments, read_only) in &actions {
             AgentAction::parse(arguments.clone()).expect("valid production dispatch branch");
             assert_mode_decision(
@@ -175,12 +164,8 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
 
 #[tokio::test]
 async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
-    for mode in [
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-        ApprovalMode::ReadOnly,
-    ] {
-        let policy = Policy::new(mode, true, true);
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
+        let policy = Policy::new(mode, true, true, None);
         for arguments in [
             json!({"action":"unknown"}),
             json!({"action":"inspect"}),
@@ -218,7 +203,7 @@ async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
 
 #[tokio::test]
 async fn cancellation_and_deadline_are_checked_without_waiting_or_approving() {
-    let policy = Policy::new(ApprovalMode::Auto, true, true);
+    let policy = Policy::new(ApprovalMode::Auto, true, true, None);
     let fixture = request("read", json!({}));
     let mut cancelled = fixture.request();
     cancelled.cancellation.cancel();
@@ -234,8 +219,14 @@ async fn cancellation_and_deadline_are_checked_without_waiting_or_approving() {
 
 #[tokio::test]
 async fn approvals_do_not_cache_or_copy_arguments_into_prompts() {
+    let workspace = tempfile::tempdir().unwrap();
     for _ in 0..2 {
-        let policy = Policy::new(ApprovalMode::Ask, true, true);
+        let policy = Policy::new(
+            ApprovalMode::Ask,
+            true,
+            true,
+            Some(workspace.path().to_path_buf()),
+        );
         for _ in 0..2 {
             let decision = policy
                 .decide(
@@ -259,12 +250,8 @@ async fn approvals_do_not_cache_or_copy_arguments_into_prompts() {
 
 #[tokio::test]
 async fn external_names_cannot_claim_either_builtin_read_only_exemption() {
-    for mode in [
-        ApprovalMode::Ask,
-        ApprovalMode::Auto,
-        ApprovalMode::ReadOnly,
-    ] {
-        let policy = Policy::new(mode, false, false);
+    for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
+        let policy = Policy::new(mode, false, false, None);
         for (name, arguments) in [
             ("read", json!({})),
             ("agent", json!({"action":"wait","timeout_ms":0})),
@@ -282,5 +269,94 @@ async fn external_names_cannot_claim_either_builtin_read_only_exemption() {
                 false,
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn cross_workspace_paths_require_approval_in_ask_and_allow_in_auto() {
+    let parent = tempfile::tempdir().unwrap();
+    let workspace = parent.path().join("ws");
+    let sibling = parent.path().join("other");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(workspace.join("inside.txt"), "ok").unwrap();
+    std::fs::write(sibling.join("outside.txt"), "ext").unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&sibling, workspace.join("ext-link")).unwrap();
+
+    let ask = Policy::new(ApprovalMode::Ask, true, true, Some(workspace.clone()));
+    let auto = Policy::new(ApprovalMode::Auto, true, true, Some(workspace.clone()));
+
+    // Inside workspace read is allowed without approval in Ask mode.
+    assert_eq!(
+        ask.decide(request("read", json!({"path":"inside.txt"})).request())
+            .await
+            .unwrap(),
+        ToolDecision::Allow
+    );
+
+    // Reading MiniCore's own spilled output log directory is also auto-allowed in Ask mode.
+    let log_file = minicore_host_local_tools::output_log_dir().join("probe-stdout.log");
+    assert_eq!(
+        ask.decide(request("read", json!({"path": log_file.to_string_lossy()})).request())
+            .await
+            .unwrap(),
+        ToolDecision::Allow
+    );
+
+    // Outside-workspace read requires Medium approval in Ask mode (including symlinks).
+    let outside_abs = sibling.join("outside.txt").to_string_lossy().into_owned();
+    let mut outside_reads = vec![outside_abs.clone(), "../other/outside.txt".to_owned()];
+    #[cfg(unix)]
+    outside_reads.push("ext-link/outside.txt".to_owned());
+    for raw in &outside_reads {
+        let decision = ask
+            .decide(request("read", json!({"path": raw})).request())
+            .await
+            .unwrap();
+        let ToolDecision::RequireApproval { request: req } = decision else {
+            panic!("expected outside read approval for {raw}, got {decision:?}");
+        };
+        assert_eq!(req.risk, ApprovalRisk::Medium);
+        assert!(req.prompt.as_str().contains("outside workspace"));
+        assert!(req.prompt.as_str().contains("outside.txt"));
+        assert_eq!(
+            auto.decide(request("read", json!({"path": raw})).request())
+                .await
+                .unwrap(),
+            ToolDecision::Allow
+        );
+    }
+
+    // Outside-workspace write/edit/apply_patch/bash require High approval in Ask, Allow in Auto.
+    let sibling_str = sibling.to_string_lossy().into_owned();
+    for (tool_name, args) in [
+        ("write", json!({"path": outside_abs, "content": "x"})),
+        (
+            "edit",
+            json!({"path": "../other/outside.txt", "old_text": "a", "new_text": "b"}),
+        ),
+        (
+            "apply_patch",
+            json!({"path": "../other/outside.txt", "patch": "@@"}),
+        ),
+        ("bash", json!({"command": "pwd", "cwd": sibling_str})),
+        ("bash", json!({"command": "pwd", "cwd": ".."})),
+    ] {
+        let decision = ask
+            .decide(request(tool_name, args.clone()).request())
+            .await
+            .unwrap();
+        let ToolDecision::RequireApproval { request: req } = decision else {
+            panic!("expected outside High approval for {tool_name}, got {decision:?}");
+        };
+        assert_eq!(req.risk, ApprovalRisk::High);
+        assert!(req.prompt.as_str().contains("outside workspace"));
+        assert_eq!(
+            auto.decide(request(tool_name, args).request())
+                .await
+                .unwrap(),
+            ToolDecision::Allow
+        );
     }
 }

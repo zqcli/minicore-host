@@ -96,18 +96,24 @@ async fn actual_http_408_compaction_keeps_provider_reason_and_source() {
         listener.local_addr().unwrap()
     );
     let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let request = http::read_request(&mut socket).await.body;
-        let body = json!({"error": {
-            "type":"request_timeout", "code":"gateway_deadline",
-            "message":"Provider deadline expired 原因\nCredential fixture-only-not-a-real-secret is not retried."
-        }}).to_string();
-        let response = format!(
-            "HTTP/1.1 408 Request Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Request-Id: req-timeout\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        socket.write_all(response.as_bytes()).await.unwrap();
-        request
+        let mut first = None;
+        for _ in 0..4 {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = http::read_request(&mut socket).await.body;
+            if first.is_none() {
+                first = Some(request);
+            }
+            let body = json!({"error": {
+                "type":"request_timeout", "code":"gateway_deadline",
+                "message":"Provider deadline expired 原因\nCredential fixture-only-not-a-real-secret is not retried."
+            }}).to_string();
+            let response = format!(
+                "HTTP/1.1 408 Request Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\nX-Request-Id: req-timeout\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        }
+        first.unwrap()
     });
     let model = model(&endpoint);
     let failure = generate(&plan(&model), &model, context())

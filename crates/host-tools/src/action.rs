@@ -1,4 +1,4 @@
-use crate::{AgentChanges, SessionChanges};
+use crate::{AgentChanges, AgentSettingsPatch, SessionChanges};
 use minicore_host_protocol::*;
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -45,7 +45,7 @@ pub enum CreateAction {
             skip_serializing_if = "Option::is_none",
             deserialize_with = "present"
         )]
-        settings: Option<SessionConfigPatch>,
+        settings: Option<AgentSettingsPatch>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -72,7 +72,7 @@ pub enum CreateAction {
             skip_serializing_if = "Option::is_none",
             deserialize_with = "present"
         )]
-        settings: Option<SessionConfigPatch>,
+        settings: Option<AgentSettingsPatch>,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -87,7 +87,7 @@ pub enum CreateAction {
 pub struct SendAction {
     pub target: MessageTarget,
     pub text: String,
-    #[serde(default = "follow_up")]
+    #[serde(default = "steer")]
     pub mode: MessageMode,
     #[serde(default)]
     pub delegate: bool,
@@ -98,8 +98,8 @@ pub struct SendAction {
     )]
     pub in_reply_to: Option<MessageId>,
 }
-fn follow_up() -> MessageMode {
-    MessageMode::FollowUp
+fn steer() -> MessageMode {
+    MessageMode::Steer
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -370,10 +370,13 @@ impl InspectAction {
         Ok(())
     }
 }
-fn validate_settings(settings: Option<&SessionConfigPatch>) -> Result<(), Fault> {
+fn validate_settings(settings: Option<&AgentSettingsPatch>) -> Result<(), Fault> {
     if let Some(settings) = settings {
-        SessionConfig::default()
-            .apply_patch(settings)
+        let base = SessionConfig::default();
+        let patch = settings
+            .resolve(&base.execution)
+            .map_err(|error| invalid(error.to_string()))?;
+        base.apply_patch(&patch)
             .map_err(|error| invalid(error.to_string()))?;
     }
     Ok(())

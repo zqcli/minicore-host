@@ -38,7 +38,7 @@ async fn compaction_model_rejection_keeps_original_message_and_source() {
     };
     assert_eq!(source.http_status, Some(503));
     assert_eq!(source.request_id.as_deref(), Some("req_original"));
-    assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(model.calls.load(Ordering::SeqCst), 4);
     assert_eq!(markers(&fixture), 0);
 }
 
@@ -776,7 +776,7 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
             )
             .unwrap(),
             calls: AtomicUsize::new(0),
-            scripts: Mutex::new(VecDeque::from([Vec::new()])),
+            scripts: Mutex::new(VecDeque::from(vec![Vec::new(); 4])),
         });
         let (entered, mut received) = mpsc::unbounded_channel();
         let mut backend = None;
@@ -921,7 +921,7 @@ async fn compaction_original_failure_survives_cancel_and_independent_save_failur
         assert_eq!(result.info.cleanup_faults, cleanup);
         assert_eq!(result.info.persistence, PersistenceState::Persisted);
         assert!(result.info.persistence_fault.is_none());
-        assert_eq!(model.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(model.calls.load(Ordering::SeqCst), 4);
         assert_eq!(markers(&fixture), 0);
     }
 }

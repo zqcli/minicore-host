@@ -1,7 +1,7 @@
 //! Atomic metadata and configuration updates for Agent and Session owners.
 use crate::{
     AgentConfigPatch, AgentId, ConfigRevision, NullablePatch, OperationId, SessionConfigPatch,
-    SessionId, ValidationError, control_receipt, invalid, validated_dto,
+    SessionId, ValidationError, invalid,
 };
 use serde::{Deserialize, Serialize};
 

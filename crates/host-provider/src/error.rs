@@ -141,6 +141,25 @@ impl ResponseContext {
         }
     }
 
+    pub(crate) fn malformed(&self, reason: &str, seen: bool) -> ModelError {
+        let delivery = if seen {
+            DeliveryState::Started
+        } else {
+            DeliveryState::NotStarted
+        };
+        let diagnostic = self.diagnostic_with_message(
+            ModelErrorKind::InvalidProviderResponse,
+            Some(format!("InvalidProviderResponse ({reason})")),
+            None,
+        );
+        ModelError::permanent(
+            ModelErrorKind::InvalidProviderResponse,
+            delivery,
+            diagnostic,
+        )
+        .with_upstream(self.details(None))
+    }
+
     pub(crate) fn attach(&self, error: ModelError) -> ModelError {
         if error.upstream().is_some() {
             error

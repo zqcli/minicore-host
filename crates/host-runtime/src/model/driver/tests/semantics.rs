@@ -71,7 +71,7 @@ async fn eof_with_open_tool_and_provider_tool_count_overflow_are_rejected() {
     let error = run_events(
         tool_request(),
         vec![Ok(start(open.clone(), "search")), Ok(args(open, "{}"))],
-        ModelDriverConfig::default(),
+        with_retry(RetryPolicySnapshot::new(1, Duration::ZERO)),
     )
     .await
     .unwrap_err();

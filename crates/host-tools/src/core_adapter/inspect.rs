@@ -48,11 +48,92 @@ pub(super) fn agent(
     }))
 }
 
+const DEFAULT_INSPECT_HISTORY_BYTES: usize = 32 * 1024;
+const EXPLICIT_INSPECT_HISTORY_BYTES: usize = 64 * 1024;
+const MAX_INSPECT_ITEM_STRING_BYTES: usize = 4 * 1024;
+
+pub(super) fn compact_history(
+    mut page: HistoryPageData<core::HistoryRecordData>,
+    default_page: bool,
+) -> Result<Value, Fault> {
+    if default_page {
+        // Default reads query Backward for the latest tail; restore chronological order.
+        page.items.reverse();
+    }
+    let byte_budget = if default_page {
+        DEFAULT_INSPECT_HISTORY_BYTES
+    } else {
+        EXPLICIT_INSPECT_HISTORY_BYTES
+    };
+    let mut sanitized = Vec::with_capacity(page.items.len());
+    let mut truncated = false;
+    for item in page.items {
+        let mut value = encoded(item)?;
+        strip_replay_and_cap_strings(&mut value, &mut truncated);
+        sanitized.push(value);
+    }
+    // Keep the most recent items that fit within the byte budget.
+    let mut kept = Vec::new();
+    let mut used = 0usize;
+    for item in sanitized.into_iter().rev() {
+        let size = serde_json::to_string(&item).map_or(0, |s| s.len());
+        if !kept.is_empty() && used.saturating_add(size) > byte_budget {
+            truncated = true;
+            break;
+        }
+        used = used.saturating_add(size);
+        kept.push(item);
+    }
+    kept.reverse();
+    let mut out = json!({
+        "items": kept,
+        "next_cursor": page.next_cursor,
+        "upper_bound": page.upper_bound,
+    });
+    if truncated {
+        out["truncated"] = Value::Bool(true);
+    }
+    Ok(out)
+}
+
+fn strip_replay_and_cap_strings(value: &mut Value, truncated: &mut bool) {
+    match value {
+        Value::Object(map) => {
+            map.remove("provider_replay");
+            for (key, entry) in map.iter_mut() {
+                if key == "content"
+                    && let Value::String(text) = entry
+                    && text.len() > MAX_INSPECT_ITEM_STRING_BYTES
+                {
+                    let mut end = MAX_INSPECT_ITEM_STRING_BYTES;
+                    while !text.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    let omitted = text.len() - end;
+                    text.truncate(end);
+                    text.push_str(&format!(
+                        "\n… [{omitted} bytes omitted; inspect specific turn/toolcall with output_range for full content]"
+                    ));
+                    *truncated = true;
+                    continue;
+                }
+                strip_replay_and_cap_strings(entry, truncated);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                strip_replay_and_cap_strings(item, truncated);
+            }
+        }
+        _ => {}
+    }
+}
+
 pub(super) fn session(
     snapshot: core::SessionSnapshot,
     info: core::SessionInfo,
     include_config: bool,
-    history: Option<HistoryPageData<core::HistoryRecordData>>,
+    history: Option<Value>,
 ) -> Result<Value, Fault> {
     #[derive(Serialize)]
     struct Data {
@@ -69,7 +150,7 @@ pub(super) fn session(
         #[serde(skip_serializing_if = "Option::is_none")]
         config: Option<SessionConfig>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        history: Option<HistoryPageData<core::HistoryRecordData>>,
+        history: Option<Value>,
     }
     let data = encoded(Data {
         state: snapshot.data,

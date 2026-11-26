@@ -246,20 +246,44 @@ async fn invalid_shapes_and_ambiguous_matches_never_modify_any_file() {
         "@@ -1 +1 @@\n-a\n+A\ntrailing junk\n",
         "@@ -1 +1 @@\n-a\n\\ No newline at end of file\n\\ No newline at end of file\n+A\n",
     ] {
-        assert_eq!(
-            invoke(&tools, "apply_patch", arguments("file", patch)).await,
-            Err(ToolError::InvalidInvocation),
-            "{patch}"
-        );
+        let result = invoke(&tools, "apply_patch", arguments("file", patch))
+            .await
+            .unwrap_or_else(|error| {
+                panic!("expected structured diagnostic for {patch}, got {error:?}")
+            });
+        assert_eq!(result["status"], "failed", "{patch}: {result}");
+        assert_eq!(result["write_outcome"], "not_applied", "{patch}: {result}");
+        let message = result["error"]["message"]
+            .as_str()
+            .expect("diagnostic message");
+        assert!(!message.is_empty(), "{patch}: {result}");
         assert_eq!(
             fs::read(root.path().join("file")).unwrap(),
             source.as_bytes()
         );
         assert!(!root.path().join("other").exists());
     }
+    // Ambiguous match returns an actionable conflict message telling the model to add context.
+    let ambiguous = invoke(
+        &tools,
+        "apply_patch",
+        arguments(
+            "file",
+            "*** Begin Patch\n*** Update File: file\n@@\n-same\n+changed\n*** End Patch\n",
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ambiguous["error"]["code"], "conflict");
+    assert!(
+        ambiguous["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("matches more than once")
+    );
     tools.finish().await;
     let edits = records.edits.lock().unwrap();
-    assert_eq!(edits.len(), 25);
+    assert_eq!(edits.len(), 26);
     assert!(
         edits
             .iter()

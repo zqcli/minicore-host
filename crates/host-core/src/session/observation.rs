@@ -456,6 +456,11 @@ impl SessionController {
                 if let Some(retry) = &mut active.info.model_retry {
                     retry.phase = ModelRetryPhase::Requesting;
                 }
+                if attempt > 1
+                    && let Some(turn_output) = state.output.get_mut(turn_id)
+                {
+                    turn_output.models.remove(&response_index);
+                }
                 self.publish(&mut state);
             }
             ModelCallEvent::RetryWaiting(retry) => {

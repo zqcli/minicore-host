@@ -14,13 +14,32 @@ async fn upstream_reason_and_source_survive_turn_result_state_and_saved_terminal
         error: error.clone(),
         calls: AtomicUsize::new(0),
     });
-    let fixture = setup(
-        Arc::new(Resources {
-            model: model.clone(),
-            tools: ToolSet::default(),
-        }),
-        |inner| inner,
-    );
+    struct DefaultRetryResources(Arc<dyn Model>);
+    impl ResourceResolver for DefaultRetryResources {
+        fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+            config
+                .validate()
+                .map_err(|e| Fault::new(FaultKind::SessionConfigInvalid, e.to_string()))
+        }
+        fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+            Box::pin(async move {
+                Ok(BoundResources {
+                    execution: ExecutionConfig::new(
+                        self.0.clone(),
+                        ReasoningPreference::Auto,
+                        ToolSet::default(),
+                        None,
+                        Arc::new(DefaultPromptProvider::new(None)),
+                    )
+                    .unwrap(),
+                    options: ExecutionOptions::default(),
+                })
+            })
+        }
+    }
+    let fixture = setup(Arc::new(DefaultRetryResources(model.clone())), |inner| {
+        inner
+    });
     send(&fixture, "upstream error fixture");
     until(&fixture, |state| state.completed.len() == 1).await;
     let result = fixture
@@ -51,8 +70,9 @@ async fn upstream_reason_and_source_survive_turn_result_state_and_saved_terminal
         matches!(&saved.last().unwrap().entry, HistoryEntry::TurnFinished { outcome: TurnOutcome::Failed, reason: Some(reason), .. } if reason == fault.message())
     );
     assert_eq!(result.info.persistence, PersistenceState::Persisted);
-    // A transient 503 is retried within the configured attempts, then reported.
-    assert_eq!(model.calls.load(Ordering::SeqCst), 2);
+    // Any model error retries 3 times (4 total attempts), then stops without failure-pausing.
+    assert_eq!(model.calls.load(Ordering::SeqCst), 4);
+    assert!(!fixture.session.state.lock().unwrap().failure_paused);
 }
 
 struct GatedPrompt {
