@@ -66,6 +66,12 @@ pub enum CreateAction {
             skip_serializing_if = "Option::is_none",
             deserialize_with = "present"
         )]
+        name: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
         mode: Option<StorageMode>,
         #[serde(
             default,
@@ -234,7 +240,10 @@ impl AgentAction {
                 validate_name(name)?;
                 validate_settings(settings.as_ref())
             }
-            Self::Create(CreateAction::Session { settings, .. }) => {
+            Self::Create(CreateAction::Session { name, settings, .. }) => {
+                if let Some(name) = name {
+                    validate_name(name)?;
+                }
                 validate_settings(settings.as_ref())
             }
             Self::Send(request)

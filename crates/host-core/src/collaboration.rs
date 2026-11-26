@@ -25,6 +25,7 @@ pub struct DelegationRegistration {
     pub task_message_id: MessageId,
     pub origin: ToolCallRef,
     pub temporary: bool,
+    pub name: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub struct DelegationCompletion {

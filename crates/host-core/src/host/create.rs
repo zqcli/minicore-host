@@ -15,6 +15,15 @@ impl Host {
         caller: &CallerContext,
         request: AgentCreate,
     ) -> Result<AgentCreateReceipt, Fault> {
+        self.create_agent_with_provenance_async(caller, request, None)
+            .await
+    }
+    pub(crate) async fn create_agent_with_provenance_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: AgentCreate,
+        provenance: Option<(SessionRef, SessionRef)>,
+    ) -> Result<AgentCreateReceipt, Fault> {
         let context = Context {
             operation_id: Some(request.operation_id.clone()),
             message_id: request
@@ -29,7 +38,7 @@ impl Host {
         };
         let mode = request.mode;
         let result = self
-            .accept_agent_creation(Some(caller), request, context.clone(), None)
+            .accept_agent_creation(Some(caller), request, context.clone(), None, provenance)
             .await;
         if let Err(fault) = &result {
             self.creation_failure_record(context, mode, "admission", fault, false)
@@ -61,6 +70,7 @@ impl Host {
             },
             context,
             Some(source),
+            None,
         )
         .await
     }
@@ -70,6 +80,7 @@ impl Host {
         request: AgentCreate,
         context: Context,
         configuration_source: Option<AgentConfigurationSource>,
+        provenance: Option<(SessionRef, SessionRef)>,
     ) -> Result<AgentCreateReceipt, Fault> {
         request
             .validate()
@@ -159,6 +170,7 @@ impl Host {
                         request,
                         context.clone(),
                         configuration_source,
+                        provenance,
                         &mut phase,
                     ))
                     .catch_unwind()
@@ -271,6 +283,7 @@ impl Host {
         request: AgentCreate,
         context: Context,
         configuration_source: Option<AgentConfigurationSource>,
+        provenance: Option<(SessionRef, SessionRef)>,
         phase: &mut &'static str,
     ) -> (AgentCreateReceipt, Option<crate::diagnostics::Record>) {
         let operation = request.operation_id.clone();
@@ -363,6 +376,7 @@ impl Host {
                     request.default_session.unwrap_or_default(),
                     request.initial_message,
                     configuration_creation,
+                    provenance,
                 )
                 .await;
             agent.finish_initial_creation();
@@ -410,9 +424,18 @@ impl Host {
         caller: &CallerContext,
         request: SessionCreate,
     ) -> Result<SessionCreateReceipt, Fault> {
+        self.create_session_with_provenance_async(caller, request, None)
+            .await
+    }
+    pub(crate) async fn create_session_with_provenance_async(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        request: SessionCreate,
+        provenance: Option<(SessionRef, SessionRef)>,
+    ) -> Result<SessionCreateReceipt, Fault> {
         self.check_host(&request.target.host_id)?;
         self.agent(caller, &request.target.agent_id)?
-            .create_session_async(caller, request)
+            .create_session_with_provenance_async(caller, request, provenance)
             .await
     }
     /// Reads a Session creation receipt from the Agent that actually owns it.

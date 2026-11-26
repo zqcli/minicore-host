@@ -544,6 +544,7 @@ fn seed(path: &Path, pairs: usize, automatic: bool) -> (SessionRef, PathBuf) {
                 )
                 .unwrap(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

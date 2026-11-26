@@ -389,9 +389,11 @@ impl DelegationPort for FixtureDelegation {
     fn association(&self) -> Option<DelegationAssociation> {
         let accepted_message_ids = self.accepted.lock().unwrap().clone();
         (!accepted_message_ids.is_empty()).then(|| DelegationAssociation {
+            root: None,
             parent: self.registration.parent.clone(),
             origin: self.registration.origin.clone(),
             child: self.registration.child.clone(),
+            name: None,
             task_message_id: self.registration.task_message_id.clone(),
             accepted_message_ids,
             inputs: Vec::new(),

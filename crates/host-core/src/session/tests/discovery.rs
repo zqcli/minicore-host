@@ -321,6 +321,7 @@ async fn settled_delegation_survives_delayed_acceptance_and_saves_typed_notice()
         task_message_id: input.message_id.clone(),
         origin: origin.clone(),
         temporary: false,
+        name: None,
     };
     let sink = Arc::new(HandoffGate {
         entered: Semaphore::new(0),
@@ -482,6 +483,7 @@ async fn task071_result_handoff_and_scope_cleanup_are_published_before_waits() {
             tool_call_id: ToolCallId("test-registration".into()),
         },
         temporary: false,
+        name: None,
     };
     let sink = Arc::new(HandoffGate {
         entered: Semaphore::new(0),

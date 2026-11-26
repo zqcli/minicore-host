@@ -183,6 +183,7 @@ fn setup(wrap: impl FnOnce(Arc<JournalHistory>) -> Arc<dyn HistoryBackend>) -> F
                 config_revision: 0,
                 effective_config: config.clone(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

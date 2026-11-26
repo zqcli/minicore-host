@@ -729,12 +729,14 @@ async fn actual_child_input_and_completion_notification_keep_sources_after_resta
     let mut notification_expected =
         with_record_identity(notification_expected, parent_history.last().unwrap());
     notification_expected["delegations"] = json!([DelegationAssociation {
+        root: Some(parent.clone()),
         parent: parent.clone(),
         origin: ToolCallRef {
             turn_id: start.source.turn.turn_id.clone(),
             tool_call_id: ToolCallId("delegate-persistent".into()),
         },
         child: child.clone(),
+        name: Some("actual child input".into()),
         task_message_id: child_input.message_id.clone(),
         accepted_message_ids: vec![child_input.message_id.clone()],
         inputs: vec![DelegationInputRange {

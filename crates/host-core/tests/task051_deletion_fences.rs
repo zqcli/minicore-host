@@ -220,6 +220,7 @@ fn registration(
             tool_call_id: ToolCallId("bound-fixture-call".into()),
         },
         temporary: false,
+        name: None,
     }
 }
 

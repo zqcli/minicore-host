@@ -105,6 +105,30 @@ async fn create_registers_receiver_before_acceptance_and_returns_real_facts() {
     assert!(relation.registration.temporary);
 }
 #[tokio::test]
+async fn delegated_session_defaults_to_memory_and_propagates_name() {
+    let port = FixtureTurn::new();
+    let tool = AgentTool::new(port.port(), ScopeManager::new());
+    let output = invoke(
+        &tool,
+        json!({"action":"create","resource":"session","name":"css-audit","text":"audit styles"}),
+    )
+    .await;
+    assert_eq!(output["result"]["delivery"], "accepted");
+    let created = port.state.session_creates.lock().unwrap().clone();
+    assert_eq!(created[0].mode, Some(StorageMode::Memory));
+    let relation = port
+        .state
+        .relations
+        .lock()
+        .unwrap()
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    assert_eq!(relation.registration.name.as_deref(), Some("css-audit"));
+    assert!(relation.registration.temporary);
+}
+#[tokio::test]
 async fn failed_preparation_preserves_creation_and_does_not_accept_task() {
     let port = FixtureTurn::new();
     port.state.prepare_fails.store(true, Ordering::Release);

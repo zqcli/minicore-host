@@ -313,6 +313,16 @@ impl TurnCapability {
 }
 
 impl TurnCapability {
+    fn delegation_provenance(&self) -> (SessionRef, SessionRef) {
+        let parent = self.source().session.clone();
+        let root = self
+            .authority
+            .owner
+            .upgrade()
+            .and_then(|owner| owner.delegation_root_owned())
+            .unwrap_or_else(|| parent.clone());
+        (parent, root)
+    }
     pub async fn create_agent_for_delegation(
         &self,
         request: AgentCreate,
@@ -325,7 +335,10 @@ impl TurnCapability {
         }
         let host = self.host()?;
         let memory = request.mode == StorageMode::Memory;
-        let receipt = host.create_agent_async(&self.caller()?, request).await?;
+        let provenance = Some(self.delegation_provenance());
+        let receipt = host
+            .create_agent_with_provenance_async(&self.caller()?, request, provenance)
+            .await?;
         let cleanup = if memory && receipt.result.steps.session.succeeded() {
             receipt
                 .agent_id
@@ -358,7 +371,10 @@ impl TurnCapability {
         let mode = request
             .mode
             .unwrap_or(self.agent_snapshot(&request.target)?.mode);
-        let receipt = host.create_session_async(&self.caller()?, request).await?;
+        let provenance = Some(self.delegation_provenance());
+        let receipt = host
+            .create_session_with_provenance_async(&self.caller()?, request, provenance)
+            .await?;
         let cleanup = if mode == StorageMode::Memory && receipt.result.steps.session.succeeded() {
             receipt
                 .session_id

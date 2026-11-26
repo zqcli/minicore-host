@@ -12,11 +12,23 @@ use std::{
 use tokio::sync::{Notify, OnceCell};
 use tokio_util::sync::CancellationToken;
 
+/// Maximum delegation depth: Root (0) -> Child (1) -> Grandchild (2).
+/// Grandchildren at depth 2 may not delegate further.
+pub const DEFAULT_MAX_DELEGATION_DEPTH: usize = 2;
+
 /// One adapter instance belongs to one Host incarnation. Only active scope
 /// membership and pending handoffs live here, not a Host task/result table.
-#[derive(Default)]
 pub struct ScopeManager {
     state: Mutex<Registry>,
+    max_depth: usize,
+}
+impl Default for ScopeManager {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(Registry::default()),
+            max_depth: DEFAULT_MAX_DELEGATION_DEPTH,
+        }
+    }
 }
 #[derive(Default)]
 struct Registry {
@@ -100,6 +112,37 @@ impl From<ToolCallRef> for DispatchContext {
 impl ScopeManager {
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
+    }
+
+    pub fn with_max_depth(max_depth: usize) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(Registry::default()),
+            max_depth,
+        })
+    }
+
+    /// Rejects new delegations when the caller is already at `max_depth`.
+    pub fn check_delegation_depth(&self, source: &SessionRef) -> Result<(), Fault> {
+        let registry = self.state.lock().expect("scope registry poisoned");
+        let Some(scope) = registry.members.get(source).and_then(Weak::upgrade) else {
+            return Ok(());
+        };
+        let depth = scope
+            .members
+            .lock()
+            .expect("scope members poisoned")
+            .get(source)
+            .map_or(0, |member| member.depth);
+        if depth >= self.max_depth {
+            return Err(Fault::new(
+                FaultKind::SessionInputInvalid,
+                format!(
+                    "maximum delegation depth ({}) reached; nested grandchildren cannot delegate further",
+                    self.max_depth
+                ),
+            ));
+        }
+        Ok(())
     }
 
     async fn scope(self: &Arc<Self>, port: &Arc<dyn TurnPort>) -> Result<Arc<Scope>, Fault> {
@@ -198,6 +241,21 @@ impl ScopeManager {
         delegate: bool,
         temporary: bool,
     ) -> Result<MessageAccepted, Fault> {
+        self.send_named(port, dispatch, target, input, delegate, temporary, None)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn send_named(
+        self: &Arc<Self>,
+        port: Arc<dyn TurnPort>,
+        dispatch: impl Into<DispatchContext>,
+        target: SessionRef,
+        input: MessageInput,
+        delegate: bool,
+        temporary: bool,
+        name: Option<String>,
+    ) -> Result<MessageAccepted, Fault> {
         let dispatch = dispatch.into();
         dispatch.check()?;
         let origin = dispatch.origin.clone();
@@ -244,6 +302,15 @@ impl ScopeManager {
                     let depth = members
                         .get(&source.session)
                         .map_or(1, |parent| parent.depth + 1);
+                    if depth > self.max_depth {
+                        return Err(Fault::new(
+                            FaultKind::SessionInputInvalid,
+                            format!(
+                                "maximum delegation depth ({}) reached; nested grandchildren cannot delegate further",
+                                self.max_depth
+                            ),
+                        ));
+                    }
                     let member = Arc::new(Member {
                         registration: DelegationRegistration {
                             host_id: source.host_id.clone(),
@@ -254,6 +321,7 @@ impl ScopeManager {
                             task_message_id: input.message_id.clone(),
                             origin: origin.clone(),
                             temporary,
+                            name,
                         },
                         depth,
                         scope: Arc::downgrade(&scope),

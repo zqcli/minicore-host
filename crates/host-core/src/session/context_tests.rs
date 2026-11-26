@@ -165,6 +165,7 @@ fn fixture() -> Fixture {
             effective_config: SessionConfig::from_agent(&config, &SessionOverrides::default())
                 .unwrap(),
             parent: None,
+            delegation_root: None,
             closed: None,
         },
     );

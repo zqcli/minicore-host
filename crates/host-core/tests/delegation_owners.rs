@@ -305,6 +305,7 @@ fn registration(
             tool_call_id: ToolCallId("actual-bound-call".into()),
         },
         temporary: false,
+        name: None,
     }
 }
 

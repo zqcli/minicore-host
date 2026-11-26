@@ -83,6 +83,8 @@ impl SessionController {
                     .as_ref()
                     .map(|deletion| deletion.data.clone()),
                 end_reason: state.end_reason.clone(),
+                delegated_by: state.info.delegated_by.clone(),
+                delegation_root: state.info.delegation_root.clone(),
             }))
         })
     }

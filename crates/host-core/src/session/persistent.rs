@@ -45,6 +45,12 @@ impl SessionController {
         state.info.title = record.data.title.clone();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
+        state.info.delegated_by = record.data.parent.clone();
+        state.info.delegation_root = record
+            .data
+            .delegation_root
+            .clone()
+            .or_else(|| record.data.parent.clone());
         if let Some(closed) = &record.data.closed {
             state.end_reason = Some(closed.reason.clone());
             state.lifecycle = SessionLifecycle::Closed;
@@ -79,6 +85,21 @@ impl SessionController {
             .root_lease
             .get_mut()
             .expect("Session lease mutex poisoned") = lease;
+        self
+    }
+    pub(crate) fn with_delegation_provenance(
+        mut self: Arc<Self>,
+        provenance: Option<(SessionRef, SessionRef)>,
+    ) -> Arc<Self> {
+        if let Some((parent, root)) = provenance {
+            let state = Arc::get_mut(&mut self)
+                .expect("unpublished Session")
+                .state
+                .get_mut()
+                .expect("Session mutex poisoned");
+            state.info.delegated_by = Some(parent);
+            state.info.delegation_root = Some(root);
+        }
         self
     }
 }

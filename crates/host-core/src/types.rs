@@ -48,6 +48,10 @@ pub struct SessionInfo {
     pub mode: StorageMode,
     pub config_revision: ConfigRevision,
     pub config: SessionConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_by: Option<SessionRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_root: Option<SessionRef>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

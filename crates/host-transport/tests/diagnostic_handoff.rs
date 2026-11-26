@@ -94,6 +94,7 @@ impl Tool for Delegate {
                     tool_call_id: ToolCallId(call.tool_call_id.as_str().into()),
                 },
                 temporary: false,
+                name: None,
             };
             let permit = self
                 .cap

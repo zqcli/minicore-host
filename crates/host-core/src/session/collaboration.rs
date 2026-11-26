@@ -102,6 +102,14 @@ impl SessionController {
                 "target already has a registered collaboration relationship",
             ));
         }
+        state
+            .info
+            .delegated_by
+            .get_or_insert_with(|| registration.parent.clone());
+        state
+            .info
+            .delegation_root
+            .get_or_insert_with(|| registration.root.clone());
         let relation = Arc::new(DelegationState {
             registration,
             child: Arc::downgrade(self),
@@ -475,6 +483,14 @@ impl SessionController {
             ));
     }
 
+    pub(crate) fn delegation_root_owned(&self) -> Option<SessionRef> {
+        let state = self.state.lock().expect("Session mutex poisoned");
+        state
+            .delegation
+            .as_ref()
+            .map(|slot| slot.relation.registration.root.clone())
+            .or_else(|| state.info.delegation_root.clone())
+    }
     pub(crate) fn delegation_association_owned(
         &self,
         relation: &Arc<DelegationState>,
@@ -516,9 +532,14 @@ impl DelegationSlot {
             });
         }
         DelegationAssociation {
+            root: Some(registration.root.clone()),
             parent: registration.parent.clone(),
             origin: registration.origin.clone(),
             child: registration.child.clone(),
+            name: registration
+                .name
+                .clone()
+                .or_else(|| state.info.title.clone()),
             task_message_id: registration.task_message_id.clone(),
             accepted_message_ids: self.accepted.iter().cloned().collect(),
             inputs,

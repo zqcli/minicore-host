@@ -196,6 +196,7 @@ fn registration(
             tool_call_id: ToolCallId("bound-fixture-call".into()),
         },
         temporary: false,
+        name: None,
     }
 }
 async fn explicit_load_settles_discarded_input(fail: bool, close: bool) {

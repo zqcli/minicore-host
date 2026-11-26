@@ -45,6 +45,7 @@ fn fixture() -> (tempfile::TempDir, SessionStore) {
                 config_revision: 1,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

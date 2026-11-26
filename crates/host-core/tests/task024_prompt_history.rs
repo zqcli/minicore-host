@@ -438,6 +438,7 @@ fn seed(path: &Path, entries: Vec<HistoryEntry>) -> (SessionRef, PathBuf, Vec<Hi
                 effective_config: SessionConfig::from_agent(&config, &SessionOverrides::default())
                     .unwrap(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

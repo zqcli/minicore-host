@@ -155,6 +155,7 @@ fn seed(path: &Path) -> (HostId, AgentId, Vec<SessionId>) {
                     )
                     .unwrap(),
                     parent: None,
+                    delegation_root: None,
                     closed: None,
                 },
             ))

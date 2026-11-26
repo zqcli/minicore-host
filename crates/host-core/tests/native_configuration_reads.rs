@@ -61,6 +61,7 @@ fn explicit_empty_and_omitted_native_instructions_remain_readable() {
                 config_revision: 0,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

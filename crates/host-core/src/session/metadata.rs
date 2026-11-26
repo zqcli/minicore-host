@@ -664,6 +664,7 @@ mod activity_tests {
                 config_revision: 0,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         );

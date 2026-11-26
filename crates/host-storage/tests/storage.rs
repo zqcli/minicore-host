@@ -96,6 +96,7 @@ impl Fixture {
                     config_revision: 1,
                     effective_config: SessionConfig::default(),
                     parent: None,
+                    delegation_root: None,
                     closed: None,
                 },
             ))
@@ -319,6 +320,7 @@ fn memory_records_and_journal_create_no_files() {
                 config_revision: 1,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))
@@ -1281,6 +1283,7 @@ fn broken_default_session_does_not_block_agent_record_or_healthy_sibling_initial
                 config_revision: 1,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))
@@ -1327,6 +1330,7 @@ fn create_sibling_session(agent: &AgentStore) -> SessionStore {
                 config_revision: 1,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

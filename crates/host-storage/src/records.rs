@@ -240,6 +240,9 @@ pub struct SessionData {
     pub effective_config: SessionConfig,
     /// Historical creation provenance only, never a resumable delegation.
     pub parent: Option<SessionRef>,
+    /// Historical root Session of the delegation scope, when delegated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_root: Option<SessionRef>,
     /// Persist only a committed close, never a runtime closing transition.
     pub closed: Option<SessionClosure>,
 }

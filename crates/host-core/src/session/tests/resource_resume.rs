@@ -96,6 +96,7 @@ impl RecoveryFixture {
                     config_revision: 0,
                     effective_config: config,
                     parent: None,
+                    delegation_root: None,
                     closed: None,
                 },
             );

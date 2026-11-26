@@ -181,6 +181,7 @@ fn fixture(rounds: usize, persistent: bool) -> Fixture {
                     config_revision: 0,
                     effective_config: config.clone(),
                     parent: None,
+                    delegation_root: None,
                     closed: None,
                 },
             ))

@@ -11,6 +11,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn normalize_task_name(raw: Option<&str>) -> Option<String> {
+    let trimmed: String = raw?
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?
+        .chars()
+        .take(60)
+        .collect();
+    (!trimmed.is_empty()).then_some(trimmed)
+}
+
 #[derive(Clone)]
 pub struct AgentTool {
     spec: ToolSpec,
@@ -168,6 +179,11 @@ impl AgentTool {
                 let settings = self.inherited(same_agent, settings)?;
                 let config = agent_config_from_settings(&source, &settings)?;
                 let initial = initial(text)?;
+                if initial.is_some() {
+                    self.scopes
+                        .check_delegation_depth(&self.port.source().session)?;
+                }
+                let task_name = normalize_task_name(Some(&name));
                 let request = AgentCreate {
                     operation_id: OperationId::new().map_err(id_fault)?,
                     name,
@@ -198,16 +214,18 @@ impl AgentTool {
                                 .clone()
                                 .ok_or_else(missing_created_id)?,
                         };
-                        self.title_child(&child, &input.text).await;
+                        self.title_child(&child, task_name.as_deref().unwrap_or(&input.text))
+                            .await;
                         match self
                             .scopes
-                            .send(
+                            .send_named(
                                 Arc::clone(&self.port),
                                 DispatchContext::new(origin, context),
                                 child,
                                 input,
                                 true,
                                 mode == StorageMode::Memory,
+                                task_name,
                             )
                             .await
                         {
@@ -232,11 +250,23 @@ impl AgentTool {
             }
             CreateAction::Session {
                 target,
+                name,
                 mode,
                 settings,
                 text,
             } => {
                 let initial = initial(text)?;
+                if initial.is_some() {
+                    self.scopes
+                        .check_delegation_depth(&self.port.source().session)?;
+                }
+                let task_name = normalize_task_name(name.as_deref());
+                // Delegated child Sessions default to memory unless explicitly persistent.
+                let mode = if initial.is_some() {
+                    mode.or(Some(StorageMode::Memory))
+                } else {
+                    mode
+                };
                 let own = AgentRef {
                     host_id: self.port.source().host_id.clone(),
                     agent_id: self.port.source().session.agent_id.clone(),
@@ -273,16 +303,18 @@ impl AgentTool {
                                 .ok_or_else(missing_created_id)?,
                         };
                         let temporary = cleanup.is_some();
-                        self.title_child(&child, &input.text).await;
+                        self.title_child(&child, task_name.as_deref().unwrap_or(&input.text))
+                            .await;
                         match self
                             .scopes
-                            .send(
+                            .send_named(
                                 Arc::clone(&self.port),
                                 DispatchContext::new(origin, context),
                                 child,
                                 input,
                                 true,
                                 temporary,
+                                task_name,
                             )
                             .await
                         {

@@ -239,6 +239,8 @@ impl SessionController {
                 mode: backend.mode(),
                 config_revision: 0,
                 config,
+                delegated_by: None,
+                delegation_root: None,
             },
             lifecycle: SessionLifecycle::Open,
             end_reason: None,

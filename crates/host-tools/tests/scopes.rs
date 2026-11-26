@@ -379,6 +379,70 @@ async fn member_cannot_close_root_scope_and_intermediate_completion_does_not_clo
     assert_eq!(grand.registration.root, root.source.session);
 }
 #[tokio::test]
+async fn delegation_depth_limit_allows_grandchild_and_rejects_depth_three() {
+    let root = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let child = session();
+    let grandchild = session();
+    let great_grandchild = session();
+    scopes
+        .send_named(
+            root.port(),
+            origin(&root),
+            child.clone(),
+            input(),
+            true,
+            true,
+            Some("child-worker".into()),
+        )
+        .await
+        .unwrap();
+    let child_port = root.for_session(child.clone());
+    assert!(scopes.check_delegation_depth(&child).is_ok());
+    scopes
+        .send_named(
+            child_port.port(),
+            origin(&child_port),
+            grandchild.clone(),
+            input(),
+            true,
+            true,
+            Some("grandchild-worker".into()),
+        )
+        .await
+        .unwrap();
+    let grandchild_port = root.for_session(grandchild.clone());
+    let depth_err = scopes
+        .check_delegation_depth(&grandchild)
+        .expect_err("grandchild at depth 2 must not delegate further");
+    assert!(depth_err.message().contains("maximum delegation depth (2)"));
+    let send_err = scopes
+        .send(
+            grandchild_port.port(),
+            origin(&grandchild_port),
+            great_grandchild,
+            input(),
+            true,
+            true,
+        )
+        .await
+        .expect_err("depth 3 delegation must be rejected");
+    assert!(send_err.message().contains("maximum delegation depth (2)"));
+    let grand = root
+        .state
+        .relations
+        .lock()
+        .unwrap()
+        .get(&grandchild)
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        grand.registration.name.as_deref(),
+        Some("grandchild-worker")
+    );
+    assert_eq!(grand.registration.root, root.source.session);
+}
+#[tokio::test]
 async fn draining_rejects_new_delegation_to_an_existing_session() {
     let port = FixtureTurn::new();
     port.state.draining.store(true, Ordering::Release);

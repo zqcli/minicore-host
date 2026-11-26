@@ -86,6 +86,7 @@ fn failed_initial_history_sync_keeps_reserved_id_without_publishing_or_recreatin
             config_revision: 1,
             effective_config: SessionConfig::default(),
             parent: None,
+            delegation_root: None,
             closed: None,
         },
     );
@@ -148,6 +149,7 @@ fn partial_explicit_delete_can_continue_while_closed_ownership_record_remains() 
                 config_revision: 1,
                 effective_config: SessionConfig::default(),
                 parent: None,
+                delegation_root: None,
                 closed: Some(SessionClosure {
                     reason: "explicit".into(),
                 }),

@@ -19,6 +19,7 @@ struct PreparedSession {
     mode: StorageMode,
     config: SessionConfig,
     agent_revision: ConfigRevision,
+    delegation_provenance: Option<(SessionRef, SessionRef)>,
 }
 impl AgentOwner {
     pub(crate) fn begin_initial_creation(&self) {
@@ -73,10 +74,11 @@ impl AgentOwner {
                 .collect())
         })
     }
-    pub(crate) async fn create_session_async(
+    pub(crate) async fn create_session_with_provenance_async(
         self: &Arc<Self>,
         caller: &CallerContext,
         request: SessionCreate,
+        provenance: Option<(SessionRef, SessionRef)>,
     ) -> Result<SessionCreateReceipt, Fault> {
         let context = Context {
             operation_id: Some(request.operation_id.clone()),
@@ -109,6 +111,7 @@ impl AgentOwner {
                 options,
                 request.initial_message,
                 CreationOrigin::SessionRequest,
+                provenance,
                 context.clone(),
                 &mut span,
             )
@@ -131,6 +134,7 @@ impl AgentOwner {
         options: SessionOptions,
         message: Option<MessageInput>,
         configuration_creation: bool,
+        provenance: Option<(SessionRef, SessionRef)>,
     ) -> Result<SessionCreateReceipt, Fault> {
         let context = Context {
             operation_id: Some(operation.clone()),
@@ -156,6 +160,7 @@ impl AgentOwner {
             } else {
                 CreationOrigin::AgentCreation
             },
+            provenance,
             context.clone(),
             &mut span,
         );
@@ -171,12 +176,14 @@ impl AgentOwner {
             )
         })
     }
+    #[allow(clippy::too_many_arguments)]
     fn accept_session_creation(
         self: &Arc<Self>,
         operation: OperationId,
         options: SessionOptions,
         message: Option<MessageInput>,
         origin: CreationOrigin,
+        provenance: Option<(SessionRef, SessionRef)>,
         context: Context,
         span: &mut Option<tracing::Span>,
     ) -> Result<oneshot::Receiver<SessionCreateReceipt>, Fault> {
@@ -232,6 +239,7 @@ impl AgentOwner {
             mode,
             config,
             agent_revision: state.info.config_revision,
+            delegation_provenance: provenance,
         };
         let initial = SessionCreateReceipt {
             kind: SessionCreateKind::SessionCreate,
@@ -373,7 +381,14 @@ impl AgentOwner {
                     agent_config_revision: prepared.agent_revision,
                     config_revision: 0,
                     effective_config: prepared.config,
-                    parent: None,
+                    parent: prepared
+                        .delegation_provenance
+                        .as_ref()
+                        .map(|(parent, _)| parent.clone()),
+                    delegation_root: prepared
+                        .delegation_provenance
+                        .as_ref()
+                        .map(|(_, root)| root.clone()),
                     closed: None,
                 },
             );
@@ -406,6 +421,7 @@ impl AgentOwner {
                 Vec::new(),
                 Arc::clone(&self.enabled),
             )
+            .with_delegation_provenance(prepared.delegation_provenance)
         };
         let session = session
             .hold_root(self.root_lease())

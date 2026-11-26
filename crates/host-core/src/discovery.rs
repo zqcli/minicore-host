@@ -108,6 +108,10 @@ pub struct SessionSummary {
     pub metadata_fault: Option<Fault>,
     pub deletion: Option<DataDeletion>,
     pub end_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegated_by: Option<SessionRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation_root: Option<SessionRef>,
 }
 
 /// Only this Session's current work. Independent child execution is not a

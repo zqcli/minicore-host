@@ -173,6 +173,7 @@ pub(super) fn setup(
                 config_revision: 0,
                 effective_config: config.clone(),
                 parent: None,
+                delegation_root: None,
                 closed: None,
             },
         ))

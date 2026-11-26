@@ -26,13 +26,14 @@ async fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
             SessionOptions::default(),
             None,
             false,
+            None,
         )
         .await
         .unwrap()
         .session_id
         .unwrap();
     let child_id = agent
-        .create_session_async(
+        .create_session_with_provenance_async(
             &caller,
             SessionCreate {
                 operation_id: OperationId::new().unwrap(),
@@ -44,6 +45,7 @@ async fn review_memory_default_precheck_cannot_hold_connection_acceptance() {
                 overrides: None,
                 initial_message: None,
             },
+            None,
         )
         .await
         .unwrap()
