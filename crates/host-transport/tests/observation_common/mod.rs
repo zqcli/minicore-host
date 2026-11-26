@@ -60,7 +60,7 @@ impl ResourceResolver for Resources {
     fn validate(&self, _: &SessionConfig) -> Result<(), Fault> {
         Ok(())
     }
-    fn resolve<'a>(&'a self, _: &'a SessionConfig) -> ResourceFuture<'a> {
+    fn resolve<'a>(&'a self, config: &'a SessionConfig) -> ResourceFuture<'a> {
         Box::pin(async move {
             let mut tools = ToolSet::builder();
             if let Some(tool) = &self.tool {
@@ -75,7 +75,10 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: ExecutionOptions::default(),
+                options: ExecutionOptions {
+                    model_retry_attempts: config.execution.model_retry_attempts,
+                    ..ExecutionOptions::default()
+                },
             })
         })
     }

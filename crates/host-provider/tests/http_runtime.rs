@@ -55,6 +55,7 @@ fn provider(endpoint: &str) -> Arc<OpenAiChatModel> {
 }
 fn call_options() -> ExecutionOptions {
     ExecutionOptions {
+        model_retry_attempts: 1,
         model_retry_base_delay: Duration::from_millis(1),
         model_timeout: Duration::from_secs(3),
         ..ExecutionOptions::default()
@@ -484,7 +485,12 @@ async fn runtime_is_the_only_retry_owner_and_retries_transient_rejections_only()
             Reply::sse(final_text("retry result")),
         ])
         .await;
-        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        let options = ExecutionOptions {
+            model_retry_attempts: expected as u8,
+            ..call_options()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
         if expected == 2 {
             assert!(report.outcome.is_ok());
         } else {
@@ -535,6 +541,7 @@ async fn official_overload_http_retries_with_existing_wait_lower_bounds() {
         ])
         .await;
         let options = ExecutionOptions {
+            model_retry_attempts: 4,
             model_retry_base_delay: Duration::from_millis(base),
             ..call_options()
         };
@@ -626,7 +633,12 @@ async fn unrecognized_overload_http_keeps_unknown_delivery_and_is_retried_as_tra
             Reply::error(status, json!({"error":error}).to_string()),
         ])
         .await;
-        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        let options = ExecutionOptions {
+            model_retry_attempts: 2,
+            ..call_options()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
         let failure = failure(&report);
         assert_eq!(failure.kind(), expected_kind);
         if expected_kind == ModelErrorKind::UpstreamUnclassified {
@@ -678,7 +690,12 @@ async fn sse_error_retry_requires_that_no_text_was_shown() {
             Reply::sse(final_text("done")),
         ])
         .await;
-        let report = call(provider(&fixture.endpoint), ToolSet::default()).await;
+        let options = ExecutionOptions {
+            model_retry_attempts: expected as u8,
+            ..call_options()
+        };
+        let report =
+            call_with_options(provider(&fixture.endpoint), ToolSet::default(), options).await;
         if expected == 2 {
             assert!(report.outcome.is_ok());
         } else {
@@ -1985,7 +2002,11 @@ async fn large_http_error_bodies_keep_structured_classification_and_retry_header
         ])
         .await;
         let (model, mut rejections) = observe_provider(&fixture.endpoint);
-        let report = call(model, ToolSet::default()).await;
+        let options = ExecutionOptions {
+            model_retry_attempts: attempts as u8,
+            ..call_options()
+        };
+        let report = call_with_options(model, ToolSet::default(), options).await;
         let error = rejection(&mut rejections).await;
         assert_eq!(error.kind(), expected_kind);
         assert!(

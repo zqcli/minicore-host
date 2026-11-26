@@ -134,6 +134,11 @@ impl Fixture {
         let client = HostClient::in_process(host).unwrap();
         let mut request = create_request();
         request.mode = mode;
+        request
+            .config
+            .session_defaults
+            .execution
+            .model_retry_attempts = 1;
         let made = client.create_agent(request, options(3000)).await.unwrap();
         let session = client.session(SessionRef {
             agent_id: made.agent_id.unwrap(),
@@ -525,6 +530,43 @@ async fn partial_id_and_pre_delivery_retry_do_not_reserve_a_tool_identity() {
             .await
             .is_err()
     );
+    let current = fixture.session.info(options(3000)).await.unwrap();
+    let mut execution = current.config.execution;
+    execution.model_retry_attempts = 2;
+    fixture
+        .session
+        .update(
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: current.config_revision,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        execution: Some(execution),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            },
+            options(3000),
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while fixture
+            .session
+            .info(options(3000))
+            .await
+            .unwrap()
+            .config
+            .execution
+            .model_retry_attempts
+            != 2
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
     fixture
         .model
         .reject_next_start
@@ -532,11 +574,6 @@ async fn partial_id_and_pre_delivery_retry_do_not_reserve_a_tool_identity() {
     fixture
         .session
         .send(input("explicit next Turn"), options(3000))
-        .await
-        .unwrap();
-    fixture
-        .session
-        .resume(control(), options(3000))
         .await
         .unwrap();
     fixture.started().await;

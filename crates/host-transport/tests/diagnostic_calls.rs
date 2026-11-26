@@ -59,7 +59,12 @@ async fn actual_typed_and_rpc_calls_keep_original_metadata_and_never_duplicate_t
     let (remote, server) = pipes(host.clone()).await;
     assert!(remote.initial_info().can_operate);
     let remote_message = input();
-    let remote_request = create(Some(remote_message.clone()));
+    let mut remote_request = create(Some(remote_message.clone()));
+    remote_request
+        .config
+        .session_defaults
+        .execution
+        .model_retry_attempts = 1;
     let remote_operation = remote_request.operation_id.clone();
     let remote_created = remote
         .create_agent(remote_request, options())

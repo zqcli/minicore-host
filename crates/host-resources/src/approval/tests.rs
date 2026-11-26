@@ -306,6 +306,7 @@ async fn cross_workspace_paths_require_approval_in_ask_and_allow_in_auto() {
 
     // Outside-workspace read requires Medium approval in Ask mode (including symlinks).
     let outside_abs = sibling.join("outside.txt").to_string_lossy().into_owned();
+    #[allow(unused_mut)]
     let mut outside_reads = vec![outside_abs.clone(), "../other/outside.txt".to_owned()];
     #[cfg(unix)]
     outside_reads.push("ext-link/outside.txt".to_owned());

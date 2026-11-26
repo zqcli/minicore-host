@@ -101,7 +101,10 @@ impl ResourceResolver for Resources {
                     Arc::new(DefaultPromptProvider::new(Some(prompt))),
                 )
                 .unwrap(),
-                options: ExecutionOptions::default(),
+                options: ExecutionOptions {
+                    model_retry_attempts: config.execution.model_retry_attempts,
+                    ..ExecutionOptions::default()
+                },
             })
         })
     }
@@ -133,6 +136,7 @@ async fn setup(
     let connection = host.connect().unwrap();
     let mut config = AgentConfig::default();
     config.session_defaults.model = "test/model".parse().unwrap();
+    config.session_defaults.execution.model_retry_attempts = 1;
     config.role.instructions = "old role".into();
     let receipt = host
         .create_agent_async(
@@ -734,6 +738,7 @@ async fn review_close_during_preparation_must_finish_after_resolution() {
     let caller = connection.caller();
     let mut config = AgentConfig::default();
     config.session_defaults.model = "test/model".parse().unwrap();
+    config.session_defaults.execution.model_retry_attempts = 1;
     let created = host
         .create_agent_async(
             &caller,
@@ -862,6 +867,7 @@ async fn setup_with_resources(
     let connection = host.connect().unwrap();
     let mut config = AgentConfig::default();
     config.session_defaults.model = "test/model".parse().unwrap();
+    config.session_defaults.execution.model_retry_attempts = 1;
     let receipt = host
         .create_agent_async(
             &connection.caller(),
@@ -922,14 +928,15 @@ async fn review_failed_model_must_pause_before_consuming_next_turn() {
     assert_eq!(
         model.calls.load(std::sync::atomic::Ordering::SeqCst),
         1,
-        "failed Turn consumed queued follow-up without resume"
+        "failed Turn must stop the driver before consuming queued follow-up"
     );
     assert_eq!(
-        host.session_state(&caller, &target)
-            .unwrap()
-            .data
-            .scheduling,
-        Scheduling::Paused
+        host.session_state(&caller, &target).unwrap().data.lifecycle,
+        SessionLifecycle::Open
+    );
+    assert_eq!(
+        host.input_list(&caller, &target).unwrap().next_turn.len(),
+        1
     );
 }
 

@@ -87,7 +87,10 @@ impl ResourceResolver for ConfiguredResources {
                     Arc::new(DefaultPromptProvider::new(None)),
                 )
                 .unwrap(),
-                options: ExecutionOptions::default(),
+                options: ExecutionOptions {
+                    model_retry_attempts: 1,
+                    ..ExecutionOptions::default()
+                },
             })
         })
     }

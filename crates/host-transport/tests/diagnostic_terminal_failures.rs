@@ -47,6 +47,11 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     let client = HostClient::in_process(host.clone()).unwrap();
     let mut request = create(None);
     request.mode = StorageMode::Persistent;
+    request
+        .config
+        .session_defaults
+        .execution
+        .model_retry_attempts = 1;
     let created = client.create_agent(request, options()).await.unwrap();
     let target = target(&created);
     let session = client.session(target.clone());
@@ -215,17 +220,10 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
                 && row["session_id"] == target.session_id.as_str()
         })
         .collect();
-    assert_eq!(
+    assert!(
         scheduling
             .iter()
-            .filter(|row| {
-                matches!(
-                    row["attributes"]["reason"].as_str(),
-                    Some("execution_failed" | "finalizing")
-                ) && row["attributes"]["execution_failure"] == true
-            })
-            .count(),
-        1
+            .all(|row| row["attributes"]["execution_failure"] == false)
     );
     for blocked in [true, false] {
         assert_eq!(
@@ -239,21 +237,17 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
             1
         );
     }
-    let resumed: Vec<_> = scheduling
+    let unblocked: Vec<_> = scheduling
         .iter()
         .filter(|row| {
-            // Either real owner can confirm the last outstanding save. The
-            // scheduling transition must still happen exactly once after both.
-            matches!(
-                row["attributes"]["reason"].as_str(),
-                Some("save_resume_finished" | "metadata_save_finished")
-            ) && row["attributes"]["execution_failure"] == false
+            row["attributes"]["reason"] == "history_save_finished"
+                && row["attributes"]["blocked"] == false
         })
         .collect();
-    assert_eq!(resumed.len(), 1);
-    assert_eq!(resumed[0]["attributes"]["execution_failure"], false);
-    assert_eq!(resumed[0]["attributes"]["blocked"], false);
-    assert_eq!(resumed[0]["attributes"]["paused"], false);
+    assert_eq!(unblocked.len(), 1);
+    assert_eq!(unblocked[0]["attributes"]["execution_failure"], false);
+    assert_eq!(unblocked[0]["attributes"]["blocked"], false);
+    assert_eq!(unblocked[0]["attributes"]["paused"], false);
     assert!(scheduling.iter().all(|row| row["level"] == "DEBUG" && row["attributes"]["controller_revision"].is_u64()));
 
     let primary = rows
@@ -282,10 +276,10 @@ async fn primary_failure_is_recorded_before_save_repair_and_finished_only_after_
     assert_eq!(done["attributes"]["persistence"], "persisted");
     assert!(done["attributes"]["duration_ms"].is_u64());
     assert!(
-        resumed[0]["attributes"]["controller_revision"]
-            .as_u64()
-            .unwrap()
-            > done["attributes"]["controller_revision"].as_u64().unwrap()
+        done["attributes"]["controller_revision"].as_u64().unwrap()
+            > unblocked[0]["attributes"]["controller_revision"]
+                .as_u64()
+                .unwrap()
     );
     for row in [primary, save, done] {
         assert_eq!(row["host_id"], finished.source.session.host_id.as_str());

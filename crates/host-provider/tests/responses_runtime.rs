@@ -84,11 +84,23 @@ fn request(tools: bool) -> ModelRequest {
 }
 
 async fn call(model: &dyn Model, request: ModelRequest) -> ModelCallReport {
-    call_with(
+    call_with_attempts(
         model,
         request,
         CancellationToken::new(),
         Duration::from_secs(5),
+        1,
+    )
+    .await
+}
+
+async fn call_retrying(model: &dyn Model, request: ModelRequest) -> ModelCallReport {
+    call_with_attempts(
+        model,
+        request,
+        CancellationToken::new(),
+        Duration::from_secs(5),
+        3,
     )
     .await
 }
@@ -99,9 +111,19 @@ async fn call_with(
     cancellation: CancellationToken,
     timeout: Duration,
 ) -> ModelCallReport {
+    call_with_attempts(model, request, cancellation, timeout, 1).await
+}
+
+async fn call_with_attempts(
+    model: &dyn Model,
+    request: ModelRequest,
+    cancellation: CancellationToken,
+    timeout: Duration,
+    attempts: u8,
+) -> ModelCallReport {
     ModelDriver::new(
         model,
-        ModelDriverConfig::new(timeout, 3, Duration::from_millis(1)),
+        ModelDriverConfig::new(timeout, attempts, Duration::from_millis(1)),
     )
     .unwrap()
     .call(
@@ -613,7 +635,7 @@ async fn responses_rejects_duplicate_fields_and_mismatched_event_identity() {
 async fn responses_initial_errors_share_classification_and_retry_lower_bound() {
     let rejection = Reply::Full { status:200,content_type:"text/event-stream",headers:"Retry-After-ms: 40\r\n".into(),body:"data: {\"type\":\"error\",\"code\":\"rate_limit_exceeded\",\"message\":\"private\"}\n\n".into(),fragment:0 };
     let fixture = Fixture::start(vec![rejection, Reply::sse(final_text("recovered"))]).await;
-    let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+    let report = call_retrying(provider(&fixture.endpoint).as_ref(), request(false)).await;
     assert!(report.outcome.is_ok());
     assert_eq!(report.attempts, 2);
     assert!(report.retry_wait_elapsed >= Duration::from_millis(35));
@@ -743,7 +765,7 @@ async fn responses_created_then_rejection_retries_while_nothing_was_shown() {
         .events
         .push(json!({"type":"error","code":"rate_limit_exceeded"}));
     let fixture = Fixture::start((0..3).map(|_| Reply::sse(script.body())).collect()).await;
-    let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+    let report = call_retrying(provider(&fixture.endpoint).as_ref(), request(false)).await;
     // Every configured attempt is used, then the last rejection is reported.
     assert_eq!(report.attempts, 3);
     assert_eq!(
@@ -762,7 +784,7 @@ async fn responses_failure_envelope_without_shown_output_is_retried() {
             .collect(),
     )
     .await;
-    let report = call(provider(&fixture.endpoint).as_ref(), request(false)).await;
+    let report = call_retrying(provider(&fixture.endpoint).as_ref(), request(false)).await;
     assert_eq!(report.attempts, 3);
     let failure = report.outcome.unwrap_err();
     assert_eq!(failure.error().kind(), ModelErrorKind::RateLimited);

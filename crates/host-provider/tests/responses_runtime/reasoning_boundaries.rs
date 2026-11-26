@@ -64,7 +64,7 @@ async fn observed_call(model: &dyn Model) -> (ModelCallReport, String) {
     let mut reasoning = String::new();
     let report = ModelDriver::new(
         model,
-        ModelDriverConfig::new(Duration::from_secs(5), 3, Duration::from_millis(1)),
+        ModelDriverConfig::new(Duration::from_secs(5), 1, Duration::from_millis(1)),
     )
     .unwrap()
     .call(
