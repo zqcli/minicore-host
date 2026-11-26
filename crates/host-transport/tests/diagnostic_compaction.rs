@@ -480,7 +480,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     http.abort().await;
 
     // Real HTTP 401 utility failure belongs to the compaction owner once.
-    let http = Http::start(replies([Reply::auth_failure()])).await;
+    let http = Http::start(replies((0..4).map(|_| Reply::auth_failure()))).await;
     let (host, _client, session) = seed(&http, None).await;
     let failed_utility = compact(&session).await;
     let CompactionState::Finished {
@@ -490,7 +490,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
         panic!("utility must fail")
     };
     assert_eq!(fault.kind(), Some(FaultKind::SessionCompactionFailed));
-    assert_eq!(http.count(), 3);
+    assert_eq!(http.count(), 6);
     stop(&host).await;
     http.finish().await;
 
@@ -521,7 +521,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
     // A failed automatic utility must not become a second primary ERROR at
     // the forwarding prompt/Turn boundary. The original business Fault and
     // Runtime result remain unchanged by diagnostics.
-    let http = Http::start(replies([Reply::auth_failure()])).await;
+    let http = Http::start(replies((0..4).map(|_| Reply::auth_failure()))).await;
     let (host, _client, session) = seed(&http, None).await;
     enable_automatic(&session).await;
     let message = input();
@@ -567,7 +567,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
             .diagnostic_id(),
         original_fault.diagnostic_id()
     );
-    assert_eq!(http.count(), 3);
+    assert_eq!(http.count(), 6);
     stop(&host).await;
     http.finish().await;
 
@@ -886,7 +886,7 @@ async fn real_compaction_boundaries_preserve_original_saves_identities_and_lock_
 
     // A closed writer cannot prevent another real utility from completing or
     // change the original business error into success.
-    let http = Http::start(replies([Reply::auth_failure()])).await;
+    let http = Http::start(replies((0..4).map(|_| Reply::auth_failure()))).await;
     let (host, _client, session) = seed(&http, None).await;
     compact(&session).await;
     assert!(matches!(
