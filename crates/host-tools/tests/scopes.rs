@@ -2,6 +2,7 @@
 mod support;
 use minicore_host_protocol::*;
 use minicore_host_tools::*;
+use serde_json::json;
 use std::sync::{Arc, atomic::Ordering};
 use support::*;
 
@@ -322,17 +323,11 @@ async fn member_cannot_close_root_scope_and_intermediate_completion_does_not_clo
     let scopes = ScopeManager::new();
     let child = session();
     let grandchild = session();
-    scopes
-        .send(
-            root.port(),
-            origin(&root),
-            child.clone(),
-            input(),
-            true,
-            true,
-        )
-        .await
-        .unwrap();
+    let accepted = invoke(
+        &AgentTool::new(root.port(), Arc::clone(&scopes)),
+        json!({"action":"send","target":{"kind":"session","agent_id":child.agent_id,"session_id":child.session_id},"text":"lead","delegate":true,"allow_delegation":true}),
+    ).await;
+    assert_eq!(accepted["result"]["delivery"], "accepted");
     let intermediate = root.for_session(child.clone());
     scopes
         .send(
@@ -379,68 +374,16 @@ async fn member_cannot_close_root_scope_and_intermediate_completion_does_not_clo
     assert_eq!(grand.registration.root, root.source.session);
 }
 #[tokio::test]
-async fn delegation_depth_limit_allows_grandchild_and_rejects_depth_three() {
+async fn root_has_no_direct_child_quota() {
     let root = FixtureTurn::new();
     let scopes = ScopeManager::new();
-    let child = session();
-    let grandchild = session();
-    let great_grandchild = session();
-    scopes
-        .send_named(
-            root.port(),
-            origin(&root),
-            child.clone(),
-            input(),
-            true,
-            true,
-            Some("child-worker".into()),
-        )
-        .await
-        .unwrap();
-    let child_port = root.for_session(child.clone());
-    assert!(scopes.check_delegation_depth(&child).is_ok());
-    scopes
-        .send_named(
-            child_port.port(),
-            origin(&child_port),
-            grandchild.clone(),
-            input(),
-            true,
-            true,
-            Some("grandchild-worker".into()),
-        )
-        .await
-        .unwrap();
-    let grandchild_port = root.for_session(grandchild.clone());
-    let depth_err = scopes
-        .check_delegation_depth(&grandchild)
-        .expect_err("grandchild at depth 2 must not delegate further");
-    assert!(depth_err.message().contains("maximum delegation depth (2)"));
-    let send_err = scopes
-        .send(
-            grandchild_port.port(),
-            origin(&grandchild_port),
-            great_grandchild,
-            input(),
-            true,
-            true,
-        )
-        .await
-        .expect_err("depth 3 delegation must be rejected");
-    assert!(send_err.message().contains("maximum delegation depth (2)"));
-    let grand = root
-        .state
-        .relations
-        .lock()
-        .unwrap()
-        .get(&grandchild)
-        .cloned()
-        .unwrap();
-    assert_eq!(
-        grand.registration.name.as_deref(),
-        Some("grandchild-worker")
-    );
-    assert_eq!(grand.registration.root, root.source.session);
+    for _ in 0..3 {
+        scopes
+            .send(root.port(), origin(&root), session(), input(), true, false)
+            .await
+            .unwrap();
+    }
+    assert_eq!(root.state.relations.lock().unwrap().len(), 3);
 }
 #[tokio::test]
 async fn draining_rejects_new_delegation_to_an_existing_session() {

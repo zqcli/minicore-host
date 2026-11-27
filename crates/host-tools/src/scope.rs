@@ -1,40 +1,39 @@
-use crate::*;
+use crate::{action::DelegationGrant, *};
 use minicore_host_protocol::*;
 use serde::Serialize;
 use std::time::Instant;
 use std::{
     collections::HashMap,
+    num::NonZeroUsize,
     sync::{
         Arc, Mutex, Weak,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 use tokio::sync::{Notify, OnceCell};
 use tokio_util::sync::CancellationToken;
 
-/// Maximum delegation depth: Root (0) -> Child (1) -> Grandchild (2).
-/// Grandchildren at depth 2 may not delegate further.
-pub const DEFAULT_MAX_DELEGATION_DEPTH: usize = 2;
-
 /// One adapter instance belongs to one Host incarnation. Only active scope
 /// membership and pending handoffs live here, not a Host task/result table.
+#[derive(Default)]
 pub struct ScopeManager {
     state: Mutex<Registry>,
-    max_depth: usize,
-}
-impl Default for ScopeManager {
-    fn default() -> Self {
-        Self {
-            state: Mutex::new(Registry::default()),
-            max_depth: DEFAULT_MAX_DELEGATION_DEPTH,
-        }
-    }
 }
 #[derive(Default)]
 struct Registry {
     host: Option<(HostId, HostIncarnation)>,
     roots: HashMap<SessionRef, Arc<Scope>>,
-    members: HashMap<SessionRef, Weak<Scope>>,
+    members: HashMap<SessionRef, RegisteredMember>,
+}
+struct RegisteredMember {
+    scope: Weak<Scope>,
+    // Release at unregistration, even if another operation still holds Member.
+    _parent_slot: Option<ChildSlot>,
+}
+impl Registry {
+    fn member_scope(&self, session: &SessionRef) -> Option<Arc<Scope>> {
+        self.members.get(session)?.scope.upgrade()
+    }
 }
 struct Scope {
     root: SessionRef,
@@ -47,7 +46,9 @@ struct Scope {
 }
 struct Member {
     registration: DelegationRegistration,
+    // Used only to preserve descendant-first cleanup, not as an admission limit.
     depth: usize,
+    child_quota: Option<Arc<ChildQuota>>,
     scope: Weak<Scope>,
     permit: OnceCell<Arc<dyn DelegationPort>>,
     dispatch: tokio::sync::Mutex<()>,
@@ -58,6 +59,55 @@ struct Member {
     done: Notify,
 }
 struct Sink(Weak<Member>);
+
+#[derive(Default)]
+pub(crate) struct DelegationStart {
+    pub grant: Option<DelegationGrant>,
+    pub temporary: bool,
+    pub name: Option<String>,
+    pub reservation: Option<CreateReservation>,
+}
+
+/// Reserve before owner creation I/O. Carry the same slot into registration,
+/// or release it on failure without touching the active relationship tables.
+pub(crate) struct CreateReservation(Option<ChildSlot>);
+impl CreateReservation {
+    fn into_slot(self, quota: Option<&Arc<ChildQuota>>) -> Result<Option<ChildSlot>, Fault> {
+        match (&self.0, quota) {
+            (None, None) => Ok(None),
+            (Some(slot), Some(quota)) if Arc::ptr_eq(&slot.0, quota) => Ok(self.0),
+            _ => Err(Fault::new(
+                FaultKind::SessionOwnershipMismatch,
+                "caller delegation changed before task acceptance",
+            )),
+        }
+    }
+}
+struct ChildQuota {
+    limit: NonZeroUsize,
+    used: AtomicUsize,
+}
+struct ChildSlot(Arc<ChildQuota>);
+impl ChildQuota {
+    fn reserve(self: &Arc<Self>) -> Result<ChildSlot, Fault> {
+        self.used
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |used| {
+                (used < self.limit.get()).then(|| used + 1)
+            })
+            .map_err(|_| {
+                Fault::new(
+                    FaultKind::SessionBusy,
+                    format!("active direct child limit ({}) reached", self.limit),
+                )
+            })?;
+        Ok(ChildSlot(Arc::clone(self)))
+    }
+}
+impl Drop for ChildSlot {
+    fn drop(&mut self) {
+        self.0.used.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ScopeCloseAccepted {
@@ -114,35 +164,22 @@ impl ScopeManager {
         Arc::new(Self::default())
     }
 
-    pub fn with_max_depth(max_depth: usize) -> Arc<Self> {
-        Arc::new(Self {
-            state: Mutex::new(Registry::default()),
-            max_depth,
-        })
-    }
-
-    /// Rejects new delegations when the caller is already at `max_depth`.
-    pub fn check_delegation_depth(&self, source: &SessionRef) -> Result<(), Fault> {
+    pub(crate) fn reserve_create(
+        &self,
+        source: &SessionRef,
+        grant: Option<DelegationGrant>,
+    ) -> Result<CreateReservation, Fault> {
         let registry = self.state.lock().expect("scope registry poisoned");
-        let Some(scope) = registry.members.get(source).and_then(Weak::upgrade) else {
-            return Ok(());
+        let Some(scope) = registry.member_scope(source) else {
+            if let Some(scope) = registry.roots.get(source) {
+                scope.ensure_open()?;
+            }
+            return Ok(CreateReservation(None));
         };
-        let depth = scope
-            .members
-            .lock()
-            .expect("scope members poisoned")
-            .get(source)
-            .map_or(0, |member| member.depth);
-        if depth >= self.max_depth {
-            return Err(Fault::new(
-                FaultKind::SessionInputInvalid,
-                format!(
-                    "maximum delegation depth ({}) reached; nested grandchildren cannot delegate further",
-                    self.max_depth
-                ),
-            ));
-        }
-        Ok(())
+        scope.ensure_open()?;
+        let members = scope.members.lock().expect("scope members poisoned");
+        let slot = members[source].quota_for_delegation(grant)?.reserve()?;
+        Ok(CreateReservation(Some(slot)))
     }
 
     async fn scope(self: &Arc<Self>, port: &Arc<dyn TurnPort>) -> Result<Arc<Scope>, Fault> {
@@ -158,11 +195,7 @@ impl ScopeManager {
                 ));
             }
             registry.host.get_or_insert(identity);
-            if let Some(scope) = registry
-                .members
-                .get(&source.session)
-                .and_then(Weak::upgrade)
-            {
+            if let Some(scope) = registry.member_scope(&source.session) {
                 scope
             } else if let Some(scope) = registry.roots.get(&source.session) {
                 Arc::clone(scope)
@@ -206,13 +239,11 @@ impl ScopeManager {
         child: &SessionRef,
     ) -> Result<Option<Arc<Member>>, Fault> {
         let registry = self.state.lock().expect("scope registry poisoned");
-        let Some(child_scope) = registry.members.get(child).and_then(Weak::upgrade) else {
+        let Some(child_scope) = registry.member_scope(child) else {
             return Ok(None);
         };
         let source_scope = registry
-            .members
-            .get(source)
-            .and_then(Weak::upgrade)
+            .member_scope(source)
             .or_else(|| registry.roots.get(source).cloned());
         if !source_scope.is_some_and(|scope| Arc::ptr_eq(&scope, &child_scope)) {
             return Err(Fault::new(
@@ -241,25 +272,32 @@ impl ScopeManager {
         delegate: bool,
         temporary: bool,
     ) -> Result<MessageAccepted, Fault> {
-        self.send_named(port, dispatch, target, input, delegate, temporary, None)
-            .await
+        self.dispatch_message(
+            port,
+            dispatch,
+            target,
+            input,
+            delegate.then_some(DelegationStart {
+                temporary,
+                ..DelegationStart::default()
+            }),
+        )
+        .await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub async fn send_named(
+    pub(crate) async fn dispatch_message(
         self: &Arc<Self>,
         port: Arc<dyn TurnPort>,
         dispatch: impl Into<DispatchContext>,
         target: SessionRef,
         input: MessageInput,
-        delegate: bool,
-        temporary: bool,
-        name: Option<String>,
+        start: Option<DelegationStart>,
     ) -> Result<MessageAccepted, Fault> {
         let dispatch = dispatch.into();
         dispatch.check()?;
         let origin = dispatch.origin.clone();
         port.check_active()?;
+        let delegate = start.is_some();
         if delegate && target == port.source().session {
             return Err(Fault::new(
                 FaultKind::SessionOwnershipMismatch,
@@ -274,10 +312,13 @@ impl ScopeManager {
             }
             result => result?,
         };
-        let member = match existing {
-            Some(member) => member,
-            None if !delegate => return port.send(SendMessage::new(input, target)).await,
-            None => {
+        let member = match (existing, start) {
+            (Some(member), start) => {
+                check_append(start.as_ref())?;
+                member
+            }
+            (None, None) => return port.send(SendMessage::new(input, target)).await,
+            (None, Some(start)) => {
                 let scope = self.scope(&port).await?;
                 let source = port.source();
                 let mut registry = self.state.lock().expect("scope registry poisoned");
@@ -288,29 +329,32 @@ impl ScopeManager {
                         "a root scope holder cannot be its own delegated member",
                     ));
                 }
-                if let Some(other) = registry.members.get(&target).and_then(Weak::upgrade) {
+                if let Some(other) = registry.member_scope(&target) {
                     if !Arc::ptr_eq(&scope, &other) {
                         return Err(Fault::new(
                             FaultKind::SessionOwnershipMismatch,
                             "Session already belongs to another delegation scope",
                         ));
                     }
+                    check_append(Some(&start))?;
                     let members = scope.members.lock().expect("scope members poisoned");
                     Arc::clone(members.get(&target).expect("registered member"))
                 } else {
                     let mut members = scope.members.lock().expect("scope members poisoned");
-                    let depth = members
-                        .get(&source.session)
-                        .map_or(1, |parent| parent.depth + 1);
-                    if depth > self.max_depth {
+                    let parent = members.get(&source.session);
+                    if parent.is_none() && source.session != scope.root {
                         return Err(Fault::new(
-                            FaultKind::SessionInputInvalid,
-                            format!(
-                                "maximum delegation depth ({}) reached; nested grandchildren cannot delegate further",
-                                self.max_depth
-                            ),
+                            FaultKind::SessionOwnershipMismatch,
+                            "caller no longer belongs to this delegation scope",
                         ));
                     }
+                    let quota = parent
+                        .map(|parent| parent.quota_for_delegation(start.grant))
+                        .transpose()?;
+                    let slot = match start.reservation {
+                        None => quota.map(ChildQuota::reserve).transpose()?,
+                        Some(reservation) => reservation.into_slot(quota)?,
+                    };
                     let member = Arc::new(Member {
                         registration: DelegationRegistration {
                             host_id: source.host_id.clone(),
@@ -320,10 +364,17 @@ impl ScopeManager {
                             child: target.clone(),
                             task_message_id: input.message_id.clone(),
                             origin: origin.clone(),
-                            temporary,
-                            name,
+                            temporary: start.temporary,
+                            name: start.name,
                         },
-                        depth,
+                        depth: parent.map_or(1, |parent| parent.depth + 1),
+                        child_quota: match start.grant {
+                            Some(DelegationGrant::Allowed(limit)) => Some(Arc::new(ChildQuota {
+                                limit,
+                                used: AtomicUsize::new(0),
+                            })),
+                            _ => None,
+                        },
                         scope: Arc::downgrade(&scope),
                         permit: OnceCell::new(),
                         dispatch: tokio::sync::Mutex::new(()),
@@ -334,7 +385,13 @@ impl ScopeManager {
                         done: Notify::new(),
                     });
                     members.insert(target.clone(), Arc::clone(&member));
-                    registry.members.insert(target, Arc::downgrade(&scope));
+                    registry.members.insert(
+                        target,
+                        RegisteredMember {
+                            scope: Arc::downgrade(&scope),
+                            _parent_slot: slot,
+                        },
+                    );
                     member
                 }
             }
@@ -520,6 +577,18 @@ impl ScopeHooks for Scope {
     }
 }
 impl Member {
+    fn quota_for_delegation(
+        &self,
+        grant: Option<DelegationGrant>,
+    ) -> Result<&Arc<ChildQuota>, Fault> {
+        if matches!(grant, Some(DelegationGrant::Allowed(_))) {
+            return Err(invalid("only a root Session can grant delegation"));
+        }
+        self.child_quota.as_ref().ok_or_else(|| {
+            invalid("this delegated Session is not allowed to start new delegated work")
+        })
+    }
+
     async fn wait_done(&self) -> Result<(), Fault> {
         loop {
             let changed = self.done.notified();
@@ -669,6 +738,14 @@ impl DelegationSink for Sink {
         runtime.spawn(member.complete(completion));
         Ok(())
     }
+}
+fn check_append(start: Option<&DelegationStart>) -> Result<(), Fault> {
+    if start.is_some_and(|start| start.grant.is_some()) {
+        return Err(invalid(
+            "delegation grant fields cannot change an existing relationship",
+        ));
+    }
+    Ok(())
 }
 fn closed() -> Fault {
     Fault::new(

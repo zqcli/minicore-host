@@ -81,6 +81,10 @@ fn valid_calls() -> Vec<Value> {
         json!({"action":"update","resource":"session","target":session(),"changes":{"title":null,"workspace":null}}),
         json!({"action":"create","text":"review changes"}),
         json!({"action":"create","text":"review changes","name":"review","target":agent(),"mode":"persistent","settings":{"reasoning":"high"}}),
+        json!({"action":"create","text":"coordinate work","allow_delegation":true}),
+        json!({"action":"create","resource":"agent","name":"lead","mode":"memory","text":"coordinate work","allow_delegation":true,"max_children":1}),
+        json!({"action":"send","target":{"kind":"session","agent_id":id(),"session_id":id()},"text":"lead","delegate":true,"allow_delegation":true,"max_children":6}),
+        json!({"action":"send","target":{"kind":"session","agent_id":id(),"session_id":id()},"text":"work","delegate":true,"allow_delegation":false}),
         json!({"action":"inspect"}),
         json!({"action":"inspect","include_config":true,"include_output":true,"history_page":{"limit":2}}),
     ]
@@ -182,10 +186,49 @@ fn defaults_are_business_defaults_and_wait_has_no_implicit_timeout() {
     };
     assert_eq!(send.mode, MessageMode::Steer);
     assert!(!send.delegate);
+    assert!(send.allow_delegation.is_none());
+    assert!(send.max_children.is_none());
     let AgentAction::Wait(wait) = AgentAction::parse(json!({"action":"wait"})).unwrap() else {
         panic!()
     };
     assert_eq!(wait.timeout_ms, None);
+}
+
+#[test]
+fn grant_fields_require_a_new_delegation_request_with_a_positive_enabled_limit() {
+    let delegated_send = json!({"action":"send","target":{"kind":"session","agent_id":id(),"session_id":id()},"text":"work","delegate":true});
+    for original in [json!({"action":"create","text":"work"}), delegated_send] {
+        for invalid_fields in [
+            json!({"allow_delegation":null}),
+            json!({"allow_delegation":true,"max_children":null}),
+            json!({"allow_delegation":true,"max_children":0}),
+            json!({"allow_delegation":true,"max_children":-1}),
+            json!({"allow_delegation":false,"max_children":1}),
+            json!({"max_children":1}),
+        ] {
+            let mut input = original.clone();
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(invalid_fields.as_object().unwrap().clone());
+            assert!(
+                AgentAction::parse(input.clone()).is_err(),
+                "accepted {input}"
+            );
+        }
+    }
+    for input in [
+        json!({"action":"create","resource":"session","allow_delegation":false}),
+        json!({"action":"create","resource":"agent","name":"empty","mode":"memory","text":" ","allow_delegation":true}),
+        json!({"action":"send","target":{"kind":"session","agent_id":id(),"session_id":id()},"text":"note","allow_delegation":false}),
+        json!({"action":"send","target":{"kind":"agent_default","host_id":id(),"agent_id":id()},"text":"work","delegate":true,"allow_delegation":true}),
+        json!({"action":"inspect","allow_delegation":true}),
+    ] {
+        assert!(
+            AgentAction::parse(input.clone()).is_err(),
+            "accepted {input}"
+        );
+    }
 }
 #[test]
 fn source_values_are_copied_and_overrides_replace_without_aliasing() {

@@ -108,6 +108,179 @@ async fn shorthand_create_and_inspect_use_the_calling_session_defaults() {
 }
 
 #[tokio::test]
+async fn ungranted_member_cannot_start_new_delegations_but_can_send() {
+    let mut f = Fixture::new();
+    let root = f.agent().await;
+    let peer = f.agent().await;
+    f.send(&root, "coordinate review");
+    f.next(&root)
+        .await
+        .tool("launch", json!({"action":"create","text":"review changes"}));
+    let (accepted, mut child) = f.delegated_calls(&root).await;
+    let child_ref = child.source.session.clone();
+    accepted.tool("change-grant-on-append", json!({"action":"send","target":target(&child_ref),"text":"more work","delegate":true,"allow_delegation":false}));
+    let rejected_append = f.next(&root).await;
+    assert_eq!(
+        rejected_append.last_tool_result()["error"]["message"],
+        "delegation grant fields cannot change an existing relationship"
+    );
+    rejected_append.complete("waiting for review");
+    f.finished(&rejected_append.source).await;
+
+    let agent = AgentRef {
+        host_id: child.source.host_id.clone(),
+        agent_id: child_ref.agent_id.clone(),
+    };
+    let count = f
+        .host
+        .sessions(&f.connection.caller(), &agent)
+        .unwrap()
+        .len();
+    for (id, args) in [
+        (
+            "blocked-create",
+            json!({"action":"create","text":"new task"}),
+        ),
+        (
+            "blocked-send",
+            json!({"action":"send","target":target(&peer),"text":"new task","delegate":true}),
+        ),
+    ] {
+        child.tool(id, args);
+        child = f.next(&child_ref).await;
+        assert_eq!(
+            child.last_tool_result()["error"]["message"],
+            "this delegated Session is not allowed to start new delegated work"
+        );
+    }
+    assert_eq!(
+        f.host
+            .sessions(&f.connection.caller(), &agent)
+            .unwrap()
+            .len(),
+        count
+    );
+
+    child.tool(
+        "ordinary-message",
+        json!({"action":"send","target":target(&peer),"text":"question for peer"}),
+    );
+    let (child, peer_call) = f.delegated_calls(&child_ref).await;
+    assert_eq!(peer_call.source.session, peer);
+    assert_eq!(child.last_tool_result()["result"]["delivery"], "accepted");
+    assert!(
+        f.host
+            .session_state(&f.connection.caller(), &peer)
+            .unwrap()
+            .data
+            .delegation
+            .is_none()
+    );
+    peer_call.complete("no automatic handoff for an ordinary message");
+    child.complete("review done");
+    let notified = f.next(&root).await;
+    notified.complete("review received");
+    f.finished(&notified.source).await;
+}
+
+#[tokio::test]
+async fn granted_member_shares_two_active_slots_across_create_and_send() {
+    let mut f = Fixture::new();
+    let root = f.agent().await;
+    let lead = f.agent().await;
+    let worker = f.agent().await;
+    let reserve = f.agent().await;
+    f.send(&root, "hand off coordination");
+    f.next(&root).await.tool("enroll-lead", json!({"action":"send","target":target(&lead),"text":"coordinate two workers","delegate":true,"allow_delegation":true}));
+    let (accepted, coordinating) = f.delegated_calls(&root).await;
+    accepted.complete("lead accepted");
+    f.finished(&accepted.source).await;
+
+    coordinating.tool("blocked-subgrant", json!({"action":"send","target":target(&worker),"text":"work","delegate":true,"allow_delegation":true}));
+    let coordinating = f.next(&lead).await;
+    assert_eq!(
+        coordinating.last_tool_result()["error"]["message"],
+        "only a root Session can grant delegation"
+    );
+    coordinating.tool("enroll-worker", json!({"action":"send","target":target(&worker),"text":"work","delegate":true,"allow_delegation":false}));
+    let (coordinating, worker_call) = f.delegated_calls(&lead).await;
+    assert_eq!(worker_call.source.session, worker);
+    coordinating.tool(
+        "create-worker",
+        json!({"action":"create","text":"independent work"}),
+    );
+    let (mut coordinating, created_worker) = f.delegated_calls(&lead).await;
+    assert_eq!(created_worker.source.session.agent_id, lead.agent_id);
+    assert_eq!(
+        coordinating.last_tool_result()["result"]["delivery"],
+        "accepted"
+    );
+
+    for (id, args) in [
+        (
+            "over-quota-create",
+            json!({"action":"create","resource":"agent","name":"extra","mode":"persistent","text":"another task"}),
+        ),
+        (
+            "over-quota-send",
+            json!({"action":"send","target":target(&reserve),"text":"another task","delegate":true}),
+        ),
+    ] {
+        coordinating.tool(id, args);
+        coordinating = f.next(&lead).await;
+        assert_eq!(
+            coordinating.last_tool_result()["error"]["message"],
+            "active direct child limit (2) reached"
+        );
+    }
+    assert_eq!(f.host.agents(&f.connection.caller()).unwrap().len(), 4);
+    coordinating.tool("append-at-quota", json!({"action":"send","target":target(&worker),"text":"supplemental steer","delegate":true}));
+    let coordinating = f.next(&lead).await;
+    assert_eq!(
+        coordinating.last_tool_result()["result"]["delivery"],
+        "accepted"
+    );
+    worker_call.tool(
+        "no-inherited-grant",
+        json!({"action":"create","text":"new descendant"}),
+    );
+    let worker_call = f.next(&worker).await;
+    assert_eq!(
+        worker_call.last_tool_result()["error"]["message"],
+        "this delegated Session is not allowed to start new delegated work"
+    );
+    assert!(worker_call.request.messages().iter().any(|message| {
+        matches!(message, ModelMessage::User(text) if input_context::decode(text).1 == "supplemental steer")
+    }));
+    worker_call.complete("one slot released");
+    let mut states = f
+        .host
+        .session_states(&f.connection.caller(), &worker)
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while states.snapshot().unwrap().data.delegation.is_some() {
+            states.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+
+    coordinating.tool(
+        "fill-released-slot",
+        json!({"action":"send","target":target(&reserve),"text":"now admitted","delegate":true}),
+    );
+    let (coordinating, reserve_call) = f.delegated_calls(&lead).await;
+    assert_eq!(reserve_call.source.session, reserve);
+    assert_eq!(
+        coordinating.last_tool_result()["result"]["delivery"],
+        "accepted"
+    );
+    created_worker.complete("created worker done");
+    reserve_call.complete("reserve worker done");
+    coordinating.complete("coordination done");
+}
+
+#[tokio::test]
 async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed() {
     let mut f = Fixture::new();
     let root = f.agent().await;
@@ -119,7 +292,7 @@ async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed
         json!({
             "action":"create", "resource":"session",
             "target":{"host_id":started.source.host_id, "agent_id":root.agent_id},
-            "mode":"memory", "text":"delegate independent work"
+            "mode":"memory", "text":"delegate independent work", "allow_delegation":true
         }),
     );
     let (root_call, intermediate_call) = f.delegated_calls(&root).await;
@@ -603,7 +776,11 @@ async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
         let root = f.next(&parent).await;
         f.send(&child, &format!("unrelated child task {number}"));
         let unrelated = f.next(&child).await;
-        root.tool("start", json!({"action":"send", "target":target(&child), "text":format!("delegated task {number}"), "mode":"follow_up", "delegate":true}));
+        let mut enrollment = json!({"action":"send", "target":target(&child), "text":format!("delegated task {number}"), "mode":"follow_up", "delegate":true});
+        if number == 0 {
+            enrollment["allow_delegation"] = json!(true);
+        }
+        root.tool("start", enrollment);
         let accepted = f.next(&parent).await;
         let origin = ToolCallRef {
             turn_id: root.source.turn.turn_id.clone(),
@@ -621,8 +798,19 @@ async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
         accepted.complete("accepted while child runs");
         f.finished(&root.source).await;
         unrelated.complete("unrelated finished");
-        let delegated = f.next(&child).await;
+        let mut delegated = f.next(&child).await;
         assert_eq!(delegated.source.turn, unrelated.source.turn);
+        if number == 1 {
+            delegated.tool(
+                "no-prior-grant",
+                json!({"action":"create","text":"unexpected subtask"}),
+            );
+            delegated = f.next(&child).await;
+            assert_eq!(
+                delegated.last_tool_result()["error"]["message"],
+                "this delegated Session is not allowed to start new delegated work"
+            );
+        }
         delegated.complete("actual delegated result");
         let notified = f.next(&parent).await;
         notified.complete("notification consumed");

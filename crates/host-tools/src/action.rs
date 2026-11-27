@@ -1,6 +1,7 @@
 use crate::{AgentChanges, AgentSettingsPatch, SessionChanges};
 use minicore_host_protocol::*;
 use serde::{Deserialize, Deserializer, Serialize};
+use std::num::NonZeroUsize;
 
 /// Six actions, with distinct create/update/control branches. No generic RPC
 /// forwarding, caller identity, operation ID, or model-supplied revision.
@@ -52,6 +53,18 @@ pub enum CreateAction {
             deserialize_with = "present"
         )]
         text: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        allow_delegation: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        max_children: Option<NonZeroUsize>,
     },
     Session {
         /// Omitted: the calling Agent.
@@ -85,6 +98,18 @@ pub enum CreateAction {
             deserialize_with = "present"
         )]
         text: Option<String>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        allow_delegation: Option<bool>,
+        #[serde(
+            default,
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "present"
+        )]
+        max_children: Option<NonZeroUsize>,
     },
 }
 
@@ -102,10 +127,46 @@ pub struct SendAction {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub allow_delegation: Option<bool>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub max_children: Option<NonZeroUsize>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub in_reply_to: Option<MessageId>,
 }
 fn steer() -> MessageMode {
     MessageMode::Steer
+}
+
+pub(crate) const DEFAULT_MAX_CHILDREN: NonZeroUsize = NonZeroUsize::new(2).unwrap();
+
+/// `None` means the caller did not specify a grant. An explicit `false` still
+/// cannot modify a registered relationship on an append.
+#[derive(Clone, Copy)]
+pub(crate) enum DelegationGrant {
+    Disabled,
+    Allowed(NonZeroUsize),
+}
+impl DelegationGrant {
+    pub(crate) fn requested(
+        allow_delegation: Option<bool>,
+        max_children: Option<NonZeroUsize>,
+    ) -> Option<Self> {
+        allow_delegation.map(|allow| {
+            if allow {
+                Self::Allowed(max_children.unwrap_or(DEFAULT_MAX_CHILDREN))
+            } else {
+                Self::Disabled
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -254,20 +315,40 @@ impl AgentAction {
     }
     pub fn validate(&self) -> Result<(), Fault> {
         match self {
-            Self::Create(CreateAction::Agent { name, settings, .. }) => {
+            Self::Create(CreateAction::Agent {
+                name,
+                settings,
+                text,
+                allow_delegation,
+                max_children,
+                ..
+            }) => {
+                validate_create_grant(text.as_deref(), *allow_delegation, *max_children)?;
                 validate_name(name)?;
                 validate_settings(settings.as_ref())
             }
-            Self::Create(CreateAction::Session { name, settings, .. }) => {
+            Self::Create(CreateAction::Session {
+                name,
+                settings,
+                text,
+                allow_delegation,
+                max_children,
+                ..
+            }) => {
+                validate_create_grant(text.as_deref(), *allow_delegation, *max_children)?;
                 if let Some(name) = name {
                     validate_name(name)?;
                 }
                 validate_settings(settings.as_ref())
             }
-            Self::Send(request)
-                if request.delegate && !matches!(request.target, MessageTarget::Session { .. }) =>
-            {
-                Err(invalid("delegate:true requires an explicit Session target"))
+            Self::Send(request) => {
+                if request.delegate && !matches!(request.target, MessageTarget::Session { .. }) {
+                    return Err(invalid("delegate:true requires an explicit Session target"));
+                }
+                if request.allow_delegation.is_some() && !request.delegate {
+                    return Err(invalid("allow_delegation on send requires delegate:true"));
+                }
+                validate_child_limit(request.allow_delegation, request.max_children)
             }
             Self::Inspect(request) => request.validate(),
             Self::Update(UpdateAction::Agent { changes, .. }) => changes.validate(),
@@ -276,6 +357,25 @@ impl AgentAction {
         }
     }
 }
+fn validate_create_grant(
+    text: Option<&str>,
+    allow_delegation: Option<bool>,
+    max_children: Option<NonZeroUsize>,
+) -> Result<(), Fault> {
+    if allow_delegation.is_some() && text.is_none_or(|text| text.trim().is_empty()) {
+        return Err(invalid("allow_delegation on create requires nonblank text"));
+    }
+    validate_child_limit(allow_delegation, max_children)
+}
+fn validate_child_limit(
+    allow_delegation: Option<bool>,
+    max_children: Option<NonZeroUsize>,
+) -> Result<(), Fault> {
+    if max_children.is_some() && allow_delegation != Some(true) {
+        return Err(invalid("max_children requires allow_delegation:true"));
+    }
+    Ok(())
+}
 const UNKNOWN_FIELD: &str = "arguments contain an unknown field";
 
 /// The field names this call's own schema branch accepts, chosen by its
@@ -283,7 +383,7 @@ const UNKNOWN_FIELD: &str = "arguments contain an unknown field";
 /// argument text, so a forged field name cannot shape the diagnostic.
 fn accepted_fields(arguments: &serde_json::Value) -> Option<String> {
     let spec = crate::agent_tool_spec();
-    let branches = spec.input_schema().get("oneOf")?.as_array()?.clone();
+    let branches = spec.input_schema().get("oneOf")?.as_array()?;
     let branch = branches.iter().find(|branch| {
         ["action", "resource", "operation"].iter().all(|key| {
             match branch["properties"]

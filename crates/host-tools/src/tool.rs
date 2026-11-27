@@ -1,4 +1,7 @@
-use crate::*;
+use crate::{
+    scope::{CreateReservation, DelegationStart},
+    *,
+};
 use minicore_host_protocol::*;
 use minicore_host_runtime::tools::{
     Tool, ToolContext, ToolError, ToolExecutionOutcome, ToolFuture, ToolInvocation, ToolOutput,
@@ -66,7 +69,7 @@ impl AgentTool {
                         session_id,
                     } => {
                         self.scopes
-                            .send(
+                            .dispatch_message(
                                 Arc::clone(&self.port),
                                 DispatchContext::new(origin, &context),
                                 SessionRef {
@@ -74,8 +77,13 @@ impl AgentTool {
                                     session_id,
                                 },
                                 input,
-                                request.delegate,
-                                false,
+                                request.delegate.then_some(DelegationStart {
+                                    grant: DelegationGrant::requested(
+                                        request.allow_delegation,
+                                        request.max_children,
+                                    ),
+                                    ..DelegationStart::default()
+                                }),
                             )
                             .await?
                     }
@@ -149,6 +157,7 @@ impl AgentTool {
         origin: ToolCallRef,
         context: &ToolContext,
     ) -> Result<Value, Fault> {
+        let dispatch = DispatchContext::new(origin, context);
         match action {
             CreateAction::Agent {
                 target,
@@ -157,6 +166,8 @@ impl AgentTool {
                 from_agent_id,
                 settings,
                 text,
+                allow_delegation,
+                max_children,
             } => {
                 let host_id = self.port.source().host_id.clone();
                 if target.is_some_and(|target| target.host_id != host_id) {
@@ -178,11 +189,8 @@ impl AgentTool {
                     .config;
                 let settings = self.inherited(same_agent, settings)?;
                 let config = agent_config_from_settings(&source, &settings)?;
-                let initial = initial(text)?;
-                if initial.is_some() {
-                    self.scopes
-                        .check_delegation_depth(&self.port.source().session)?;
-                }
+                let grant = DelegationGrant::requested(allow_delegation, max_children);
+                let initial = self.reserve_initial(text, grant, &dispatch)?;
                 let task_name = normalize_task_name(Some(&name));
                 let request = AgentCreate {
                     operation_id: OperationId::new().map_err(id_fault)?,
@@ -203,7 +211,7 @@ impl AgentTool {
                         cleanup: None,
                     }
                 };
-                if let Some(input) = initial {
+                if let Some((input, reservation)) = initial {
                     receipt.message_id = Some(input.message_id.clone());
                     let mut steps = receipt.result.steps.clone();
                     if steps.session.succeeded() {
@@ -218,14 +226,17 @@ impl AgentTool {
                             .await;
                         match self
                             .scopes
-                            .send_named(
+                            .dispatch_message(
                                 Arc::clone(&self.port),
-                                DispatchContext::new(origin, context),
+                                dispatch,
                                 child,
                                 input,
-                                true,
-                                mode == StorageMode::Memory,
-                                task_name,
+                                Some(DelegationStart {
+                                    grant,
+                                    temporary: mode == StorageMode::Memory,
+                                    name: task_name,
+                                    reservation: Some(reservation),
+                                }),
                             )
                             .await
                         {
@@ -254,12 +265,11 @@ impl AgentTool {
                 mode,
                 settings,
                 text,
+                allow_delegation,
+                max_children,
             } => {
-                let initial = initial(text)?;
-                if initial.is_some() {
-                    self.scopes
-                        .check_delegation_depth(&self.port.source().session)?;
-                }
+                let grant = DelegationGrant::requested(allow_delegation, max_children);
+                let initial = self.reserve_initial(text, grant, &dispatch)?;
                 let task_name = normalize_task_name(name.as_deref());
                 // Delegated child Sessions default to memory unless explicitly persistent.
                 let mode = if initial.is_some() {
@@ -291,7 +301,7 @@ impl AgentTool {
                         cleanup: None,
                     }
                 };
-                if let Some(input) = initial {
+                if let Some((input, reservation)) = initial {
                     receipt.message_id = Some(input.message_id.clone());
                     let mut steps = receipt.result.steps.clone();
                     if steps.session.succeeded() {
@@ -307,14 +317,17 @@ impl AgentTool {
                             .await;
                         match self
                             .scopes
-                            .send_named(
+                            .dispatch_message(
                                 Arc::clone(&self.port),
-                                DispatchContext::new(origin, context),
+                                dispatch,
                                 child,
                                 input,
-                                true,
-                                temporary,
-                                task_name,
+                                Some(DelegationStart {
+                                    grant,
+                                    temporary,
+                                    name: task_name,
+                                    reservation: Some(reservation),
+                                }),
                             )
                             .await
                         {
@@ -338,6 +351,27 @@ impl AgentTool {
                 encoded(receipt)
             }
         }
+    }
+    fn reserve_initial(
+        &self,
+        text: Option<String>,
+        grant: Option<DelegationGrant>,
+        dispatch: &DispatchContext,
+    ) -> Result<Option<(MessageInput, CreateReservation)>, Fault> {
+        text.map(|text| {
+            dispatch.check()?;
+            let reservation = self
+                .scopes
+                .reserve_create(&self.port.source().session, grant)?;
+            let input = MessageInput {
+                message_id: MessageId::new().map_err(id_fault)?,
+                mode: MessageMode::FollowUp,
+                text,
+                in_reply_to: None,
+            };
+            Ok((input, reservation))
+        })
+        .transpose()
     }
     /// Names an untitled delegated Session after its task's first line, so
     /// Session lists show what each child is doing. Best effort: delegation
@@ -487,17 +521,6 @@ impl From<Fault> for ToolFailure {
     fn from(error: Fault) -> Self {
         Self::Fault(error)
     }
-}
-fn initial(text: Option<String>) -> Result<Option<MessageInput>, Fault> {
-    text.map(|text| {
-        Ok(MessageInput {
-            message_id: MessageId::new().map_err(id_fault)?,
-            mode: MessageMode::FollowUp,
-            text,
-            in_reply_to: None,
-        })
-    })
-    .transpose()
 }
 fn encoded(value: impl Serialize) -> Result<Value, Fault> {
     serde_json::to_value(value).map_err(internal)

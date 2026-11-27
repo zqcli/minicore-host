@@ -275,6 +275,69 @@ async fn next_step_wait_registers_before_checking_and_has_no_lost_wake_in_fixtur
 }
 
 #[tokio::test]
+async fn pending_creation_reserves_shared_quota_until_failed_preparation_releases_it() {
+    let root = FixtureTurn::new();
+    let scopes = ScopeManager::new();
+    let lead_ref = session();
+    let accepted = invoke(
+        &AgentTool::new(root.port(), Arc::clone(&scopes)),
+        json!({"action":"send","target":{"kind":"session","agent_id":lead_ref.agent_id,"session_id":lead_ref.session_id},"text":"lead","delegate":true,"allow_delegation":true,"max_children":1}),
+    ).await;
+    assert_eq!(accepted["result"]["delivery"], "accepted");
+
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *root.state.creation_gate.lock().unwrap() = Some(Arc::clone(&gate));
+    let lead = Arc::new(AgentTool::new(root.for_session(lead_ref).port(), scopes));
+    let pending = tokio::spawn({
+        let lead = Arc::clone(&lead);
+        async move {
+            invoke(
+                lead.as_ref(),
+                json!({"action":"create","text":"pending start"}),
+            )
+            .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while root.state.session_creates.lock().unwrap().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let spare = session();
+    let send = json!({"action":"send","target":{"kind":"session","agent_id":spare.agent_id,"session_id":spare.session_id},"text":"another task","delegate":true});
+    let (create, delegated_send) = tokio::time::timeout(Duration::from_secs(1), async {
+        tokio::join!(
+            invoke(
+                lead.as_ref(),
+                json!({"action":"create","mode":"persistent","text":"extra work"})
+            ),
+            invoke(lead.as_ref(), send.clone()),
+        )
+    })
+    .await
+    .expect("over-quota starts must not enter creation or wait on its I/O");
+    for result in [create, delegated_send] {
+        assert_eq!(
+            result["error"]["message"],
+            "active direct child limit (1) reached"
+        );
+    }
+    assert_eq!(root.state.session_creates.lock().unwrap().len(), 1);
+
+    root.state.prepare_fails.store(true, Ordering::Release);
+    gate.add_permits(1);
+    let failed = pending.await.unwrap();
+    assert_eq!(failed["result"]["steps"]["message"]["status"], "failed");
+    root.state.prepare_fails.store(false, Ordering::Release);
+    assert_eq!(
+        invoke(lead.as_ref(), send).await["result"]["delivery"],
+        "accepted"
+    );
+}
+
+#[tokio::test]
 async fn dropped_startup_wait_still_cleans_a_created_temporary_session() {
     let port = FixtureTurn::new();
     let gate = Arc::new(tokio::sync::Semaphore::new(0));

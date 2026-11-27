@@ -10,9 +10,9 @@ pub fn agent_tool_spec() -> ToolSpec {
             "Manage Agents and Sessions with create, send, inspect, wait, update and control. ",
             "create with text and no resource starts a child Session asynchronously; text must be nonblank. Defaults are your own Agent and memory mode; target and mode may override them. Use a short descriptive name. ",
             "Explicit resource:session may omit text to create an empty Session. resource:agent requires name and mode, copying your Agent unless from_agent_id selects another. ",
-            "Delegation depth is limited to 2 (root -> child -> grandchild). ",
+            "Only a root Session can set allow_delegation:true on a new create with text or send with delegate:true. Tell the recipient about this grant in the task text. It shares max_children active direct slots across create and send (default 2); pending starts count until released. Grants are not inherited or retained for later delegations. ",
             "Same-Agent children inherit your model, reasoning, approval policy and workspace. Overrides belong in settings (model, reasoning, instructions, role, tools, workspace, execution); choose model IDs from available_models in session context. ",
-            "For ordinary communication, send to the exact agent_id/session_id with kind:session and omit delegate (false). Use kind:agent_default only to address an Agent's default Session. Set delegate:true only to enroll an existing exact Session into delegated work. ",
+            "For ordinary communication, send to the exact agent_id/session_id with kind:session and omit delegate (false). Use kind:agent_default only to address an Agent's default Session. Set delegate:true to enroll an existing exact Session into delegated work. A delegated child without a grant can still communicate and append to active relations in its scope, but cannot start new delegated work. Do not supply grant fields on an append. ",
             "All sends use steer: next step when busy, new Turn when idle. Creation with text and delegated sends return acceptance, not completion. Final results automatically go only to the direct delegator. Ordinary messages need an explicit send reply; do not duplicate the automatic final handoff. ",
             "inspect without target shows your current Session; config and output default to false. Explicit targets remain available. Session include_output:true returns a bounded latest history tail unless history_page is set. ",
             "wait waits for consumable input in your Session, not a specific task, without consuming it. It returns immediately on input_available and defaults to 60000ms; prefer the default over short polling."
@@ -33,6 +33,22 @@ fn branch(action: &str, extra: Value, required: &[&str]) -> Value {
     let mut required_fields = vec!["action"];
     required_fields.extend_from_slice(required);
     object(Value::Object(properties), &required_fields)
+}
+fn delegation_fields(mut branch: Value, startup: Value) -> Value {
+    branch["properties"]["allow_delegation"] = json!({
+        "type":"boolean", "description":"Only a root can set true on a new delegation. Defaults to false."
+    });
+    branch["properties"]["max_children"] = json!({
+        "type":"integer", "minimum":1, "description":format!(
+            "Active direct child limit when allow_delegation is true; defaults to {}.",
+            crate::action::DEFAULT_MAX_CHILDREN,
+        )
+    });
+    branch["allOf"] = json!([
+        {"if":{"anyOf":[{"required":["allow_delegation"]},{"required":["max_children"]}]},"then":startup},
+        {"if":{"required":["max_children"]},"then":{"required":["allow_delegation"],"properties":{"allow_delegation":{"const":true}}}}
+    ]);
+    branch
 }
 fn schema() -> Value {
     let id = json!({"type":"string","pattern":"^[0123456789abcdefghjkmnpqrstvwxyz]{20}$"});
@@ -95,21 +111,33 @@ fn schema() -> Value {
         object(Value::Object(properties), &required)
     };
     let message_target = json!({"oneOf":[target("agent_default", &["host_id","agent_id"]),target("session", &["agent_id","session_id"])]});
+    let create_task =
+        json!({"required":["text"],"properties":{"text":{"type":"string","pattern":"\\S"}}});
+    let delegate_true = json!({"required":["delegate"],"properties":{"delegate":{"const":true}}});
     let mut alternatives = vec![
-        branch(
-            "create",
-            json!({"resource":{"const":"agent"},"target":reference("host_target"),"name":{"type":"string","minLength":1},"mode":reference("mode"),"from_agent_id":id,"settings":reference("settings"),"text":text}),
-            &["resource", "name", "mode"],
+        delegation_fields(
+            branch(
+                "create",
+                json!({"resource":{"const":"agent"},"target":reference("host_target"),"name":{"type":"string","minLength":1},"mode":reference("mode"),"from_agent_id":id,"settings":reference("settings"),"text":text}),
+                &["resource", "name", "mode"],
+            ),
+            create_task.clone(),
         ),
-        branch(
-            "create",
-            json!({"resource":{"const":"session","default":"session"},"target":reference("agent_ref"),"name":{"type":"string","minLength":1,"maxLength":60},"mode":reference("mode"),"settings":reference("settings"),"text":text}),
-            &[],
+        delegation_fields(
+            branch(
+                "create",
+                json!({"resource":{"const":"session","default":"session"},"target":reference("agent_ref"),"name":{"type":"string","minLength":1,"maxLength":60},"mode":reference("mode"),"settings":reference("settings"),"text":text}),
+                &[],
+            ),
+            create_task.clone(),
         ),
-        branch(
-            "send",
-            json!({"target":message_target,"text":text,"mode":{"enum":["steer"],"default":"steer"},"delegate":boolean,"in_reply_to":id}),
-            &["target", "text"],
+        delegation_fields(
+            branch(
+                "send",
+                json!({"target":message_target,"text":text,"mode":{"enum":["steer"],"default":"steer"},"delegate":boolean,"in_reply_to":id}),
+                &["target", "text"],
+            ),
+            delegate_true.clone(),
         ),
         branch(
             "wait",
@@ -212,12 +240,9 @@ fn schema() -> Value {
         alternatives.push(inspect);
     }
     // Shorthand creation requires a task; explicit Session creation may be empty.
-    alternatives[1]["anyOf"] = json!([
-        {"required":["resource"]},
-        {"required":["text"],"properties":{"text":{"type":"string","pattern":"\\S"}}}
-    ]);
+    alternatives[1]["anyOf"] = json!([{"required":["resource"]}, create_task]);
     // The delegate flag cannot resolve an Agent default as a delegation target.
-    alternatives[2]["allOf"] = json!([{"if":{"properties":{"delegate":{"const":true}},"required":["delegate"]},"then":{"properties":{"target":target("session", &["agent_id","session_id"])}}}]);
+    alternatives[2]["allOf"].as_array_mut().expect("send grant constraints").push(json!({"if":delegate_true,"then":{"properties":{"target":target("session", &["agent_id","session_id"])}}}));
     let output_range = object(
         json!({"channel":{"type":"string","minLength":1},"start":{"type":"integer","minimum":0},"end":{"type":"integer","minimum":0},"max_bytes":positive}),
         &["channel", "start", "end", "max_bytes"],
