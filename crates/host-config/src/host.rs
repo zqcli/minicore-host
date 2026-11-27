@@ -12,6 +12,10 @@ pub struct HostConfig {
     #[serde(default)]
     pub instructions: String,
     pub models: Vec<OpenAiModelSettings>,
+    /// Used solely when loading explicit credentials from host.json.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub inline_model_keys: InlineModelKeys,
     /// Available selections from the statically compiled tool registry.
     pub tools: Vec<ToolBinding>,
     /// Explicit directory-picker roots. Empty exposes no directories.
@@ -26,6 +30,7 @@ impl Default for HostConfig {
             name: "MiniCore".into(),
             instructions: String::new(),
             models: Vec::new(),
+            inline_model_keys: InlineModelKeys::default(),
             tools: Vec::new(),
             workspace_roots: Vec::new(),
             network: NetworkSettings::default(),
@@ -33,6 +38,23 @@ impl Default for HostConfig {
         }
     }
 }
+/// Private input to resource preparation; not serialized or shown in Debug.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct InlineModelKeys(std::collections::BTreeMap<ModelRef, std::sync::Arc<str>>);
+impl fmt::Debug for InlineModelKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("InlineModelKeys([REDACTED])")
+    }
+}
+impl InlineModelKeys {
+    pub(crate) fn insert(&mut self, model: ModelRef, key: std::sync::Arc<str>) {
+        self.0.insert(model, key);
+    }
+    pub fn get(&self, model: &ModelRef) -> Option<&str> {
+        self.0.get(model).map(AsRef::as_ref)
+    }
+}
+
 impl HostConfig {
     pub fn validate(&self) -> Result<(), Fault> {
         if self.name.trim().is_empty()
@@ -57,7 +79,9 @@ impl HostConfig {
             if model.stream.is_some() && model.api != OpenAiModelApi::Responses {
                 return Err(invalid("stream requires the Responses API"));
             }
-            environment_name(&model.api_key_env)?;
+            if self.inline_model_keys.get(&model.model).is_none() {
+                environment_name(&model.api_key_env)?;
+            }
         }
         let mut tools = BTreeSet::new();
         for tool in &self.tools {

@@ -1,5 +1,8 @@
 //! Read one complete declaration set; publication belongs to Host owners.
-use crate::{HostConfig, LogSettings, NetworkSettings, OpenAiModelSettings, invalid};
+use crate::{
+    HostConfig, LogSettings, NetworkSettings, invalid,
+    provider_file::{self, ModelFile, ProviderFile},
+};
 use minicore_host_protocol::{AgentConfig, Fault, Role, SessionDefaults, ToolBinding};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::{
@@ -23,20 +26,30 @@ pub struct LoadedConfiguration {
 }
 
 // Prompt paths exist only in file declarations; owners receive plain text.
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct HostFile {
-    name: String,
-    #[serde(default, deserialize_with = "present_string")]
-    instructions: Option<String>,
-    #[serde(default, deserialize_with = "present_string")]
-    instructions_file: Option<String>,
-    models: Vec<OpenAiModelSettings>,
-    tools: Vec<ToolBinding>,
+pub(crate) struct HostFile {
+    pub(crate) name: String,
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) instructions: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) instructions_file: Option<String>,
     #[serde(default)]
-    workspace_roots: Vec<String>,
-    network: NetworkSettings,
-    logging: LogSettings,
+    pub(crate) providers: BTreeMap<String, ProviderFile>,
+    pub(crate) models: Vec<ModelFile>,
+    pub(crate) tools: Vec<ToolBinding>,
+    #[serde(default)]
+    pub(crate) workspace_roots: Vec<String>,
+    pub(crate) network: NetworkSettings,
+    pub(crate) logging: LogSettings,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -132,6 +145,8 @@ pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfigurati
     }
     let host_path = directory.join("host.json");
     let file: HostFile = read_json(&host_path)?;
+    let (models, inline_model_keys) = provider_file::expand(&file.providers, file.models)
+        .map_err(|error| file_error(&host_path, "validate model declarations", error))?;
     let host = HostConfig {
         name: file.name,
         instructions: resolve_instructions(
@@ -140,7 +155,8 @@ pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfigurati
             file.instructions,
             file.instructions_file,
         )?,
-        models: file.models,
+        models,
+        inline_model_keys,
         tools: file.tools,
         workspace_roots: file.workspace_roots,
         network: file.network,

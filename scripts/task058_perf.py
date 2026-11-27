@@ -111,11 +111,12 @@ class Process:
         self.trace = trace
         config = {
             "name": "task058 actual Host", "instructions": "",
-            "models": [{"model": MODEL, "api": "chat_completions", "endpoint": endpoint,
-                        "provider_model": "gated-loopback-sse-fixture",
-                        "api_key_env": "TASK058_MODEL_KEY", "context_window": 128000,
-                        "supported_reasoning": ["auto"], "supports_tools": True,
-                        "request_timeout_ms": 20000}],
+            "providers": {"local": {"baseurl": endpoint.removesuffix("/chat/completions"),
+                                     "api": "chat_completions", "api_key": "$TASK058_MODEL_KEY",
+                                     "request_timeout_ms": 20000}},
+            "models": [{"name": MODEL, "provider": "local",
+                        "model": "gated-loopback-sse-fixture", "context_window": 128000,
+                        "reasoning": ["auto"], "supports_tools": True}],
             "tools": [{"name": "bash"}],
             "network": {"listen": None, "access_key_env": None},
             "logging": {"level": "info", "output": {"kind": "stderr"}},

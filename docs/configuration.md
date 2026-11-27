@@ -41,8 +41,10 @@ It does not launch a Host subprocess or translate shell arguments. TUI reads
 Only one running process can own a data root at a time.
 
 Copy the entire [example-config](../example-config/host.json) directory and edit
-the provider endpoint, provider model and capabilities before starting Host.
-Supply the credential through the environment variable named by `api_key_env`.
+the shared provider `baseurl`, selected upstream models and their capabilities.
+The provider `api_key` can reference a Host environment variable using
+`"$MINICORE_MODEL_KEY"`. See [provider and model configuration](../crates/host-app/README.md)
+for the fields and migration from the former flat model list.
 The examples contain placeholders, never a working key. The sample selects no
 tools or workspace; add those explicitly before local file or shell operations.
 For an interactive TUI, set `logging.output` to a file with an absolute path

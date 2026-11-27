@@ -166,6 +166,7 @@ impl Resources {
         let provider = HttpFixture::start().await;
         let config = HostConfig {
             workspace_roots: Vec::new(),
+            inline_model_keys: Default::default(),
             name: "Real configured Host".into(),
             instructions: "Resource query acceptance framework".into(),
             // Deliberately reverse the two complete, same-leaf references.

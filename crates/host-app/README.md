@@ -41,16 +41,20 @@ For example, this **template** declares one OpenAI-compatible provider:
 {
   "name": "Local Host",
   "instructions": "",
+  "providers": {
+    "gateway": {
+      "baseurl": "https://gateway.example.invalid/v1",
+      "api": "responses",
+      "api_key": "$MINICORE_MODEL_KEY"
+    }
+  },
   "models": [{
-    "model": "provider/chat",
-    "api": "chat_completions",
-    "endpoint": "https://provider.example.invalid/v1/chat/completions",
-    "provider_model": "replace-with-provider-model",
-    "api_key_env": "MINICORE_MODEL_KEY",
+    "name": "provider/chat",
+    "provider": "gateway",
+    "model": "replace-with-provider-model",
     "context_window": 128000,
-    "supported_reasoning": ["auto"],
-    "supports_tools": true,
-    "request_timeout_ms": 120000
+    "reasoning": ["auto"],
+    "supports_tools": true
   }],
   "tools": [],
   "workspace_roots": [],
@@ -59,25 +63,34 @@ For example, this **template** declares one OpenAI-compatible provider:
 }
 ```
 
-Use the provider's actual address, model and capabilities. Credential values
-come only from the environment sources named in effective configuration and
-are private preparation inputs, not saved Host JSON. The process does not scan
-arbitrary environment variables, call a model at startup, or install tools.
-Selected tools must exist in the compiled production registry.
+One named provider holds the connection and may be shared by multiple models.
+Each model's unique `name` is the MiniCore selection reference. Its `model` is
+the ID sent upstream. `reasoning` lists the effort levels the model supports.
+A missing provider reference fails configuration validation.
 
-`api` is required and accepts `"chat_completions"` or `"responses"`. To use
-Responses, select `"api":"responses"` and the provider's full Responses endpoint.
-The Host does not infer a protocol from the endpoint or fall back to another
-protocol. Both ordinary Turns and compaction use the configured selection.
-Responses sends complete input with `store:false`; provider-side conversation
-state is not required. To adapt the example, set `api` to `"responses"` and
-`endpoint` to the provider's full `/v1/responses` URL. Responses uses HTTP/SSE
-by default. Set `"stream":"wss"` on a model entry to try WebSocket first, or
-`"stream":"sse"` to explicitly select the default. An unsupported upgrade or
-explicit pre-start WS route rejection falls back to SSE at the same endpoint;
-an ambiguous or started request is not replayed. The URL scheme does not select
-the stream. Plaintext is limited to literal loopback. This is the model
-connection, not the Host's incoming JSON-RPC WebSocket.
+`api_key` accepts a literal or the complete value `$VARIABLE_NAME` (no shell
+or substitution inside other strings). Prefer environment references so the key
+is not in the file. Missing or empty referenced values are configuration errors.
+Key values are not included in Host queries, diagnostics, or data records.
+
+`api` accepts `chat_completions` or `responses`. Set `baseurl` to the API root,
+including its prefix (for example `https://gateway.example/v1`). Host appends
+`/chat/completions` or `/responses`; it does not add `/v1` or guess the protocol.
+Use HTTPS for remote providers. Plain HTTP is limited to literal loopback.
+
+Responses uses SSE when `stream` is omitted or set to `sse`. A provider with
+`"stream":"wss"` tries WebSocket first, with same-endpoint SSE fallback on an
+unsupported upgrade or explicit pre-start WS route rejection. An ambiguous or
+started request is not replayed. There is no automatic switch to a different
+provider or protocol. Optional `request_timeout_ms` belongs to the provider.
+
+To migrate the former flat model list, move the shared address, API, key,
+stream and timeout into a named provider. Remove the method suffix from the old
+endpoint, and change an old `wss://` URL to `https://` plus explicit `stream`.
+Move the old `model` to `name`, `provider_model` to `model`, and
+`supported_reasoning` to `reasoning`. Set `provider` to the provider's key.
+Convert `api_key_env: "KEY"` to `api_key: "$KEY"`. Existing Session model
+references remain valid when the new names match their old model aliases.
 
 For a provider/model that supports hosted search, set `"web_search":"live"`
 in its model entry, or use `"cached"` to disable external web access. Omit the

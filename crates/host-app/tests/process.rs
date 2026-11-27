@@ -87,8 +87,23 @@ async fn stdio_message_executes_production_http_adapter_and_persists_real_output
     let root = dir.path().join("root");
     let path = dir.path().join("config");
     write_config(&path, &config(Some(http.endpoint.clone()), false));
+    let declaration = path.join("host.json");
+    let mut file: Value = serde_json::from_slice(&std::fs::read(&declaration).unwrap()).unwrap();
+    file["providers"]["fixture-0"]["api_key"] = json!(MODEL_KEY);
+    let mut second_model = file["models"][0].clone();
+    second_model["name"] = json!("fixture/other");
+    second_model["model"] = json!("local-http-fixture-2");
+    file["models"].as_array_mut().unwrap().push(second_model);
+    std::fs::write(&declaration, serde_json::to_vec(&file).unwrap()).unwrap();
     let mut child = Process::start(&root, &path, true, None);
     child.rpc("initialize", json!({})).await;
+    let public = child.rpc("host.config.get", json!({})).await;
+    assert!(!public.to_string().contains(MODEL_KEY));
+    assert!(
+        !std::fs::read_to_string(root.join("host.json"))
+            .unwrap()
+            .contains(MODEL_KEY)
+    );
     let created = child.rpc("agent.create", agent_request()).await;
     let target = target(&created);
     let accepted = child
@@ -109,6 +124,26 @@ async fn stdio_message_executes_production_http_adapter_and_persists_real_output
         .await;
     assert_eq!(result["data"]["info"]["outcome"], "completed");
     assert!(result.to_string().contains("actual local HTTP response"));
+    let mut other = agent_request();
+    other["config"]["session_defaults"]["model"] = json!("fixture/other");
+    let created = child.rpc("agent.create", other).await;
+    let other_target = support::target(&created);
+    child
+        .rpc(
+            "message.send",
+            message(&other_target, "same provider, second model"),
+        )
+        .await;
+    assert_eq!(http.request().await["model"], "local-http-fixture-2");
+    let other_turns = child.rpc("turn.list", json!({"target":other_target})).await;
+    http.finish_response();
+    let result = child
+        .rpc(
+            "turn.wait",
+            json!({"target":other_target,"turn_id":other_turns["data"][0]["turn_id"]}),
+        )
+        .await;
+    assert_eq!(result["data"]["info"]["outcome"], "completed");
     child.send("host.shutdown", shutdown("graceful"));
     let output = child.finish().await;
     assert!(output.status.success());

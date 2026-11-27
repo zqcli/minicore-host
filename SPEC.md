@@ -1,4 +1,4 @@
-**设计基线：v4.11.11｜2026-11-27。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.11.12｜2026-11-27。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -192,11 +192,13 @@ Host 与内嵌 Host 的 TUI 统一使用 `--config-dir`。未提供时使用用�
 
 | 路径 | 内容与所有者 |
 | --- | --- |
-| `<config-dir>/host.json` | 一个原生 HostConfig，必须存在；保留模型、工具、workspace_roots、网络与日志等现有字段，支持 instructions_file |
+| `<config-dir>/host.json` | 必须存在；包含 providers、models、工具、workspace_roots、网络、日志与可选 instructions_file |
 | `<config-dir>/agents/*.json` | 每文件一个 Agent 声明；字段为 key、name、role、可省略的 instructions 或 instructions_file、完整 session_defaults |
 | `<config-dir>/roles/*.json` | 每文件一个 Role 声明；name、description 与可省略的 instructions 或 instructions_file |
 | `<config-dir>/tui.json` | TUI 自行读取、校验、应用及保存的界面配置，包含 ui.theme/editor/bell |
 | Web 部署目录的 `web.json` | Web 自己的界面与 Host 连接配置；不属于任何 Host 配置目录，本次不实施 Web 多 Host 界面 |
+
+文件中的 `providers` 按名声明 `baseurl`、`api`、`api_key` 和可选 `stream`、`request_timeout_ms`。每项 `models` 声明 MiniCore 选择名 `name`、上游模型 ID `model`、`reasoning` 等能力，并以 `provider` 精确引用一个渠道。Host 在加载时展开为有效模型目录，Agent、Session 与公开模型目录仍用原选择名。基础 URL 不含方法后缀；按所选 API 追加 `/responses` 或 `/chat/completions`，不推测 `/v1`。模型密钥为字面值或整个值为 `$变量名` 的 Host 环境引用；不执行命令，密钥值不进入客户端配置查询、诊断或数据记录。
 
 Host 只读取 host.json、agents/roles 下的 JSON 以及这些声明显式引用的 Markdown，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板放 `<config-dir>/commands/`；不搜索旧 prompt/commands 路径。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
 
@@ -583,7 +585,7 @@ Provider 在协议结束条件成立后，先交出实际结束原因和用量�
 
 ### Responses 提供方
 
-Responses 适配使用显式完整输入、`store=false` 与必要的原生推理重放数据，不依赖 `previous_response_id` 或提供方持有的隐式会话。`responses` 模型使用准确的 endpoint URL，模型项省略 `stream` 或使用 `"stream":"sse"` 都直接使用 HTTPS/SSE（`stream=true`）；只有 `"stream":"wss"` 才优先尝试 WSS（每次调用一个连接，发送 `response.create`）。升级不支持或上游明确拒绝 WS 路由时使用同地址的 HTTPS/SSE。认证错误、请求是否已执行未知、或已开始响应时不得切换传输重发。明文只允许字面回环地址。两种传输共享 Responses 解码、终态和错误规则，不影响 Host 接入层的 JSON-RPC WSS。
+Responses 适配使用显式完整输入、`store=false` 与必要的原生推理重放数据，不依赖 `previous_response_id` 或提供方持有的隐式会话。`responses` 模型使用准确的 endpoint URL，所引用渠道省略 `stream` 或使用 `"stream":"sse"` 都直接使用 HTTPS/SSE（`stream=true`）；只有 `"stream":"wss"` 才优先尝试 WSS（每次调用一个连接，发送 `response.create`）。升级不支持或上游明确拒绝 WS 路由时使用同地址的 HTTPS/SSE。认证错误、请求是否已执行未知、或已开始响应时不得切换传输重发。明文只允许字面回环地址。两种传输共享 Responses 解码、终态和错误规则，不影响 Host 接入层的 JSON-RPC WSS。
 
 `web_search` 是 Responses 模型的可选设置：省略关闭，`live` 允许上游实时联网，`cached` 禁止上游外部访问。Session 配置可以用 `off`、`live` 或 `cached` 覆盖选定模型的默认值；省略时继承模型默认值，已绑定的 Turn 不受后续配置变更影响。内部摘要压缩不启用搜索。上游在原模型请求内执行搜索，Provider 保留其返回的搜索项、来源及 URL 引用，不生成本地 ToolCall 或独立搜索接口。
 

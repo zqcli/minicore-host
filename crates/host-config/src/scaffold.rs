@@ -1,11 +1,13 @@
 //! Initial examples are native configuration values and never contain secrets.
 use crate::{
-    HostConfig, LogOutput, LogSettings, OpenAiModelApi, OpenAiModelSettings,
-    directory::{AgentFile, file_error},
+    LogOutput, LogSettings, NetworkSettings, OpenAiModelApi,
+    directory::{AgentFile, HostFile, file_error},
     invalid,
+    provider_file::{ModelFile, ProviderFile},
 };
 use minicore_host_protocol::{Fault, Role, SessionDefaults, ToolBinding, WorkspaceRef};
 use std::{
+    collections::BTreeMap,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -49,19 +51,27 @@ pub fn create_config_directory(
     let log_dir = log_dir
         .canonicalize()
         .map_err(|error| file_error(&log_dir, "resolve log directory", error))?;
-    let host = HostConfig {
+    let host = HostFile {
         name: "MiniCore Host".into(),
-        models: vec![OpenAiModelSettings {
-            model: model.clone(),
-            api: OpenAiModelApi::ChatCompletions,
-            endpoint: "https://provider.example.invalid/v1/chat/completions".into(),
-            provider_model: "replace-with-provider-model".into(),
-            api_key_env: "MINICORE_MODEL_KEY".into(),
+        instructions: None,
+        instructions_file: None,
+        providers: BTreeMap::from([(
+            "provider".into(),
+            ProviderFile {
+                baseurl: "https://provider.example.invalid/v1".into(),
+                api: OpenAiModelApi::ChatCompletions,
+                api_key: "$MINICORE_MODEL_KEY".into(),
+                stream: None,
+                request_timeout_ms: Some(120_000),
+            },
+        )]),
+        models: vec![ModelFile {
+            name: model.clone(),
+            provider: "provider".into(),
+            model: "replace-with-provider-model".into(),
             context_window: 128_000,
-            supported_reasoning: vec![Default::default()],
+            reasoning: vec![Default::default()],
             supports_tools: true,
-            request_timeout_ms: Some(120_000),
-            stream: None,
             web_search: None,
         }],
         tools: tools.clone(),
@@ -72,7 +82,7 @@ pub fn create_config_directory(
             },
             ..LogSettings::default()
         },
-        ..HostConfig::default()
+        network: NetworkSettings::default(),
     };
     let role = Role {
         name: "Coding assistant".into(),

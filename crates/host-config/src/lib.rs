@@ -8,6 +8,7 @@
 mod directory;
 mod host;
 mod paths;
+mod provider_file;
 mod scaffold;
 
 pub use directory::{AgentDefinition, LoadedConfiguration, load_config_directory};

@@ -56,8 +56,11 @@ impl HostResourceBuilder {
         for model in &config.models {
             model_keys.insert(
                 model.model.clone(),
-                SecretApiKey::from_env(&model.api_key_env)
-                    .map_err(|error| invalid(format!("model {}: {error}", model.model)))?,
+                match config.inline_model_keys.get(&model.model) {
+                    Some(value) => SecretApiKey::new(value),
+                    None => SecretApiKey::from_env(&model.api_key_env),
+                }
+                .map_err(|error| invalid(format!("model {}: {error}", model.model)))?,
             );
         }
         let network_access_key = config

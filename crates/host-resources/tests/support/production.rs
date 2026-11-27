@@ -61,6 +61,7 @@ pub(crate) fn selection(names: &[&str]) -> Vec<ToolBinding> {
 pub(crate) fn config(endpoint: &str) -> HostConfig {
     HostConfig {
         workspace_roots: Vec::new(),
+        inline_model_keys: Default::default(),
         name: "Production local tools fixture".into(),
         instructions: "FRAMEWORK A".into(),
         models: vec![OpenAiModelSettings {

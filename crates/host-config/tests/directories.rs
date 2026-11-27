@@ -325,3 +325,66 @@ fn host_instruction_omission_empty_and_null_remain_distinct() {
     wire["instructions"] = Value::Null;
     assert!(serde_json::from_value::<HostConfig>(wire).is_err());
 }
+
+#[test]
+fn two_model_names_share_a_provider_and_secrets_do_not_serialize() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut host = serde_json::to_value(HostConfig::default()).unwrap();
+    host["providers"] = json!({
+        "proxy": {"baseurl":"https://gateway.example/private/v1/", "api":"responses",
+                  "stream":"wss", "api_key":"fixture-secret-do-not-emit"},
+        "direct": {"baseurl":"http://127.0.0.1:8080/internal/v1", "api":"chat_completions",
+                   "api_key":"$GATEWAY_KEY"}
+    });
+    host["models"] = json!([
+        {"name":"primary", "provider":"proxy", "model":"remote/one",
+         "context_window":128000, "reasoning":["auto","high"], "supports_tools":true,
+         "web_search":"cached"},
+        {"name":"secondary", "provider":"proxy", "model":"remote/two",
+         "context_window":64000, "reasoning":["auto"], "supports_tools":true},
+        {"name":"local", "provider":"direct", "model":"remote/three",
+         "context_window":16000, "reasoning":["auto"], "supports_tools":false}
+    ]);
+    let host_path = dir.path().join("host.json");
+    write_json(&host_path, &host);
+    let config = load_config_directory(dir.path()).unwrap().host;
+    for model in &config.models[..2] {
+        assert_eq!(
+            model.endpoint,
+            "https://gateway.example/private/v1/responses"
+        );
+        assert_eq!(model.stream, Some(ResponsesStream::Wss));
+        assert_eq!(
+            config.inline_model_keys.get(&model.model),
+            Some("fixture-secret-do-not-emit")
+        );
+    }
+    assert_eq!(config.models[0].provider_model, "remote/one");
+    assert_eq!(config.models[1].provider_model, "remote/two");
+    assert_eq!(
+        config.models[2].endpoint,
+        "http://127.0.0.1:8080/internal/v1/chat/completions"
+    );
+    assert_eq!(config.models[2].api_key_env, "GATEWAY_KEY");
+    assert!(!format!("{config:?}").contains("fixture-secret-do-not-emit"));
+    assert!(
+        !serde_json::to_string(&config)
+            .unwrap()
+            .contains("fixture-secret-do-not-emit")
+    );
+
+    host["models"][0]["provider"] = json!("missing");
+    write_json(&host_path, &host);
+    assert!(
+        load_config_directory(dir.path())
+            .unwrap_err()
+            .to_string()
+            .contains("unknown provider")
+    );
+    host["models"][0]["provider"] = json!("proxy");
+    host["providers"]["proxy"]["api_key"] = json!("${INVALID ENV}");
+    write_json(&host_path, &host);
+    let error = load_config_directory(dir.path()).unwrap_err().to_string();
+    assert!(error.contains("invalid API key environment reference"));
+    assert!(!error.contains("INVALID ENV"));
+}

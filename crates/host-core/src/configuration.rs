@@ -117,7 +117,13 @@ impl ToolEnvironmentExclusions {
     }
     pub(crate) fn include(&self, config: &HostConfig) {
         let mut names = self.0.lock().expect("tool environment mutex poisoned");
-        names.extend(config.models.iter().map(|model| model.api_key_env.clone()));
+        names.extend(
+            config
+                .models
+                .iter()
+                .filter(|model| !model.api_key_env.is_empty())
+                .map(|model| model.api_key_env.clone()),
+        );
         names.extend(config.network.access_key_env.iter().cloned());
     }
     /// Snapshot at child-launch filtering time. The lock is released before

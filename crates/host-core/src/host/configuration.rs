@@ -12,7 +12,10 @@ impl Host {
         self.access.read(caller, || {
             let current = self.configuration.snapshot();
             Ok(HostConfigSnapshot {
-                config: current.config.clone(),
+                config: HostConfig {
+                    inline_model_keys: Default::default(),
+                    ..current.config.clone()
+                },
                 config_revision: current.revision,
             })
         })

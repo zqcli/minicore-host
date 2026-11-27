@@ -10,6 +10,7 @@ description = "Pure Host configuration values and native JSON directory loading"
 minicore-host-protocol.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+url = "2.5"
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -38,11 +38,13 @@ pub fn request(expected_revision: u64) -> HostReloadRequest {
         expected_revision,
     }
 }
+#[path = "../../../../tests/support/config_file.rs"]
+mod config_file;
 pub fn write_config(directory: &std::path::Path, config: &HostConfig) {
     std::fs::create_dir_all(directory).unwrap();
     std::fs::write(
         directory.join("host.json"),
-        serde_json::to_vec(config).unwrap(),
+        serde_json::to_vec(&config_file::declaration(config)).unwrap(),
     )
     .unwrap();
 }

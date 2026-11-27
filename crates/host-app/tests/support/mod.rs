@@ -47,9 +47,15 @@ pub fn config(endpoint: Option<String>, network: bool) -> HostConfig {
     }
     config
 }
+#[path = "../../../../tests/support/config_file.rs"]
+mod config_file;
 pub fn write_config(path: &Path, config: &HostConfig) {
     std::fs::create_dir_all(path).unwrap();
-    std::fs::write(path.join("host.json"), serde_json::to_vec(config).unwrap()).unwrap();
+    std::fs::write(
+        path.join("host.json"),
+        serde_json::to_vec(&config_file::declaration(config)).unwrap(),
+    )
+    .unwrap();
 }
 pub fn agent_request() -> Value {
     let mut config = AgentConfig::default();
