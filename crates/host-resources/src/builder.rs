@@ -7,7 +7,7 @@ use crate::{
 };
 use minicore_host_core::{
     HostConfig, HostConfigurationFuture, HostConfigurationPreparer, OpenAiModelApi,
-    PreparedHostConfiguration,
+    OpenAiWebSearch, PreparedHostConfiguration,
 };
 use minicore_host_protocol::{Fault, FaultKind};
 use minicore_host_provider::{
@@ -145,6 +145,9 @@ impl HostResourceBuilder {
                             descriptor,
                         );
                         connection.request_timeout = timeout;
+                        connection.web_search = settings
+                            .web_search
+                            .map(|mode| mode == OpenAiWebSearch::Live);
                         OpenAiResponsesModel::new(connection, key)
                             .map(|model| Arc::new(model) as Arc<dyn Model>)
                     }

@@ -24,6 +24,8 @@ pub struct OpenAiResponsesConfig {
     pub provider_model: String,
     pub descriptor: ModelDescriptor,
     pub request_timeout: Option<Duration>,
+    /// None disables hosted search; Some selects external web access.
+    pub web_search: Option<bool>,
 }
 
 impl OpenAiResponsesConfig {
@@ -37,6 +39,7 @@ impl OpenAiResponsesConfig {
             provider_model: provider_model.into(),
             descriptor,
             request_timeout: None,
+            web_search: None,
         }
     }
 
@@ -82,7 +85,7 @@ impl OpenAiChatConfig {
         }
     }
 
-    pub(crate) fn validate(&self) -> Result<Url, ProviderConfigError> {
+    pub(crate) fn validate(&self, allow_websocket: bool) -> Result<Url, ProviderConfigError> {
         self.descriptor
             .validate()
             .map_err(|_| ProviderConfigError::InvalidDescriptor)?;
@@ -103,12 +106,19 @@ impl OpenAiChatConfig {
                 .parse::<IpAddr>()
                 .is_ok_and(|ip| ip.is_loopback())
         });
+        let scheme_allowed = match endpoint.scheme() {
+            "https" => true,
+            "http" => loopback,
+            "wss" => allow_websocket,
+            "ws" => allow_websocket && loopback,
+            _ => false,
+        };
         if endpoint.host().is_none()
             || !endpoint.username().is_empty()
             || endpoint.password().is_some()
             || endpoint.query().is_some()
             || endpoint.fragment().is_some()
-            || !(endpoint.scheme() == "https" || (endpoint.scheme() == "http" && loopback))
+            || !scheme_allowed
         {
             return Err(ProviderConfigError::InvalidEndpoint);
         }
@@ -158,7 +168,7 @@ pub enum ProviderConfigError {
     #[error("provider configuration is invalid")]
     InvalidConfiguration,
     #[error(
-        "endpoint must be HTTPS (or literal loopback HTTP), without userinfo, query or fragment"
+        "endpoint must use a supported TLS scheme (or literal loopback plaintext), without userinfo, query or fragment"
     )]
     InvalidEndpoint,
     #[error("provider credential is missing")]
@@ -196,7 +206,7 @@ mod tests {
             "http://127.0.0.1:8000/chat/completions",
             "http://[::1]/chat/completions",
         ] {
-            assert!(config(endpoint).validate().is_ok());
+            assert!(config(endpoint).validate(false).is_ok());
         }
         for endpoint in [
             "http://example.com/",
@@ -207,7 +217,33 @@ mod tests {
             "file:///tmp/provider",
         ] {
             assert_eq!(
-                config(endpoint).validate().unwrap_err(),
+                config(endpoint).validate(false).unwrap_err(),
+                ProviderConfigError::InvalidEndpoint
+            );
+        }
+    }
+
+    #[test]
+    fn websocket_is_responses_only_and_plaintext_requires_literal_loopback() {
+        for endpoint in [
+            "wss://example.com/v1/responses",
+            "ws://127.0.0.1:9000/v1/responses",
+            "ws://[::1]/v1/responses",
+        ] {
+            assert!(config(endpoint).validate(true).is_ok());
+            assert_eq!(
+                config(endpoint).validate(false).unwrap_err(),
+                ProviderConfigError::InvalidEndpoint
+            );
+        }
+        for endpoint in [
+            "ws://example.com/v1/responses",
+            "ws://localhost/v1/responses",
+            "wss://user@example.com/v1/responses",
+            "wss://example.com/v1/responses?key=secret",
+        ] {
+            assert_eq!(
+                config(endpoint).validate(true).unwrap_err(),
                 ProviderConfigError::InvalidEndpoint
             );
         }

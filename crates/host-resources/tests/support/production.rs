@@ -73,6 +73,7 @@ pub(crate) fn config(endpoint: &str) -> HostConfig {
             supported_reasoning: vec![ReasoningPreference::Auto],
             supports_tools: true,
             request_timeout_ms: None,
+            web_search: None,
         }],
         tools: selection(&["read", "write", "edit", "bash"]),
         network: NetworkSettings {

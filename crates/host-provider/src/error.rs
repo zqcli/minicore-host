@@ -40,20 +40,27 @@ impl ResponseContext {
         response: &reqwest::Response,
         authorization: &reqwest::header::HeaderValue,
     ) -> Self {
+        Self::from_headers(
+            response.status().as_u16(),
+            response.headers(),
+            authorization,
+        )
+    }
+
+    pub(crate) fn from_headers(
+        status: u16,
+        headers: &reqwest::header::HeaderMap,
+        authorization: &reqwest::header::HeaderValue,
+    ) -> Self {
         let mut context = Self {
-            status: response.status().as_u16(),
-            retry_at: retry_after(response.headers()),
+            status,
+            retry_at: retry_after(headers),
             request_id: None,
             authorization: authorization.clone(),
         };
         context.request_id = ["x-request-id", "request-id"]
             .into_iter()
-            .find_map(|name| {
-                response
-                    .headers()
-                    .get(name)
-                    .and_then(|value| value.to_str().ok())
-            })
+            .find_map(|name| headers.get(name).and_then(|value| value.to_str().ok()))
             .and_then(|value| context.text(value));
         context
     }
@@ -209,11 +216,15 @@ fn retryable(kind: ModelErrorKind, delay: Option<Duration>, status: Option<u16>)
     ModelError::not_started(kind, delay, diagnostic(kind, status))
 }
 
+pub(crate) fn connect_unavailable() -> ModelError {
+    retryable(ModelErrorKind::TransportUnavailable, None, None)
+}
+
 pub(crate) fn send(error: reqwest::Error) -> ModelError {
     if error.is_builder() {
         local(ModelErrorKind::InvalidRequest)
     } else if error.is_connect() {
-        retryable(ModelErrorKind::TransportUnavailable, None, None)
+        connect_unavailable()
     } else if error.is_timeout() {
         unknown(ModelErrorKind::Timeout)
     } else {
@@ -337,8 +348,7 @@ pub(crate) async fn http(
     deadline: TokioInstant,
     authorization: &reqwest::header::HeaderValue,
 ) -> ModelError {
-    let mut source = ResponseContext::new(&response, authorization);
-    let status = source.status;
+    let source = ResponseContext::new(&response, authorization);
     let mut bytes = response.bytes_stream();
     let mut body = Vec::new();
     loop {
@@ -359,7 +369,12 @@ pub(crate) async fn http(
             None => break,
         }
     }
-    let envelope = serde_json::from_slice::<Value>(&body).ok();
+    http_rejection(source, &body)
+}
+
+pub(crate) fn http_rejection(mut source: ResponseContext, body: &[u8]) -> ModelError {
+    let status = source.status;
+    let envelope = serde_json::from_slice::<Value>(body).ok();
     source.record_request_id(
         envelope
             .as_ref()

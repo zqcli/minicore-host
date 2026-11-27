@@ -1,9 +1,9 @@
 #![doc = include_str!("../README.md")]
 
-//! Production HTTP/SSE transport for the Runtime `Model` capability.
+//! Production model transports for the Runtime `Model` capability.
 //!
-//! This crate owns neither sessions nor retries. One `start` sends one HTTP
-//! request. The Runtime ModelDriver alone decides whether another attempt is
+//! This crate owns neither sessions nor retries. One `start` sends one
+//! model request. The Runtime ModelDriver alone decides whether another attempt is
 //! safe. Fixtures in this crate exercise real transport, not a live provider.
 
 mod config;
@@ -51,7 +51,15 @@ impl fmt::Debug for OpenAiChatModel {
 impl OpenAiChatModel {
     /// Validate private Host connection settings without contacting a provider.
     pub fn new(config: OpenAiChatConfig, key: SecretApiKey) -> Result<Self, ProviderConfigError> {
-        let endpoint = config.validate()?;
+        Self::build(config, key, false)
+    }
+
+    fn build(
+        config: OpenAiChatConfig,
+        key: SecretApiKey,
+        allow_websocket: bool,
+    ) -> Result<Self, ProviderConfigError> {
+        let endpoint = config.validate(allow_websocket)?;
         let authorization = key.into_authorization()?;
         let mut client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -116,9 +124,8 @@ impl OpenAiChatModel {
         ))
     }
 
-    // Both wire protocols share exactly the same HTTP policy, credentials,
-    // classification and cancellation/deadline boundary. Encoding and SSE
-    // event interpretation remain protocol-specific.
+    // HTTP requests for both wire protocols share the same policy, credentials
+    // and cancellation/deadline boundary.
     async fn send(
         &self,
         body: Vec<u8>,

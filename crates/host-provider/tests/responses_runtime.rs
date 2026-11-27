@@ -1,11 +1,15 @@
 //! Scripted loopback TCP fixtures exercising the production Responses adapter
 //! and real Runtime driver. These tests do not call a live model service.
 
+#[path = "responses_runtime/hosted_search.rs"]
+mod hosted_search;
 #[path = "responses_runtime/metadata.rs"]
 mod metadata;
 #[path = "responses_runtime/reasoning_boundaries.rs"]
 mod reasoning_boundaries;
 mod support;
+#[path = "responses_runtime/websocket.rs"]
+mod websocket;
 
 use std::{
     collections::BTreeSet,
@@ -35,6 +39,14 @@ fn provider(endpoint: &str) -> Arc<OpenAiResponsesModel> {
 }
 
 fn provider_for_model(endpoint: &str, model: &str) -> Arc<OpenAiResponsesModel> {
+    provider_with_search(endpoint, model, None)
+}
+
+fn provider_with_search(
+    endpoint: &str,
+    model: &str,
+    web_search: Option<bool>,
+) -> Arc<OpenAiResponsesModel> {
     let descriptor = ModelDescriptor::new(
         "fixture/responses".parse().unwrap(),
         128_000,
@@ -46,16 +58,15 @@ fn provider_for_model(endpoint: &str, model: &str) -> Arc<OpenAiResponsesModel> 
         true,
     )
     .unwrap();
+    let mut config = OpenAiResponsesConfig::new(
+        endpoint.replace("/chat/completions", "/responses"),
+        model,
+        descriptor,
+    );
+    config.web_search = web_search;
     Arc::new(
-        OpenAiResponsesModel::new(
-            OpenAiResponsesConfig::new(
-                endpoint.replace("/chat/completions", "/responses"),
-                model,
-                descriptor,
-            ),
-            SecretApiKey::new("fixture-not-a-real-key").unwrap(),
-        )
-        .unwrap(),
+        OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-not-a-real-key").unwrap())
+            .unwrap(),
     )
 }
 

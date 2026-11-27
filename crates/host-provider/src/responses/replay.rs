@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::wire::{IncompleteDetails, Item, ProviderUsage};
+use super::wire::{Annotation, IncompleteDetails, Item, ProviderUsage};
 
 pub(super) const FORMAT: &str = "minicore-host.openai-responses.v1";
 pub(super) const PARTIAL_FORMAT: &str = "minicore-host.openai-responses.partial.v1";
@@ -41,6 +41,9 @@ pub(super) enum ReplayItem {
     Reasoning {
         item: Item,
     },
+    WebSearch {
+        item: Item,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -48,6 +51,8 @@ pub(super) enum ReplayItem {
 pub(super) struct ReplayText {
     pub kind: String,
     pub ranges: Vec<TextRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]

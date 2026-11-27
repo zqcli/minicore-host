@@ -17,12 +17,15 @@ use crate::error;
 struct Request<'a> {
     model: &'a str,
     input: Vec<Input<'a>>,
-    stream: bool,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    event: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream: Option<bool>,
     store: bool,
     truncation: &'static str,
-    include: [&'static str; 1],
+    include: Vec<&'static str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    tools: Vec<Definition<'a>>,
+    tools: Vec<Tool<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -43,7 +46,7 @@ enum Input<'a> {
     Message(Message<'a>),
     Call(Call<'a>),
     Output(Output<'a>),
-    Reasoning(wire::Item),
+    Native(wire::Item),
 }
 
 #[derive(Serialize)]
@@ -96,6 +99,17 @@ struct Output<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(untagged)]
+enum Tool<'a> {
+    Function(Definition<'a>),
+    WebSearch {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        external_web_access: bool,
+    },
+}
+
+#[derive(Serialize)]
 struct Definition<'a> {
     #[serde(rename = "type")]
     kind: &'static str,
@@ -114,6 +128,8 @@ pub(super) fn encode(
     model: &str,
     descriptor: &ModelDescriptor,
     request: &ModelRequest,
+    websocket: bool,
+    web_search: Option<bool>,
 ) -> Result<Vec<u8>, ModelError> {
     if !descriptor.supports_reasoning(request.reasoning())
         || (!descriptor.supports_tools && !request.tools().is_empty())
@@ -198,26 +214,38 @@ pub(super) fn encode(
             .iter()
             .any(|p| !matches!(p, ReasoningPreference::Auto | ReasoningPreference::Disabled)))
     .then_some("auto");
-    let body = Request {
-        model,
-        input,
-        stream: true,
-        store: false,
-        truncation: "disabled",
-        include: ["reasoning.encrypted_content"],
-        max_output_tokens: request.limits().max_output_tokens(),
-        reasoning: (effort.is_some() || summary.is_some()).then_some(Reasoning { effort, summary }),
-        tools: request
-            .tools()
-            .iter()
-            .map(|tool| Definition {
+    let mut include = vec!["reasoning.encrypted_content"];
+    let mut tools: Vec<_> = request
+        .tools()
+        .iter()
+        .map(|tool| {
+            Tool::Function(Definition {
                 kind: "function",
                 name: tool.name().as_str(),
                 description: tool.description().as_str(),
                 parameters: tool.input_schema(),
                 strict: false,
             })
-            .collect(),
+        })
+        .collect();
+    if let Some(external_web_access) = web_search {
+        include.push("web_search_call.action.sources");
+        tools.push(Tool::WebSearch {
+            kind: "web_search",
+            external_web_access,
+        });
+    }
+    let body = Request {
+        model,
+        input,
+        event: websocket.then_some("response.create"),
+        stream: (!websocket).then_some(true),
+        store: false,
+        truncation: "disabled",
+        include,
+        max_output_tokens: request.limits().max_output_tokens(),
+        reasoning: (effort.is_some() || summary.is_some()).then_some(Reasoning { effort, summary }),
+        tools,
     };
     serde_json::to_vec(&body).map_err(|_| invalid())
 }
@@ -371,12 +399,19 @@ fn project<'a>(
                 input.push(Input::Call(call_input(call, Some(id))?));
                 call_index += 1;
             }
+            ReplayItem::WebSearch { item } => {
+                wire::validate_web_search(&item).map_err(|_| invalid())?;
+                if !ids.insert(item.id.clone()) {
+                    return Err(invalid());
+                }
+                input.push(Input::Native(item));
+            }
             ReplayItem::Reasoning { item } => {
                 wire::validate_reasoning(&item).map_err(|_| invalid())?;
                 if !ids.insert(item.id.clone()) {
                     return Err(invalid());
                 }
-                input.push(Input::Reasoning(item));
+                input.push(Input::Native(item));
             }
         }
     }
@@ -396,7 +431,7 @@ fn project<'a>(
     // provider model string; do not infer a provider from it or the endpoint.
     if !same_model {
         input.retain_mut(|item| match item {
-            Input::Reasoning(_) => false,
+            Input::Native(_) => false,
             Input::Message(message) => {
                 message.id = None;
                 message.phase = None;

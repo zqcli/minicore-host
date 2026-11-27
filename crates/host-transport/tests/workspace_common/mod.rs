@@ -31,6 +31,7 @@ pub async fn candidate(http: &HttpFixture, tools: Vec<ToolBinding>) -> PreparedH
             supported_reasoning: vec![ReasoningPreference::Auto],
             supports_tools: true,
             request_timeout_ms: None,
+            web_search: None,
         }],
         tools,
         network: NetworkSettings {

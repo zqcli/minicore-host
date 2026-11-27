@@ -44,6 +44,7 @@ fn discovery_retains_protocol_without_private_connection_configuration() {
         "provider_model",
         "api_key_env",
         "request_timeout_ms",
+        "web_search",
     ] {
         assert!(description.get(name).is_none());
     }
@@ -52,4 +53,25 @@ fn discovery_retains_protocol_without_private_connection_configuration() {
     assert!(!debug.contains("example.invalid"));
     assert!(!debug.contains("PRIVATE_FIXTURE_KEY_SOURCE"));
     assert!(!debug.contains("private-provider-model"));
+}
+
+#[test]
+fn hosted_search_is_opt_in_and_responses_only() {
+    for (name, mode) in [
+        ("live", OpenAiWebSearch::Live),
+        ("cached", OpenAiWebSearch::Cached),
+    ] {
+        let mut data = settings("responses");
+        data["web_search"] = json!(name);
+        let model: OpenAiModelSettings = serde_json::from_value(data.clone()).unwrap();
+        assert_eq!(model.web_search, Some(mode));
+        assert_eq!(serde_json::to_value(&model).unwrap(), data);
+        let mut config = HostConfig {
+            models: vec![model],
+            ..HostConfig::default()
+        };
+        assert!(config.validate().is_ok());
+        config.models[0].api = OpenAiModelApi::ChatCompletions;
+        assert!(config.validate().is_err());
+    }
 }

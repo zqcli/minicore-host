@@ -17,7 +17,7 @@ pub use collaboration::*;
 pub use configuration::{
     HostConfig, HostConfigSnapshot, HostConfigurationFuture, HostConfigurationPreparer,
     HostReloadResult, LogLevel, LogOutput, LogSettings, ModelDescription, NetworkSettings,
-    OpenAiModelApi, OpenAiModelSettings, PreparedHostConfiguration, RestartField,
+    OpenAiModelApi, OpenAiModelSettings, OpenAiWebSearch, PreparedHostConfiguration, RestartField,
     ToolEnvironmentExclusions,
 };
 pub use context::*;

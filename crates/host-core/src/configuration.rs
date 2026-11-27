@@ -14,7 +14,7 @@ use std::{
 
 pub use minicore_host_config::{
     HostConfig, HostConfigSnapshot, LogLevel, LogOutput, LogSettings, ModelDescription,
-    NetworkSettings, OpenAiModelApi, OpenAiModelSettings,
+    NetworkSettings, OpenAiModelApi, OpenAiModelSettings, OpenAiWebSearch,
 };
 
 impl From<crate::HostSettings> for HostConfig {

@@ -4,14 +4,14 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "OpenAI-compatible HTTP/SSE Model adapter for MiniCore Host"
+description = "OpenAI-compatible model transports for MiniCore Host"
 
 [dependencies]
 minicore-host-diagnostics.workspace = true
 tracing = { workspace = true, features = ["std"] }
 minicore-host-runtime.workspace = true
 bytes.workspace = true
-futures-util.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
 httpdate.workspace = true
 reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
@@ -19,6 +19,7 @@ serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "time"] }
+tokio-tungstenite = { workspace = true, features = ["connect", "rustls-tls-webpki-roots"] }
 tokio-util = { workspace = true, features = ["rt"] }
 
 [dev-dependencies]

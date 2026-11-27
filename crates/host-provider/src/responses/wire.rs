@@ -16,6 +16,8 @@ pub(super) struct Event {
     pub item_id: Option<String>,
     pub content_index: Option<usize>,
     pub summary_index: Option<usize>,
+    pub annotation_index: Option<usize>,
+    pub annotation: Option<Annotation>,
     pub item: Option<Item>,
     pub part: Option<Content>,
     pub delta: Option<String>,
@@ -50,6 +52,10 @@ pub(super) struct ErrorEnvelope {
     pub _content_index: Option<IgnoredAny>,
     #[serde(rename = "summary_index")]
     pub _summary_index: Option<IgnoredAny>,
+    #[serde(rename = "annotation_index")]
+    pub _annotation_index: Option<IgnoredAny>,
+    #[serde(rename = "annotation")]
+    pub _annotation: Option<IgnoredAny>,
     #[serde(rename = "item")]
     pub _item: Option<IgnoredAny>,
     #[serde(rename = "part")]
@@ -128,6 +134,80 @@ pub(super) struct Item {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<Box<SearchAction>>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum SearchAction {
+    Search {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        queries: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        sources: Option<Vec<SearchSource>>,
+    },
+    OpenPage {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+    },
+    FindInPage {
+        pattern: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+    },
+}
+
+impl SearchAction {
+    // The terminal response can include source details omitted from item.done.
+    fn agrees_with(&self, complete: &Self) -> bool {
+        match (self, complete) {
+            (
+                Self::Search {
+                    queries,
+                    query,
+                    sources: None,
+                },
+                Self::Search {
+                    queries: final_queries,
+                    query: final_query,
+                    ..
+                },
+            ) => queries == final_queries && query == final_query,
+            _ => self == complete,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum SearchSource {
+    Url { url: String },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum Annotation {
+    UrlCitation {
+        start_index: usize,
+        end_index: usize,
+        title: String,
+        url: String,
+    },
+}
+
+impl Annotation {
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::UrlCitation {
+                start_index,
+                end_index,
+                ..
+            } => start_index <= end_index,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -138,10 +218,20 @@ pub(super) struct Content {
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refusal: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 impl Content {
     pub fn text(&self) -> Result<&str, ()> {
+        if (!self.annotations.is_empty() && self.kind != "output_text")
+            || self
+                .annotations
+                .iter()
+                .any(|annotation| !annotation.valid())
+        {
+            return Err(());
+        }
         match self.kind.as_str() {
             "output_text" | "reasoning_text" | "summary_text" if self.refusal.is_none() => {
                 self.text.as_deref().ok_or(())
@@ -154,6 +244,45 @@ impl Content {
 
 pub(super) fn valid_id(value: &str) -> bool {
     !value.is_empty() && !value.chars().any(char::is_control)
+}
+
+pub(super) fn validate_web_search_structure(item: &Item) -> Result<(), ()> {
+    if item.kind != "web_search_call"
+        || !valid_id(&item.id)
+        || item.role.is_some()
+        || item.phase.is_some()
+        || item.content.is_some()
+        || item.summary.is_some()
+        || item.encrypted_content.is_some()
+        || item.call_id.is_some()
+        || item.name.is_some()
+        || item.arguments.is_some()
+    {
+        return Err(());
+    }
+    Ok(())
+}
+
+pub(super) fn validate_web_search(item: &Item) -> Result<(), ()> {
+    if !matches!(
+        item.status.as_deref(),
+        Some("completed" | "failed" | "incomplete")
+    ) {
+        return Err(());
+    }
+    validate_web_search_structure(item)
+}
+
+// Callers have already checked that both snapshots have the same item ID and
+// represent a structurally valid closed hosted search.
+pub(super) fn web_search_agrees(previous: &Item, complete: &Item) -> bool {
+    previous.status == complete.status
+        && previous.action.as_deref().is_none_or(|action| {
+            complete
+                .action
+                .as_deref()
+                .is_some_and(|complete| action.agrees_with(complete))
+        })
 }
 
 pub(super) fn valid_phase(value: Option<&str>) -> bool {
@@ -177,6 +306,7 @@ pub(super) fn validate_reasoning_structure(item: &Item) -> Result<(), ()> {
         || item.call_id.is_some()
         || item.name.is_some()
         || item.arguments.is_some()
+        || item.action.is_some()
         || item
             .encrypted_content
             .as_deref()

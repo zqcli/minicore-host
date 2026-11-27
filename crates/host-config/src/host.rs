@@ -51,6 +51,9 @@ impl HostConfig {
             {
                 return Err(invalid("model configuration is invalid or duplicated"));
             }
+            if model.web_search.is_some() && model.api != OpenAiModelApi::Responses {
+                return Err(invalid("web_search requires the Responses API"));
+            }
             environment_name(&model.api_key_env)?;
         }
         let mut tools = BTreeSet::new();
@@ -101,6 +104,14 @@ pub enum OpenAiModelApi {
     Responses,
 }
 
+/// Optional access mode for the provider-managed Responses web search tool.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpenAiWebSearch {
+    Live,
+    Cached,
+}
+
 /// Explicit OpenAI-compatible configuration. Capability values are declarations
 /// from the user's model configuration, not discovered or guessed capabilities.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
@@ -115,6 +126,8 @@ pub struct OpenAiModelSettings {
     pub supported_reasoning: Vec<ReasoningPreference>,
     pub supports_tools: bool,
     pub request_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<OpenAiWebSearch>,
 }
 impl fmt::Debug for OpenAiModelSettings {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

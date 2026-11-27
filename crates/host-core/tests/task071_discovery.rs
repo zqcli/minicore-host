@@ -114,6 +114,7 @@ async fn actual_host_facilities_and_query_values_do_not_retain_resources() {
             supported_reasoning: vec![ReasoningPreference::Auto],
             supports_tools: true,
             request_timeout_ms: None,
+            web_search: None,
         }],
         tools: vec![ToolBinding {
             name: "fixture".into(),

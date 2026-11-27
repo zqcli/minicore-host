@@ -15,18 +15,67 @@ use super::{
     replay::{
         self, Fingerprint, Normalized, Replay, ReplayItem, ReplayText, TextRange, append_range,
     },
-    wire::{self, Content, Event, Item, ProviderUsage, Response},
+    wire::{self, Annotation, Content, Event, Item, ProviderUsage, Response},
 };
 use crate::{error, sse::Parser};
 
 type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
+pub(super) enum Source {
+    Sse {
+        bytes: ByteStream,
+        chunk: Bytes,
+        offset: usize,
+        parser: Parser,
+    },
+    WebSocket(Box<super::websocket::Socket>),
+}
+
+impl Source {
+    pub(super) fn sse(response: reqwest::Response) -> Self {
+        Self::Sse {
+            bytes: Box::pin(response.bytes_stream()),
+            chunk: Bytes::new(),
+            offset: 0,
+            parser: Parser::new(),
+        }
+    }
+
+    pub(super) fn websocket(socket: super::websocket::Socket) -> Self {
+        Self::WebSocket(Box::new(socket))
+    }
+
+    async fn frame(&mut self) -> Result<Bytes, ModelErrorKind> {
+        match self {
+            Self::Sse {
+                bytes,
+                chunk,
+                offset,
+                parser,
+            } => loop {
+                while *offset < chunk.len() {
+                    let byte = chunk[*offset];
+                    *offset += 1;
+                    if let Some(frame) = parser.push(byte) {
+                        return Ok(Bytes::from(frame));
+                    }
+                }
+                *chunk = match bytes.next().await {
+                    Some(Ok(chunk)) => chunk,
+                    Some(Err(error)) if error.is_timeout() => return Err(ModelErrorKind::Timeout),
+                    Some(Err(_)) => return Err(ModelErrorKind::StreamInterrupted),
+                    None => return Err(ModelErrorKind::IncompleteResponse),
+                };
+                *offset = 0;
+            },
+            Self::WebSocket(socket) => super::websocket::frame(socket).await,
+        }
+    }
+}
+
 pub(super) struct State {
-    bytes: ByteStream,
+    source: Source,
     error_context: error::ResponseContext,
-    chunk: Bytes,
-    offset: usize,
-    parser: Parser,
     pending: VecDeque<ModelEvent>,
     pending_error: Option<ModelError>,
     cancellation: CancellationToken,
@@ -72,12 +121,39 @@ enum Body {
         arguments: Fingerprint,
         arguments_done: bool,
     },
+    WebSearch {
+        progress: Option<SearchProgress>,
+        native: Option<Item>,
+    },
+}
+
+impl Body {
+    fn accept_snapshot(&mut self, item: Item) {
+        match self {
+            Self::Message { phase, content } => {
+                *phase = item.phase;
+                for (part, snapshot) in content.iter_mut().zip(item.content.into_iter().flatten()) {
+                    part.enrich_annotations(snapshot.annotations);
+                }
+            }
+            Self::Reasoning { native, .. } | Self::WebSearch { native, .. } => *native = Some(item),
+            Self::Tool { .. } => {}
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, PartialOrd)]
+enum SearchProgress {
+    InProgress,
+    Searching,
+    Completed,
 }
 
 struct Part {
     kind: String,
     raw: Fingerprint,
     ranges: Vec<TextRange>,
+    annotations: Vec<Annotation>,
     text_done: bool,
     done: bool,
 }
@@ -88,27 +164,43 @@ impl Part {
             kind,
             raw: Fingerprint::default(),
             ranges: Vec::new(),
+            annotations: Vec::new(),
             text_done: false,
             done: false,
+        }
+    }
+
+    fn check_snapshot(&self, snapshot: &Content) -> Result<(), ()> {
+        // Not all snapshots carry annotation metadata. Keep the longest
+        // observed prefix while rejecting contradictory annotations.
+        if self.kind != snapshot.kind
+            || !self.raw.matches(snapshot.text()?)
+            || !(snapshot.annotations.starts_with(&self.annotations)
+                || self.annotations.starts_with(&snapshot.annotations))
+        {
+            return Err(());
+        }
+        Ok(())
+    }
+
+    fn enrich_annotations(&mut self, annotations: Vec<Annotation>) {
+        if annotations.len() > self.annotations.len() {
+            self.annotations = annotations;
         }
     }
 }
 
 impl State {
     pub(super) fn new(
-        response: reqwest::Response,
+        source: Source,
+        error_context: error::ResponseContext,
         cancellation: CancellationToken,
         deadline: Instant,
         model: String,
-        authorization: &reqwest::header::HeaderValue,
     ) -> Self {
-        let error_context = error::ResponseContext::new(&response, authorization);
         Self {
-            bytes: Box::pin(response.bytes_stream()),
+            source,
             error_context,
-            chunk: Bytes::new(),
-            offset: 0,
-            parser: Parser::new(),
             pending: VecDeque::new(),
             pending_error: None,
             cancellation,
@@ -141,14 +233,14 @@ impl State {
             return Err(error::stream(ModelErrorKind::IncompleteResponse, self.seen));
         }
         let frame =
-            std::str::from_utf8(frame).map_err(|_| self.malformed("non-UTF-8 SSE frame"))?;
+            std::str::from_utf8(frame).map_err(|_| self.malformed("non-UTF-8 Responses frame"))?;
         let event = match serde_json::from_str::<Event>(frame) {
             Ok(event) => event,
             Err(_) => {
                 // Rejections take precedence over malformed normal fields. A
                 // separate typed envelope still rejects repeated known fields.
                 let envelope: wire::ErrorEnvelope = serde_json::from_str(frame)
-                    .map_err(|_| self.malformed("unparseable SSE event JSON"))?;
+                    .map_err(|_| self.malformed("unparseable Responses event JSON"))?;
                 self.error_context.record_request_id(
                     envelope
                         .request_id
@@ -179,7 +271,7 @@ impl State {
                 });
                 return Err(match value {
                     Some(value) => error::provider(&value, self.seen, &self.error_context),
-                    None => self.malformed("unrecognized SSE error envelope"),
+                    None => self.malformed("unrecognized Responses error envelope"),
                 });
             }
         };
@@ -240,10 +332,20 @@ impl State {
             "response.output_item.done" => {
                 self.finish_item(event.output_index.ok_or(()), event.item.ok_or(()))
             }
-            "response.content_part.added" => self.add_part(&event, false),
-            "response.reasoning_summary_part.added" => self.add_part(&event, true),
-            "response.content_part.done" => self.finish_part(&event, false),
-            "response.reasoning_summary_part.done" => self.finish_part(&event, true),
+            "response.content_part.added" => self.add_part(event, false),
+            "response.reasoning_summary_part.added" => self.add_part(event, true),
+            "response.content_part.done" => self.finish_part(event, false),
+            "response.reasoning_summary_part.done" => self.finish_part(event, true),
+            "response.output_text.annotation.added" => self.annotation_added(event),
+            "response.web_search_call.in_progress" => {
+                self.search_progress(&event, SearchProgress::InProgress)
+            }
+            "response.web_search_call.searching" => {
+                self.search_progress(&event, SearchProgress::Searching)
+            }
+            "response.web_search_call.completed" => {
+                self.search_progress(&event, SearchProgress::Completed)
+            }
             "response.output_text.delta" => self.text_delta(&event, false, "output_text"),
             "response.refusal.delta" => self.text_delta(&event, false, "refusal"),
             "response.reasoning_text.delta" => self.text_delta(&event, false, "reasoning_text"),
@@ -332,10 +434,11 @@ impl State {
             || index != self.items.len()
             || !wire::valid_id(&item.id)
             || self.items.iter().any(|output| output.id == item.id)
-            || item
-                .status
-                .as_deref()
-                .is_some_and(|status| status != "in_progress")
+            || item.status.as_deref().is_some_and(|status| {
+                status != "in_progress"
+                    && !(item.kind == "web_search_call" && status == "searching")
+            })
+            || (item.kind != "web_search_call" && item.action.is_some())
         {
             return Err(());
         }
@@ -419,6 +522,13 @@ impl State {
                     arguments_done: false,
                 }
             }
+            "web_search_call" => {
+                wire::validate_web_search_structure(&item)?;
+                Body::WebSearch {
+                    progress: None,
+                    native: None,
+                }
+            }
             _ => return Err(()),
         };
         self.incomplete_tool_header = None;
@@ -438,6 +548,18 @@ impl State {
             return Err(());
         }
         Ok(index)
+    }
+
+    fn search_progress(&mut self, event: &Event, next: SearchProgress) -> Result<(), ()> {
+        let index = self.reference(event)?;
+        let Body::WebSearch { progress, .. } = &mut self.items[index].body else {
+            return Err(());
+        };
+        if progress.is_some_and(|previous| previous >= next) {
+            return Err(());
+        }
+        *progress = Some(next);
+        Ok(())
     }
 
     fn parts(&mut self, index: usize, summary: bool) -> Result<&mut Vec<Part>, ()> {
@@ -463,10 +585,10 @@ impl State {
         }
     }
 
-    fn add_part(&mut self, event: &Event, summary: bool) -> Result<(), ()> {
-        let index = self.reference(event)?;
-        let part_index = Self::part_index(event, summary)?;
-        let part = event.part.as_ref().ok_or(())?;
+    fn add_part(&mut self, event: Event, summary: bool) -> Result<(), ()> {
+        let index = self.reference(&event)?;
+        let part_index = Self::part_index(&event, summary)?;
+        let part = event.part.ok_or(())?;
         let text = part.text()?;
         let expected = match (&self.items[index].body, summary) {
             (Body::Message { .. }, false)
@@ -486,7 +608,25 @@ impl State {
             return Err(());
         }
         parts.push(Part::new(part.kind.clone()));
-        self.append_text(index, part_index, summary, text)
+        self.append_text(index, part_index, summary, text)?;
+        self.parts(index, summary)?[part_index].annotations = part.annotations;
+        Ok(())
+    }
+
+    fn annotation_added(&mut self, event: Event) -> Result<(), ()> {
+        let index = self.reference(&event)?;
+        let part_index = Self::part_index(&event, false)?;
+        let part = self.parts(index, false)?.get_mut(part_index).ok_or(())?;
+        let annotation = event.annotation.ok_or(())?;
+        if part.kind != "output_text"
+            || part.done
+            || event.annotation_index != Some(part.annotations.len())
+            || !annotation.valid()
+        {
+            return Err(());
+        }
+        part.annotations.push(annotation);
+        Ok(())
     }
 
     fn append_text(
@@ -569,18 +709,16 @@ impl State {
         Ok(())
     }
 
-    fn finish_part(&mut self, event: &Event, summary: bool) -> Result<(), ()> {
-        let index = self.reference(event)?;
-        let part_index = Self::part_index(event, summary)?;
-        let snapshot = event.part.as_ref().ok_or(())?;
+    fn finish_part(&mut self, event: Event, summary: bool) -> Result<(), ()> {
+        let index = self.reference(&event)?;
+        let part_index = Self::part_index(&event, summary)?;
+        let snapshot = event.part.ok_or(())?;
         let part = self.parts(index, summary)?.get_mut(part_index).ok_or(())?;
-        if part.done
-            || !part.text_done
-            || part.kind != snapshot.kind
-            || !part.raw.matches(snapshot.text()?)
-        {
+        if part.done || !part.text_done {
             return Err(());
         }
+        part.check_snapshot(&snapshot)?;
+        part.enrich_annotations(snapshot.annotations);
         part.done = true;
         Ok(())
     }
@@ -645,19 +783,21 @@ impl State {
             return Err(());
         }
         for (part, snapshot) in parts.iter().zip(snapshots) {
-            if (!incomplete && !part.done)
-                || part.kind != snapshot.kind
-                || !part.raw.matches(snapshot.text()?)
-            {
+            if !incomplete && !part.done {
                 return Err(());
             }
+            part.check_snapshot(snapshot)?;
         }
         Ok(())
     }
 
     fn check_item(&self, index: usize, item: &Item, terminal: bool) -> Result<(), ()> {
         let output = self.items.get(index).ok_or(())?;
-        if output.id != item.id || output.done != terminal || (terminal && output.incomplete) {
+        if output.id != item.id
+            || output.done != terminal
+            || (terminal && output.incomplete)
+            || (item.kind != "web_search_call" && item.action.is_some())
+        {
             return Err(());
         }
         let incomplete = !terminal && item.status.as_deref() == Some("incomplete");
@@ -739,6 +879,19 @@ impl State {
                 }
                 Ok(())
             }
+            Body::WebSearch { progress, native } => {
+                wire::validate_web_search(item)?;
+                if (*progress == Some(SearchProgress::Completed)
+                    && item.status.as_deref() != Some("completed"))
+                    || (terminal
+                        && !native
+                            .as_ref()
+                            .is_some_and(|previous| wire::web_search_agrees(previous, item)))
+                {
+                    return Err(());
+                }
+                Ok(())
+            }
         }
     }
 
@@ -779,12 +932,11 @@ impl State {
         }
         self.check_item(index, &item, false)?;
         let output = &mut self.items[index];
-        output.incomplete = item.status.as_deref() == Some("incomplete");
-        match &mut output.body {
-            Body::Message { phase, .. } => *phase = item.phase,
-            Body::Reasoning { native, .. } => *native = Some(item),
-            Body::Tool { .. } => {}
-        }
+        // A closed hosted search can itself be incomplete while the model
+        // finishes successfully. Only unfinished local output blocks completion.
+        output.incomplete = item.status.as_deref() == Some("incomplete")
+            && !matches!(output.body, Body::WebSearch { .. });
+        output.body.accept_snapshot(item);
         output.done = true;
         Ok(())
     }
@@ -826,9 +978,7 @@ impl State {
         }
         // All identities and snapshots are verified before retaining enrichment.
         for (output, item) in self.items.iter_mut().zip(response.output) {
-            if let Body::Reasoning { native, .. } = &mut output.body {
-                *native = Some(item);
-            }
+            output.body.accept_snapshot(item);
         }
         let tool_ids: Vec<_> = self
             .items
@@ -885,6 +1035,7 @@ impl State {
                         .map(|part| ReplayText {
                             kind: part.kind,
                             ranges: part.ranges,
+                            annotations: part.annotations,
                         })
                         .collect(),
                 }),
@@ -896,7 +1047,10 @@ impl State {
                 Body::Reasoning {
                     native: Some(item), ..
                 } => Some(ReplayItem::Reasoning { item }),
-                Body::Reasoning { native: None, .. } => None,
+                Body::WebSearch {
+                    native: Some(item), ..
+                } => Some(ReplayItem::WebSearch { item }),
+                Body::Reasoning { native: None, .. } | Body::WebSearch { native: None, .. } => None,
             })
             .collect();
         let replay = Replay {
@@ -941,55 +1095,19 @@ pub(super) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
         if state.done {
             return None;
         }
-        let failure = if state.cancellation.is_cancelled() {
-            Some(error::stream(ModelErrorKind::Cancelled, state.seen))
-        } else if Instant::now() >= state.deadline {
-            Some(error::stream(ModelErrorKind::Timeout, state.seen))
-        } else {
-            None
+        let frame = tokio::select! {
+            biased;
+            _ = state.cancellation.cancelled() => Err(ModelErrorKind::Cancelled),
+            _ = tokio::time::sleep_until(state.deadline) => Err(ModelErrorKind::Timeout),
+            frame = state.source.frame() => frame,
         };
-        if let Some(error) = failure {
+        let result = match frame {
+            Ok(frame) => state.handle(&frame),
+            Err(kind) => Err(error::stream(kind, state.seen)),
+        };
+        if let Err(error) = result {
             let result = state.fail(error);
             return Some((result, state));
-        }
-        if state.offset < state.chunk.len() {
-            let mut frame = None;
-            while state.offset < state.chunk.len() {
-                let byte = state.chunk[state.offset];
-                state.offset += 1;
-                if let Some(value) = state.parser.push(byte) {
-                    frame = Some(value);
-                    break;
-                }
-            }
-            if let Some(frame) = frame
-                && let Err(error) = state.handle(&frame)
-            {
-                let result = state.fail(error);
-                return Some((result, state));
-            }
-            continue;
-        }
-        let next = tokio::select! {
-            biased;
-            _ = state.cancellation.cancelled() => Err(error::stream(ModelErrorKind::Cancelled, state.seen)),
-            _ = tokio::time::sleep_until(state.deadline) => Err(error::stream(ModelErrorKind::Timeout, state.seen)),
-            chunk = state.bytes.next() => match chunk {
-                Some(Ok(chunk)) => Ok(chunk),
-                Some(Err(failure)) if failure.is_timeout() => Err(error::stream(ModelErrorKind::Timeout, state.seen)),
-                Some(Err(_)) => Err(error::stream(ModelErrorKind::StreamInterrupted, state.seen)),
-                None => Err(error::stream(ModelErrorKind::IncompleteResponse, state.seen)),
-            }
-        };
-        match next {
-            Ok(chunk) => {
-                state.chunk = chunk;
-                state.offset = 0;
-            }
-            Err(error) => {
-                let result = state.fail(error);
-                return Some((result, state));
-            }
         }
     }
 }
