@@ -144,7 +144,13 @@ pub enum InspectTarget {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InspectAction {
-    pub target: InspectTarget,
+    /// Omitted: the calling Session.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub target: Option<InspectTarget>,
     #[serde(default)]
     pub include_output: bool,
     #[serde(default)]
@@ -214,7 +220,19 @@ pub enum UpdateAction {
 }
 
 impl AgentAction {
-    pub fn parse(arguments: serde_json::Value) -> Result<Self, Fault> {
+    pub fn parse(mut arguments: serde_json::Value) -> Result<Self, Fault> {
+        if arguments.get("action").and_then(|value| value.as_str()) == Some("create")
+            && arguments.get("resource").is_none()
+        {
+            if arguments
+                .get("text")
+                .and_then(|value| value.as_str())
+                .is_none_or(|text| text.trim().is_empty())
+            {
+                return Err(invalid("create without resource requires nonblank text"));
+            }
+            arguments["resource"] = serde_json::json!("session");
+        }
         let accepted = accepted_fields(&arguments);
         let action: Self = serde_json::from_value(arguments).map_err(|error| {
             let fault = parse_error(error);
@@ -324,7 +342,7 @@ impl InspectAction {
         if self.include_config
             && !matches!(
                 self.target,
-                InspectTarget::Agent { .. } | InspectTarget::Session { .. }
+                None | Some(InspectTarget::Agent { .. } | InspectTarget::Session { .. })
             )
         {
             return Err(invalid("include_config is only valid for Agent or Session"));
@@ -332,10 +350,12 @@ impl InspectAction {
         if self.include_output
             && !matches!(
                 self.target,
-                InspectTarget::Session { .. }
-                    | InspectTarget::Turn { .. }
-                    | InspectTarget::Toolcall { .. }
-                    | InspectTarget::Message { .. }
+                None | Some(
+                    InspectTarget::Session { .. }
+                        | InspectTarget::Turn { .. }
+                        | InspectTarget::Toolcall { .. }
+                        | InspectTarget::Message { .. }
+                )
             )
         {
             return Err(invalid(
@@ -346,7 +366,7 @@ impl InspectAction {
             if !self.include_output
                 || !matches!(
                     self.target,
-                    InspectTarget::Turn { .. } | InspectTarget::Toolcall { .. }
+                    Some(InspectTarget::Turn { .. } | InspectTarget::Toolcall { .. })
                 )
             {
                 return Err(invalid(
@@ -356,19 +376,24 @@ impl InspectAction {
             range
                 .validate()
                 .map_err(|error| invalid(error.to_string()))?;
-            if matches!(self.target, InspectTarget::Turn { .. }) && self.response_index.is_none() {
+            if matches!(self.target, Some(InspectTarget::Turn { .. }))
+                && self.response_index.is_none()
+            {
                 return Err(invalid("Turn output_range requires response_index"));
             }
         }
         if self.response_index.is_some()
-            && (self.output_range.is_none() || !matches!(self.target, InspectTarget::Turn { .. }))
+            && (self.output_range.is_none()
+                || !matches!(self.target, Some(InspectTarget::Turn { .. })))
         {
             return Err(invalid(
                 "response_index is only valid with a Turn output_range",
             ));
         }
         if let Some(page) = &self.history_page {
-            if !self.include_output || !matches!(self.target, InspectTarget::Session { .. }) {
+            if !self.include_output
+                || !matches!(self.target, None | Some(InspectTarget::Session { .. }))
+            {
                 return Err(invalid(
                     "history_page requires Session with include_output:true",
                 ));

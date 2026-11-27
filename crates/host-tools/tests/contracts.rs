@@ -39,10 +39,10 @@ fn parse_diagnostics_keep_constraints_without_echoing_argument_values_or_unknown
     assert!(misplaced.message().contains("go inside settings"));
     assert!(!misplaced.message().contains("private"));
     assert_eq!(
-        AgentAction::parse(json!({"action":"inspect"}))
+        AgentAction::parse(json!({"action":"create"}))
             .unwrap_err()
             .message(),
-        "missing field `target`"
+        "create without resource requires nonblank text"
     );
     assert_eq!(
         AgentAction::parse(json!({"action":"send","target":{"kind":"agent_default","host_id":id(),"agent_id":id()},"text":"task","delegate":true}))
@@ -79,6 +79,10 @@ fn valid_calls() -> Vec<Value> {
         json!({"action":"control","operation":"close_scope"}),
         json!({"action":"update","resource":"agent","target":agent(),"changes":{"name":"name","model":"new"}}),
         json!({"action":"update","resource":"session","target":session(),"changes":{"title":null,"workspace":null}}),
+        json!({"action":"create","text":"review changes"}),
+        json!({"action":"create","text":"review changes","name":"review","target":agent(),"mode":"persistent","settings":{"reasoning":"high"}}),
+        json!({"action":"inspect"}),
+        json!({"action":"inspect","include_config":true,"include_output":true,"history_page":{"limit":2}}),
     ]
 }
 #[test]
@@ -121,6 +125,11 @@ fn branch_specific_fields_and_nullability_are_strict() {
         json!({"action":"control","operation":"close_session","target":session(),"keep_inbox":true}),
         json!({"action":"create","resource":"session","target":agent(),"from_agent_id":id()}),
         json!({"action":"create","resource":"agent","target":{"host_id":id()},"name":"reviewer"}),
+        json!({"action":"create"}),
+        json!({"action":"create","text":" \n\t"}),
+        json!({"action":"create","text":null}),
+        json!({"action":"create","text":123}),
+        json!({"action":"create","resource":null,"text":"review"}),
         json!({"action":"send","target":{"kind":"agent_default","host_id":id(),"agent_id":id()},"text":"work","delegate":true}),
         json!({"action":"update","resource":"agent","target":agent(),"changes":{}}),
         json!({"action":"update","resource":"agent","target":agent(),"changes":{"mode":"memory"}}),
@@ -129,6 +138,10 @@ fn branch_specific_fields_and_nullability_are_strict() {
         json!({"action":"update","resource":"session","target":session(),"changes":{"execution":{"tool_timeout_ms":0}}}),
         json!({"action":"inspect","target":{"kind":"turn","agent_id":id(),"session_id":id(),"turn_id":id()},"include_config":true}),
         json!({"action":"inspect","target":{"kind":"receipt","host_id":id(),"operation_id":id()},"include_output":true}),
+        json!({"action":"inspect","target":null}),
+        json!({"action":"inspect","history_page":{"limit":2}}),
+        json!({"action":"inspect","include_output":true,"output_range":{"channel":"text","start":0,"end":5,"max_bytes":5}}),
+        json!({"action":"inspect","response_index":0}),
     ];
     for input in invalid {
         assert!(
@@ -148,6 +161,22 @@ fn branch_specific_fields_and_nullability_are_strict() {
 }
 #[test]
 fn defaults_are_business_defaults_and_wait_has_no_implicit_timeout() {
+    let AgentAction::Create(CreateAction::Session {
+        target, mode, text, ..
+    }) = AgentAction::parse(json!({"action":"create","text":"review changes"})).unwrap()
+    else {
+        panic!()
+    };
+    assert!(target.is_none());
+    assert!(mode.is_none());
+    assert_eq!(text.as_deref(), Some("review changes"));
+    let AgentAction::Inspect(inspect) = AgentAction::parse(json!({"action":"inspect"})).unwrap()
+    else {
+        panic!()
+    };
+    assert!(inspect.target.is_none());
+    assert!(!inspect.include_config);
+    assert!(!inspect.include_output);
     let AgentAction::Send(send) = AgentAction::parse(valid_calls()[2].clone()).unwrap() else {
         panic!()
     };
@@ -278,6 +307,33 @@ fn actual_runtime_spec_has_only_six_actions_and_strict_objects() {
     );
     for branch in schema["oneOf"].as_array().unwrap() {
         assert_eq!(branch["additionalProperties"], false);
+    }
+    let session_create = &schema["oneOf"][1];
+    assert_eq!(session_create["required"], json!(["action"]));
+    assert_eq!(
+        session_create["properties"]["resource"]["default"],
+        "session"
+    );
+    assert_eq!(
+        session_create["anyOf"],
+        json!([
+            {"required":["resource"]},
+            {"required":["text"],"properties":{"text":{"type":"string","pattern":"\\S"}}}
+        ])
+    );
+    for branch in schema["oneOf"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|branch| branch["properties"]["action"]["const"] == "inspect")
+    {
+        let expected = if branch["properties"]["target"]["properties"]["kind"]["const"] == "session"
+        {
+            json!(["action"])
+        } else {
+            json!(["action", "target"])
+        };
+        assert_eq!(branch["required"], expected);
     }
 }
 

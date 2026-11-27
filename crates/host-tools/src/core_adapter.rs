@@ -31,7 +31,10 @@ impl CoreTurnPort {
     }
     async fn inspect_actual(&self, request: InspectAction) -> Result<Value, Fault> {
         request.validate()?;
-        match request.target {
+        match request.target.unwrap_or_else(|| InspectTarget::Session {
+            agent_id: self.source.session.agent_id.clone(),
+            session_id: self.source.session.session_id.clone(),
+        }) {
             InspectTarget::Agent { host_id, agent_id } => {
                 self.check_host(&host_id)?;
                 let target = AgentRef { host_id, agent_id };

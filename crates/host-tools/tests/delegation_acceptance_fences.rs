@@ -60,6 +60,54 @@ impl Fixture {
 }
 
 #[tokio::test]
+async fn shorthand_create_and_inspect_use_the_calling_session_defaults() {
+    let mut f = Fixture::new();
+    let root = f.agent().await;
+    f.send(&root, "coordinate review");
+    let started = f.next(&root).await;
+    started.tool(
+        "start-review",
+        json!({"action":"create","text":"review changes","name":"review"}),
+    );
+    let (accepted, child_call) = f.delegated_calls(&root).await;
+    let child = child_call.source.session.clone();
+    assert_eq!(child.agent_id, root.agent_id);
+    assert_eq!(
+        accepted.last_tool_result()["session_id"],
+        json!(child.session_id)
+    );
+    assert_eq!(
+        accepted.last_tool_result()["result"]["delivery"],
+        "accepted"
+    );
+    let info = f.host.session_info(&f.connection.caller(), &child).unwrap();
+    assert_eq!(info.mode, StorageMode::Memory);
+    assert_eq!(info.title.as_deref(), Some("review"));
+    assert!(child_call.request.messages().iter().any(|message| {
+        matches!(message, ModelMessage::User(text) if input_context::decode(text).1 == "review changes")
+    }));
+    accepted.complete("work accepted before child completion");
+    f.finished(&accepted.source).await;
+
+    child_call.tool("self-overview", json!({"action":"inspect"}));
+    let overview = f.next(&child).await;
+    let result = overview.last_tool_result();
+    assert_eq!(result["agent_id"], json!(child.agent_id));
+    assert_eq!(result["session_id"], json!(child.session_id));
+    assert!(result["data"].get("config").is_none());
+    assert!(result["data"].get("history").is_none());
+    overview.tool("self-detail", json!({"action":"inspect","include_config":true,"include_output":true,"history_page":{"limit":2}}));
+    let detailed = f.next(&child).await;
+    let result = detailed.last_tool_result();
+    assert!(result["data"]["config"].is_object());
+    assert!(result["data"]["history"]["items"].is_array());
+    detailed.complete("review complete");
+    let notified = f.next(&root).await;
+    notified.complete("review result received");
+    f.finished(&notified.source).await;
+}
+
+#[tokio::test]
 async fn nested_child_accepts_scope_followup_after_temporary_parent_is_reclaimed() {
     let mut f = Fixture::new();
     let root = f.agent().await;

@@ -110,7 +110,7 @@ async fn delegated_session_defaults_to_memory_and_propagates_name() {
     let tool = AgentTool::new(port.port(), ScopeManager::new());
     let output = invoke(
         &tool,
-        json!({"action":"create","resource":"session","name":"css-audit","text":"audit styles"}),
+        json!({"action":"create","name":"css-audit","text":"audit styles"}),
     )
     .await;
     assert_eq!(output["result"]["delivery"], "accepted");

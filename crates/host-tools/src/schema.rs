@@ -6,7 +6,17 @@ use std::sync::LazyLock;
 pub fn agent_tool_spec() -> ToolSpec {
     static SPEC: LazyLock<ToolSpec> = LazyLock::new(|| {
         ToolSpec::new("agent".parse().expect("static tool name"),
-        "Create, send to, inspect, update or control Agents and Sessions in this Host. To delegate, create a Session with text and a short descriptive name (e.g. \"review-auth\", \"css-audit\") so it is easy to identify alongside its ID in Tasks: omit target to use your own Agent; delegated Sessions default to mode \"memory\" unless mode is explicitly set; it inherits your model, reasoning, approval policy and workspace unless settings override them (settings.execution allows partial field overrides; choose model IDs from available_models in session context). A new Agent copies your Agent unless from_agent_id names another. model, reasoning, instructions, tools, workspace and execution go inside settings. Creation with text and send with delegate:true start independent work and return acceptance (with the child's agent_id and session_id); the child's final Turn output is handed off automatically to the parent as a new message, so delegated children should NOT call send back to their parent for routine progress updates. All send calls deliver immediately as steer (injected at the next step when the target is busy, or starting a new Turn when idle). Delegation depth is limited to 2 (root -> child -> grandchild; grandchildren cannot delegate further). wait waits for consumable input in this Session, returns immediately on input_available, and defaults to 60000ms when timeout_ms is omitted (prefer omitting timeout_ms or 30000-120000ms instead of 1000ms short-polling). Session inspect with include_output:true returns the latest bounded tail of history when history_page is omitted.",
+        concat!(
+            "Manage Agents and Sessions with create, send, inspect, wait, update and control. ",
+            "create with text and no resource starts a child Session asynchronously; text must be nonblank. Defaults are your own Agent and memory mode; target and mode may override them. Use a short descriptive name. ",
+            "Explicit resource:session may omit text to create an empty Session. resource:agent requires name and mode, copying your Agent unless from_agent_id selects another. ",
+            "Delegation depth is limited to 2 (root -> child -> grandchild). ",
+            "Same-Agent children inherit your model, reasoning, approval policy and workspace. Overrides belong in settings (model, reasoning, instructions, role, tools, workspace, execution); choose model IDs from available_models in session context. ",
+            "For ordinary communication, send to the exact agent_id/session_id with kind:session and omit delegate (false). Use kind:agent_default only to address an Agent's default Session. Set delegate:true only to enroll an existing exact Session into delegated work. ",
+            "All sends use steer: next step when busy, new Turn when idle. Creation with text and delegated sends return acceptance, not completion. Final results automatically go only to the direct delegator. Ordinary messages need an explicit send reply; do not duplicate the automatic final handoff. ",
+            "inspect without target shows your current Session; config and output default to false. Explicit targets remain available. Session include_output:true returns a bounded latest history tail unless history_page is set. ",
+            "wait waits for consumable input in your Session, not a specific task, without consuming it. It returns immediately on input_available and defaults to 60000ms; prefer the default over short polling."
+        ),
         schema()).expect("static agent tool declaration is valid")
     });
     SPEC.clone()
@@ -93,8 +103,8 @@ fn schema() -> Value {
         ),
         branch(
             "create",
-            json!({"resource":{"const":"session"},"target":reference("agent_ref"),"name":{"type":"string","minLength":1,"maxLength":60},"mode":reference("mode"),"settings":reference("settings"),"text":text}),
-            &["resource"],
+            json!({"resource":{"const":"session","default":"session"},"target":reference("agent_ref"),"name":{"type":"string","minLength":1,"maxLength":60},"mode":reference("mode"),"settings":reference("settings"),"text":text}),
+            &[],
         ),
         branch(
             "send",
@@ -190,12 +200,22 @@ fn schema() -> Value {
                 json!({"if":{"required":["response_index"]},"then":{"required":["output_range"]}}),
             );
         }
-        let mut inspect = branch("inspect", properties, &["target"]);
+        let required = if kind == "session" {
+            &[][..]
+        } else {
+            &["target"][..]
+        };
+        let mut inspect = branch("inspect", properties, required);
         if !rules.is_empty() {
             inspect["allOf"] = json!(rules);
         }
         alternatives.push(inspect);
     }
+    // Shorthand creation requires a task; explicit Session creation may be empty.
+    alternatives[1]["anyOf"] = json!([
+        {"required":["resource"]},
+        {"required":["text"],"properties":{"text":{"type":"string","pattern":"\\S"}}}
+    ]);
     // The delegate flag cannot resolve an Agent default as a delegation target.
     alternatives[2]["allOf"] = json!([{"if":{"properties":{"delegate":{"const":true}},"required":["delegate"]},"then":{"properties":{"target":target("session", &["agent_id","session_id"])}}}]);
     let output_range = object(
