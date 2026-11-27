@@ -116,6 +116,8 @@ impl std::ops::Deref for RetainedTurnResult {
 
 struct SessionState {
     info: SessionInfo,
+    // A reopened record without a preview must load history before new input can fill it.
+    preview_needs_history: bool,
     lifecycle: SessionLifecycle,
     end_reason: Option<String>,
     paused: bool,
@@ -236,12 +238,14 @@ impl SessionController {
                 id: id.clone(),
                 agent_id: agent_id.clone(),
                 title: None,
+                first_user_preview: None,
                 mode: backend.mode(),
                 config_revision: 0,
                 config,
                 delegated_by: None,
                 delegation_root: None,
             },
+            preview_needs_history: false,
             lifecycle: SessionLifecycle::Open,
             end_reason: None,
             paused: false,

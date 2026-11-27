@@ -43,6 +43,8 @@ impl SessionController {
         state.info.created_at = record.data.created_at;
         state.info.last_activity_at = record.data.last_activity_at;
         state.info.title = record.data.title.clone();
+        state.info.first_user_preview = record.data.first_user_preview.clone();
+        state.preview_needs_history = reopened && state.info.first_user_preview.is_none();
         state.info.config_revision = record.data.config_revision;
         state.info.agent_config_revision = record.data.agent_config_revision;
         state.info.delegated_by = record.data.parent.clone();

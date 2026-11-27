@@ -115,6 +115,12 @@ impl SessionController {
         })?;
         let received_at = Timestamp::now();
         state.info.last_activity_at = state.info.last_activity_at.max(received_at);
+        if !state.preview_needs_history
+            && state.info.first_user_preview.is_none()
+            && source == MessageSource::User
+        {
+            state.info.first_user_preview = Some(first_user_preview(&message.text));
+        }
         let entry = QueuedInput {
             delegations: delegations.clone(),
             received_at,
@@ -349,5 +355,39 @@ impl SessionController {
             })
             .map(|message| self.observe_message(state, message, Some(&active.info)))
             .collect()
+    }
+}
+
+/// Keep catalog data small without copying a potentially large prompt first.
+pub(super) fn first_user_preview(text: &str) -> String {
+    const MAX_CHARS: usize = 160;
+    let mut chars = text
+        .split(|ch: char| ch.is_whitespace() || ch.is_control())
+        .filter(|part| !part.is_empty())
+        .flat_map(|part| std::iter::once(' ').chain(part.chars()))
+        .skip(1);
+    let mut preview: String = chars.by_ref().take(MAX_CHARS).collect();
+    if chars.next().is_some() {
+        preview.pop();
+        preview.push('…');
+    }
+    preview
+}
+
+#[cfg(test)]
+mod preview_tests {
+    use super::first_user_preview;
+
+    #[test]
+    fn preview_is_one_line_and_bounded_without_splitting_unicode() {
+        assert_eq!(
+            first_user_preview("  First\n\tuser\r\x07prompt  "),
+            "First user prompt"
+        );
+        let preview = first_user_preview(&"问".repeat(10_000));
+        assert_eq!(preview.chars().count(), 160);
+        assert_eq!(preview, format!("{}…", "问".repeat(159)));
+        assert_eq!(first_user_preview(&"x".repeat(160)), "x".repeat(160));
+        assert_eq!(first_user_preview("\n  \t"), "");
     }
 }

@@ -15,6 +15,7 @@ impl SessionRecordWork {
     pub(super) fn activity_only(&self) -> bool {
         let mut baseline = self.baseline.clone();
         baseline.data.last_activity_at = self.candidate.data.last_activity_at;
+        baseline.data.first_user_preview = self.candidate.data.first_user_preview.clone();
         baseline == self.candidate
     }
 }
@@ -35,10 +36,10 @@ impl SessionController {
             || state.deleting
             || state.lifecycle == SessionLifecycle::Closed
             || state.executor.is_none()
-            || state
-                .record_base
-                .as_ref()
-                .is_none_or(|base| base.data.last_activity_at >= state.info.last_activity_at)
+            || state.record_base.as_ref().is_none_or(|base| {
+                base.data.last_activity_at >= state.info.last_activity_at
+                    && base.data.first_user_preview == state.info.first_user_preview
+            })
         {
             return;
         }
@@ -62,6 +63,7 @@ impl SessionController {
         record.data.created_at = state.info.created_at;
         record.data.last_activity_at = state.info.last_activity_at;
         record.data.title = state.info.title.clone();
+        record.data.first_user_preview = state.info.first_user_preview.clone();
         record.data.config_revision = state.info.config_revision;
         record.data.effective_config = state.info.config.clone();
         record
@@ -620,7 +622,9 @@ mod activity_tests {
             })
         }
     }
-    fn fixture() -> (
+    fn fixture(
+        reopened: bool,
+    ) -> (
         tempfile::TempDir,
         Arc<SessionController>,
         SessionStore,
@@ -659,6 +663,7 @@ mod activity_tests {
                 created_at,
                 last_activity_at: created_at,
                 title: None,
+                first_user_preview: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
                 config_revision: 0,
@@ -680,7 +685,7 @@ mod activity_tests {
             access,
             Arc::new(IdleResources),
             Arc::new(AtomicBool::new(true)),
-            true,
+            reopened,
         );
         owner.state.lock().unwrap().paused = true;
         (dir, owner, store, connection)
@@ -709,7 +714,7 @@ mod activity_tests {
 
     #[tokio::test]
     async fn newer_activity_coalesces_before_quiescence_and_survives_shutdown() {
-        let (_dir, owner, store, connection) = fixture();
+        let (_dir, owner, store, connection) = fixture(false);
         // Deterministic gate between original metadata acceptance and worker I/O.
         // This is a named scheduling fixture, not a simulated disk confirmation.
         let candidate = {
@@ -747,6 +752,10 @@ mod activity_tests {
         let saved = store.load().unwrap();
         assert_eq!(saved.data.last_activity_at, received_at);
         assert_eq!(saved.data.title.as_deref(), Some("original accepted title"));
+        assert_eq!(
+            saved.data.first_user_preview.as_deref(),
+            Some("accepted while paused")
+        );
         assert_eq!(saved.data.config_revision, 1);
         assert_eq!(
             saved.data.created_at,
@@ -798,12 +807,16 @@ mod activity_tests {
             .unwrap();
         assert_eq!(summary.last_activity_at, received_at);
         assert_eq!(summary.title.as_deref(), Some("original accepted title"));
+        assert_eq!(
+            summary.first_user_preview.as_deref(),
+            Some("accepted while paused")
+        );
         assert!(!reopened.state.lock().unwrap().history_loaded);
     }
 
     #[tokio::test]
     async fn paused_input_registers_activity_save_before_force_clear() {
-        let (_dir, owner, store, connection) = fixture();
+        let (_dir, owner, store, connection) = fixture(false);
         owner.send(&connection.caller(), message()).unwrap();
         let received_at = owner.state.lock().unwrap().messages[0].received_at;
         owner.begin_host_shutdown_owned(true);
@@ -816,7 +829,7 @@ mod activity_tests {
     #[tokio::test]
     async fn recovered_activity_is_checkpointed_before_load_or_preparation_quiesces() {
         for explicit_load in [true, false] {
-            let (_dir, owner, store, connection) = fixture();
+            let (_dir, owner, store, connection) = fixture(false);
             // Durable history can be newer than session.json after a previous
             // process ended between the original history and metadata saves.
             // The future value also proves we compare actual timestamps rather
@@ -881,5 +894,159 @@ mod activity_tests {
             owner.checkpoint_activity();
             assert!(owner.state.lock().unwrap().record_task.is_none());
         }
+    }
+
+    #[tokio::test]
+    async fn first_user_preview_is_source_aware_and_independent_of_title() {
+        let (_dir, owner, store, connection) = fixture(false);
+        let caller = connection.caller();
+        assert!(
+            owner
+                .summary(&caller)
+                .unwrap()
+                .unwrap()
+                .first_user_preview
+                .is_none()
+        );
+        let peer = SessionRef {
+            agent_id: AgentId::new().unwrap(),
+            session_id: SessionId::new().unwrap(),
+        };
+        let mut task = message();
+        task.text = "agent task".into();
+        owner
+            .accept_message(
+                task,
+                UserInput::text("agent task").unwrap(),
+                MessageSource::Agent { source: peer },
+            )
+            .unwrap()
+            .1
+            .emit();
+        settled(&owner).await;
+        assert!(store.load().unwrap().data.first_user_preview.is_none());
+        let mut first = message();
+        first.text = "  调查  网络\n\t延迟与性能  ".into();
+        owner.send(&caller, first).unwrap();
+        owner.send(&caller, message()).unwrap();
+        settled(&owner).await;
+        let info = owner.info(&caller).unwrap();
+        assert_eq!(
+            info.first_user_preview.as_deref(),
+            Some("调查 网络 延迟与性能")
+        );
+        assert!(info.title.is_none());
+        owner
+            .update_candidate_async(
+                &caller,
+                info.config_revision,
+                info.config,
+                Some("Network investigation".into()),
+            )
+            .await
+            .unwrap();
+        let saved = store.load().unwrap();
+        assert_eq!(saved.data.title.as_deref(), Some("Network investigation"));
+        assert_eq!(
+            saved.data.first_user_preview.as_deref(),
+            Some("调查 网络 延迟与性能")
+        );
+        owner.begin_host_shutdown_owned(true);
+        owner.wait_quiescent_owned().await;
+        owner.release_host_resources_owned().await.unwrap();
+        let reopened = SessionController::from_record(
+            saved,
+            store,
+            owner.host_id.clone(),
+            owner.incarnation.clone(),
+            owner.access.clone(),
+            Arc::new(IdleResources),
+            Arc::new(AtomicBool::new(true)),
+            true,
+        );
+        let summary = reopened.summary(&caller).unwrap().unwrap();
+        assert_eq!(
+            summary.first_user_preview.as_deref(),
+            Some("调查 网络 延迟与性能")
+        );
+        assert_eq!(summary.title.as_deref(), Some("Network investigation"));
+        assert!(!reopened.state.lock().unwrap().history_loaded);
+    }
+
+    #[tokio::test]
+    async fn old_metadata_recovers_preview_from_original_history_before_new_input() {
+        use minicore_host_runtime::{LoopId, UserHistory, UserMessageKind};
+        let (_dir, owner, store, connection) = fixture(true);
+        let caller = connection.caller();
+        let source = SessionRef {
+            agent_id: AgentId::new().unwrap(),
+            session_id: SessionId::new().unwrap(),
+        };
+        let entries = [
+            (MessageSource::Agent { source }, "agent-origin delegation"),
+            (MessageSource::User, "First original\nuser prompt"),
+            (MessageSource::User, "Second original user prompt"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (source, text))| {
+            let at = Timestamp::from_unix_milliseconds(i as i64 + 1).unwrap();
+            minicore_host_storage::HistoryRecord::at(
+                owner.id.clone(),
+                i as u64,
+                at,
+                HistoryEntry::Input {
+                    received_at: at,
+                    turn_id: TurnId::new().unwrap(),
+                    message_id: MessageId::new().unwrap(),
+                    source,
+                    mode: MessageMode::FollowUp,
+                    in_reply_to: None,
+                    user: UserHistory {
+                        loop_id: LoopId::new().unwrap(),
+                        kind: UserMessageKind::Prompt,
+                        input: UserInput::text(text).unwrap(),
+                    },
+                },
+            )
+        })
+        .collect();
+        let mut journal = store.open_journal().unwrap();
+        journal.accept_batch(entries).unwrap();
+        journal.persist_pending().unwrap();
+        drop(journal);
+        owner.send(&caller, message()).unwrap();
+        settled(&owner).await;
+        assert!(
+            owner
+                .summary(&caller)
+                .unwrap()
+                .unwrap()
+                .first_user_preview
+                .is_none()
+        );
+        assert!(!owner.state.lock().unwrap().history_loaded);
+        owner
+            .control(
+                &caller,
+                SessionControlRequest {
+                    operation_id: OperationId::new().unwrap(),
+                },
+                SessionControlKind::Load,
+            )
+            .unwrap();
+        owner.wait_quiescent_owned().await;
+        let summary = owner.summary(&caller).unwrap().unwrap();
+        assert_eq!(
+            summary.first_user_preview.as_deref(),
+            Some("First original user prompt")
+        );
+        assert!(summary.title.is_none());
+        let saved = store.load().unwrap();
+        assert_eq!(saved.data.first_user_preview, summary.first_user_preview);
+        assert!(saved.data.title.is_none());
+        owner.begin_host_shutdown_owned(true);
+        owner.wait_quiescent_owned().await;
+        owner.release_host_resources_owned().await.unwrap();
     }
 }

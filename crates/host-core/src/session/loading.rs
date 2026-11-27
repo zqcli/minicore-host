@@ -332,6 +332,31 @@ impl SessionState {
                 raw.push(item);
             }
         }
+        // Old metadata has no preview. Recover only during this ordinary load,
+        // before considering any newly queued input; catalog reads stay cheap.
+        if self.preview_needs_history {
+            let first = entries
+                .iter()
+                .filter_map(|record| match &record.entry {
+                    HistoryEntry::Input {
+                        received_at,
+                        source: MessageSource::User,
+                        user,
+                        ..
+                    } => Some((*received_at, user.input.as_text())),
+                    _ => None,
+                })
+                .min_by_key(|(received_at, _)| *received_at)
+                .map(|(_, text)| text)
+                .or_else(|| {
+                    self.messages.iter().find_map(|message| {
+                        (message.source == MessageSource::User)
+                            .then_some(message.input.text.as_str())
+                    })
+                });
+            self.info.first_user_preview = first.map(input::first_user_preview);
+            self.preview_needs_history = false;
+        }
         self.history = Arc::new(raw);
         self.input_provenance = input_provenance;
         self.history_position = entries.len() as u64;

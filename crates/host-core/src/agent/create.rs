@@ -377,6 +377,7 @@ impl AgentOwner {
                     created_at,
                     last_activity_at: created_at,
                     title: None,
+                    first_user_preview: None,
                     mode: prepared.mode,
                     agent_config_revision: prepared.agent_revision,
                     config_revision: 0,

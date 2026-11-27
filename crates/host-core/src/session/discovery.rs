@@ -56,6 +56,7 @@ impl SessionController {
                 id: self.id.clone(),
                 agent_id: self.agent_id.clone(),
                 title: state.info.title.clone(),
+                first_user_preview: state.info.first_user_preview.clone(),
                 mode: state.info.mode,
                 config_revision: state.info.config_revision,
                 lifecycle: state.lifecycle,

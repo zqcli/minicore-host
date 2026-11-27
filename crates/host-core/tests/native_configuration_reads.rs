@@ -56,6 +56,7 @@ fn explicit_empty_and_omitted_native_instructions_remain_readable() {
                 created_at: created,
                 last_activity_at: created,
                 title: None,
+                first_user_preview: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
                 config_revision: 0,

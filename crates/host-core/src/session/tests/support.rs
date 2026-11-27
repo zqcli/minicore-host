@@ -168,6 +168,7 @@ pub(super) fn setup(
                 created_at: minicore_host_protocol::Timestamp::now(),
                 last_activity_at: minicore_host_protocol::Timestamp::now(),
                 title: None,
+                first_user_preview: None,
                 mode: StorageMode::Persistent,
                 agent_config_revision: 0,
                 config_revision: 0,

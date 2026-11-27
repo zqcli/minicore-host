@@ -234,6 +234,9 @@ pub struct SessionData {
     pub last_activity_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Bounded first user-origin input, independent of an explicit title.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_user_preview: Option<String>,
     pub mode: StorageMode,
     pub agent_config_revision: ConfigRevision,
     pub config_revision: ConfigRevision,
