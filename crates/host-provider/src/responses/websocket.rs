@@ -18,13 +18,13 @@ pub(super) type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 pub(super) async fn start(
     connection: &OpenAiChatModel,
+    endpoint: &reqwest::Url,
     body: Vec<u8>,
     context: &ModelCallContext,
     deadline: Instant,
     diagnostic: &mut diagnostics::Request,
-) -> Result<(Socket, error::ResponseContext), ModelError> {
-    let mut request = connection
-        .endpoint
+) -> Result<Option<(Socket, error::ResponseContext)>, ModelError> {
+    let mut request = endpoint
         .as_str()
         .into_client_request()
         .map_err(|_| error::local(ModelErrorKind::InvalidRequest))?;
@@ -37,6 +37,9 @@ pub(super) async fn start(
         biased;
         _ = context.cancellation.cancelled() => return Err(error::local(ModelErrorKind::Cancelled)),
         _ = tokio::time::sleep_until(connect_deadline) => {
+            if Instant::now() < deadline {
+                return Ok(None);
+            }
             return Err(error::local(ModelErrorKind::Timeout));
         }
         opened = connect_async(request) => opened,
@@ -49,12 +52,17 @@ pub(super) async fn start(
         Err(Error::Http(response)) => {
             let status = response.status().as_u16();
             diagnostic.response(status);
+            if matches!(status, 200 | 400 | 404 | 405 | 426 | 501) {
+                return Ok(None);
+            }
             return Err(error::http_rejection(
                 response_context(status, response.headers()),
                 response.body().as_deref().unwrap_or_default(),
             ));
         }
-        // No response.create was sent yet. Runtime owns any new attempt.
+        // No response.create was sent. Only upgrade/connection failures are safe
+        // here; certificate errors must remain visible rather than be bypassed.
+        Err(Error::Protocol(_) | Error::Io(_)) => return Ok(None),
         Err(_) => return Err(error::connect_unavailable()),
     };
     let status = response.status().as_u16();
@@ -68,7 +76,7 @@ pub(super) async fn start(
             sent.map_err(|_| error::unknown(ModelErrorKind::RequestOutcomeUnknown))?;
         }
     }
-    Ok((socket, error_context))
+    Ok(Some((socket, error_context)))
 }
 
 pub(super) async fn frame(socket: &mut Socket) -> Result<Bytes, ModelErrorKind> {

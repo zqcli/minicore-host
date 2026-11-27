@@ -313,7 +313,9 @@ fn structured_kind(error: &Value) -> Option<ModelErrorKind> {
             Some(ModelErrorKind::ProviderUnavailable)
         }
         "invalid_api_key" | "authentication_error" => Some(ModelErrorKind::AuthRejected),
-        "invalid_request_error" => Some(ModelErrorKind::InvalidRequest),
+        "invalid_request_error" | "model_not_found" | "unsupported_transport" => {
+            Some(ModelErrorKind::InvalidRequest)
+        }
         _ => None,
     })
 }

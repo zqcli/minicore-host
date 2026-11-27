@@ -114,6 +114,7 @@ pub enum ExecutionConfigError {
 /// Immutable execution resources bound by the Session to one Turn.
 #[derive(Clone)]
 pub struct ExecutionConfig {
+    web_search: Option<crate::model::WebSearchMode>,
     model: Arc<dyn Model>,
     descriptor: ModelDescriptor,
     reasoning: ReasoningPreference,
@@ -144,6 +145,7 @@ impl ExecutionConfig {
             return Err(ExecutionConfigError::ToolsUnsupported);
         }
         Ok(Self {
+            web_search: None,
             model,
             descriptor,
             reasoning,
@@ -153,6 +155,11 @@ impl ExecutionConfig {
         })
     }
 
+    pub fn with_web_search(mut self, mode: Option<crate::model::WebSearchMode>) -> Self {
+        self.web_search = mode;
+        self
+    }
+
     pub fn request(&self, messages: Vec<ModelMessage>) -> Result<ModelRequest, ModelValueError> {
         ModelRequest::with_validated_tools(
             messages,
@@ -160,6 +167,7 @@ impl ExecutionConfig {
             ModelLimits::default(),
             self.reasoning,
         )
+        .map(|request| request.with_web_search(self.web_search))
     }
 
     /// Wraps the bound model while retaining its already validated descriptor

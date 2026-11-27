@@ -122,18 +122,20 @@ metadata; failed requests never authorize unfinished tools.
 ## Responses
 
 `OpenAiResponsesModel` sends one stateless request per `start`. The exact
-endpoint URL selects HTTP/SSE (`https`) or WebSocket (`wss`); plaintext is
-limited to literal loopback. Both use the same event decoder, cancellation,
-absolute deadlines and diagnostics. HTTP sends `stream: true`; WS sends
-`type: "response.create"` on a socket scoped to one invocation, with no
-automatic transport fallback. Both send full `input`, `store: false`,
+endpoint uses WSS first for remote TLS, and an unsupported upgrade or explicit
+early WS route rejection falls back to SSE at the same endpoint. A generation
+that may have started is not replayed on a different transport. Plaintext is
+limited to literal loopback (`http` for direct SSE, `ws` for WS-first). Both
+transports share the decoder, cancellation and one absolute deadline. SSE sends
+`stream: true`; WS sends `type: "response.create"` on a socket scoped to one
+invocation. Both send full `input`, `store: false`,
 `truncation: disabled`, and `include: ["reasoning.encrypted_content"]`. It never
 uses `previous_response_id` or a provider-side conversation. An output limit is
 sent only when supplied by Runtime. Declared function schemas are forwarded
 without silently enabling strict schema conversion. Configured reasoning effort
 is forwarded; reasoning-capable descriptors also request an automatic summary.
 
-Hosted web search is off unless explicitly configured. The adapter adds
+Hosted web search is off unless configured on the model or overridden for a Session. The adapter adds
 `web_search` and requests its source list from the same Responses provider
 over either transport. The provider performs the search; no local ToolCall
 is emitted. Actual search results and URL citations are retained in provider

@@ -71,14 +71,17 @@ The Host does not infer a protocol from the endpoint or fall back to another
 protocol. Both ordinary Turns and compaction use the configured selection.
 Responses sends complete input with `store:false`; provider-side conversation
 state is not required. To adapt the example, set `api` to `"responses"` and
-`endpoint` to the provider's full `/v1/responses` URL. Use `https://` for
-HTTP/SSE or `wss://` for WebSocket. Plaintext `http://` and `ws://` are limited
-to literal loopback addresses; `ws(s)` is Responses-only. This is the model
-connection, not the Host's incoming JSON-RPC WebSocket.
+`endpoint` to the provider's full `/v1/responses` URL. With either `https://` or
+`wss://`, Responses tries WebSocket first and uses HTTP/SSE when the upstream
+cannot upgrade or explicitly rejects the WS route before starting. An ambiguous
+or started request is not sent again via SSE. Plaintext endpoints are limited
+to literal loopback: `http://` uses SSE and `ws://` tries WS first. This is the
+model connection, not the Host's incoming JSON-RPC WebSocket.
 
 For a provider/model that supports hosted search, set `"web_search":"live"`
 in its model entry, or use `"cached"` to disable external web access. Omit the
-field to leave it off. It uses the same Responses request (no `/v1/search`
+field to leave it off. A session can override it with `off`, `live`, or
+`cached` in its config. It uses the same Responses request (no `/v1/search`
 route); the upstream provider performs the search, outside local tool approval.
 
 The builtins are `read`, `write`, `edit`, `apply_patch`, `bash`, and the six-action

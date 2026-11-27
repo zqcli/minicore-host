@@ -189,6 +189,7 @@ impl AgentSettingsPatch {
             instructions: self.instructions.clone(),
             model: self.model.clone(),
             reasoning: self.reasoning,
+            web_search: None,
             tools: self.tools.clone(),
             workspace: self.workspace.clone(),
             execution,
@@ -305,6 +306,7 @@ pub fn agent_config_from_settings(
         session_defaults: SessionDefaults {
             model: session.model,
             reasoning: session.reasoning,
+            web_search: session.web_search,
             tools: session.tools,
             workspace: session.workspace,
             execution: session.execution,

@@ -152,7 +152,8 @@ impl RequestHistory {
             ModelLimits::default(),
             resources.reasoning,
         )
-        .map_err(|error| failure(error.to_string()))?;
+        .map_err(|error| failure(error.to_string()))?
+        .with_web_search(Some(minicore_host_runtime::model::WebSearchMode::Off));
         engine::prepare(
             source,
             self.view().len(),

@@ -91,7 +91,16 @@ impl ProductionResources {
             ))),
             Arc::new(prompt),
         )
-        .map_err(|error| session_invalid(error.to_string()))?;
+        .map_err(|error| session_invalid(error.to_string()))?
+        .with_web_search(config.web_search.map(|mode| {
+            use minicore_host_protocol::WebSearchMode;
+            use minicore_host_runtime::model::WebSearchMode as RuntimeSearch;
+            match mode {
+                WebSearchMode::Off => RuntimeSearch::Off,
+                WebSearchMode::Live => RuntimeSearch::Live,
+                WebSearchMode::Cached => RuntimeSearch::Cached,
+            }
+        }));
         let settings = &config.execution;
         let options = ExecutionOptions {
             deadline: None,

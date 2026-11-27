@@ -74,12 +74,22 @@ impl<'de> Deserialize<'de> for ModelLimits {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchMode {
+    Off,
+    Live,
+    Cached,
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize)]
 pub struct ModelRequest {
     messages: Arc<[ModelMessage]>,
     tools: Arc<[ToolSpec]>,
     limits: ModelLimits,
     reasoning: ReasoningPreference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    web_search: Option<WebSearchMode>,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +99,8 @@ struct ModelRequestWire {
     tools: Vec<ToolSpec>,
     limits: ModelLimits,
     reasoning: ReasoningPreference,
+    #[serde(default)]
+    web_search: Option<WebSearchMode>,
 }
 
 impl ModelRequest {
@@ -117,6 +129,7 @@ impl ModelRequest {
             self.limits,
             self.reasoning,
         )
+        .map(|request| request.with_web_search(self.web_search))
     }
 
     /// Reuses a checked catalog (the Turn's frozen ToolSet), while validating
@@ -136,7 +149,17 @@ impl ModelRequest {
             tools,
             limits,
             reasoning,
+            web_search: None,
         })
+    }
+
+    pub fn with_web_search(mut self, mode: Option<WebSearchMode>) -> Self {
+        self.web_search = mode;
+        self
+    }
+
+    pub const fn web_search(&self) -> Option<WebSearchMode> {
+        self.web_search
     }
 
     pub fn messages(&self) -> &[ModelMessage] {
@@ -175,6 +198,7 @@ impl<'de> Deserialize<'de> for ModelRequest {
     {
         let value = ModelRequestWire::deserialize(deserializer)?;
         Self::new(value.messages, value.tools, value.limits, value.reasoning)
+            .map(|request| request.with_web_search(value.web_search))
             .map_err(serde::de::Error::custom)
     }
 }

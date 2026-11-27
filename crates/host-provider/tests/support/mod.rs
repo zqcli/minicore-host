@@ -16,7 +16,9 @@ use tokio_util::sync::CancellationToken;
 #[path = "../../../../tests/support/http.rs"]
 mod http;
 pub use http::Captured;
-use http::read_request;
+pub use http::read_request;
+#[allow(unused_imports)]
+pub use http::write_sse;
 
 pub enum Reply {
     Full {

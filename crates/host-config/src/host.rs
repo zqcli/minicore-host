@@ -184,6 +184,8 @@ pub struct ModelDescription {
     pub context_window: u64,
     pub supported_reasoning: Vec<ReasoningPreference>,
     pub supports_tools: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<OpenAiWebSearch>,
 }
 impl From<&OpenAiModelSettings> for ModelDescription {
     fn from(value: &OpenAiModelSettings) -> Self {
@@ -193,6 +195,7 @@ impl From<&OpenAiModelSettings> for ModelDescription {
             context_window: value.context_window,
             supported_reasoning: value.supported_reasoning.clone(),
             supports_tools: value.supports_tools,
+            web_search: value.web_search,
         }
     }
 }

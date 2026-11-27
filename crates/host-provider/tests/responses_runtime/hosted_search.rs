@@ -96,3 +96,18 @@ async fn hosted_search_keeps_native_sources_without_dispatching_a_local_tool() {
         assert_eq!(requests[1].body["input"][3]["id"], "msg_search");
     }
 }
+
+#[tokio::test]
+async fn explicit_off_overrides_the_model_search_default() {
+    use minicore_host_runtime::model::WebSearchMode;
+    let fixture = Fixture::start(vec![Reply::sse(final_text("search disabled"))]).await;
+    let model = provider_with_search(&fixture.endpoint, "fixture-responses-model", Some(true));
+    let request = request(false).with_web_search(Some(WebSearchMode::Off));
+    assert!(call(model.as_ref(), request).await.outcome.is_ok());
+    let requests = fixture.finish().await;
+    assert!(requests[0].body.get("tools").is_none());
+    assert_eq!(
+        requests[0].body["include"],
+        json!(["reasoning.encrypted_content"])
+    );
+}

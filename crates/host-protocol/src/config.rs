@@ -181,9 +181,20 @@ impl ExecutionSettings {
     }
 }
 
+/// An explicit per-session override of the selected model's hosted search default.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchMode {
+    Off,
+    Live,
+    Cached,
+}
+
 validated_dto!(SessionDefaults, SessionDefaultsWire, "SessionDefaultsWire" {
     model: ModelRef,
     reasoning: ReasoningPreference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    web_search: Option<WebSearchMode>,
     tools: Vec<ToolBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace: Option<WorkspaceRef>,
@@ -198,6 +209,7 @@ impl Default for SessionDefaults {
                 .parse()
                 .expect("literal has valid Runtime grammar"),
             reasoning: ReasoningPreference::Auto,
+            web_search: None,
             tools: Vec::new(),
             workspace: None,
             execution: ExecutionSettings::default(),
@@ -264,6 +276,8 @@ validated_dto!(SessionConfig, SessionConfigWire, "SessionConfigWire" {
     instructions: String,
     model: ModelRef,
     reasoning: ReasoningPreference,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    web_search: Option<WebSearchMode>,
     tools: Vec<ToolBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     workspace: Option<WorkspaceRef>,
@@ -291,6 +305,7 @@ impl SessionConfig {
             instructions: agent.instructions.clone(),
             model: defaults.model.clone(),
             reasoning: defaults.reasoning,
+            web_search: defaults.web_search,
             tools: defaults.tools.clone(),
             workspace: defaults.workspace.clone(),
             execution: defaults.execution.clone(),
@@ -310,6 +325,9 @@ impl SessionConfig {
         }
         if let Some(value) = patch.reasoning {
             candidate.reasoning = value;
+        }
+        if let Some(value) = patch.web_search {
+            candidate.web_search = Some(value);
         }
         if let Some(value) = &patch.tools {
             candidate.tools = value.clone();
@@ -419,6 +437,12 @@ pub struct SessionConfigPatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present"
     )]
+    pub web_search: Option<WebSearchMode>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub tools: Option<Vec<ToolBinding>>,
     #[serde(default, skip_serializing_if = "NullablePatch::is_unchanged")]
     pub workspace: NullablePatch<WorkspaceRef>,
@@ -435,6 +459,7 @@ impl SessionConfigPatch {
             && self.instructions.is_none()
             && self.model.is_none()
             && self.reasoning.is_none()
+            && self.web_search.is_none()
             && self.tools.is_none()
             && self.workspace.is_unchanged()
             && self.execution.is_none()

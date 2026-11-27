@@ -16,7 +16,9 @@ pub use message::{AssistantPart, ModelMessage, ReasoningContent, ToolCall};
 pub use model_ref::{ModelRef, ModelRefError};
 pub use port::{Model, ModelCallContext, ModelDescriptor, ModelStartFuture, ModelStream};
 pub use replay::ProviderReplay;
-pub use request::{ModelLimits, ModelLimitsError, ModelRequest, ReasoningPreference};
+pub use request::{
+    ModelLimits, ModelLimitsError, ModelRequest, ReasoningPreference, WebSearchMode,
+};
 pub use response::{
     IncompleteToolCall, ModelEvent, ModelFinishReason, ModelPartial, ModelResponse,
 };
