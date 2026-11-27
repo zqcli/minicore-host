@@ -1,6 +1,13 @@
 # MiniCore Host
 
-## Current work: Host/TUI 0.12.11 (Task 122)
+## Current work: Markdown instruction files (Task 123)
+
+[Task 123](tasks/123-markdown-instructions/TASK.md) records the shared
+Host/Agent/Role instruction loader, Host field migration and validation.
+Review this change against Host `dev` baseline
+`a900fc45d19e0f104e3b9bbc4502642dd7788e99`.
+
+## Previous work: Host/TUI 0.12.11 (Task 122)
 
 [Task 122](tasks/122-version-01211/TASK.md) fixes the confirmed findings of a
 long-running TUI test: transient model failures retry while nothing was shown,

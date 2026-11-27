@@ -81,7 +81,8 @@ pub fn create_config_directory(
         key: "assistant".into(),
         name: "Assistant".into(),
         role: "coding".into(),
-        instructions: String::new(),
+        instructions: None,
+        instructions_file: None,
         session_defaults: SessionDefaults {
             model,
             tools,

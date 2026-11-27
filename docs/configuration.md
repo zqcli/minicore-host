@@ -8,7 +8,7 @@ migration. Runtime persistence stays in the separate data root.
 
 | Path | Meaning | Reader and owner |
 | --- | --- | --- |
-| `host.json` | Host name, framework instructions, providers, tools, workspace roots, network and logging | Shared `host-config` loader; Host applies values |
+| `host.json` | Host name, shared instructions, providers, tools, workspace roots, network and logging | Shared `host-config` loader; Host applies values |
 | `agents/*.json` | One declared Agent per file | Loader resolves references; Host and Agent owners apply values |
 | `roles/*.json` | One reusable Role per file | Loader expands the selected Role into each native Agent configuration |
 | `tui.json` | TUI editor, display and terminal preferences | TUI reads, parses and saves locally |
@@ -101,7 +101,7 @@ declaration and reload.
 
 ## Three instruction layers
 
-The instruction fields are `host.json.framework_instructions`, Role
+The instruction fields are `host.json.instructions`, Role
 `instructions`, and Agent `instructions`. Each may be omitted or `""`; JSON
 `null` is invalid. Nonempty layers become separate System messages in the order
 Host, Role, Agent, Workspace, then conversation history/input. When the selected
@@ -112,9 +112,30 @@ they are not stored in history. Compaction requests do not receive this executio
 context. Role name and description are metadata. Tool selection remains in the
 tool fields.
 
+All three declarations use `instructions` for inline text and
+`instructions_file` for Markdown. In existing `host.json` files, rename
+`framework_instructions` to `instructions` (or remove it if empty).
+The old key is not accepted. Embedders also need to rename the Rust field
+to `HostConfig::instructions`; if reopening old inline Host records, migrate
+the same key under `data.configuration.config` while the Host is stopped.
+
+File examples:
+
+| Declaration | File field | Example value |
+| --- | --- | --- |
+| `host.json` | `instructions_file` | `prompt/host.md` |
+| `roles/lead.json` | `instructions_file` | `../prompt/lead.md` |
+| `agents/assistant.json` | `instructions_file` | `../prompt/assistant.md` |
+
+Paths use `/` and are relative to the JSON file that declares them. They must
+resolve to a regular UTF-8 `.md` file inside the configuration directory.
+Omit the corresponding inline field entirely when using a file. Host reads the
+text verbatim at startup and configuration reload. Missing or invalid files
+fail configuration loading. Programmatic configurations still use inline text.
+
 Session creation copies Role and Agent instructions. Changes to these Agent
 defaults affect new Sessions; existing Sessions require explicit updates.
-Host framework changes apply to future Turns, including existing Sessions.
+Host instruction changes apply to future Turns, including existing Sessions.
 An active Turn keeps its frozen configuration. No model request rereads a file
 or follows mutable Agent values. These layers do not create protocol permission
 levels.

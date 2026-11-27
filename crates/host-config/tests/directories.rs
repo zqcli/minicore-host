@@ -46,7 +46,7 @@ fn load_resolves_native_roles_stable_keys_and_ignores_frontend_files() {
     assert_eq!(loaded.agents[1].config.instructions, "Agent instructions");
     assert_eq!(loaded.agents[1].config.role.name, "Different display name");
     assert!(loaded.agents[1].config.role.instructions.is_empty());
-    assert!(loaded.host.framework_instructions.is_empty());
+    assert!(loaded.host.instructions.is_empty());
     let native = serde_json::to_value(&loaded.agents[1].config).unwrap();
     assert!(native.get("key").is_none());
     assert!(native["role"].is_object());
@@ -56,6 +56,96 @@ fn load_resolves_native_roles_stable_keys_and_ignores_frontend_files() {
     )
     .unwrap();
     assert_eq!(load_config_directory(root.path()).unwrap(), loaded);
+}
+
+#[test]
+fn resolves_all_three_prompt_layers_relative_to_their_declarations() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    let prompt = "# Lead\r\n\r\n协调任务。\r\n";
+    std::fs::create_dir(root.join("prompt")).unwrap();
+    for (name, text) in [
+        ("host", "Host rules"),
+        ("lead", prompt),
+        ("agent", "Agent rules"),
+    ] {
+        std::fs::write(root.join(format!("prompt/{name}.md")), text).unwrap();
+    }
+
+    let mut host = serde_json::to_value(HostConfig::default()).unwrap();
+    host.as_object_mut().unwrap().remove("instructions");
+    host["instructions_file"] = json!("prompt/host.md");
+    write_json(&root.join("host.json"), &host);
+    write_json(
+        &root.join("roles/code.json"),
+        &json!({"name":"Lead","description":"","instructions_file":"../prompt/lead.md"}),
+    );
+    let mut definition = agent("stable", "code");
+    definition["instructions_file"] = json!("../prompt/agent.md");
+    write_json(&root.join("agents/a.json"), &definition);
+
+    let loaded = load_config_directory(root).unwrap();
+    assert_eq!(loaded.host.instructions, "Host rules");
+    assert_eq!(loaded.agents[0].config.role.instructions, prompt);
+    assert_eq!(loaded.agents[0].config.instructions, "Agent rules");
+
+    std::fs::write(root.join("roles/local.md"), "Updated").unwrap();
+    write_json(
+        &root.join("roles/code.json"),
+        &json!({"name":"Lead","description":"","instructions_file":"local.md"}),
+    );
+    let reloaded = load_config_directory(root).unwrap();
+    assert_eq!(reloaded.agents[0].config.role.instructions, "Updated");
+}
+
+#[test]
+fn invalid_prompt_sources_fail_configuration_loading() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("config");
+    minimal(&root);
+    std::fs::write(temp.path().join("outside.md"), "not configuration").unwrap();
+    let path = root.join("roles/code.json");
+    for (fields, expected) in [
+        (
+            json!({"instructions":"","instructions_file":"lead.md"}),
+            "not both",
+        ),
+        (
+            json!({"instructions_file":"../../outside.md"}),
+            "inside the configuration directory",
+        ),
+        (json!({"instructions_file":"/lead.md"}), "relative .md path"),
+        (
+            json!({"instructions_file":"C:\\lead.md"}),
+            "relative .md path",
+        ),
+        (json!({"instructions_file":"lead.txt"}), "relative .md path"),
+        (json!({"instructions_file":"lead.md"}), "lead.md"),
+        (json!({"instructions_file":null}), "parse JSON"),
+        (json!({"instructions":null}), "parse JSON"),
+    ] {
+        let mut value = json!({"name":"Lead","description":""});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        write_json(&path, &value);
+        let fault = load_config_directory(&root).unwrap_err();
+        assert_eq!(fault.kind(), Some(FaultKind::HostConfigInvalid));
+        assert!(fault.to_string().contains(expected), "{fault}");
+    }
+}
+
+#[test]
+fn host_does_not_accept_the_retired_instruction_keys() {
+    let root = tempfile::tempdir().unwrap();
+    for field in ["framework_instructions", "framework_instructions_file"] {
+        let mut host = serde_json::to_value(HostConfig::default()).unwrap();
+        host[field] = json!("old");
+        write_json(&root.path().join("host.json"), &host);
+        let fault = load_config_directory(root.path()).unwrap_err();
+        assert!(fault.to_string().contains(field), "{fault}");
+    }
 }
 
 #[test]
@@ -219,21 +309,19 @@ fn scaffold_is_native_explicit_and_does_not_replace_existing_files() {
 }
 
 #[test]
-fn host_framework_omission_empty_and_null_remain_distinct() {
+fn host_instruction_omission_empty_and_null_remain_distinct() {
     let original = HostConfig::default();
     let mut wire = serde_json::to_value(&original).unwrap();
-    assert_eq!(wire["framework_instructions"], "");
+    assert_eq!(wire["instructions"], "");
     assert_eq!(
         serde_json::from_value::<HostConfig>(wire.clone()).unwrap(),
         original
     );
-    wire.as_object_mut()
-        .unwrap()
-        .remove("framework_instructions");
+    wire.as_object_mut().unwrap().remove("instructions");
     assert_eq!(
         serde_json::from_value::<HostConfig>(wire.clone()).unwrap(),
         original
     );
-    wire["framework_instructions"] = Value::Null;
+    wire["instructions"] = Value::Null;
     assert!(serde_json::from_value::<HostConfig>(wire).is_err());
 }

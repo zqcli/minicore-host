@@ -882,6 +882,16 @@ async fn reference_only_restart_ignores_json_formatting_and_role_changes_only_ne
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         std::fs::write(path, serde_json::to_vec_pretty(&value).unwrap()).unwrap();
     }
+    let prompt_dir = fixture.config.join("prompt");
+    std::fs::create_dir(&prompt_dir).unwrap();
+    let prompt_path = prompt_dir.join("writer.md");
+    std::fs::write(&prompt_path, "role text").unwrap();
+    let role_path = fixture.config.join("roles/writer.json");
+    let mut role: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&role_path).unwrap()).unwrap();
+    role.as_object_mut().unwrap().remove("instructions");
+    role["instructions_file"] = serde_json::json!("../prompt/writer.md");
+    std::fs::write(role_path, serde_json::to_vec(&role).unwrap()).unwrap();
     let host = fixture.open().await;
     let connection = host.connect().unwrap();
     let caller = connection.caller();
@@ -901,10 +911,7 @@ async fn reference_only_restart_ignores_json_formatting_and_role_changes_only_ne
     stop(&host, &caller).await;
     drop(connection);
     drop(host);
-    let role_path = fixture.config.join("roles/writer.json");
-    let mut role: Role = serde_json::from_slice(&std::fs::read(&role_path).unwrap()).unwrap();
-    role.instructions = "updated shared Role".into();
-    std::fs::write(role_path, serde_json::to_vec(&role).unwrap()).unwrap();
+    std::fs::write(prompt_path, "updated shared Role").unwrap();
     let host = fixture.open().await;
     let connection = host.connect().unwrap();
     let caller = connection.caller();

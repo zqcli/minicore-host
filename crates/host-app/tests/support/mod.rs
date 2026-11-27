@@ -23,7 +23,7 @@ pub const WAIT: Duration = Duration::from_secs(8);
 
 pub fn config(endpoint: Option<String>, network: bool) -> HostConfig {
     let mut config = HostConfig {
-        framework_instructions: PRIVATE_PROMPT.into(),
+        instructions: PRIVATE_PROMPT.into(),
         ..Default::default()
     };
     if let Some(endpoint) = endpoint {

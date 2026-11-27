@@ -112,7 +112,7 @@ class Process:
     def __init__(self, binary, directory, endpoint, trace):
         self.trace = trace
         config = {
-            "name": "task058 actual Host", "framework_instructions": "",
+            "name": "task058 actual Host", "instructions": "",
             "models": [{"model": MODEL, "api": "chat_completions", "endpoint": endpoint,
                         "provider_model": "gated-loopback-sse-fixture",
                         "api_key_env": "TASK058_MODEL_KEY", "context_window": 128000,

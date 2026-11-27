@@ -1,7 +1,7 @@
 //! Read one complete declaration set; publication belongs to Host owners.
-use crate::{HostConfig, invalid};
-use minicore_host_protocol::{AgentConfig, Fault, Role, SessionDefaults};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use crate::{HostConfig, LogSettings, NetworkSettings, OpenAiModelSettings, invalid};
+use minicore_host_protocol::{AgentConfig, Fault, Role, SessionDefaults, ToolBinding};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Component, Path, PathBuf},
@@ -22,20 +22,101 @@ pub struct LoadedConfiguration {
     pub agents: Vec<AgentDefinition>,
 }
 
-/// File references belong to loading only. Owners receive complete native
-/// AgentConfig values and keep source keys in their own identity metadata.
+// Prompt paths exist only in file declarations; owners receive plain text.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HostFile {
+    name: String,
+    #[serde(default, deserialize_with = "present_string")]
+    instructions: Option<String>,
+    #[serde(default, deserialize_with = "present_string")]
+    instructions_file: Option<String>,
+    models: Vec<OpenAiModelSettings>,
+    tools: Vec<ToolBinding>,
+    #[serde(default)]
+    workspace_roots: Vec<String>,
+    network: NetworkSettings,
+    logging: LogSettings,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentFile {
     pub(crate) key: String,
     pub(crate) name: String,
     pub(crate) role: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub(crate) instructions: String,
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) instructions: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "present_string",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub(crate) instructions_file: Option<String>,
     pub(crate) session_defaults: SessionDefaults,
 }
 
-/// Load Host, Agent and Role JSON only. Frontend files are never read. Missing
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoleFile {
+    name: String,
+    description: String,
+    #[serde(default, deserialize_with = "present_string")]
+    instructions: Option<String>,
+    #[serde(default, deserialize_with = "present_string")]
+    instructions_file: Option<String>,
+}
+
+fn present_string<'de, D: Deserializer<'de>>(input: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(input).map(Some)
+}
+
+fn resolve_instructions(
+    root: &Path,
+    declaration: &Path,
+    inline: Option<String>,
+    file: Option<String>,
+) -> Result<String, Fault> {
+    let Some(file) = file else {
+        return Ok(inline.unwrap_or_default());
+    };
+    if inline.is_some() {
+        return Err(file_error(
+            declaration,
+            "load instructions",
+            "use inline instructions or an instructions file, not both",
+        ));
+    }
+    let relative = Path::new(&file);
+    if relative.has_root()
+        || file.contains(['\\', ':', '\0'])
+        || relative.extension().and_then(|ext| ext.to_str()) != Some("md")
+    {
+        return Err(file_error(
+            declaration,
+            "load instructions",
+            "use a relative .md path with / separators",
+        ));
+    }
+    let path = declaration.with_file_name(relative);
+    let resolved = path
+        .canonicalize()
+        .map_err(|error| file_error(&path, "resolve instructions file", error))?;
+    if !resolved.starts_with(root) || !resolved.is_file() {
+        return Err(file_error(
+            &path,
+            "load instructions",
+            "expected a regular file inside the configuration directory",
+        ));
+    }
+    std::fs::read_to_string(&resolved)
+        .map_err(|error| file_error(&path, "read instructions file", error))
+}
+
+/// Load Host, Agent and Role declarations. Frontend files are never read. Missing
 /// Agent/Role directories mean empty declaration sets; host.json is required.
 /// This performs filesystem I/O synchronously and must run outside owner locks.
 pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfiguration, Fault> {
@@ -50,7 +131,21 @@ pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfigurati
         )));
     }
     let host_path = directory.join("host.json");
-    let host: HostConfig = read_json(&host_path)?;
+    let file: HostFile = read_json(&host_path)?;
+    let host = HostConfig {
+        name: file.name,
+        instructions: resolve_instructions(
+            &directory,
+            &host_path,
+            file.instructions,
+            file.instructions_file,
+        )?,
+        models: file.models,
+        tools: file.tools,
+        workspace_roots: file.workspace_roots,
+        network: file.network,
+        logging: file.logging,
+    };
     host.validate()
         .map_err(|error| file_error(&host_path, "validate configuration", error))?;
 
@@ -62,7 +157,20 @@ pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfigurati
             .ok_or_else(|| invalid(format!("role filename is not UTF-8: {}", path.display())))?;
         validate_role_reference(stem)
             .map_err(|error| file_error(&path, "validate role filename", error))?;
-        roles.insert(stem.to_owned(), read_json::<Role>(&path)?);
+        let file: RoleFile = read_json(&path)?;
+        let role = Role {
+            name: file.name,
+            description: file.description,
+            instructions: resolve_instructions(
+                &directory,
+                &path,
+                file.instructions,
+                file.instructions_file,
+            )?,
+        };
+        role.validate()
+            .map_err(|error| file_error(&path, "validate Role declaration", error))?;
+        roles.insert(stem.to_owned(), role);
     }
 
     let mut keys = BTreeSet::new();
@@ -92,7 +200,12 @@ pub fn load_config_directory(root: impl AsRef<Path>) -> Result<LoadedConfigurati
         })?;
         let config = AgentConfig {
             role: role.clone(),
-            instructions: file.instructions,
+            instructions: resolve_instructions(
+                &directory,
+                &path,
+                file.instructions,
+                file.instructions_file,
+            )?,
             session_defaults: file.session_defaults,
         };
         config

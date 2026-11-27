@@ -69,7 +69,7 @@ fn config(endpoint: &str) -> HostConfig {
     HostConfig {
         workspace_roots: Vec::new(),
         name: "Configured Host".into(),
-        framework_instructions: "FRAMEWORK A".into(),
+        instructions: "FRAMEWORK A".into(),
         models: vec![OpenAiModelSettings {
             api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "custom/provider/chat".parse().unwrap(),
@@ -297,7 +297,7 @@ async fn old_turn_resources_after_reload(network_operator: bool) {
     send(&host, &caller, &target, "first task");
     let first = server_a.request().await;
     let mut candidate = original.clone();
-    candidate.framework_instructions = "FRAMEWORK B".into();
+    candidate.instructions = "FRAMEWORK B".into();
     candidate.models[0].endpoint = server_b.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
     candidate.tools.clear();
@@ -442,7 +442,7 @@ async fn empty_instruction_layers_and_role_metadata_add_no_system_messages() {
     let mut server = Server::start(vec![(answer("done"), None)]).await;
     let builder = HostResourceBuilder::builtins().unwrap();
     let mut configured = config(&server.endpoint);
-    configured.framework_instructions.clear();
+    configured.instructions.clear();
     let host = Host::memory_configured(prepare(&builder, configured, "key").await).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
@@ -589,7 +589,7 @@ async fn reload_rejects_restart_invalid_stale_and_readonly_without_rotating_keys
         .unwrap_err();
     assert_eq!(err.kind(), Some(FaultKind::HostAccessReadOnly));
     let mut hot = initial.clone();
-    hot.framework_instructions = "NEW FRAMEWORK".into();
+    hot.instructions = "NEW FRAMEWORK".into();
     host.reload_configuration(&caller, 0, prepare(&builder, hot.clone(), "old-key").await)
         .await
         .unwrap();

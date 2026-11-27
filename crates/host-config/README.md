@@ -14,7 +14,9 @@ home information fails instead of falling back to the executable or cwd.
 
 `load_config_directory(root)` reads `host.json`, `roles/*.json` and
 `agents/*.json`. The Host file is required. Missing Agent/Role directories are
-empty declaration sets. Frontend files, including `tui.json`, are ignored.
+empty declaration sets. Host, Agent and Role declarations can reference UTF-8 Markdown within the
+configuration directory instead of inline instructions. Frontend files,
+including `tui.json`, are ignored.
 Every parsed object rejects unknown fields. A bad file, missing Role reference
 or duplicate Agent key fails the whole read with its source path.
 
@@ -36,7 +38,7 @@ the same directory is an explicit picker root in the generated Host file.
 Logging goes to the absolute native-home `.minicore/logs/host.log` path; the
 initializer creates its parent. Host config remains the owner of custom log paths.
 
-Host framework, Role instructions and Agent instructions each default to an
+Host, Role and Agent instructions each default to an
 empty string when omitted. Native serialization retains explicit empty strings
 so strict durable-record reads never discard an existing instruction field.
 Session creation copies Role and Agent instructions

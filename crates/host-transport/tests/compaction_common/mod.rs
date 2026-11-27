@@ -154,7 +154,7 @@ impl Drop for HttpFixture {
 }
 pub async fn host(http: &HttpFixture) -> Arc<Host> {
     let config = HostConfig {
-        framework_instructions: "Transport framework".into(),
+        instructions: "Transport framework".into(),
         models: vec![OpenAiModelSettings {
             api: minicore_host_core::OpenAiModelApi::ChatCompletions,
             model: "custom/provider/chat".parse().unwrap(),

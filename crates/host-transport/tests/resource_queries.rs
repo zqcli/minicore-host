@@ -167,7 +167,7 @@ impl Resources {
         let config = HostConfig {
             workspace_roots: Vec::new(),
             name: "Real configured Host".into(),
-            framework_instructions: "Resource query acceptance framework".into(),
+            instructions: "Resource query acceptance framework".into(),
             // Deliberately reverse the two complete, same-leaf references.
             models: ["provider-b/chat", MODEL]
                 .into_iter()

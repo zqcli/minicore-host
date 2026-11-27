@@ -1,4 +1,4 @@
-**设计基线：v4.11.6｜2026-11-23。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.11.7｜2026-11-27。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -144,7 +144,7 @@ type SessionConfig = SessionDefaults & {
 
 Role 不承载模型、工具、工作目录、Host 地址、运行历史或权限策略，也不另设一份 system_prompt。角色工作约定不被解释为访问控制。Agent 名称表示参与者身份，Role 名称表示职责；两个 Agent 可以采用同一 Role 和不同执行配置。Role 文件复用由配置目录加载器解析为同一结构；原生 AgentConfig、SessionConfig 中仍保存完整 Role 值，不建立 Role 运行服务。
 
-普通模型请求依次组装 HostConfig.framework_instructions、当前 Turn 已绑定的 Session role.instructions、Session instructions、Workspace 目录上下文、历史和本次允许取入的输入。前三层均可省略或为空字符串，缺省为空；非空层分别形成一条 System 消息，空层不产生占位消息，三层不互相覆盖，也不因此建立新的权限等级。指令不反复写入历史；用户任务、同伴消息和工具结果保留各自来源、关联及顺序，临时分工作为任务输入。Role name/description 不自动拼入指令；工具声明仍由 tools 字段传递。提供方适配只改变编码形式。
+普通模型请求依次组装 HostConfig.instructions、当前 Turn 已绑定的 Session role.instructions、Session instructions、Workspace 目录上下文、历史和本次允许取入的输入。前三层均可省略或为空字符串，缺省为空；非空层分别形成一条 System 消息，空层不产生占位消息，三层不互相覆盖，也不因此建立新的权限等级。指令不反复写入历史；用户任务、同伴消息和工具结果保留各自来源、关联及顺序，临时分工作为任务输入。Role name/description 不自动拼入指令；工具声明仍由 tools 字段传递。提供方适配只改变编码形式。
 
 普通请求实际选择内置 agent 工具时，在上述指令和 Workspace 之后、历史之前加入一条当前执行上下文，包含原 Turn 绑定提供的 host_id、agent_id、session_id。这些是后端生成的只读定位事实，不从用户文本、历史或模型自报恢复，不写入历史，不创建新的授权层。当前目标仍按 agent schema 显式传入，执行资格仍由原 Turn 能力和直接所有者校验。未选择内置 agent 的请求和仅做摘要的压缩请求不为此添加执行身份或工具执行资格。
 
@@ -188,19 +188,21 @@ agent.update、session.update 采用明确字段的部分更新。SessionOverrid
 
 Host 与内嵌 Host 的 TUI 统一使用 `--config-dir`。未提供时使用用户主目录下的 `.minicore/config`，数据默认位于 `.minicore/data`；`--config-dir` 仅覆盖配置目录，`--data-root` 仅覆盖数据目录，二者互不推导。显式相对路径按启动工作目录转为绝对路径；主目录按平台原生机制取得，不能确定必需默认路径时明确报错，不退回可执行文件目录或 cwd。TUI 将同一个已解析目录值传给 Host 的 Rust 启动接口，不拼接子进程命令或自行解析 Host 业务配置。配置目录在该 Host 实例启动时绑定，运行中不通过重载请求切换目录。初始化样例日志使用 `.minicore/logs/host.log` 的绝对路径；自定义日志位置仍由 host.json.logging 指定，不新增根目录或日志路径命令行选项。
 
-全部配置文件使用 UTF-8 标准 JSON；不读取旧 TOML、`agent-defaults.json`、旧单文件启动参数或旧 `MINICORE_HOME` 路径规则，不自动转换或兼容旧文件。目录管理 Host 与 Agent 的配置正文唯一保存在配置目录；数据目录只为它们保存稳定身份、来源、已应用配置摘要、版本与管理事实，不再重复保存名称、提示词、模型或 Role 正文。独立程序化 Host 和动态 Agent 没有文件声明，继续持久保存自身配置。Session 保留独立的 effective_config 和历史，不用 Session 配置反推 Agent 默认值。
+配置声明使用 UTF-8 标准 JSON，Host、Agent 与 Role 可显式引用配置目录内的 UTF-8 Markdown 提示词；不读取旧 TOML、`agent-defaults.json`、旧单文件启动参数或旧 `MINICORE_HOME` 路径规则，不自动转换或兼容旧文件。目录管理 Host 与 Agent 的配置正文唯一保存在配置目录；数据目录只为它们保存稳定身份、来源、已应用配置摘要、版本与管理事实，不再重复保存名称、提示词、模型或 Role 正文。独立程序化 Host 和动态 Agent 没有文件声明，继续持久保存自身配置。Session 保留独立的 effective_config 和历史，不用 Session 配置反推 Agent 默认值。
 
 | 路径 | 内容与所有者 |
 | --- | --- |
-| `<config-dir>/host.json` | 一个原生 HostConfig，必须存在；保留模型、工具、workspace_roots、网络与日志等现有字段 |
-| `<config-dir>/agents/*.json` | 每文件一个 Agent 声明；字段为 key、name、role、可省略的 instructions、完整 session_defaults |
-| `<config-dir>/roles/*.json` | 每文件一个原生 Role；name、description 与可省略的 instructions |
+| `<config-dir>/host.json` | 一个原生 HostConfig，必须存在；保留模型、工具、workspace_roots、网络与日志等现有字段，支持 instructions_file |
+| `<config-dir>/agents/*.json` | 每文件一个 Agent 声明；字段为 key、name、role、可省略的 instructions 或 instructions_file、完整 session_defaults |
+| `<config-dir>/roles/*.json` | 每文件一个 Role 声明；name、description 与可省略的 instructions 或 instructions_file |
 | `<config-dir>/tui.json` | TUI 自行读取、校验、应用及保存的界面配置，包含 ui.theme/editor/bell |
 | Web 部署目录的 `web.json` | Web 自己的界面与 Host 连接配置；不属于任何 Host 配置目录，本次不实施 Web 多 Host 界面 |
 
-Host 只读取 host.json 与 agents/roles 下的 JSON，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板放 `<config-dir>/commands/`；不搜索旧 prompt/commands 路径。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
+Host 只读取 host.json、agents/roles 下的 JSON 以及这些声明显式引用的 Markdown，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板放 `<config-dir>/commands/`；不搜索旧 prompt/commands 路径。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
 
 Agent 声明的 `key` 在一个 Host 内唯一、非空且不含 NUL，是稳定配置标识；`name` 是可修改且不要求唯一的显示名。文件名通常与 key 一致，但重命名文件不改变实体身份。`role` 精确引用 `roles/<role>.json` 的文件 stem；只允许单个名称，不接受绝对路径、目录穿越或多处搜索。Role name 不参与文件定位。缺失的 agents/roles 目录表示没有相应声明；角色文件被引用但不存在、JSON 错误、重复 key 或非法资源声明必须明确报错，不替换角色、模型或工具。
+
+Host 的 `instructions_file`、Agent 和 Role 的 `instructions_file` 均以各自 JSON 文件所在目录为起点，使用 `/` 分隔的相对 `.md` 路径。可引用同目录或配置目录内其他目录，例如 `roles/lead.json` 引用 `../prompt/lead.md`，但最终文件不能在配置目录外。文件配置与对应内联字段互斥；启动与重载时原样展开 UTF-8 正文，缺失、不可读或无效时拒绝该配置。协议、动态配置与 Session 仍使用内联文本。
 
 `crates/host-config` 共享库承载纯 Host 配置值、目录路径解析、文件加载、Role 引用展开与初始化样例。该库依赖现有 protocol 值类型，不依赖 core、Runtime、UI 或运行资源。Host core 使用其结果；资源准备、对象身份、版本、回执、持久化与正式发布仍由原所有者负责。已解析候选只包含 HostConfig 及 {key,name,config:AgentConfig}，文件引用不进入 Session 或 Runtime。初始样例通过 create_new 生成，不覆盖用户文件，不包含真实凭据；默认本地工具 Agent 明确保存初始化时选定的绝对工作区。TUI 以缺少 host.json 作为首次初始化入口，空 agents/roles 目录不阻止生成缺失样例；生成后说明路径并退出，不在该次调用中启动 Host，也不声称恢复了旧配置。已有 host.json 时不因声明目录为空而注入示例 Agent。
 
@@ -220,7 +222,7 @@ Agent owner 的运行查询以可空 `configuration_source: {key}` 表达文件�
 
 可热更时，Host 自身配置字段按原规则整份提交，然后逐层更新声明 Agent。不引入跨所有 Agent 的原子事务或补偿回滚：运行期保存失败必须保留已完成事实，回执报告各 key 的创建、更新、未变化或失败，不再有解绑结果；新建 Agent 复用原 AgentCreateReceipt 的分阶段结果。全部完成返回 Applied，真实部分完成返回 PartiallyApplied，准备阶段失败及需重启仍使用原结果。收到部分结果后客户端只刷新实际状态，不自动重试。密钥发布导致调用连接断开时，已接受的后续 owner 工作仍继续。
 
-Role 或 Agent 指令更新只改变相关 Agent 以后创建的 Session；已有 Session 显式更新，当前 Turn 保持原绑定。Host framework 更新可供已有 Session 的后续 Turn 使用。所有新 instructions 字段省略使用空串，显式空串清空，null 拒绝；Session patch 省略保持已有值。每个 Turn 绑定三层文本，不逐轮回读文件或 Agent 默认配置。初始化后的文件不自动监控，业务重载与 UI 设置保存相互独立。
+Role 或 Agent 指令更新只改变相关 Agent 以后创建的 Session；已有 Session 显式更新，当前 Turn 保持原绑定。Host 指令更新可供已有 Session 的后续 Turn 使用。所有新 instructions 字段省略使用空串，显式空串清空，null 拒绝；Session patch 省略保持已有值。每个 Turn 绑定三层文本，不逐轮回读文件或 Agent 默认配置。初始化后的文件不自动监控，业务重载与 UI 设置保存相互独立。
 
 ## 资源装配与 Host 重载
 

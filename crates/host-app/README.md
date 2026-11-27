@@ -40,7 +40,7 @@ For example, this **template** declares one OpenAI-compatible provider:
 ```json
 {
   "name": "Local Host",
-  "framework_instructions": "",
+  "instructions": "",
   "models": [{
     "model": "provider/chat",
     "api": "chat_completions",

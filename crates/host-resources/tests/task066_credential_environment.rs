@@ -171,7 +171,7 @@ async fn publication_scenario() {
     next.models[0].api_key_env = NAMES[2].into();
     next.models[0].provider_model = "provider-B".into();
     next.network.access_key_env = Some(NAMES[3].into());
-    next.framework_instructions = "FRAMEWORK B".into();
+    next.instructions = "FRAMEWORK B".into();
     let prepared = builder.prepare(next.clone()).await.unwrap();
     assert_eq!(
         host.reload_configuration(&caller, 0, prepared)

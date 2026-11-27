@@ -1,6 +1,6 @@
 {
   "name": "Local Host",
-  "framework_instructions": "",
+  "instructions": "",
   "models": [
     {
       "model": "provider/chat",

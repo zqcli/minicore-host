@@ -431,7 +431,7 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
     let mut candidate = original;
     candidate.models[0].endpoint = new.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
-    candidate.framework_instructions = "FRAMEWORK B".into();
+    candidate.instructions = "FRAMEWORK B".into();
     candidate.tools = selection(&["read"]);
     assert_eq!(
         host.reload_configuration(&caller, 0, prepare(&builder, candidate).await)

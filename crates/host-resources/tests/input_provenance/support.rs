@@ -74,7 +74,7 @@ impl Fixture {
 }
 pub(super) fn config(endpoint: &str) -> HostConfig {
     let mut config = base::config(endpoint);
-    config.framework_instructions = "FRAMEWORK".into();
+    config.instructions = "FRAMEWORK".into();
     config.tools = selection(&["agent"]);
     config
 }

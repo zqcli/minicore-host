@@ -167,7 +167,7 @@ pub fn target(receipt: &AgentCreateReceipt) -> SessionRef {
 }
 pub fn configuration(endpoint: &str) -> HostConfig {
     let mut config = HostConfig {
-        framework_instructions: FRAMEWORK.into(),
+        instructions: FRAMEWORK.into(),
         ..Default::default()
     };
     config.models.push(OpenAiModelSettings {

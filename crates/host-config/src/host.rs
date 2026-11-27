@@ -10,7 +10,7 @@ use crate::invalid;
 pub struct HostConfig {
     pub name: String,
     #[serde(default)]
-    pub framework_instructions: String,
+    pub instructions: String,
     pub models: Vec<OpenAiModelSettings>,
     /// Available selections from the statically compiled tool registry.
     pub tools: Vec<ToolBinding>,
@@ -24,7 +24,7 @@ impl Default for HostConfig {
     fn default() -> Self {
         Self {
             name: "MiniCore".into(),
-            framework_instructions: String::new(),
+            instructions: String::new(),
             models: Vec::new(),
             tools: Vec::new(),
             workspace_roots: Vec::new(),
@@ -37,7 +37,7 @@ impl HostConfig {
     pub fn validate(&self) -> Result<(), Fault> {
         if self.name.trim().is_empty()
             || self.name.contains('\0')
-            || self.framework_instructions.contains('\0')
+            || self.instructions.contains('\0')
         {
             return Err(invalid("Host name and framework instructions are invalid"));
         }

@@ -83,11 +83,10 @@ fn explicit_empty_and_omitted_native_instructions_remain_readable() {
         .join(format!("{}.json", agent.id().as_str()));
     let session_path = session.canonical_path().join("session.json");
     let history_path = session.canonical_path().join("history.jsonl");
-    // The supported record schema already wrote these two original fields as
-    // explicit empty strings. New Agent/Session instructions were absent.
+    // Explicit empty Host/Role instructions still load when standalone
+    // Agent/Session instructions are omitted.
     rewrite(&host_path, |value| {
-        value["data"]["configuration"]["config"]["framework_instructions"] =
-            Value::String(String::new())
+        value["data"]["configuration"]["config"]["instructions"] = Value::String(String::new())
     });
     rewrite(&agent_path, |value| {
         value["data"]["configuration"]["config"]["role"]["instructions"] =
@@ -115,7 +114,7 @@ fn explicit_empty_and_omitted_native_instructions_remain_readable() {
     else {
         panic!("inline Host expected")
     };
-    assert!(config.framework_instructions.is_empty());
+    assert!(config.instructions.is_empty());
     let loaded_agent = agent.load().unwrap();
     let minicore_host_storage::AgentConfiguration::Inline { config, .. } =
         loaded_agent.data.configuration

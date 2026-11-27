@@ -143,7 +143,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
         HttpFixture::start("A finished after rotation", Some(finish_a.clone())).await;
     let mut provider_b = HttpFixture::start("B finished", None).await;
     let mut original = config();
-    original.framework_instructions = "FRAMEWORK A".into();
+    original.instructions = "FRAMEWORK A".into();
     original.models = vec![OpenAiModelSettings {
         api: minicore_host_core::OpenAiModelApi::ChatCompletions,
         model: "fixture/chat".parse().unwrap(),
@@ -231,7 +231,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
         .await
         .unwrap();
     let mut candidate = same_key;
-    candidate.framework_instructions = "FRAMEWORK B".into();
+    candidate.instructions = "FRAMEWORK B".into();
     candidate.models[0].endpoint = provider_b.endpoint.clone();
     candidate.models[0].provider_model = "provider-B".into();
     candidate.network.access_key_env = Some(SOURCE_B.into());

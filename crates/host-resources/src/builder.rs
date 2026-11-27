@@ -163,7 +163,7 @@ impl HostResourceBuilder {
                 models,
                 tools,
                 enabled: config.tools.iter().map(|tool| tool.name.clone()).collect(),
-                framework: config.framework_instructions.clone(),
+                framework: config.instructions.clone(),
             });
             PreparedHostConfiguration::new(config, resources, selected_specs, access_key)
                 .map(|candidate| candidate.with_preparer(preparer))
