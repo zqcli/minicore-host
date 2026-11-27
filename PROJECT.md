@@ -1,6 +1,18 @@
 # MiniCore Host
 
-## Current work: Markdown instruction files (Task 123)
+## Current work: Agent action defaults and delegation grants (Task 124)
+
+[Task 124](tasks/124-agent-action-defaults/TASK.md) records the create shorthand,
+current-Session inspect default, explicit per-delegation grant and direct-child
+limit, and the model-facing tool description update.
+The comparison baseline is Host `dev`
+`fc971505eb36efe46762aabe0ca5ff8349634c46`; package and SPEC version labels stay
+unchanged. The fixed implementation checkpoint is
+`ba93f3e0eebbd8b103515fbb60d66688016779c3`; focused checks and their limits
+are recorded with the task. Independent review remains pending. Ordinary
+messages, closure and other actions retain their existing behavior.
+
+## Previous work: Markdown instruction files (Task 123)
 
 [Task 123](tasks/123-markdown-instructions/TASK.md) records the shared
 Host/Agent/Role instruction loader, Host field migration and validation.

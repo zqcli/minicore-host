@@ -49,7 +49,7 @@ Host 管 Agent，Agent 管自己的 Session，Agent 内部的 SessionController 
 
 11. **数据按直接归属管理，物理布局保持简单。** Host 根目录保存 host.json、agents/<AgentId>.json 与 sessions/<SessionId>/；业务仍按 Host → Agent → Session 管理，归属以记录为准，不以目录层级代替所有权。同一实际 Host 数据目录同时只由一个运行实例管理。停止、关闭和实例回收不隐式删除 persistent 历史；显式删除逐层执行且范围明确，不扩大到其他接收方结果或工作区产物。
 
-12. **本版不设置应用层资源上限。** 不设执行名额、模型或工具额度，以及实体、输入、等待、正文、结果、回执、连接、订阅和日志的数量、字节或保留时长预算，不做容量预留、容量准入或按容量淘汰。正常消费、结算、回收和显式删除继续执行；查询范围、单 Session 单 Turn、取消、明确期限及有限重试不属于容量配额。
+12. **本版不设置应用层资源上限。** 不设执行名额、模型或工具额度，以及实体、输入、等待、正文、结果、回执、连接、订阅和日志的数量、字节或保留时长预算，不做容量预留、容量准入或按容量淘汰。正常消费、结算、回收和显式删除继续执行；查询范围、单 Session 单 Turn、取消、明确期限及有限重试不属于容量配额。agent 工具显式授予成员的直属子委派上限属于本次协作权限，不是 Host 资源额度。
 
 13. **配置按确定边界生效。** Agent 默认值只影响新建 Session，已有 Session 显式更新，当前 Turn 保持配置和资源绑定。部分字段更新、显式清空、数组整体替换，经整次校验和配置版本确认后提交。Host 实际变更含需重启项时整次不应用；密钥按成功发布边界生效。
 
@@ -349,7 +349,7 @@ closed 对两种 mode 都是终态。普通会话无论 persistent 或 memory，
 
 临时子方的收尾顺序为：固定本次结果并将必要数据交给范围所有者，结束自身执行与资源，按契约通知仍可接收的直接父 Session，再移除本次委派登记。范围所有者只暂存当前交付需要的数据，不建立结束后的子结果仓库。根范围关闭则先封闭新的委派与唤醒，再逐个通过实际所有者完成后代和根方收尾；物理目录与历史删除另按存储规则处理。
 
-显式暂停时，通知可以接收但不消费。普通取消不自动暂停或取消独立后代；普通失败或取消若留下未消费输入，按实际暂停／阻塞状态驻留，Turn 结果仍可观察，但尚不发布整个委派的最终通知。若运行故障使正常结束事实无法提交，且没有后来的有效结束事实覆盖该故障，范围所有者按真实错误终止委派并明确处置剩余输入；这不是把所有 failed 结果或持久化失败都当作强制回收条件。实际委派结束并交出必要结果后，才按真实原因通知一次。沿用已明确的执行期限，不新增 memory TTL、委派名额或通用任务期限。
+显式暂停时，通知可以接收但不消费。普通取消不自动暂停或取消独立后代；普通失败或取消若留下未消费输入，按实际暂停／阻塞状态驻留，Turn 结果仍可观察，但尚不发布整个委派的最终通知。若运行故障使正常结束事实无法提交，且没有后来的有效结束事实覆盖该故障，范围所有者按真实错误终止委派并明确处置剩余输入；这不是把所有 failed 结果或持久化失败都当作强制回收条件。实际委派结束并交出必要结果后，才按真实原因通知一次。沿用已明确的执行期限，不新增 memory TTL、全局委派名额或通用任务期限。
 
 ## Turn 生命周期与终态
 
@@ -1167,9 +1167,9 @@ Host 运行环境的装配代码登记可用工具模块，复用同一声明供
 
 | action | 工具层语义 | 使用的基础能力 |
 | --- | --- | --- |
-| create | 一次调用创建 Agent 及默认 Session，或在已有 Agent 下创建 Session；可直接配置或显式复用来源配置，可带首条 text；带任务时先准备委派再受理，省略 text 时只创建空对象 | agent.create／session.create，标准文本投递、运行期关联及通用结果交接 |
-| send | 投递 follow_up／steer；已有委派追加消息时保持原关联，首次委派已有明确 Session 时使用 delegate:true；返回接收事实，不等待任务完成 | message.send；首次委派先完成工具范围登记和接收准备，不改变基础投递接口 |
-| inspect | 读取明确目标的身份、状态、配置、消息或回执；按需读取实际仍有的正文 | 既有查询与读取，不从旧启动回执虚构最终结果 |
+| create | 省略 resource 时以首条 text 启动子 Session，默认当前 Agent、memory；显式指定 Agent／Session 时保留配置、来源和空对象创建；带任务时先核对委派权限再准备受理 | agent.create／session.create，标准文本投递、运行期关联及通用结果交接 |
+| send | 以 steer 投递；已有委派追加消息时保持原关联，首次委派已有明确 Session 时使用 delegate:true；返回接收事实，不等待任务完成 | message.send；首次委派先核对委派权限并完成范围登记和接收准备，不改变基础投递接口 |
+| inspect | 默认读取当前 Session，也可指定目标读取身份、状态、配置、消息或回执；按需读取实际仍有的正文 | 既有查询与读取，不从旧启动回执虚构最终结果 |
 | wait | 等待当前会话有可消费的 next-step 输入或明确等待结束；暂停仅排队，不消费消息、不代表指定子任务成功 | 标准工具等待、输入可用通知与取消；不轮询模型或生成伪结果 |
 | control | 取消明确 Turn／Session、关闭 Session，或结束调用方实际持有的根协作范围 | 既有对象控制与工具范围收尾，交实际所有者执行 |
 | update | 修改明确 Agent 的元数据／默认配置，或明确 Session 的元数据／有效配置；不隐式更新其他会话 | agent.update／session.update，复用字段校验、配置版本与保存规则 |
@@ -1184,14 +1184,17 @@ Host 运行环境的装配代码登记可用工具模块，复用同一声明供
 
 | 调用分支 | 必填参数 | 可选参数与默认行为 |
 | --- | --- | --- |
+| create，省略 resource | 非空 text | 等同 resource=session 的带任务创建；target 省略时为调用方 Agent，mode 默认 memory；可显式提供 target、mode、name、settings，沿用 Session 分支的校验与继承 |
 | create，resource=agent | name、mode | target:{host_id} 省略时为本 Host；from_agent_id 省略时以调用方 Agent 为配置来源；settings、text；name 与 mode 属于新 Agent，默认 Session 随同创建并沿用其默认配置与模式 |
-| create，resource=session | 无 | target:AgentRef 省略时为调用方 Agent；mode、settings、text；mode 取所属 Agent；未覆盖设置见下文委派继承；不接受 from_agent_id |
-| send | target:MessageTarget、text | mode 默认 follow_up，可指定 steer；delegate 默认 false；in_reply_to 可引用实际消息 |
-| inspect | target，按下表的读取分支定位 | include_output 默认 false；include_config 默认 false，仅用于 Agent／Session；正文读取范围和分页复用既有基本结构 |
+| create，resource=session | 无 | target:AgentRef 省略时为调用方 Agent；name、mode、settings、text；带 text 时 mode 默认 memory，不带 text 时取所属 Agent；未覆盖设置见下文委派继承；不接受 from_agent_id |
+| send | target:MessageTarget、text | mode 可省略，工具统一按 steer 投递；delegate 默认 false；in_reply_to 可引用实际消息 |
+| inspect | 无 | target 省略时为调用方当前 Session，显式提供时按下表定位；include_output 默认 false；include_config 默认 false，仅用于 Agent／Session；正文读取范围和分页复用既有基本结构 |
 | wait | 无额外必填业务参数 | timeout_ms；不接受子 Session target |
 | control | operation，以及该分支要求的目标 | keep_inbox 仅用于取消分支，默认 false |
 | update，resource=agent | target:AgentRef、changes | changes 允许 name 及下述业务配置字段；不接受 mode、归属或默认 Session 指针 |
 | update，resource=session | target:SessionRef、changes | changes 允许 title 及下述业务配置字段；不接受 mode、归属或 Agent 默认值修改 |
+
+省略 resource 的 create 必须携带有效首条 text，不把缺少任务的简写解释为空对象创建。普通 send 的目标继续使用 session／agent_default，不新增 parent 别名。启动新委派时可用的顶层参数 allow_delegation、max_children 见下文。
 
 settings 是创建时的配置输入；changes 是更新时的明确字段赋值，两者复用相同业务字段的值类型。配置字段包括 role、model、reasoning、tools、workspace、execution：role 复用完整 Role，model 等复用当前资源引用与参数类型，execution 仅开放现有执行和压缩配置中允许修改的字段，不接受任意内部配置。Agent 分支将 role 放入 AgentConfig.role，其余配置放入 session_defaults；Session 分支映射为本 Session 的创建覆盖或有效配置更新。name／title 是元数据，分别由所属对象处理。
 
@@ -1204,7 +1207,7 @@ settings 是创建时的配置输入；changes 是更新时的明确字段赋值
 | message | agent_id、session_id、message_id | message.get 与实际仍保留的消息文本 |
 | receipt | host_id、operation_id | host.receipt.get |
 
-读取目标的 kind 决定必填字段，上表是跨工具边界所需定位上下文，不改变 AgentRef、SessionRef、TurnRef、ToolCallRef 的直接归属定义。默认 inspect 取得必要身份、当前状态与执行／错误摘要；include_config 只读允许公开的实际配置，include_output 只用于 Session、Turn、ToolCall 或 Message 的实际正文。Session 正文须返回实际来源和范围，查看指定旧执行时明确给出对应目标。读取只针对仍存在的数据，不建立结果缓存或保留承诺。
+显式读取目标的 kind 决定必填字段，上表是跨工具边界所需定位上下文，不改变 AgentRef、SessionRef、TurnRef、ToolCallRef 的直接归属定义。省略 target 的 inspect 从可信调用上下文补齐当前 Session，显式但缺字段的 target 仍报错，不猜测目标。默认只取得必要身份、当前状态与执行／错误摘要；include_config 只读允许公开的实际配置，include_output 只用于 Session、Turn、ToolCall 或 Message 的实际正文。Session 正文须返回实际来源和范围，查看指定旧执行时明确给出对应目标。读取只针对仍存在的数据，不建立结果缓存或保留承诺。
 
 | control.operation | 目标与参数 | 处理方式 |
 | --- | --- | --- |
@@ -1229,11 +1232,19 @@ update.changes 至少包含一个允许修改的业务字段或元数据。省�
 
 更新 Agent 的 Role／SessionDefaults 只影响之后认领创建的新 Session，已经存在的默认 Session 同样保持原值。修改已有 Session 必须明确以 resource=session 调用 update，从下一 Turn 生效；当前 Turn 的后续模型请求、工具、重试和压缩保持原绑定。名称／标题按元数据规则处理。默认收件入口继续使用 agent.set_default_session，不混入 changes，也不新增 Host 公共方法。
 
+## 新委派的权限与直属子委派上限
+
+不处于活动成员关系的 Session 可作为根方启动新委派；活动成员默认不能启动，包括带 text 的 create（新 Agent 或 Session）和首次 send(delegate:true) 纳入已有 Session。资格按当前关系判断，不看历史 delegated_by，不设固定深度门槛。显式创建空对象和普通消息不受这项限制。
+
+根方可在带 text 的 create，或首次 send(delegate:true) 纳入 Session 时，以 allow_delegation:true 授权收件方派发直属子任务。allow_delegation 省略或 false 均不授权；仅 true 可搭配正整数 max_children，省略 max_children 时默认 2。两字段均不接受 null，只用于启动新委派，在普通 send、空对象创建或对已有委派的追加中均须省略。活动成员不能向下转授，因此获授权 Lead 创建或纳入的子成员不能继续派发。
+
+授权只属于当前委派，不写入 Agent、Role 或 Session 配置，不继承、不跨委派沿用。max_children 限制该成员同时占用的直属子委派：带 text 的 create 与首次 send(delegate:true) 共用上限，从启动认领到子委派收尾并释放期间计入，启动失败清理后归还。达到上限时明确拒绝新的派发，不排队；普通消息和仅追加输入的调用不多占名额。根方不受这个成员上限影响，运行、通知与关闭仍按原契约处理。
+
 ## 已有 Session 的首次委派
 
-create 不带 text 只创建空对象。普通 send 只承诺消息投递；向本次已有委派追加输入时保留原直接父方、范围和通知责任，delegate:false 不撤销已有关系。要把普通或空 Session 首次纳入本次委派，明确使用 delegate:true，且 target 必须是 kind=session 的实际 Session，不能使用 agent_default 猜测接收方。
+显式指定 resource 的 create 不带 text 时只创建空对象。普通 send 只承诺消息投递；向本次已有委派追加输入时保留原直接父方、范围和通知责任，delegate:false 不撤销已有关系。要把普通或空 Session 首次纳入本次委派，明确使用 delegate:true，且 target 必须是 kind=session 的实际 Session，不能使用 agent_default 猜测接收方。
 
-delegate:true 由工具先完成范围登记与必要结果接收，再调用标准 message.send；准备失败不得先投递任务。与本次已有委派一致时沿原关系追加，不重复建立通知责任；已有其他父方或范围关系时不得覆盖。此标记不改变 SessionRecord.parent 的创建来源含义，也不改变对象所有者。
+delegate:true 首次纳入 Session 时先核对委派权限，由工具完成范围登记与必要结果接收，再调用标准 message.send；准备失败不得先投递任务。与本次已有委派一致时沿原关系追加，不重复建立通知责任；已有其他父方或范围关系时不得覆盖。此标记不改变 SessionRecord.parent 的创建来源含义，也不改变对象所有者。
 
 复用已有 Session 按本次任务消息和实际执行范围交接结果，旧输出、旧 final 或其他任务结束不能冒充本次完成。多个输入共同影响输出时保留真实共同范围，不承诺每条消息独占一份最终结果；不新增必须 idle 才能委派的通用限制。普通复用会话的存储与关闭策略保持原约定，不因 delegate:true 变成临时对象。
 
@@ -1317,9 +1328,18 @@ turn.cancel／session.cancel 默认取消当前父活动并清除当时两队列
 
 ## 查询与工具调用示例
 
-inspect 默认返回明确目标的必要身份、当前状态、当前执行和阻塞／错误摘要；include_config 按需读取 Agent／Session 的可公开配置，include_output 按实际目标读取已有输出或结果。长内容采用基础分段并说明实际范围，已有对象或文件引用按需复用，不要求先申请通用结果引用再读取。Agent 查询汇总所属 Session 的必要状态，不用单一 busy 标志替代它们的状态。
+inspect 默认返回当前 Session 的必要身份、当前状态、当前执行和阻塞／错误摘要；显式 target 可读取其他目标。include_config 与 include_output 默认均为 false，按需读取可公开配置或实际仍有的输出。长内容采用基础分段并说明实际范围，已有对象或文件引用按需复用，不要求先申请通用结果引用再读取。Agent 查询汇总所属 Session 的必要状态，不用单一 busy 标志替代它们的状态。
 
 需要主动查询时，创建／控制进度通过 host.receipt.get 与 operation_id 取得。启动事实来自原 ToolCall result，最终结果来自已接收的通知消息及实际主方历史；子方仍存在时可按需读取其输出。关联复用 Session、任务消息、通知 MessageId 和发起 ToolCallRef，不建立独立持久任务结果库，也不据任意 MessageId 推导独占业务结果。
+
+根方或有权且未达到上限的委派成员可用简写启动同 Agent 的临时并行工作，创建工具在受理后返回，不等待子任务完成；独立检查自身状态不需要搬运自己的 ID：
+
+```javascript
+agent({ action: "create", text: "Review /repo/app 的本次改动" })
+agent({ action: "inspect" })
+```
+
+根方需要 Lead 带队时可调用 `agent({action:"create", name:"lead", text:"协调两项复核", allow_delegation:true})`。Lead 默认可同时派发 2 个直属子任务；同组沟通仍用普通 send，不必为发消息开启委派。
 
 下面示例在 H1 内参考 A1 的配置值，一次创建 memory Agent A2 与其默认 memory Session S2，并附带首条 review 文本。from_agent_id 是可选的配置来源，本例不复制 A1 的身份或历史；不提供来源时可直接通过 settings 自定义。启动调用不等待 review 结果，返回后主模型可继续工作或结束当前 Turn：
 
@@ -1365,7 +1385,7 @@ agent({
 }
 ```
 
-只需在已有 A1 下开独立上下文时，使用 resource: "session"，目标为 A1，由 A1 创建 S2，工具同样可直接携带首条文本。后续通过 send 向 S2 追加消息 M2／M3：执行中补充要求使用 steer，希望后续轮次处理使用 follow_up，实际入队与消费仍按两队列及当前状态裁定。子方最终结果使用新的通知消息 N1 关联原任务 M1，不回填这份启动结果。
+只需在已有 A1 下开独立上下文时，使用 resource: "session"，目标为 A1，由 A1 创建 S2，工具同样可直接携带首条文本。后续通过 send 向 S2 追加消息 M2／M3：steer 在忙时进入下一 step，空闲时可启动新 Turn；实际入队与消费仍按既有规则裁定。子方最终结果使用新的通知消息 N1 关联原任务 M1，不回填这份启动结果。
 
 例如主 T1 的启动调用 C1 派发子任务 S2／M1，C1 返回受理结果后结束，S2 独立执行。父方暂时无事可做时 T1 正常 finished；队列里的 follow_up 可启动 T2。S2 随后完成，范围所有者生成 N1：父方当时 busy 则走 steer，idle 则走 follow_up。N1 按实际消费边界进入当前允许的 Turn 或新 T3；C1 的结果始终只是启动事实，不重新改成 running，也不追加子最终正文。
 
@@ -2737,11 +2757,16 @@ interface LoggingStatus {
 | 场景 | 必须观察到的事实 |
 | --- | --- |
 | 新 Agent 直接自定义，或显式／省略 from_agent_id 加覆盖 | 必需配置完整并校验后创建；复制仅限配置快照，不带身份、mode、历史或运行关系；无来源时以调用方 Agent 为来源并应用委派继承，来源后续变化不传播 |
+| create 仅提供 action 与 text | 在调用方 Agent 下创建 memory Session，继承当前设置，先准备委派再接受任务；启动调用不等待最终结果；省略或空白 text 时拒绝，显式 resource 的空对象创建保留 |
+| 未获授权的活动成员尝试带 text 的 create 或首次 send(delegate:true) | 拒绝新委派，不发送任务；显式空对象创建、普通消息与不含授权字段的既有关系追加仍可使用；仅有历史 delegated_by 不限制后续根方派发 |
+| 根方对新建或首次纳入的 Session 授权 | 仅 allow_delegation:true 启用，默认直属上限 2，可指定正整数；成员不能转授，既有关系不能追加授权，旧授权不随 Session 复用 |
+| 获授权成员混用带 text 的 create 和首次 send(delegate:true) | 新直属委派共用并发上限，启动中也计入；超额拒绝；委派收尾或启动失败释放名额，不额外计算沟通或已有委派的追加输入 |
+| inspect 省略 target，或显式提供不完整 target | 省略时查询调用方当前 Session，默认不带配置与正文；显式无效目标仍拒绝，不自动补成当前 Session |
 | 模型工具 update 指向 Agent 或已有 Session | 分别调用 agent.update／session.update；Agent 默认值只影响新会话，已有默认 Session 不变；Session 下一 Turn 生效，当前绑定保持；版本冲突或校验失败不部分提交 |
 | 先创建空 Session，再 send(delegate:true) | 首次任务接受前完成委派登记与接收准备；普通 send 不自动承诺通知，已有委派追加不改父方或重复登记，其他范围关系不能覆盖 |
 | 一次 create 携带首条文本消息 | 内部完成创建、委派与必要接收准备后再接受消息；模型不必另调 send 发送同一首条消息 |
 | 新建 Agent 及默认 Session | Host 创建 Agent，由新 Agent 创建默认 Session；工具不额外创建第二个默认 Session，各层只处理直接所属工作 |
-| 创建不带初始消息，或已请求消息但前一步失败 | 前者只创建空对象并省略消息字段／步骤；后者保留真实失败与未执行步骤，不能混淆为未请求 |
+| 显式资源创建不带初始消息，或已请求消息但前一步失败 | 前者只创建空对象并省略消息字段／步骤；后者保留真实失败与未执行步骤，不能混淆为未请求 |
 | 给模型的创建回执与部分失败 | 适用 ID 顶层各一次，分步状态／错误不重复引用；保留实际已发布对象及 accepted 事实，缺失对象不伪造 ID，独立对象与引用仍保留直接归属 |
 | persistent 主方保存启动回执与最终消息后重启 | 分别读取两份历史事实，不恢复子执行、队列或委派范围 |
 | 历史只有启动回执，没有最终通知 | 启动 ToolCall 已闭合，不补 ToolResult、不补通知、不自动重派 |
