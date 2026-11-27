@@ -1,6 +1,15 @@
 # MiniCore Host
 
-## Current work: Agent action defaults and delegation grants (Task 124)
+## Current work: Responses WebSocket and hosted search (Task 125)
+
+[Task 125](tasks/125-responses-transport/TASK.md) records explicit upstream
+Responses WebSocket transport and opt-in hosted search, with both sharing the
+existing Responses decoder. Compare feature commit
+`79443c989416ffdacf0af21bf8ed2361272c45d5` against
+`d91157e737b8889f918948f476e099c3e4382df8`. No new Host RPC or client changes.
+Independent review pending.
+
+## Previous work: Agent action defaults and delegation grants (Task 124)
 
 [Task 124](tasks/124-agent-action-defaults/TASK.md) records the create shorthand,
 current-Session inspect default, explicit per-delegation grant and direct-child
