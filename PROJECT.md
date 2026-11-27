@@ -11,6 +11,12 @@ Focused Linux checks pass (2 protocol, 10 workspace and 3 cross-transport tests,
 formatting/whitespace and strict library Clippy). Independent review and TUI
 integration remain pending; no remote publication is claimed here.
 
+## Current work: first-user Session previews
+
+[Session previews](tasks/session-user-preview/TASK.md) records the separate, bounded
+first-user-input catalog field and persistence checks. It does not rename Sessions
+or add picker-driven history reads. Local integration and review are pending.
+
 ## Previous work: Responses WebSocket and hosted search (Task 125)
 
 [Task 125](tasks/125-responses-transport/TASK.md) records explicit upstream
