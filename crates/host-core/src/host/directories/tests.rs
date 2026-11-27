@@ -64,6 +64,8 @@ fn query(root: &Path) -> DirectoryListRequest {
     DirectoryListRequest {
         path: root.to_str().unwrap().into(),
         hidden: false,
+        include_files: false,
+        workspace_session: None,
         cursor: None,
         limit: 10,
     }

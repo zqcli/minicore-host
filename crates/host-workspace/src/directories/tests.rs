@@ -4,6 +4,8 @@ fn request(path: &Path, limit: usize) -> DirectoryListRequest {
     DirectoryListRequest {
         path: display(path).unwrap(),
         hidden: false,
+        include_files: false,
+        workspace_session: None,
         cursor: None,
         limit,
     }
@@ -84,7 +86,7 @@ fn directories_page_without_a_fixed_entry_quota_and_include_hidden_only_on_reque
 }
 
 #[test]
-fn cursors_bind_roots_directory_and_hidden_filter() {
+fn cursors_bind_roots_directory_and_listing_filters() {
     let temporary = tempfile::tempdir().unwrap();
     for name in ["a", "b", "c"] {
         fs::create_dir(temporary.path().join(name)).unwrap();
@@ -96,6 +98,12 @@ fn cursors_bind_roots_directory_and_hidden_filter() {
     hidden.hidden = true;
     assert!(matches!(
         directories.list(hidden),
+        Err(DirectoryError::InvalidCursor)
+    ));
+    let mut files = query.clone();
+    files.include_files = true;
+    assert!(matches!(
+        directories.list(files),
         Err(DirectoryError::InvalidCursor)
     ));
     let mut other = query.clone();
@@ -351,4 +359,57 @@ fn windows_existing_verbatim_names_roundtrip_through_roots_list_and_mkdir() {
         verbatim.join("child").canonicalize().unwrap()
     );
     fs::remove_dir_all(verbatim).unwrap();
+}
+
+#[test]
+fn file_browsing_lists_and_resolves_without_widening_roots() {
+    let allowed = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let directory = allowed.path().join("folder");
+    std::fs::create_dir(&directory).unwrap();
+    let image = allowed.path().join("screen shot.png");
+    std::fs::write(&image, b"not read by a directory query").unwrap();
+    let external = other.path().join("not visible.png");
+    std::fs::write(&external, b"not allowed").unwrap();
+    let directories = WorkspaceDirectories::prepare(&[display(allowed.path()).unwrap()]).unwrap();
+    let browse = |path| DirectoryListRequest {
+        include_files: true,
+        ..request(path, 10)
+    };
+    let list = directories.list(browse(allowed.path())).unwrap();
+    assert!(list.parent.is_none());
+    assert_eq!(
+        list.entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.is_file))
+            .collect::<Vec<_>>(),
+        [("folder", false), ("screen shot.png", true)]
+    );
+    assert!(directories.list(browse(&image)).unwrap().is_file);
+    assert!(matches!(
+        directories.list(browse(&external)),
+        Err(DirectoryError::OutsideRoots)
+    ));
+    assert!(matches!(
+        directories.list(request(&image, 10)),
+        Err(DirectoryError::NotDirectory)
+    ));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(&image, allowed.path().join("image-link")).unwrap();
+        symlink(&external, allowed.path().join("escape-link")).unwrap();
+        let entries = directories.list(browse(allowed.path())).unwrap().entries;
+        assert_eq!(entries.len(), 3);
+        let link = entries
+            .iter()
+            .find(|entry| entry.name == "image-link")
+            .unwrap();
+        assert!(link.is_file);
+        assert_eq!(link.path, display(&image.canonicalize().unwrap()).unwrap());
+        assert!(matches!(
+            directories.list(browse(&allowed.path().join("escape-link"))),
+            Err(DirectoryError::OutsideRoots)
+        ));
+    }
 }

@@ -73,6 +73,7 @@ impl WorkspaceDirectories {
                 .map(|path| {
                     let text = display(path)?;
                     Ok(DirectoryEntry {
+                        is_file: false,
                         name: match path.file_name() {
                             Some(name) => name.to_str().ok_or(DirectoryError::NonUtf8Path)?.into(),
                             None => text.clone(),
@@ -84,18 +85,41 @@ impl WorkspaceDirectories {
         })
     }
 
+    /// Add an owner-resolved Session workspace for this read, not to Host roots.
+    pub fn with_workspace(&self, path: &str) -> Result<Self> {
+        let mut expanded = Self::prepare(&[path.into()])?;
+        expanded.roots.extend(self.roots.iter().cloned());
+        expanded.roots.sort();
+        expanded.roots.dedup();
+        Ok(expanded)
+    }
+
     pub fn list(&self, request: DirectoryListRequest) -> Result<DirectoryListResult> {
         if request.limit == 0 {
             return Err(DirectoryError::InvalidRange);
         }
-        let path = self.directory(&request.path)?;
+        absolute(&request.path)?;
+        let path = self.canonical(Path::new(&request.path))?;
+        let metadata = fs::metadata(&path)?;
+        if !metadata.is_dir() {
+            if !request.include_files || !metadata.is_file() {
+                return Err(DirectoryError::NotDirectory);
+            }
+            return Ok(DirectoryListResult {
+                is_file: true,
+                path: display(&path)?,
+                parent: None,
+                entries: Vec::new(),
+                next_cursor: None,
+            });
+        }
         let mut hash = Sha256::new();
         for value in self.roots.iter().chain(std::iter::once(&path)) {
             let text = display(value)?;
             hash.update(text.len().to_le_bytes());
             hash.update(text.as_bytes());
         }
-        hash.update([u8::from(request.hidden)]);
+        hash.update([u8::from(request.hidden), u8::from(request.include_files)]);
         let scope = format!("{:x}", hash.finalize());
         if let Some(cursor) = &request.cursor
             && (cursor.scope != scope || single_component(&cursor.after_name).is_err())
@@ -107,7 +131,7 @@ impl WorkspaceDirectories {
         for entry in fs::read_dir(&path)? {
             let entry = entry?;
             let kind = entry.file_type()?;
-            if !kind.is_dir() && !kind.is_symlink() {
+            if !(kind.is_dir() || kind.is_symlink() || (request.include_files && kind.is_file())) {
                 continue;
             }
             let name = entry.file_name();
@@ -125,8 +149,9 @@ impl WorkspaceDirectories {
                 Err(DirectoryError::OutsideRoots | DirectoryError::NotFound) => continue,
                 Err(error) => return Err(error),
             };
-            if fs::metadata(&target)?.is_dir() {
-                entries.push((name.to_owned(), display(&target)?));
+            let metadata = fs::metadata(&target)?;
+            if metadata.is_dir() || (request.include_files && metadata.is_file()) {
+                entries.push((name.to_owned(), display(&target)?, metadata.is_file()));
                 if entries.len() > request.limit {
                     entries.pop();
                     more = true;
@@ -136,13 +161,18 @@ impl WorkspaceDirectories {
         let entries: Vec<_> = entries
             .into_sorted_vec()
             .into_iter()
-            .map(|(name, path)| DirectoryEntry { name, path })
+            .map(|(name, path, is_file)| DirectoryEntry {
+                name,
+                path,
+                is_file,
+            })
             .collect();
         let next_cursor = more.then(|| DirectoryCursor {
             scope,
             after_name: entries.last().expect("positive page size").name.clone(),
         });
         Ok(DirectoryListResult {
+            is_file: false,
             path: display(&path)?,
             parent: path
                 .parent()

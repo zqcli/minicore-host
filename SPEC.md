@@ -1,4 +1,4 @@
-**设计基线：v4.11.12｜2026-11-27。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
+**设计基线：v4.11.13｜2026-11-27。** Host 管理自身与直属对象，其他 Host 的连接与调用归工具。对象按直接归属标识，会话内操作复用已有 Session 调用上下文；普通消息正文仅为 text。异步委派采用 DSH 模式：启动工具返回受理事实后结束，子 Session 独立执行，最终结果作为新消息通知原直接父方。SessionController 持有独立的 next-step 与 next-turn 队列，并由既有任务唯一驱动完整 Turn；同 workspace 的内部 Runtime 提供模型调用和工具执行原语。模型响应结束、Turn 结束和子执行结束分别表达。核心流程保留明确的状态、交接与竞争边界；辅助接口首版提供实际对接所需的基本功能。回执、事件、状态、读取、持久记录、执行交接、配置、错误与交互共用已有身份和类型定义，各自表达对应事实。
 
 阅读主线：先确定对象和直接所有者，再看创建、输入、执行、工具结果交接与关闭，最后核对接口、观察、错误和验收。每类规则在对应章节集中定义，接口目录只维护一份；验收章节保留用于验证这些规则的场景。
 
@@ -199,6 +199,8 @@ Host 与内嵌 Host 的 TUI 统一使用 `--config-dir`。未提供时使用用�
 | Web 部署目录的 `web.json` | Web 自己的界面与 Host 连接配置；不属于任何 Host 配置目录，本次不实施 Web 多 Host 界面 |
 
 文件中的 `providers` 按名声明 `baseurl`、`api`、`api_key` 和可选 `stream`、`request_timeout_ms`。每项 `models` 声明 MiniCore 选择名 `name`、上游模型 ID `model`、`reasoning` 等能力，并以 `provider` 精确引用一个渠道。Host 在加载时展开为有效模型目录，Agent、Session 与公开模型目录仍用原选择名。基础 URL 不含方法后缀；按所选 API 追加 `/responses` 或 `/chat/completions`，不推测 `/v1`。模型密钥为字面值或整个值为 `$变量名` 的 Host 环境引用；不执行命令，密钥值不进入客户端配置查询、诊断或数据记录。
+
+TUI 文件引用可以对现有 Host 目录查询显式启用文件列表；默认相同行为仍只返回目录。文件列表可加入当前 Session 已绑定的工作区作为可浏览根，其他目录仍受 `workspace_roots` 限制。绝对路径可返回同一范围内的常规文件引用，不读取其内容；向上导航只使用 Host 返回的父目录。
 
 Host 只读取 host.json、agents/roles 下的 JSON 以及这些声明显式引用的 Markdown，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板放 `<config-dir>/commands/`；不搜索旧 prompt/commands 路径。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
 

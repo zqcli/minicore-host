@@ -41,3 +41,21 @@ fn directory_contracts_reject_authority_fields_and_invented_receipt_facts() {
         AccessRequirement::Operate
     );
 }
+
+#[test]
+fn directory_only_wire_shape_stays_unchanged_without_file_opt_in() {
+    let request = json!({"path":"/work", "hidden":false, "cursor":null, "limit":10});
+    let decoded: DirectoryListRequest = serde_json::from_value(request.clone()).unwrap();
+    assert!(!decoded.include_files);
+    assert!(decoded.workspace_session.is_none());
+    assert_eq!(serde_json::to_value(decoded).unwrap(), request);
+    let result = json!({
+        "path":"/work", "parent":null,
+        "entries":[{"name":"project", "path":"/work/project"}],
+        "next_cursor":null
+    });
+    let decoded: DirectoryListResult = serde_json::from_value(result.clone()).unwrap();
+    assert!(!decoded.is_file);
+    assert!(!decoded.entries[0].is_file);
+    assert_eq!(serde_json::to_value(decoded).unwrap(), result);
+}

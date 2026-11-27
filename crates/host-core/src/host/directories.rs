@@ -1,4 +1,4 @@
-//! Host-owned directory selection, independent of Agent and Session lifetimes.
+//! Host directory queries, optionally including a selected Session workspace.
 use super::*;
 use minicore_host_workspace::DirectoryError;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -22,10 +22,19 @@ impl Host {
         let directories = self.access.read(caller, || {
             Ok(Arc::clone(&self.configuration.snapshot().directories))
         })?;
-        let result = tokio::task::spawn_blocking(move || directories.list(request))
-            .await
-            .map_err(|_| directory_worker_fault())?
-            .map_err(directory_fault)?;
+        let workspace = match request.workspace_session.as_ref() {
+            Some(target) if request.include_files => {
+                self.session_info(caller, target)?.config.workspace
+            }
+            _ => None,
+        };
+        let result = tokio::task::spawn_blocking(move || match workspace {
+            Some(workspace) => directories.with_workspace(&workspace.path)?.list(request),
+            None => directories.list(request),
+        })
+        .await
+        .map_err(|_| directory_worker_fault())?
+        .map_err(directory_fault)?;
         self.access.read(caller, || Ok(result))
     }
 

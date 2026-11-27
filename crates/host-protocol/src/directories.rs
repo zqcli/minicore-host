@@ -1,10 +1,12 @@
-//! Host directory selection before an Agent or Session exists.
-use crate::OperationId;
+//! Host directory selection and opt-in file references for an editor.
+use crate::{OperationId, SessionRef};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectoryEntry {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_file: bool,
     pub name: String,
     /// Canonical absolute path in the Host platform's syntax.
     pub path: String,
@@ -29,6 +31,12 @@ pub struct DirectoryListRequest {
     pub path: String,
     #[serde(default)]
     pub hidden: bool,
+    /// Opt in to regular files as well as directories, or resolve a file path.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_files: bool,
+    /// With include_files, a caller may also browse its selected Session workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_session: Option<SessionRef>,
     pub cursor: Option<DirectoryCursor>,
     /// Caller-requested page size, not an application capacity limit.
     pub limit: usize,
@@ -37,6 +45,9 @@ pub struct DirectoryListRequest {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DirectoryListResult {
+    /// A direct file resolution has no entries, parent or continuation.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_file: bool,
     pub path: String,
     pub parent: Option<String>,
     pub entries: Vec<DirectoryEntry>,
