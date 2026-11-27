@@ -37,6 +37,7 @@ pub fn config(endpoint: Option<String>, network: bool) -> HostConfig {
             supported_reasoning: vec![ReasoningPreference::Auto],
             supports_tools: true,
             request_timeout_ms: Some(20_000),
+            stream: None,
             web_search: None,
         });
     }

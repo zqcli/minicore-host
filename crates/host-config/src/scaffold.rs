@@ -61,6 +61,7 @@ pub fn create_config_directory(
             supported_reasoning: vec![Default::default()],
             supports_tools: true,
             request_timeout_ms: Some(120_000),
+            stream: None,
             web_search: None,
         }],
         tools: tools.clone(),

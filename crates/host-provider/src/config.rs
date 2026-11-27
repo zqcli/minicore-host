@@ -24,6 +24,8 @@ pub struct OpenAiResponsesConfig {
     pub provider_model: String,
     pub descriptor: ModelDescriptor,
     pub request_timeout: Option<Duration>,
+    /// None follows the endpoint default (WSS first for remote TLS).
+    pub prefer_websocket: Option<bool>,
     /// None disables hosted search; Some selects external web access.
     pub web_search: Option<bool>,
 }
@@ -39,6 +41,7 @@ impl OpenAiResponsesConfig {
             provider_model: provider_model.into(),
             descriptor,
             request_timeout: None,
+            prefer_websocket: None,
             web_search: None,
         }
     }

@@ -205,3 +205,21 @@ async fn explicit_ws_route_rejection_falls_back_but_authentication_does_not() {
         server.await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn explicit_sse_sends_a_post_without_probing_the_ws_endpoint() {
+    let fixture = Fixture::start(vec![Reply::sse(final_text("direct SSE"))]).await;
+    let ws_url = fixture.endpoint.replacen("http://", "ws://", 1);
+    let mut config = provider_config(&ws_url, "fixture-responses-model", None);
+    config.prefer_websocket = Some(false);
+    let model =
+        OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-key").unwrap()).unwrap();
+    let report = call(&model, request(false)).await;
+    assert!(
+        matches!(answer(&report).parts(), [AssistantPart::Text(text)] if text.as_ref() == "direct SSE")
+    );
+    let requests = fixture.finish().await;
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].head.starts_with("POST /v1/responses HTTP/1.1"));
+    assert_eq!(requests[0].body["stream"], true);
+}

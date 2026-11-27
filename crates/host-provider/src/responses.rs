@@ -43,9 +43,18 @@ impl OpenAiResponsesModel {
     ) -> Result<Self, ProviderConfigError> {
         let request_timeout = config.request_timeout;
         let web_search = config.web_search;
+        let prefer_websocket = config.prefer_websocket;
         let mut connection = OpenAiChatModel::build(config.into_connection(), key, true)?;
+        let try_websocket = prefer_websocket.unwrap_or(connection.endpoint.scheme() != "http");
         let websocket_endpoint = match connection.endpoint.scheme() {
-            "https" => Some(with_scheme(&connection.endpoint, "wss")),
+            "https" | "http" => try_websocket.then(|| {
+                let scheme = if connection.endpoint.scheme() == "https" {
+                    "wss"
+                } else {
+                    "ws"
+                };
+                with_scheme(&connection.endpoint, scheme)
+            }),
             "ws" | "wss" => {
                 let endpoint = connection.endpoint.clone();
                 let sse_scheme = if endpoint.scheme() == "wss" {
@@ -54,10 +63,9 @@ impl OpenAiResponsesModel {
                     "http"
                 };
                 connection.endpoint = with_scheme(&endpoint, sse_scheme);
-                Some(endpoint)
+                try_websocket.then_some(endpoint)
             }
-            // Literal loopback HTTP is the explicit plaintext SSE endpoint.
-            _ => None,
+            _ => unreachable!("validated Responses endpoint"),
         };
         Ok(Self {
             connection,

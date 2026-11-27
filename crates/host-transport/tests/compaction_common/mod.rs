@@ -165,6 +165,7 @@ pub async fn host(http: &HttpFixture) -> Arc<Host> {
             supported_reasoning: vec![ReasoningPreference::Auto],
             supports_tools: true,
             request_timeout_ms: None,
+            stream: None,
             web_search: None,
         }],
         network: NetworkSettings {

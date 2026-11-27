@@ -154,6 +154,7 @@ async fn canonical_wss_rotation_keeps_an_accepted_http_turn_and_next_turn_binds_
         supported_reasoning: vec![ReasoningPreference::Auto],
         supports_tools: true,
         request_timeout_ms: None,
+        stream: None,
         web_search: None,
     }];
     let (host, preparer) = CredentialFixture::host(original.clone(), false).await;

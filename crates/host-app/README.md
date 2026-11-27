@@ -76,7 +76,10 @@ state is not required. To adapt the example, set `api` to `"responses"` and
 cannot upgrade or explicitly rejects the WS route before starting. An ambiguous
 or started request is not sent again via SSE. Plaintext endpoints are limited
 to literal loopback: `http://` uses SSE and `ws://` tries WS first. This is the
-model connection, not the Host's incoming JSON-RPC WebSocket.
+model connection, not the Host's incoming JSON-RPC WebSocket. In each Responses
+model entry use `"stream":"sse"` to skip the WebSocket handshake entirely or
+`"stream":"wss"` for WebSocket with the same fallback rules. The URL path,
+model and credentials remain unchanged.
 
 For a provider/model that supports hosted search, set `"web_search":"live"`
 in its model entry, or use `"cached"` to disable external web access. Omit the

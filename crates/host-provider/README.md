@@ -128,7 +128,8 @@ that may have started is not replayed on a different transport. Plaintext is
 limited to literal loopback (`http` for direct SSE, `ws` for WS-first). Both
 transports share the decoder, cancellation and one absolute deadline. SSE sends
 `stream: true`; WS sends `type: "response.create"` on a socket scoped to one
-invocation. Both send full `input`, `store: false`,
+invocation. An explicit transport preference can skip the upgrade and send SSE
+directly. Both send full `input`, `store: false`,
 `truncation: disabled`, and `include: ["reasoning.encrypted_content"]`. It never
 uses `previous_response_id` or a provider-side conversation. An output limit is
 sent only when supplied by Runtime. Declared function schemas are forwarded

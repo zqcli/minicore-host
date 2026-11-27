@@ -47,6 +47,14 @@ fn provider_with_search(
     model: &str,
     web_search: Option<bool>,
 ) -> Arc<OpenAiResponsesModel> {
+    let config = provider_config(endpoint, model, web_search);
+    Arc::new(
+        OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-not-a-real-key").unwrap())
+            .unwrap(),
+    )
+}
+
+fn provider_config(endpoint: &str, model: &str, web_search: Option<bool>) -> OpenAiResponsesConfig {
     let descriptor = ModelDescriptor::new(
         "fixture/responses".parse().unwrap(),
         128_000,
@@ -64,10 +72,7 @@ fn provider_with_search(
         descriptor,
     );
     config.web_search = web_search;
-    Arc::new(
-        OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-not-a-real-key").unwrap())
-            .unwrap(),
-    )
+    config
 }
 
 fn specs() -> Vec<ToolSpec> {
@@ -271,7 +276,7 @@ fn replay_message(response: &ModelResponse) -> ModelMessage {
 }
 
 #[tokio::test]
-async fn responses_streams_text_reasoning_usage_and_stateless_request() {
+async fn streams_text_reasoning_usage_and_stateless_request() {
     let mut script = Script::new();
     script.reasoning(true);
     script.message("msg_original", Some("final_answer"), &["Hello ", "世界"]);
@@ -1293,7 +1298,7 @@ async fn responses_replay_rejects_invalid_metadata_canonical_text_and_ranges() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_arguments_done_emits_only_missing_suffix() {
+async fn stream_fix_arguments_done_emits_only_missing_suffix() {
     for (initial, delta) in [
         ("", ""),
         ("{", "\"value\":\""),
@@ -1359,7 +1364,7 @@ async fn responses_stream_fix_arguments_done_emits_only_missing_suffix() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_arguments_guards_and_json_validation() {
+async fn stream_fix_arguments_guards_and_json_validation() {
     for problem in [
         "conflict",
         "shorter",
@@ -1441,7 +1446,7 @@ async fn responses_stream_fix_arguments_guards_and_json_validation() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_terminal_reasoning_enrichment_replays() {
+async fn stream_fix_terminal_reasoning_enrichment_replays() {
     for summary in [false, true] {
         let mut script = Script::new();
         script.reasoning(summary);
@@ -1488,7 +1493,7 @@ async fn responses_stream_fix_terminal_reasoning_enrichment_replays() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_terminal_reasoning_enrichment_rejects_changes() {
+async fn stream_fix_terminal_reasoning_enrichment_rejects_changes() {
     for problem in [
         "conflict", "removed", "empty", "identity", "summary", "status",
     ] {
@@ -1540,7 +1545,7 @@ async fn responses_stream_fix_terminal_reasoning_enrichment_rejects_changes() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_incomplete_items_keep_terminal_facts() {
+async fn stream_fix_incomplete_items_keep_terminal_facts() {
     for tool in [false, true] {
         for closed_parts in [false, true] {
             let mut script = Script::new();
@@ -1598,7 +1603,7 @@ async fn responses_stream_fix_incomplete_items_keep_terminal_facts() {
 }
 
 #[tokio::test]
-async fn responses_stream_fix_incomplete_items_cannot_become_completed() {
+async fn stream_fix_incomplete_items_cannot_become_completed() {
     for tool in [false, true] {
         for rewrite_status in [false, true] {
             let mut script = Script::new();

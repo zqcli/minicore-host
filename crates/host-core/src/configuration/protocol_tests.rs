@@ -75,3 +75,24 @@ fn hosted_search_is_opt_in_and_responses_only() {
         assert!(config.validate().is_err());
     }
 }
+
+#[test]
+fn stream_prefers_only_the_configured_responses_transport() {
+    for (value, expected) in [("sse", ResponsesStream::Sse), ("wss", ResponsesStream::Wss)] {
+        let mut data = settings("responses");
+        data["stream"] = json!(value);
+        let model: OpenAiModelSettings = serde_json::from_value(data.clone()).unwrap();
+        assert_eq!(model.stream, Some(expected));
+        assert_eq!(serde_json::to_value(&model).unwrap(), data);
+        let mut config = HostConfig {
+            models: vec![model],
+            ..HostConfig::default()
+        };
+        assert!(config.validate().is_ok());
+        config.models[0].api = OpenAiModelApi::ChatCompletions;
+        assert!(config.validate().is_err());
+    }
+    let mut invalid = settings("responses");
+    invalid["stream"] = json!(true);
+    assert!(serde_json::from_value::<OpenAiModelSettings>(invalid).is_err());
+}

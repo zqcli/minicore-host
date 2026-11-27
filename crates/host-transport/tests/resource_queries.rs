@@ -181,6 +181,7 @@ impl Resources {
                     supported_reasoning: vec![ReasoningPreference::Auto, ReasoningPreference::High],
                     supports_tools: true,
                     request_timeout_ms: None,
+                    stream: None,
                     web_search: None,
                 })
                 .collect(),

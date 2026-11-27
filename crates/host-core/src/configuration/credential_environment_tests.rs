@@ -30,6 +30,7 @@ fn config(models: &[&str], network: Option<&str>) -> HostConfig {
                 supported_reasoning: vec![ReasoningPreference::Auto],
                 supports_tools: true,
                 request_timeout_ms: None,
+                stream: None,
                 web_search: None,
             })
             .collect(),

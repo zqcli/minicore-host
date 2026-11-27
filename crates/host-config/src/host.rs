@@ -54,6 +54,9 @@ impl HostConfig {
             if model.web_search.is_some() && model.api != OpenAiModelApi::Responses {
                 return Err(invalid("web_search requires the Responses API"));
             }
+            if model.stream.is_some() && model.api != OpenAiModelApi::Responses {
+                return Err(invalid("stream requires the Responses API"));
+            }
             environment_name(&model.api_key_env)?;
         }
         let mut tools = BTreeSet::new();
@@ -104,6 +107,14 @@ pub enum OpenAiModelApi {
     Responses,
 }
 
+/// Preferred connection for a single upstream Responses model entry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResponsesStream {
+    Wss,
+    Sse,
+}
+
 /// Optional access mode for the provider-managed Responses web search tool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -126,6 +137,8 @@ pub struct OpenAiModelSettings {
     pub supported_reasoning: Vec<ReasoningPreference>,
     pub supports_tools: bool,
     pub request_timeout_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream: Option<ResponsesStream>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_search: Option<OpenAiWebSearch>,
 }

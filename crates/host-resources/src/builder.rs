@@ -145,6 +145,9 @@ impl HostResourceBuilder {
                             descriptor,
                         );
                         connection.request_timeout = timeout;
+                        connection.prefer_websocket = settings
+                            .stream
+                            .map(|mode| mode == minicore_host_core::ResponsesStream::Wss);
                         connection.web_search = settings
                             .web_search
                             .map(|mode| mode == OpenAiWebSearch::Live);

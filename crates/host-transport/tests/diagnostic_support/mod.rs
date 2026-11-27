@@ -180,6 +180,7 @@ pub fn configuration(endpoint: &str) -> HostConfig {
         supported_reasoning: vec![ReasoningPreference::Auto],
         supports_tools: true,
         request_timeout_ms: Some(5_000),
+        stream: None,
         web_search: None,
     });
     config

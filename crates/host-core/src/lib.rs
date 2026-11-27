@@ -17,8 +17,8 @@ pub use collaboration::*;
 pub use configuration::{
     HostConfig, HostConfigSnapshot, HostConfigurationFuture, HostConfigurationPreparer,
     HostReloadResult, LogLevel, LogOutput, LogSettings, ModelDescription, NetworkSettings,
-    OpenAiModelApi, OpenAiModelSettings, OpenAiWebSearch, PreparedHostConfiguration, RestartField,
-    ToolEnvironmentExclusions,
+    OpenAiModelApi, OpenAiModelSettings, OpenAiWebSearch, PreparedHostConfiguration,
+    ResponsesStream, RestartField, ToolEnvironmentExclusions,
 };
 pub use context::*;
 mod host;
