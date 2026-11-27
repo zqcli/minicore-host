@@ -101,6 +101,10 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
             false,
         ),
         (
+            json!({"action":"create","text":"delegate child","allow_delegation":true}),
+            false,
+        ),
+        (
             json!({"action":"send","target":{"kind":"agent_default","host_id":host,"agent_id":agent},"text":"message"}),
             false,
         ),
@@ -110,6 +114,10 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
         ),
         (
             json!({"action":"send","target":{"kind":"session","agent_id":agent,"session_id":session},"text":"message","delegate":true}),
+            false,
+        ),
+        (
+            json!({"action":"send","target":{"kind":"session","agent_id":agent,"session_id":session},"text":"message","delegate":true,"allow_delegation":true,"max_children":1}),
             false,
         ),
         (
@@ -133,6 +141,7 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
             false,
         ),
         (json!({"action":"control","operation":"close_scope"}), false),
+        (json!({"action":"inspect"}), true),
         (json!({"action":"wait"}), true),
         (json!({"action":"wait","timeout_ms":0}), true),
     ];
@@ -164,13 +173,16 @@ async fn all_valid_agent_branches_are_classified_from_the_dispatch_parser() {
 
 #[tokio::test]
 async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
+    let incomplete_inspect =
+        json!({"action":"inspect","target":{"kind":"session","agent_id":AgentId::new().unwrap()}});
     for mode in [ApprovalMode::Ask, ApprovalMode::Auto] {
         let policy = Policy::new(mode, true, true, None);
         for arguments in [
             json!({"action":"unknown"}),
-            json!({"action":"inspect"}),
+            incomplete_inspect.clone(),
             json!({"action":"wait","command":"unrecognized"}),
             json!({"action":"wait","timeout_ms":-1}),
+            json!({"action":"create","text":"delegate child","max_children":1}),
             json!({"action":"inspect","target":{"kind":"session","agent_id":"invalid","session_id":"invalid"}}),
         ] {
             assert!(matches!(
@@ -182,7 +194,7 @@ async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
             ));
         }
         let ToolDecision::InvalidInvocation { reason } = policy
-            .decide(request("agent", json!({"action":"inspect"})).request())
+            .decide(request("agent", incomplete_inspect.clone()).request())
             .await
             .unwrap()
         else {
@@ -190,7 +202,7 @@ async fn malformed_agent_arguments_fail_before_policy_approval_or_execution() {
         };
         assert_eq!(
             reason.as_str(),
-            "invalid agent arguments: missing field `target`"
+            "invalid agent arguments: missing field `session_id`"
         );
         let mut mismatched = request("read", json!({}));
         mismatched.spec = request("write", json!({})).spec;
