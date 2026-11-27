@@ -9,12 +9,17 @@ use tokio_tungstenite::{
     },
 };
 
+fn ws_provider(endpoint: &str, search: Option<bool>) -> OpenAiResponsesModel {
+    let mut config = provider_config(endpoint, "fixture-responses-model", search);
+    config.prefer_websocket = true;
+    OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-not-a-real-key").unwrap()).unwrap()
+}
+
 #[tokio::test]
 async fn responses_websocket_uses_the_same_runtime_event_and_replay_path() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let model = provider_with_search(
+    let model = ws_provider(
         &format!("ws://{}/v1/responses", listener.local_addr().unwrap()),
-        "fixture-responses-model",
         Some(true),
     );
     let server = tokio::spawn(async move {
@@ -62,7 +67,7 @@ async fn responses_websocket_uses_the_same_runtime_event_and_replay_path() {
             }
         }
     });
-    let first = call(model.as_ref(), request(false)).await;
+    let first = call(&model, request(false)).await;
     assert!(
         matches!(answer(&first).parts(), [AssistantPart::Text(text)] if text.as_ref() == "from WS")
     );
@@ -70,7 +75,7 @@ async fn responses_websocket_uses_the_same_runtime_event_and_replay_path() {
     messages.push(replay_message(answer(&first)));
     messages.push(ModelMessage::user("continue").unwrap());
     let second = call(
-        model.as_ref(),
+        &model,
         ModelRequest::new(
             messages,
             vec![],
@@ -89,10 +94,10 @@ async fn responses_websocket_uses_the_same_runtime_event_and_replay_path() {
 #[tokio::test]
 async fn responses_websocket_close_without_completion_keeps_partial_text() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let model = provider(&format!(
-        "ws://{}/v1/responses",
-        listener.local_addr().unwrap()
-    ));
+    let model = ws_provider(
+        &format!("ws://{}/v1/responses", listener.local_addr().unwrap()),
+        None,
+    );
     let server = tokio::spawn(async move {
         let (tcp, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
@@ -107,7 +112,7 @@ async fn responses_websocket_close_without_completion_keeps_partial_text() {
         }
         ws.close(None).await.unwrap();
     });
-    let report = call(model.as_ref(), request(false)).await;
+    let report = call(&model, request(false)).await;
     assert_eq!(report.attempts, 1);
     let failure = report.outcome.unwrap_err();
     assert_eq!(failure.error().kind(), ModelErrorKind::IncompleteResponse);
@@ -124,10 +129,10 @@ async fn rejected_upgrade_uses_one_sse_post_with_the_same_search_policy() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let model = provider(&format!(
-        "ws://{}/v1/responses",
-        listener.local_addr().unwrap()
-    ));
+    let model = ws_provider(
+        &format!("ws://{}/v1/responses", listener.local_addr().unwrap()),
+        None,
+    );
     let server = tokio::spawn(async move {
         let (mut handshake, _) = listener.accept().await.unwrap();
         let mut head = Vec::new();
@@ -154,7 +159,7 @@ async fn rejected_upgrade_uses_one_sse_post_with_the_same_search_policy() {
         support::write_sse(&mut http, &final_text("from SSE")).await;
     });
     let report = call(
-        model.as_ref(),
+        &model,
         request(false).with_web_search(Some(WebSearchMode::Cached)),
     )
     .await;
@@ -169,10 +174,10 @@ async fn rejected_upgrade_uses_one_sse_post_with_the_same_search_policy() {
 async fn explicit_ws_route_rejection_falls_back_but_authentication_does_not() {
     for code in ["model_not_found", "invalid_api_key"] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let model = provider(&format!(
-            "ws://{}/v1/responses",
-            listener.local_addr().unwrap()
-        ));
+        let model = ws_provider(
+            &format!("ws://{}/v1/responses", listener.local_addr().unwrap()),
+            None,
+        );
         let server = tokio::spawn(async move {
             let (tcp, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
@@ -190,7 +195,7 @@ async fn explicit_ws_route_rejection_falls_back_but_authentication_does_not() {
                 support::write_sse(&mut http, &final_text("fallback")).await;
             }
         });
-        let report = call(model.as_ref(), request(false)).await;
+        let report = call(&model, request(false)).await;
         assert_eq!(report.attempts, 1);
         if code == "model_not_found" {
             assert!(
@@ -207,11 +212,10 @@ async fn explicit_ws_route_rejection_falls_back_but_authentication_does_not() {
 }
 
 #[tokio::test]
-async fn explicit_sse_sends_a_post_without_probing_the_ws_endpoint() {
+async fn default_sse_sends_a_post_without_probing_the_ws_endpoint() {
     let fixture = Fixture::start(vec![Reply::sse(final_text("direct SSE"))]).await;
     let ws_url = fixture.endpoint.replacen("http://", "ws://", 1);
-    let mut config = provider_config(&ws_url, "fixture-responses-model", None);
-    config.prefer_websocket = Some(false);
+    let config = provider_config(&ws_url, "fixture-responses-model", None);
     let model =
         OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-key").unwrap()).unwrap();
     let report = call(&model, request(false)).await;

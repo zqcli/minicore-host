@@ -43,9 +43,8 @@ impl OpenAiResponsesModel {
     ) -> Result<Self, ProviderConfigError> {
         let request_timeout = config.request_timeout;
         let web_search = config.web_search;
-        let prefer_websocket = config.prefer_websocket;
+        let try_websocket = config.prefer_websocket;
         let mut connection = OpenAiChatModel::build(config.into_connection(), key, true)?;
-        let try_websocket = prefer_websocket.unwrap_or(connection.endpoint.scheme() != "http");
         let websocket_endpoint = match connection.endpoint.scheme() {
             "https" | "http" => try_websocket.then(|| {
                 let scheme = if connection.endpoint.scheme() == "https" {
@@ -227,7 +226,7 @@ mod tests {
     use minicore_host_runtime::model::ReasoningPreference;
 
     #[test]
-    fn https_responses_tries_wss_on_the_same_origin_and_path() {
+    fn explicit_wss_uses_the_same_origin_and_path() {
         let descriptor = ModelDescriptor::new(
             "fixture/responses".parse().unwrap(),
             128_000,
@@ -236,15 +235,15 @@ mod tests {
         )
         .unwrap();
         for scheme in ["https", "wss"] {
-            let model = OpenAiResponsesModel::new(
-                OpenAiResponsesConfig::new(
-                    format!("{scheme}://example.com:8443/custom/v1/responses"),
-                    "fixture",
-                    descriptor.clone(),
-                ),
-                SecretApiKey::new("fixture-key").unwrap(),
-            )
-            .unwrap();
+            let mut config = OpenAiResponsesConfig::new(
+                format!("{scheme}://example.com:8443/custom/v1/responses"),
+                "fixture",
+                descriptor.clone(),
+            );
+            config.prefer_websocket = true;
+            let model =
+                OpenAiResponsesModel::new(config, SecretApiKey::new("fixture-key").unwrap())
+                    .unwrap();
             assert_eq!(
                 model.websocket_endpoint.unwrap().as_str(),
                 "wss://example.com:8443/custom/v1/responses"
