@@ -1,7 +1,8 @@
 # minicore-host-provider
 
-A real HTTP/SSE implementation of `minicore_host_runtime::model::Model` for
-OpenAI-compatible **Chat Completions** and **Responses**. No endpoint is called by construction.
+A `minicore_host_runtime::model::Model` adapter for OpenAI-compatible
+**Chat Completions** and **Responses**, with HTTP SSE and opt-in Responses
+WebSockets. No endpoint is called by construction.
 No default model, token cap, automatic retry layer or fake completion exists.
 
 ```rust,no_run
@@ -121,14 +122,23 @@ metadata; failed requests never authorize unfinished tools.
 
 ## Responses
 
-`OpenAiResponsesModel` sends one stateless request per `start`. The exact
-endpoint uses HTTP/SSE by default. Explicit WebSocket preference enables WSS
-first, with fallback to SSE only for an unsupported upgrade or explicit early
-WS route rejection. A generation that may have started is not replayed on a
-different transport. Plaintext is limited to literal loopback. Both transports
-share the decoder, cancellation and one absolute deadline. SSE sends
-`stream: true`; WS sends `type: "response.create"` on a socket scoped to one
-invocation. Both send full `input`, `store: false`,
+`OpenAiResponsesModel` uses HTTP SSE by default. To prefer a fresh WebSocket
+per request, set `OpenAiResponsesConfig::prefer_websocket` in Rust or the
+[provider's `stream`](../../docs/configuration.md#providers-and-models) to `wss`
+in `host.json`. Plain HTTP/WS is limited to numeric loopback. This is the
+outbound model stream, not the inbound Host/TUI/Web transport.
+
+The same endpoint can fall back from WS to SSE on an unsupported upgrade,
+eligible connection failures, or the 10-second connect budget expiring before
+the request deadline, all before sending `response.create`. Once sent, only a
+confirmed pre-start `model_not_found` or `unsupported_transport` rejection
+allows fallback. Authentication and certificate failures are not bypassed, and
+an ambiguous or started generation is never replayed on the other transport.
+There is no persistent transport preference learned from failures. Both paths
+share the decoder, cancellation and one absolute deadline.
+
+SSE sends `stream: true`; WS sends `type: "response.create"` on a socket
+scoped to one invocation. Both send full `input`, `store: false`,
 `truncation: disabled`, and `include: ["reasoning.encrypted_content"]`. It never
 uses `previous_response_id` or a provider-side conversation. An output limit is
 sent only when supplied by Runtime. Declared function schemas are forwarded

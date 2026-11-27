@@ -1,5 +1,9 @@
 # Task 125: Responses WebSocket and hosted search
 
+This records the original feature checkpoint. In 0.12.18, Responses defaults
+to SSE, WSS is a provider opt-in with restricted fallback, and Sessions can
+override search. See the [current configuration](../../docs/configuration.md#providers-and-models).
+
 - Comparison baseline: `d91157e737b8889f918948f476e099c3e4382df8`.
 - Feature checkpoint: `79443c989416ffdacf0af21bf8ed2361272c45d5` (same source tree as tested local commit `5342f65488b5c33e2e1ddcd41635ef89750a376a`).
 - SPEC: 4.11.8. Package version unchanged. No companion repository changes.

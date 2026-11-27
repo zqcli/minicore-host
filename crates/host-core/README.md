@@ -218,11 +218,11 @@ carry `saved_terminal` and stored content, not invented execution metadata.
 Current active/finalizing ownership takes precedence over disk reads. See
 `tests/task087_saved_result_restart.rs` and the validated branches in `src/query.rs`.
 
-Host directory selection (`workspace_roots/list/mkdir`) does not resolve an Agent or
-Session. Read access and current-operation admission use the existing connection
-registry; mkdir keeps its actual blocking worker and receipt under the Host until
-completion, and Host shutdown waits for accepted directory writes. Its receipts
-reuse `host.receipt.get`; configured roots publish with the existing Host snapshot.
+Host directory selection (`workspace_roots/list/mkdir`) normally needs no
+Session. Opt-in file browsing can use a Session's committed workspace via its
+owner query for that list request only. Configured roots still publish with the
+Host snapshot. `mkdir` retains its owned worker, shutdown barrier and receipt.
+See the [directory API](../host-transport/README.md#directory-selection-and-file-references).
 
 ## Declared configuration ownership
 

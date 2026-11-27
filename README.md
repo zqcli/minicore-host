@@ -1,13 +1,24 @@
 # minicore-host
 
-Multi-agent, multi-session Host backend under development against [SPEC.md](SPEC.md), design v4.11.8.
+Multi-agent, multi-session Host backend. The 0.12.18 workspace follows
+[SPEC.md](SPEC.md), design v4.11.13.
 
 The implementation contains strict contracts, native durable storage, Session-owned
-Turn execution, production HTTP/SSE resources, scoped observation/interaction adapters
+Turn execution, OpenAI-compatible providers, scoped observation/interaction adapters
 and the owner-bound agent tool. Start with the [executable guide](crates/host-app/README.md).
 See [current project status](PROJECT.md) for the release version, exact source,
 validation, publication and remaining acceptance work. Historical reports below
 describe their fixed checkpoints, not the current open-work list.
+
+## Upgrade to 0.12.18
+
+Update `host.json` using the [provider/model migration guide](docs/configuration.md#providers-and-models).
+Keep your existing model aliases. Responses uses upstream SSE by default; set
+`stream` to `wss` on the provider to opt in. This is separate from client WSS.
+
+Clients can opt in to [workspace file references](crates/host-transport/README.md#directory-selection-and-file-references)
+and use the [first-user preview](crates/host-transport/README.md#session-catalog-previews)
+in Session catalogs without renaming Sessions or reading their history.
 
 ## Tool approval
 
@@ -29,8 +40,8 @@ Rust 1.90.0 is pinned in `rust-toolchain.toml`. Run `./scripts/check.sh` for for
 
 Shared package metadata and dependency pins are declared in the root
 [Cargo.toml](Cargo.toml); members retain their own feature selections. The
-committed lockfile fixes the resolved graph. Runtime is now maintained directly
-in `crates/host-runtime`, at the same 0.12.11 workspace version. Its imported source
+committed lockfile fixes the resolved graph. Runtime is maintained directly
+in `crates/host-runtime` at the same workspace version. Its imported source
 checkpoint and the integrated validation are recorded in [Task106](tasks/106-host-runtime/TASK.md).
 
 ## Components

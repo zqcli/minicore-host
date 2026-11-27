@@ -1,6 +1,6 @@
 # Production Host resource assembly
 
-`HostResourceBuilder` composes real OpenAI-compatible HTTP/SSE clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and frozen Host/Role/Agent prompt layers per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, `apply_patch`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
+`HostResourceBuilder` composes OpenAI-compatible clients, the statically compiled tool registry, canonical workspace bindings, execution deadlines/retries, and frozen Host/Role/Agent prompt layers per Turn. The built-in registry contains `agent`, `read`, `write`, `edit`, `apply_patch`, and `bash`; registration alone does not enable them. HostConfig.tools selects available definitions, and SessionConfig.tools selects the actual ToolSet.
 
 The source follows those existing preparation boundaries:
 
@@ -26,13 +26,15 @@ tools, external factories named `agent`, and compaction utility requests receive
 no such context. The facts are not written into conversation history.
 
 Each configured model requires an explicit `api`: `chat_completions` or
-`responses`. The builder constructs that exact provider without endpoint
-guessing, network probes or fallback. Model discovery includes the selected
+`responses`. The builder constructs that exact provider without protocol
+guessing or network probes. Responses uses SSE unless the effective settings
+prefer WSS; the [adapter](../host-provider/README.md#responses) handles any
+eligible same-endpoint transport fallback. Model discovery includes the selected
 protocol without private endpoint, provider-model or credential-source fields.
 Ordinary and compaction bindings select the same configured provider. Existing
 Turns retain their bound protocol and credentials across a configuration reload.
 
-Keep one builder (or its clones) across reloads, so the agent tool's independently owned delegation scopes and concurrent Turns' actual Workspace mutation binding remain shared. `prepare` reads only explicitly named environment variables. `prepare_with_credentials` supports explicit private embedding inputs, including isolated fixture credentials. Neither path sends model requests or executes tools to test availability.
+Keep one builder (or its clones) across reloads, so the agent tool's independently owned delegation scopes and concurrent Turns' actual Workspace mutation binding remain shared. `prepare` uses private literal keys supplied by the file loader or resolves the explicitly referenced environment variables. `prepare_with_credentials` supports explicit private embedding inputs, including isolated fixture credentials. Neither path sends model requests or executes tools to test availability.
 
 A directory-based production setup passes one configuration directory and builder to the Host startup entry. Host loads native JSON through `minicore-host-config`, then prepares the complete candidate with this builder before publishing it. Directory declarations supply current Host and managed Agent settings; durable records retain their identities and existing Sessions. The programmatic `Host::memory_configured` and `Host::open_configured` entries remain available for embedding. Provider and network key bytes are never serialized. There is one `HostRecord<HostConfig>` disk shape; the name-only HostSettings convenience does not define another storage format.
 

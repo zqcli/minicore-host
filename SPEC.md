@@ -156,9 +156,11 @@ Agent 的可变业务配置包括 Role、instructions，以及 SessionDefaults �
 
 ### 模型协议与基础显示元数据
 
-Host 配置中的每项模型显式选择 `chat_completions` 或 `responses` 协议，模型引用、实际模型名称、准确 endpoint、凭证来源和能力声明分别保留。资源装配按协议构造对应 Provider，不根据 URL 猜测协议、不自动探测或回退。普通 Turn 与压缩调用复用同一模型能力；协议选择变更遵守既有完整候选校验、热更与本轮绑定规则。
+每个有效模型保留 `chat_completions` 或 `responses` 协议、MiniCore 选择名、上游模型 ID、准确 endpoint、凭证来源和能力声明。文件声明由引用的渠道提供连接配置。资源装配不猜测、不探测或切换 API 协议；Responses 的流传输按第 5 章选择。普通 Turn 与压缩调用复用同一模型能力；变化遵守既有完整候选校验、热更与本轮绑定规则。
 
 Session 所有者在创建时记录 `created_at`，并维护 `last_activity_at`：它是实际接受输入或完整历史、终态、压缩等业务事实时所捕获时间的最大值；查询、订阅、token 回调与 UI 选择不推进该值。会话详情及列表提供这些真实时间与界面需要的工作区、模型、reasoning 等基本摘要，不以随机 ID、查询时间或文件修改时间代替业务活动。排序由调用方根据这些事实完成，不新增通用排序或统计接口。
+
+会话详情及目录摘要可返回 `first_user_preview`，它是首条已接受用户来源输入的单行预览，合并空白与控制字符，最多 160 个 Unicode 字符（含截断省略号）。不使用 Agent 消息、委派结果或模型提示包装生成预览。明确设置的 `title` 独立保存；改名或清空标题不修改预览或会话身份。缺少预览的旧记录在正常读取历史时恢复，不为目录查询加载历史。
 
 输入在实际接受边界记录原 `received_at`，延后绑定与保存不改写该时间。新 Host 历史封装在原逻辑位置旁保留所有者接受记录时的 `recorded_at`，原生 Runtime 正文保持原样；Turn 终态记录保留真实结束时间、请求次数、工具轮数和模型尝试次数。时间采用 UTC RFC3339，记录顺序仍由逻辑位置及真实关联确定，不依靠墙钟排序。元数据沿既有 Session 记录所有者与历史保存边界提交，不逐 token 写入，不建立另一份正文或结果仓库；保存失败保留原候选与真实阻塞事实。
 
@@ -200,7 +202,7 @@ Host 与内嵌 Host 的 TUI 统一使用 `--config-dir`。未提供时使用用�
 
 文件中的 `providers` 按名声明 `baseurl`、`api`、`api_key` 和可选 `stream`、`request_timeout_ms`。每项 `models` 声明 MiniCore 选择名 `name`、上游模型 ID `model`、`reasoning` 等能力，并以 `provider` 精确引用一个渠道。Host 在加载时展开为有效模型目录，Agent、Session 与公开模型目录仍用原选择名。基础 URL 不含方法后缀；按所选 API 追加 `/responses` 或 `/chat/completions`，不推测 `/v1`。模型密钥为字面值或整个值为 `$变量名` 的 Host 环境引用；不执行命令，密钥值不进入客户端配置查询、诊断或数据记录。
 
-TUI 文件引用可以对现有 Host 目录查询显式启用文件列表；默认相同行为仍只返回目录。文件列表可加入当前 Session 已绑定的工作区作为可浏览根，其他目录仍受 `workspace_roots` 限制。绝对路径可返回同一范围内的常规文件引用，不读取其内容；向上导航只使用 Host 返回的父目录。
+TUI 文件选择器可复用第 8 章的 `workspace.list` 取得规范路径，不读取文件正文。
 
 Host 只读取 host.json、agents/roles 下的 JSON 以及这些声明显式引用的 Markdown，不解释 tui.json 或提供前端配置文件读写接口。TUI 的输入召回保存在 `<data-root>/tui/history.jsonl`，命令模板放 `<config-dir>/commands/`；不搜索旧 prompt/commands 路径。界面配置的错误与刷新不参与 Host 业务配置的校验、版本或重载。Web 独立维护其连接入口与偏好，向各 Host 查询该 Host 的实际业务状态。
 
@@ -413,7 +415,7 @@ Host 记录使用基本外形，Agent 记录在外层增加 host_id，Session �
 
 Host data 另保存 config_revision；Agent data 另保存 mode、config_revision、default_session_id。fingerprint 是完整已应用类型值确定性 JSON 编码的 SHA-256 小写十六进制摘要：Host 覆盖 HostConfig，Agent 覆盖 `[name, resolved AgentConfig]`，包括展开后的 Role 正文。源码 JSON 排版或字段顺序不改变摘要；配置实际值变化按 owner 原规则递增版本，未变化的配置重启不增加版本。摘要只用于比较，不提供正文恢复，不新增配置版本库。
 
-Session data 保留独立 effective_config、适用配置版本、必要管理与历史元数据及已提交管理事实，例如 persistent Session 已明确 closed 的事实。Host 运行编号、LoadId、当前操作端、活动 Turn、两队列和运行期等待等不作为可恢复现场保存。各对象继续读写自己的记录，重启初始化与 JSONL resume 分别按本章规则处理。
+Session data 保留独立 effective_config、适用配置版本、可选的 `title` 与 `first_user_preview` 等元数据及已提交管理事实，例如 persistent Session 已明确 closed 的事实。Host 运行编号、LoadId、当前操作端、活动 Turn、两队列和运行期等待等不作为可恢复现场保存。各对象继续读写自己的记录，重启初始化与 JSONL resume 分别按本章规则处理。
 
 ## 数据根目录的独占使用
 
@@ -577,7 +579,7 @@ TurnRef 已包含 session_id 与 turn_id。原 Host 运行与 Agent 归属来自
 
 ### 提供方解码与模型响应组装
 
-`host-provider` 负责 HTTP/SSE 和提供方消息格式，普通有效消息直接解码为具体结构，不先构建整份通用 JSON 对象。明确的提供方错误单独识别，保留既有错误分类优先级、首条消息识别、delivery 和重试下限；具体消息结构和错误帧外层中已识别字段的重复，以及不支持的结构明确报错，不自动修复或改走旧解码路径。整帧校验 UTF-8，实际消费的字段保持类型和内容检查；未消费的扩展字段沿所用 JSON 库的跳过规则处理，不为它们构建通用对象或额外校验平台。Provider 校验提供方索引、编号与名称片段、消息顺序、结束原因及流结束条件，向 Runtime 交出统一的文字、工具开始、原始参数片段和工具结束事实。
+`host-provider` 负责上游流传输和提供方消息格式，普通有效消息直接解码为具体结构，不先构建整份通用 JSON 对象。明确的提供方错误单独识别，保留既有错误分类优先级、首条消息识别、delivery 和重试下限；具体消息结构和错误帧外层中已识别字段的重复，以及不支持的结构明确报错，不自动修复或改走旧解码路径。整帧校验 UTF-8，实际消费的字段保持类型和内容检查；未消费的扩展字段沿所用 JSON 库的跳过规则处理，不为它们构建通用对象或额外校验平台。Provider 校验提供方索引、编号与名称片段、消息顺序、结束原因及流结束条件，向 Runtime 交出统一的文字、工具开始、原始参数片段和工具结束事实。
 
 工具参数由 Runtime 单一累计，在对应工具结束时按原文解析并构造标准 ToolCall。参数不套用回答或思考文本的字符清理，不补齐、截断或修复 JSON；对象形状、嵌套安全、本次声明中的工具和调用编号校验继续保留。验证成功后释放原始参数缓冲；失败时保留原文。Provider 不另存已交接参数的累计副本，不重复解析整份参数；尚无法形成有效工具开始消息的原始编号、名称和参数片段，仍由 Provider 保留为不可执行的部分内容。
 
@@ -587,7 +589,7 @@ Provider 在协议结束条件成立后，先交出实际结束原因和用量�
 
 ### Responses 提供方
 
-Responses 适配使用显式完整输入、`store=false` 与必要的原生推理重放数据，不依赖 `previous_response_id` 或提供方持有的隐式会话。`responses` 模型使用准确的 endpoint URL，所引用渠道省略 `stream` 或使用 `"stream":"sse"` 都直接使用 HTTPS/SSE（`stream=true`）；只有 `"stream":"wss"` 才优先尝试 WSS（每次调用一个连接，发送 `response.create`）。升级不支持或上游明确拒绝 WS 路由时使用同地址的 HTTPS/SSE。认证错误、请求是否已执行未知、或已开始响应时不得切换传输重发。明文只允许字面回环地址。两种传输共享 Responses 解码、终态和错误规则，不影响 Host 接入层的 JSON-RPC WSS。
+Responses 适配使用显式完整输入、`store=false` 与必要的原生推理重放数据，不依赖 `previous_response_id` 或提供方持有的隐式会话。渠道省略 `stream` 或使用 `"stream":"sse"` 时直接使用 HTTP/SSE（`stream=true`）；只有 `"stream":"wss"` 才为每次请求尝试新 WebSocket 并发送 `response.create`。发出请求前允许在连接或升级失败等明确安全的场景回落；发出后只在上游明确拒绝 WS 路由且证实未开始时回落到同地址 SSE。认证错误、请求是否已执行未知、或已开始响应时不得切换传输重发。明文只允许字面回环地址。两种传输共享 Responses 解码、终态和错误规则，不影响 Host 接入层的 JSON-RPC WSS。
 
 `web_search` 是 Responses 模型的可选设置：省略关闭，`live` 允许上游实时联网，`cached` 禁止上游外部访问。Session 配置可以用 `off`、`live` 或 `cached` 覆盖选定模型的默认值；省略时继承模型默认值，已绑定的 Turn 不受后续配置变更影响。内部摘要压缩不启用搜索。上游在原模型请求内执行搜索，Provider 保留其返回的搜索项、来源及 URL 引用，不生成本地 ToolCall 或独立搜索接口。
 
@@ -1552,7 +1554,7 @@ turn.cancel 先核对指定执行，仅成功认领取消时才执行附带的�
 | session.compact | C | 以 operation_id 关联本次手动压缩，空闲时直接开始；已有活动 Turn、启动或压缩工作时返回忙碌，不进入消息队列 |
 | session.compact.cancel | C | 以 target_operation_id 指定原手动压缩；取消请求使用独立 operation_id，不清消息队列，不改投后来的压缩 |
 | workspace.roots | Q | 读取当前 Host 显式配置且已规范化的可选目录根，不要求 Session |
-| workspace.list | Q | 在可选目录根内浏览真实直接子目录并分页，不要求 Session |
+| workspace.list | Q | 在允许根内分页列目录；显式启用时也可列文件或解析文件路径，允许附带 Session 工作区 |
 | workspace.mkdir | C | 当前操作连接在可选目录根内新建一个真实直接子目录，不要求 Session |
 | workspace.files | Q | 浏览指定 Session 已绑定工作区的目录与文件 |
 | workspace.read | Q | 按范围读取文件 |
@@ -1568,25 +1570,28 @@ model.list 主要供 TUI 和管理客户端展示用户已有的自定义模型�
 
 tool.list 描述可选或已启用工具，toolcall.* 描述一次实际执行；当前 Turn 的工具声明和执行器来自同一次绑定，沿用第 2 章既定生效边界。workspace.*、changes.* 首版复用已有文件搜索与差异读取能力，按指定目标和必要范围返回实际结果，字段满足当前 TUI 使用即可。工作区读取须由调用方明确请求，不表示消息层自动代读、打包或复制文件；接口不依赖客户端当前打开的页面。
 
-### Session 创建前的目录选择
+### 目录选择与文件引用
 
-`workspace.roots`、`workspace.list`、`workspace.mkdir` 直接归 Host；已有 `workspace.files/read/search/status` 仍使用明确 Session 的已提交工作区。可选根只限定这三个目录选择方法，不改变 Session 配置或工具执行的既有边界。客户端将所选绝对路径写入现有 `WorkspaceRef.path`，目录浏览或创建本身不创建 Agent／Session。
+`workspace.roots`、`workspace.list`、`workspace.mkdir` 直接归 Host；已有 `workspace.files/read/search/status` 仍使用明确 Session 的已提交工作区。默认只使用 `workspace_roots`。`workspace.list` 的文件模式可通过 `workspace_session` 读取指定 Session 的已提交工作区，并仅为本次查询加入该根；不改变 Host 根或 Session 配置、文件内容读取与工具执行的权限。可选目录路径可作为现有 `WorkspaceRef.path`，查询或创建目录本身不创建 Agent／Session。
 
 同进程、stdio 与 WSS 使用以下相同业务形状，不新增 `filesystem.*` 别名或旧 Web 远程协议：
 
 ```typescript
-type DirectoryEntry = { name: string; path: string };
+type DirectoryEntry = { name: string; path: string; is_file?: boolean };
 type DirectoryCursor = { scope: string; after_name: string };
 // workspace.roots: params {} -> { roots: DirectoryEntry[] }
 // workspace.list:
 type DirectoryListRequest = {
   path: string;
   hidden?: boolean; // 默认 false
+  include_files?: boolean; // 默认 false
+  workspace_session?: SessionRef; // 仅文件模式使用
   cursor?: DirectoryCursor | null;
   limit: number; // 调用方要求的正整数页大小，不是服务端容量上限
 };
 type DirectoryListResult = {
   path: string;
+  is_file?: boolean;
   parent: string | null;
   entries: DirectoryEntry[];
   next_cursor: DirectoryCursor | null;
@@ -1599,7 +1604,9 @@ type DirectoryMkdirResult =
   | { status: "failed"; error: Fault };
 ```
 
-结果 path 是可直接使用的 Host 平台绝对路径，Windows 保留驱动器和 UNC 语义；不把非 UTF-8 名称无损转换成不存在的路径。list 只列直接子目录，按名称确定排序；隐藏项由 hidden 显式控制。cursor 绑定配置根、规范化目录与 hidden 范围，只在仍有下一页时返回，不做 MAX_ENTRIES 等固定截断。目录项和请求路径均检查规范化后的根包含关系；符号链接只能指向任一允许根内目录，越界链接不列出，越界或父级遍历请求明确失败。parent 只有仍处于允许范围内才返回。
+结果 `path` 是 Host 平台规范绝对路径，Windows 保留驱动器和 UNC 语义；不把非 UTF-8 名称替换为不存在的路径。默认列直接子目录，`include_files` 为 true 时也列常规文件。`is_file` 仅为 true 时发送。直接请求允许范围内的绝对文件路径只返回规范路径、`is_file: true`、空 `entries`、空 `parent` 与 `next_cursor`，不读取正文。
+
+目录项按名称排序，`hidden` 控制点前缀项。游标绑定实际允许根、规范化目录、`hidden` 与 `include_files`，有下一页才返回，不做固定条目截断。路径按规范化后的根包含关系检查，越界符号链接不列出，越界请求或 `..` 路径组件明确失败。向上导航使用允许范围内才返回的 `parent`。
 
 roots/list 需要有效读取资格；mkdir 在真实受理边界核对当前连接操作权及 Host 运行状态。name 只能是一个有效平台路径组件，不接受绝对路径、`.`、`..` 或路径分隔符。mkdir 不递归建父目录，已存在明确失败，不覆盖、不自动重试。接受后由现有 Host 所有者持有真实文件工作与对应回执，连接结束或调用等待超时不撤销已接受工作；Host 退出等待实际写入收尾。回执复用 `host.receipt.get`，operation_id 仍只用于关联、不去重。常见路径、未找到、已存在、游标、范围与 I/O 错误使用 HOST_ 域登记，不伪装 Session 故障，不泄露原始 OS 错误正文。
 

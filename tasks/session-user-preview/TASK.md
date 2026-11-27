@@ -53,6 +53,8 @@ those patches and lockfile edits are not committed.
 ## Integration and limits
 
 TUI consumes the field for `/sessions` labels and filtering, and distinguishes
-manual titles from previews and empty-session IDs. TUI must pin a Host commit
-containing this change. Versions and SPEC are unchanged. No live model, remote
-publication or independent review is claimed by this local task.
+manual titles from previews and empty-session IDs. The Host implementation
+was published as [`13d084ffc3dccceb1770edd555f7e19ddc4edfbc`](https://github.com/zqcli/minicore-host/commit/13d084ffc3dccceb1770edd555f7e19ddc4edfbc).
+See [PROJECT.md](../../PROJECT.md#current-checkpoint-host-01218) for the 0.12.18
+Host/TUI pins and Host CI. These checks do not represent live-model acceptance
+or independent review.

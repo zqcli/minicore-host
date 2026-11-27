@@ -20,6 +20,12 @@ including `tui.json`, are ignored.
 Every parsed object rejects unknown fields. A bad file, missing Role reference
 or duplicate Agent key fails the whole read with its source path.
 
+Named providers in `host.json` expand into effective model settings referenced
+by model `name`. File-only fields do not change the `HostConfig` wire shape.
+The loader separates literal keys from serializable settings; resource
+preparation resolves credentials. See the
+[file format and migration](../../docs/configuration.md#providers-and-models).
+
 An Agent file has `key`, `name`, `role`, optional `instructions`, and complete
 native `session_defaults`. Its `role` is one filename stem from `roles/`, not a
 Role display name or an arbitrary path. The result contains the canonical

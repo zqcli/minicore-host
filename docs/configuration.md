@@ -1,14 +1,14 @@
 # JSON configuration directories
 
-Host 0.12.11 and SPEC 4.11.6 use one explicit configuration directory. Configuration
-files are UTF-8 standard JSON: no TOML, comments, legacy-file fallback or automatic
-migration. Runtime persistence stays in the separate data root.
+Host 0.12.18 uses one explicit configuration directory. Files are UTF-8 standard
+JSON: no TOML, comments, legacy-file fallback or automatic migration. Runtime
+persistence stays in the separate data root.
 
 ## Files and owners
 
 | Path | Meaning | Reader and owner |
 | --- | --- | --- |
-| `host.json` | Host name, shared instructions, providers, tools, workspace roots, network and logging | Shared `host-config` loader; Host applies values |
+| `host.json` | Host name, shared instructions, providers, models, tools, workspace roots, network and logging | Shared `host-config` loader; Host applies values |
 | `agents/*.json` | One declared Agent per file | Loader resolves references; Host and Agent owners apply values |
 | `roles/*.json` | One reusable Role per file | Loader expands the selected Role into each native Agent configuration |
 | `tui.json` | TUI editor, display and terminal preferences | TUI reads, parses and saves locally |
@@ -40,11 +40,9 @@ It does not launch a Host subprocess or translate shell arguments. TUI reads
 `tui.json` itself. Its input history lives at `<data-root>/tui/history.jsonl`.
 Only one running process can own a data root at a time.
 
-Copy the entire [example-config](../example-config/host.json) directory and edit
-the shared provider `baseurl`, selected upstream models and their capabilities.
-The provider `api_key` can reference a Host environment variable using
-`"$MINICORE_MODEL_KEY"`. See [provider and model configuration](../crates/host-app/README.md)
-for the fields and migration from the former flat model list.
+Copy the entire [example-config](../example-config) directory and edit the
+[providers and models](#providers-and-models). Before upgrading an existing
+configuration, [migrate the flat model list](#migrate-from-a-flat-model-list).
 The examples contain placeholders, never a working key. The sample selects no
 tools or workspace; add those explicitly before local file or shell operations.
 For an interactive TUI, set `logging.output` to a file with an absolute path
@@ -65,6 +63,93 @@ message or execute a model call.
 The former Host `--config`, TUI `--home`/`--host-config`, `MINICORE_HOME`,
 `config.toml`, `agent-defaults.json` and `/agent-defaults` entry points are removed.
 Arrange existing settings into the new files explicitly.
+
+## Providers and models
+
+Declare each upstream connection once in the `providers` object. Two models
+can reference the same provider; their `name` values still select different
+MiniCore models. This example can replace `host.json` in the example directory:
+
+```json
+{
+  "name": "Local Host",
+  "providers": {
+    "gateway": {
+      "baseurl": "https://gateway.example.invalid/v1",
+      "api": "responses",
+      "api_key": "$MINICORE_MODEL_KEY"
+    }
+  },
+  "models": [
+    {
+      "name": "provider/chat",
+      "provider": "gateway",
+      "model": "replace-with-chat-model",
+      "context_window": 128000,
+      "reasoning": ["auto"],
+      "supports_tools": true
+    },
+    {
+      "name": "provider/review",
+      "provider": "gateway",
+      "model": "replace-with-review-model",
+      "context_window": 128000,
+      "reasoning": ["auto", "high"],
+      "supports_tools": true
+    }
+  ],
+  "tools": [],
+  "network": {"listen": null, "access_key_env": null},
+  "logging": {"level": "info", "output": {"kind": "stderr"}}
+}
+```
+
+| Field | Use |
+| --- | --- |
+| `providers.<key>.baseurl` | Upstream API root, including an existing prefix such as `/v1`. Do not include the method suffix. Use HTTPS, or HTTP for a numeric loopback address. |
+| `providers.<key>.api` | `chat_completions` or `responses`. Host appends `/chat/completions` or `/responses`, respectively; it does not add `/v1`. |
+| `providers.<key>.api_key` | A literal key or `$ENV_VAR`. Prefer the environment reference. |
+| `providers.<key>.stream` | Optional and Responses-only: omit or set `sse` for HTTP SSE; set `wss` to try WebSocket first. |
+| `providers.<key>.request_timeout_ms` | Optional positive request timeout in milliseconds, shared by models on this provider. |
+| `models[].name` / `provider` / `model` | Unique MiniCore selection name, exact provider key, and upstream model ID, respectively. Agent `session_defaults.model` and existing Sessions select `name`, not the upstream ID. |
+| `models[].context_window` / `reasoning` / `supports_tools` | The declared context window, supported reasoning levels, and function-tool capability. Set these to match the upstream model. |
+| `models[].web_search` | Optional Responses hosted search: `live` allows external web access, `cached` disables it. Omit to leave search off. |
+
+The `$` prefix means the whole value names a variable in the Host process
+environment. `${VAR}`, shell commands and interpolation are not supported.
+Startup and reload fail if a configured model's credential is missing or invalid.
+Literal key bytes are not returned by RPC or written to data records or diagnostics;
+they are still present in the source file if supplied there.
+
+Omitted `stream` does not probe WebSocket. `wss` tries a fresh upstream socket
+for each Responses request. It can fall back to the same endpoint over SSE only
+on supported pre-send failures or an explicit pre-start route rejection; it
+does not replay a request that may already be running. This setting does not
+control the Host's inbound WSS listener. See the
+[Responses adapter](../crates/host-provider/README.md#responses) for exact behavior.
+
+A Session can override the model's search default with `web_search: "off"`,
+`"live"` or `"cached"` for its next Turn. Search runs on the upstream Responses
+request, not as a local tool or a separate `/v1/search` endpoint.
+
+### Migrate from a flat model list
+
+Edit `host.json` before starting 0.12.18. The old flat rows are not accepted.
+Group rows with the same connection settings into one named provider. If their
+API, credentials, stream or timeout differ, keep separate providers.
+
+| Old model-row field | New location |
+| --- | --- |
+| `endpoint` | Provider `baseurl`: remove the `/responses` or `/chat/completions` suffix; keep the API prefix. Convert an old `wss://` URL to `https://` (`ws://` to `http://` for loopback) and set provider `stream` to `wss` if you still want WebSocket. |
+| `api`, `stream`, `request_timeout_ms` | Same fields on the provider. Use `stream` only for Responses. |
+| `api_key_env: "KEY"` | Provider `api_key: "$KEY"`. |
+| `model`, `provider_model`, `supported_reasoning` | Model `name`, `model`, and `reasoning`, respectively. |
+| `context_window`, `supports_tools`, `web_search` | Unchanged on the model. Add `provider` referencing the new provider key. |
+
+Keep the old model alias as `name` so existing Agent declarations and Session
+model references continue to resolve. Do not change the data root. The new
+layout is for file declarations only: `host.config.get` and the Rust embedding
+API still expose effective model settings, not the `providers` file object.
 
 ## Agent identity and Role references
 
@@ -171,7 +256,7 @@ See [SPEC.md](../SPEC.md) for the normative contract and
 | --- | --- |
 | `host.json` | Host ID, configuration source and revision |
 | `agents/<AgentId>.json` | Agent ID, Host ID, configuration source, mode, revision and default Session |
-| `sessions/<SessionId>/session.json` | Session ID, Agent ID and independent effective configuration/metadata |
+| `sessions/<SessionId>/session.json` | Session ID, Agent ID, independent effective configuration, optional title and first-user preview |
 | `sessions/<SessionId>/history.jsonl` | Original native history records |
 | `tui/history.jsonl` | Frontend input recall, owned by TUI |
 

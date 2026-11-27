@@ -2,10 +2,12 @@
 
 - Baseline: `929c6632c2c614d02f3ddae455f672a5bf096bc5` (`dev`).
 - Implementation checkpoint: `2ebf74cbdcc2249fef5ab97a038a259f5f077836`.
+- Published implementation: [`8930d26bc4d749a2b214d820dd84d9db13554c7d`](https://github.com/zqcli/minicore-host/commit/8930d26bc4d749a2b214d820dd84d9db13554c7d), included in [Host 0.12.18](../../PROJECT.md#current-checkpoint-host-01218).
 - Scope: additive file browsing through `workspace.list`; package version stays
-  0.12.17 and SPEC advances to 4.11.13. No new RPC, content read or execution.
+  0.12.17 at the original checkpoint and SPEC advances to 4.11.13. No new RPC,
+  content read or execution.
 - Worker requested as `gpt-6-astra` / `max`; no claim of independently inspected
-  runtime settings. Local-only changes, no push or release.
+  runtime settings.
 
 ## Contract and implementation
 
@@ -41,5 +43,6 @@ Pinned Rust 1.90.0 with locked dependencies, on the implementation checkpoint:
   -p minicore-host-core -p minicore-host-transport --lib -- -D warnings`: passed.
 
 Implementation complete; focused Linux verification passed. No model requests
-were made by these fixtures. Full workspace, non-Linux CI, manual TUI interaction
-and independent review remain separate coordinator checks. No remote push.
+were made by these fixtures. For the published implementation and cross-platform
+Host CI, see [PROJECT.md](../../PROJECT.md#current-checkpoint-host-01218). Manual
+TUI interaction and independent review are separate from these checks.

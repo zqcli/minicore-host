@@ -1,17 +1,18 @@
 # MiniCore Host workspace and directory operations
 
-A small backend module for SPEC v4.11.0 §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
+A small backend module for [SPEC](../../SPEC.md) §§2, 7–9. The six workspace/change reads use actual files, Git objects/index/worktree state, and explicitly retained tool observations. There is no model call, process-global `chdir`, database, cache owner, resource quota, or compatibility layer.
 
 ## Host directory selection
 
 `WorkspaceDirectories::prepare` canonicalizes only explicitly configured absolute
-roots during Host resource preparation. `roots/list/mkdir` operate on that immutable
-selection without requiring a Session. List results contain direct directories only,
-including symlinks whose targets remain inside an allowed root. They use absolute
-Host-platform paths, preserve Windows drive/UNC syntax, and reject unrepresentable
-UTF-8 paths rather than inventing lossy names. Names use the Host platform's rules.
-List cursors bind all prepared roots, the canonical directory and hidden filter;
-page size is caller-selected with no fixed entry cap. These are live observations.
+roots during Host resource preparation. `roots/list/mkdir` normally use that
+immutable selection. For an opt-in file query, Host can call `with_workspace`
+to add an owner-resolved Session workspace to that read only. List returns direct
+directories by default and regular files when requested, without reading their
+contents. Paths remain canonical absolute Host-platform paths. Cursors bind the
+effective roots, directory, hidden filter and file mode. These are live queries
+with a caller-selected page size. See the
+[directory API](../host-transport/README.md#directory-selection-and-file-references).
 
 Host owns authentication, operation rights, blocking-worker lifetime, shutdown
 settlement, error mapping and the mkdir receipt. `mkdir` creates one actual child,

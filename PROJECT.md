@@ -1,30 +1,27 @@
 # MiniCore Host
 
-## Current work: Host-backed editor file references (Task 126)
+## Current checkpoint: Host 0.12.18
 
-[Task 126](tasks/126-editor-file-references/TASK.md) adds opt-in file references
-through the existing workspace directory query. The selected Session workspace
-and configured Host roots determine browsing scope; directory-only callers keep
-their existing wire shape. Baseline `929c6632c2c614d02f3ddae455f672a5bf096bc5`;
-implementation checkpoint `2ebf74cbdcc2249fef5ab97a038a259f5f077836`.
-Focused Linux checks pass (2 protocol, 10 workspace and 3 cross-transport tests,
-formatting/whitespace and strict library Clippy). Independent review and TUI
-integration remain pending; no remote publication is claimed here.
+The Host 0.12.18 code checkpoint on `dev` is [`3edc6aad5f07d7ed6a37c95b72cf39b2aaf30ead`](https://github.com/zqcli/minicore-host/commit/3edc6aad5f07d7ed6a37c95b72cf39b2aaf30ead).
+[Host CI #97](https://github.com/zqcli/minicore-host/actions/runs/46010344345)
+passed all nine jobs on that commit: quality, four platform test jobs and four
+platform package jobs. These are CI fixtures, not live-provider acceptance.
+The first TUI 0.12.18 `dev` checkpoint [`0b15ce554cd86de1e9dc8462a99be85f630f88d6`](https://github.com/zqcli/minicore-tui/commit/0b15ce554cd86de1e9dc8462a99be85f630f88d6)
+pins that Host commit. The Host run does not validate TUI's separate CI.
 
-## Current work: first-user Session previews
+- [Provider/model migration](docs/configuration.md#providers-and-models): named
+  providers share connection settings; existing model aliases still resolve.
+  Responses defaults to SSE and opts in to WSS per provider. The original
+  transport and hosted-search work is recorded in [Task 125](tasks/125-responses-transport/TASK.md).
+- [Editor file references](tasks/126-editor-file-references/TASK.md): opt-in
+  `workspace.list` file metadata and Session workspace scope, without changing
+  directory-only callers.
+- [Session previews](tasks/session-user-preview/TASK.md): bounded first-user
+  metadata, separate from explicit titles, with no catalog-driven history load.
 
-[Session previews](tasks/session-user-preview/TASK.md) records the separate, bounded
-first-user-input catalog field and persistence checks. It does not rename Sessions
-or add picker-driven history reads. Local integration and review are pending.
-
-## Previous work: Responses WebSocket and hosted search (Task 125)
-
-[Task 125](tasks/125-responses-transport/TASK.md) records explicit upstream
-Responses WebSocket transport and opt-in hosted search, with both sharing the
-existing Responses decoder. Compare feature commit
-`79443c989416ffdacf0af21bf8ed2361272c45d5` against
-`d91157e737b8889f918948f476e099c3e4382df8`. No new Host RPC or client changes.
-Independent review pending.
+Compare the provider split, file browsing and preview changes with baseline
+`ce2733b15400761b2ccf379b5062e6547374f1ab`. The task records distinguish focused
+local checks and published commits. Independent review remains separate.
 
 ## Previous work: Agent action defaults and delegation grants (Task 124)
 

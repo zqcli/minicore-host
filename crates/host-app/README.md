@@ -7,7 +7,7 @@ configuration loader; each frontend owns its own UI settings.
 
 ## Start a Host
 
-Copy the complete [example directory](../../example-config/host.json), edit its
+Copy the complete [example directory](../../example-config), edit its
 provider settings, and supply the credential environment variable before starting:
 
 ```sh
@@ -35,68 +35,10 @@ to actual owners. Follow its receipt for applied, partially applied, failed or
 restart-required results. There is no file watcher, candidate/path RPC input or
 legacy `--config` fallback.
 
-For example, this **template** declares one OpenAI-compatible provider:
-
-```json
-{
-  "name": "Local Host",
-  "instructions": "",
-  "providers": {
-    "gateway": {
-      "baseurl": "https://gateway.example.invalid/v1",
-      "api": "responses",
-      "api_key": "$MINICORE_MODEL_KEY"
-    }
-  },
-  "models": [{
-    "name": "provider/chat",
-    "provider": "gateway",
-    "model": "replace-with-provider-model",
-    "context_window": 128000,
-    "reasoning": ["auto"],
-    "supports_tools": true
-  }],
-  "tools": [],
-  "workspace_roots": [],
-  "network": {"listen": null, "access_key_env": null},
-  "logging": {"level": "info", "output": {"kind": "stderr"}}
-}
-```
-
-One named provider holds the connection and may be shared by multiple models.
-Each model's unique `name` is the MiniCore selection reference. Its `model` is
-the ID sent upstream. `reasoning` lists the effort levels the model supports.
-A missing provider reference fails configuration validation.
-
-`api_key` accepts a literal or the complete value `$VARIABLE_NAME` (no shell
-or substitution inside other strings). Prefer environment references so the key
-is not in the file. Missing or empty referenced values are configuration errors.
-Key values are not included in Host queries, diagnostics, or data records.
-
-`api` accepts `chat_completions` or `responses`. Set `baseurl` to the API root,
-including its prefix (for example `https://gateway.example/v1`). Host appends
-`/chat/completions` or `/responses`; it does not add `/v1` or guess the protocol.
-Use HTTPS for remote providers. Plain HTTP is limited to literal loopback.
-
-Responses uses SSE when `stream` is omitted or set to `sse`. A provider with
-`"stream":"wss"` tries WebSocket first, with same-endpoint SSE fallback on an
-unsupported upgrade or explicit pre-start WS route rejection. An ambiguous or
-started request is not replayed. There is no automatic switch to a different
-provider or protocol. Optional `request_timeout_ms` belongs to the provider.
-
-To migrate the former flat model list, move the shared address, API, key,
-stream and timeout into a named provider. Remove the method suffix from the old
-endpoint, and change an old `wss://` URL to `https://` plus explicit `stream`.
-Move the old `model` to `name`, `provider_model` to `model`, and
-`supported_reasoning` to `reasoning`. Set `provider` to the provider's key.
-Convert `api_key_env: "KEY"` to `api_key: "$KEY"`. Existing Session model
-references remain valid when the new names match their old model aliases.
-
-For a provider/model that supports hosted search, set `"web_search":"live"`
-in its model entry, or use `"cached"` to disable external web access. Omit the
-field to leave it off. A session can override it with `off`, `live`, or
-`cached` in its config. It uses the same Responses request (no `/v1/search`
-route); the upstream provider performs the search, outside local tool approval.
+See [providers and models](../../docs/configuration.md#providers-and-models) for a
+complete shared-provider example and the flat-list migration. Responses defaults
+to outbound SSE; `providers.<key>.stream` opts in to WSS. That choice does not
+enable the Host's [client listener](#wss-and-client-ownership).
 
 The builtins are `read`, `write`, `edit`, `apply_patch`, `bash`, and the six-action
 `agent` tool. Registration does not enable tools:
@@ -112,11 +54,12 @@ It follows the same approval, mutation guard and edit-journal path as `edit`.
 For example, set `"workspace_roots":["/home/user/projects"]` (or the actual absolute
 Windows path, such as `"C:\\Users\\User\\projects"`). Every root must already be a
 directory; preparation fixes its canonical path. The default empty list exposes
-none and does not fall back to HOME, cwd or a Session workspace. The three
-`workspace.roots/list/mkdir` operations use this scope; existing Session workspace
-reads and tool execution keep their own configured workspace. Roots can change
-by editing `host.json` and calling `host.reload`. A browser's selected
-path is a path on the Host machine.
+none and does not fall back to HOME or cwd. An opt-in `workspace.list` file
+query can also browse the explicitly referenced Session's workspace; `roots`
+and `mkdir` still use only configured roots. See
+[directory selection and file references](../host-transport/README.md#directory-selection-and-file-references).
+Roots can change by editing `host.json` and calling `host.reload`. The returned
+path is on the Host machine, not necessarily on the client.
 
 Session `execution.approval` defaults to `"ask"`, including when omitted.
 Mutating calls and outside-workspace calls request approval with

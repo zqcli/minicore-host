@@ -199,10 +199,27 @@ never stripped. A Session may select tools outside its Agent's default list.
 These queries are available to read-only connections. Results preserve complete
 model references and original Runtime `ToolSpec` declarations in lexical order,
 without new resource IDs, per-item kind tags, executors, or credential values.
-Configuration contains credential source names, not resolved keys. An empty
+`host.config.get` returns the effective model settings. It is not a copy of the
+`host.json` [provider declarations](../../docs/configuration.md#providers-and-models).
+It can include environment variable names, not key bytes. An empty
 enabled set is distinct from a missing target or a selected tool removed by a
 successful configuration reload; those missing cases retain the owner's Fault.
 Known references can be used directly without first calling either list method.
+
+### Session catalog previews
+
+`session.get`, `session.list` items, and the Session summaries in `agent.get`
+and `agent.list` may include `first_user_preview`. It is a single-line excerpt
+of the first accepted user-origin input, at most 160 Unicode characters,
+including an ellipsis if truncated. Agent messages and delegation results do
+not supply it. The field is absent when unavailable.
+
+The explicit `title` remains separate. For a picker label use a nonempty title,
+otherwise a nonempty preview, otherwise the Session ID. Renaming or clearing the
+title does not replace the preview; neither field changes the Session identity.
+Persistent Sessions store the preview in `session.json`. Older records without
+it recover it during normal history loading, not as a side effect of a catalog
+query. Catalog clients need not scan history to get a label.
 
 `HostClient::reload` and `host.reload` accept `HostReloadRequest` directly:
 `operation_id` and `expected_revision`. The request contains neither a candidate
@@ -434,16 +451,63 @@ launch ToolResults/completion messages and independent workspace artifacts are
 not deleted. A filesystem error may follow partial removal and is reported as
 such, without rollback, implicit retry or fabricated full deletion.
 
-## Directory selection before Session creation
+## Directory selection and file references
 
 These methods are available through `HostClient` and the same stdio/WSS operation
 handlers. `workspace.roots` takes `{}` and returns `{roots:[{name,path}]}`.
-`workspace.list` takes `{path,hidden:false,limit,cursor:null}` and returns
-`{path,parent,entries:[{name,path}],next_cursor}`. The optional cursor is
-`{scope,after_name}`; page size must be positive and can change between calls.
-Only real direct child directories inside configured `workspace_roots` are listed;
-returned paths are canonical absolute Host-platform paths. No Session reference is
-accepted or required. The client can pass a selected path as `WorkspaceRef.path`.
+By default, `workspace.list` takes an absolute `path`, positive `limit`, and
+optional `hidden` (default `false`) and `cursor`. It returns direct child
+directories under configured `workspace_roots` without needing a Session.
+The result is `{path,parent,entries:[{name,path}],next_cursor}`. Use a selected
+directory as `WorkspaceRef.path`. `hidden` includes dot-prefixed entries.
+
+Set `include_files: true` to list regular files as well. A file entry carries
+`is_file: true`; directories omit it. For this mode only, optional
+`workspace_session: {agent_id,session_id}` lets Host add that Session's configured
+workspace to the allowed roots for the read. A Session with no workspace adds
+nothing. Other Sessions, HOME and the process working directory are not
+implicit roots. `workspace.roots` and `workspace.mkdir` are unchanged.
+
+A direct absolute file path returns canonical metadata only, not file bytes.
+For example, after `initialize`, replace the IDs and path below with those on
+your Host:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "workspace.list",
+  "params": {
+    "path": "/home/user/project/README.md",
+    "include_files": true,
+    "workspace_session": {
+      "agent_id": "0123456789abcdefghjk",
+      "session_id": "23456789abcdefghjkmn"
+    },
+    "limit": 50
+  }
+}
+```
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "is_file": true,
+    "path": "/home/user/project/README.md",
+    "parent": null,
+    "entries": [],
+    "next_cursor": null
+  }
+}
+```
+
+Paths are canonical absolute Host-platform paths. Use the returned `parent`
+to navigate up; it is `null` at the allowed boundary, and raw `..` components
+are rejected. Symlinks cannot expose paths outside the allowed roots. Pass
+`next_cursor` back unchanged for the next directory page; it is bound to the
+effective roots, directory, `hidden` and `include_files`. The page size may change.
 
 `workspace.mkdir` takes `{operation_id,parent,name}`. Only the current operator can
 submit it. It creates exactly one child and returns the standard Host receipt with

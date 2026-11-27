@@ -1,6 +1,6 @@
 # MiniCore Host protocol foundation
 
-Shared value contracts for the v4.11.4 design in `../../SPEC.md`.
+Shared value contracts for the design in [SPEC.md](../../SPEC.md).
 This crate does not implement Host services, authentication, execution, storage,
 transports, or TUI integration. A method's presence in the canonical catalog is
 not a claim that its handler is implemented.
@@ -148,5 +148,7 @@ acquire fabricated record positions or LoadIds. Host object schema 3 and history
 schema 3 retain these facts; old envelope versions are rejected without migration.
 
 `DirectoryRoots`, `DirectoryListRequest/Result` and `DirectoryMkdirRequest/Receipt`
-are Host-level directory selection contracts. They do not carry Session IDs.
-`workspace.mkdir` uses the existing control receipt envelope and Host Fault registry.
+are Host-level directory selection contracts. `DirectoryListRequest` can opt in
+to files and reference a Session workspace for that read. `workspace.mkdir` uses
+the existing control receipt envelope and Host Fault registry. See the
+[directory API](../host-transport/README.md#directory-selection-and-file-references).

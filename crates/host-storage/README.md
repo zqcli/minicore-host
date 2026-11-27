@@ -1,6 +1,6 @@
 # MiniCore Host storage
 
-Object schema **3** and history schema **3**, implementing the persistence boundaries of SPEC v4.11.6. Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
+Object schema **3** and history schema **3**, following the persistence boundaries of [SPEC.md](../../SPEC.md). Earlier Host envelope versions are explicitly rejected; files are not migrated, rewritten, or timestamp-backfilled. Native Runtime content formats remain unchanged.
 The adapter supplies filesystem facts, not Host/Agent/Session business ownership.
 
 `journal.rs` owns accepted writes and original-range save confirmation.
@@ -99,6 +99,11 @@ configuration revision, native effective `SessionConfig`, optional historical
 parent reference and optional committed `SessionClosure {reason}`. A committed
 close cannot be reopened or rewritten. No incarnation, Runner, active Turn,
 queue, pause, credential handle, waiter or delegation state is recoverable.
+
+Optional `title` and `first_user_preview` are independent Session metadata.
+Existing schema-3 records without the preview remain readable. Only the Session
+owner can derive the preview during normal history loading; storage discovery
+does not open the conversation to fill it.
 
 Host configuration is a caller-supplied serde type. The Host owns its validation
 and resource resolution; storage verifies schema, identity and lossless decoding.
