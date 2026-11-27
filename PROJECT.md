@@ -1,6 +1,17 @@
 # MiniCore Host
 
-## Current work: Responses WebSocket and hosted search (Task 125)
+## Current work: Host-backed editor file references (Task 126)
+
+[Task 126](tasks/126-editor-file-references/TASK.md) adds opt-in file references
+through the existing workspace directory query. The selected Session workspace
+and configured Host roots determine browsing scope; directory-only callers keep
+their existing wire shape. Baseline `929c6632c2c614d02f3ddae455f672a5bf096bc5`;
+implementation checkpoint `2ebf74cbdcc2249fef5ab97a038a259f5f077836`.
+Focused Linux checks pass (2 protocol, 10 workspace and 3 cross-transport tests,
+formatting/whitespace and strict library Clippy). Independent review and TUI
+integration remain pending; no remote publication is claimed here.
+
+## Previous work: Responses WebSocket and hosted search (Task 125)
 
 [Task 125](tasks/125-responses-transport/TASK.md) records explicit upstream
 Responses WebSocket transport and opt-in hosted search, with both sharing the
