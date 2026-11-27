@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 #[path = "../../../../tests/support/http.rs"]
 pub(crate) mod http;
-use minicore_host_core::{HostConfig, OpenAiModelSettings};
+use minicore_host_core::{HostConfig, OpenAiModelApi, OpenAiModelSettings};
 use minicore_host_protocol::*;
 use minicore_host_transport::tls;
 use serde_json::{Value, json};

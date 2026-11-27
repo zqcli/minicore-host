@@ -1,5 +1,5 @@
 //! Adapt in-process fixture values to file declarations; production has no legacy file loader.
-use minicore_host_core::{HostConfig, OpenAiModelApi};
+use super::{HostConfig, OpenAiModelApi};
 use serde_json::{Map, Value, json};
 
 pub fn declaration(config: &HostConfig) -> Value {

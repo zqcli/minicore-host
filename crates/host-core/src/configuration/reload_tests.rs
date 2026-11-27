@@ -7,6 +7,9 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
+#[path = "../../../../tests/support/config_file.rs"]
+mod config_file;
+
 struct TestPreparer {
     gate: Option<Arc<SaveGate>>,
     calls: AtomicUsize,
@@ -58,7 +61,7 @@ pub(super) fn write_candidate(host: &Host, candidate: &HostConfig) {
         .expect("test directory bound");
     std::fs::write(
         directory.join("host.json"),
-        serde_json::to_vec(candidate).unwrap(),
+        serde_json::to_vec(&config_file::declaration(candidate)).unwrap(),
     )
     .unwrap();
 }

@@ -140,7 +140,11 @@ async fn preparation_failure_and_restart_candidate_do_not_publish_names() {
         },
     )
     .unwrap();
-    preparer.entered.acquire().await.unwrap().forget();
+    tokio::time::timeout(Duration::from_secs(5), preparer.entered.acquire())
+        .await
+        .expect("the file candidate must reach credential preparation")
+        .unwrap()
+        .forget();
     names(&view, &["TASK066_OLD"]);
     preparer.release.add_permits(1);
     tokio::time::timeout(Duration::from_secs(5), async {
