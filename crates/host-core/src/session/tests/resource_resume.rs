@@ -243,7 +243,13 @@ async fn session_update_keeps_authority_revision_and_lifecycle_refusals() {
     let request = || SessionUpdateRequest {
         operation_id: OperationId::new().unwrap(),
         expected_config_revision: 0,
-        changes: SessionUpdateChanges::default(),
+        changes: SessionUpdateChanges {
+            config: SessionConfigPatch {
+                instructions: Some("fixture instructions".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     };
     assert_eq!(
         fixture
@@ -357,10 +363,17 @@ async fn update_releases_only_resource_block(mode: StorageMode, candidate: bool)
         let original = fixture.session.info(&caller).unwrap();
         // A rejected stale update never clears the startup fault.
         assert_eq!(
-            commit_control(&fixture, 9, SessionConfigPatch::default())
-                .await
-                .unwrap_err()
-                .kind(),
+            commit_control(
+                &fixture,
+                9,
+                SessionConfigPatch {
+                    role: Some(original.config.role.clone()),
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap_err()
+            .kind(),
             Some(FaultKind::SessionConfigConflict)
         );
         assert_eq!(
@@ -440,9 +453,16 @@ async fn updates_keep_history_blocks(mode: StorageMode) {
                     .await
                     .unwrap();
             } else {
-                commit_control(&fixture, 0, SessionConfigPatch::default())
-                    .await
-                    .unwrap();
+                commit_control(
+                    &fixture,
+                    0,
+                    SessionConfigPatch {
+                        role: Some(info.config.role),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap();
             }
             assert_eq!(
                 fixture
@@ -603,7 +623,13 @@ async fn real_host_revision_conflict_clears_after_session_update() {
         SessionUpdateRequest {
             operation_id: OperationId::new().unwrap(),
             expected_config_revision: 0,
-            changes: SessionUpdateChanges::default(),
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    role: Some(host.session_info(&caller, &target).unwrap().config.role),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await
