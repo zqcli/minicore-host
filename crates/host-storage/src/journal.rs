@@ -302,11 +302,7 @@ impl SessionJournal {
                     start: current,
                     end: current,
                 },
-                persistence: if matches!(self.backend, Backend::Memory) {
-                    PersistenceState::NotApplicable
-                } else {
-                    PersistenceState::Persisted
-                },
+                persistence: PersistenceState::Persisted,
             });
         };
         let Backend::Persistent(backend) = &mut self.backend else {

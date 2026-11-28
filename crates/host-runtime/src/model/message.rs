@@ -500,12 +500,11 @@ impl<'de> Deserialize<'de> for ModelMessage {
 
 pub(super) fn validate_tool_call_order(parts: &[AssistantPart]) -> Result<(), ModelValueError> {
     let mut ids = BTreeSet::new();
-    let mut indices = BTreeSet::new();
     let mut expected_index = 0_u32;
     for part in parts {
         part.validate()?;
         if let Some(call) = part.as_tool_call() {
-            if !indices.insert(call.call_index()) {
+            if call.call_index() < expected_index {
                 return Err(ModelValueError::DuplicateToolCallIndex);
             }
             if call.call_index() != expected_index {
