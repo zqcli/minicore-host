@@ -281,7 +281,7 @@ fn unsupported_objects_and_ownership_mismatch_are_not_rewritten() {
     assert!(f.session.load().is_ok());
 }
 #[test]
-fn memory_records_and_journal_create_no_files() {
+fn memory_records_create_no_files_and_cannot_open_a_journal() {
     let f = Fixture::new();
     let agent_id = AgentId::new().unwrap();
     let agent = f.host.agent(agent_id.clone(), StorageMode::Memory);
@@ -327,20 +327,10 @@ fn memory_records_and_journal_create_no_files() {
             },
         ))
         .unwrap();
-    let mut journal = session.open_journal().unwrap();
-    let range = journal
-        .accept(vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())])
-        .unwrap();
-    let confirmation = journal.persist_pending().unwrap();
-    assert_eq!(confirmation.range, range);
-    assert_eq!(confirmation.persistence, PersistenceState::NotApplicable);
-    assert_eq!(
-        journal.positions(),
-        SavePositions {
-            accepted: 1,
-            persisted: None
-        }
-    );
+    assert!(matches!(
+        session.open_journal(),
+        Err(StorageError::InvalidStorageMode)
+    ));
     assert!(
         !f.root
             .canonical_path()
@@ -352,10 +342,10 @@ fn memory_records_and_journal_create_no_files() {
         .agent
         .session(SessionId::new().unwrap(), StorageMode::Memory)
         .unwrap();
-    let mut memory_journal = memory_child.open_journal().unwrap();
-    memory_journal
-        .accept(vec![input(TurnId::new().unwrap(), LoopId::new().unwrap())])
-        .unwrap();
+    assert!(matches!(
+        memory_child.open_journal(),
+        Err(StorageError::InvalidStorageMode)
+    ));
     assert!(!memory_child.canonical_path().exists());
 }
 #[test]
@@ -1137,13 +1127,16 @@ fn a_terminal_partial_prevents_further_records_for_that_loop_without_mutating_ac
         vec![partial(0, 0), partial(1, 1)],
         vec![partial(0, 0), later_response],
     ] {
-        let mut memory = SessionJournal::memory(f.session.id().clone());
-        assert!(memory.accept(entries.clone()).is_err());
-        assert_eq!(memory.positions().accepted, 0);
-        // All speculative index changes from a rejected batch were discarded.
-        memory
-            .accept(vec![response(turn.clone(), loop_id)])
-            .unwrap();
+        fs::write(f.history_path(), []).unwrap();
+        {
+            let mut journal = f.session.open_journal().unwrap();
+            assert!(journal.accept(entries.clone()).is_err());
+            assert_eq!(journal.positions().accepted, 0);
+            // All speculative index changes from a rejected batch were discarded.
+            journal
+                .accept(vec![response(turn.clone(), loop_id)])
+                .unwrap();
+        }
         let bad = record_bytes(&f.session, entries);
         fs::write(f.history_path(), &bad).unwrap();
         assert!(f.session.read_history().is_err());
@@ -1230,7 +1223,8 @@ fn literal_numeric_transport_marker_keys_remain_ordinary_typed_object_fields() {
 }
 #[test]
 fn failed_batch_validation_never_commits_a_finished_turn_or_native_normalization() {
-    let mut journal = SessionJournal::memory(SessionId::new().unwrap());
+    let f = Fixture::new();
+    let mut journal = f.session.open_journal().unwrap();
     let turn = TurnId::new().unwrap();
     let loop_id = LoopId::new().unwrap();
     assert!(
@@ -1730,7 +1724,8 @@ fn terminal_counters_agree_with_known_response_and_tool_result_facts() {
             assert!(f.session.read_history().is_err());
             assert!(f.session.open_journal().is_err());
             assert_eq!(read_history_bytes(f.history_path()).unwrap(), bytes);
-            let mut journal = SessionJournal::memory(f.session.id().clone());
+            fs::write(f.history_path(), []).unwrap();
+            let mut journal = f.session.open_journal().unwrap();
             assert!(journal.accept(entries).is_err());
             assert_eq!(journal.positions().accepted, 0);
             let mut valid = prefix.clone();
@@ -1756,7 +1751,7 @@ fn terminal_counters_agree_with_known_response_and_tool_result_facts() {
         reason: None,
     };
     entries.push(terminal(0));
-    let mut journal = SessionJournal::memory(f.session.id().clone());
+    let mut journal = f.session.open_journal().unwrap();
     assert!(journal.accept(entries.clone()).is_err());
     *entries.last_mut().unwrap() = terminal(1);
     journal.accept(entries).unwrap();

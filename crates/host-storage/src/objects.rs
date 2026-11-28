@@ -477,10 +477,8 @@ impl SessionStore {
             persistence: PersistenceState::Persisted,
         })
     }
+    /// Open the persistent history writer. Memory Sessions have no disk journal.
     pub fn open_journal(&self) -> Result<SessionJournal, StorageError> {
-        if self.mode == StorageMode::Memory {
-            return Ok(SessionJournal::memory(self.session_id.clone()));
-        }
         self.load()?;
         SessionJournal::persistent(self.clone(), self.directory(false)?)
     }

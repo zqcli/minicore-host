@@ -514,35 +514,6 @@ fn invalid_batch_does_not_install_compaction_coverage_before_acceptance() {
 }
 
 #[test]
-fn memory_compaction_uses_same_validation_without_creating_files() {
-    let f = Fixture::new();
-    let session = f
-        .agent
-        .session(SessionId::new().unwrap(), StorageMode::Memory)
-        .unwrap();
-    let mut journal = session.open_journal().unwrap();
-    let entries = complete_turn();
-    append(&mut journal, entries.clone());
-    let candidate = projection(3, 1, "memory summary");
-    candidate.validate(&raw(&entries), 3, 0).unwrap();
-    let range = journal
-        .accept(vec![candidate.clone().into_entry()])
-        .unwrap();
-    let confirmation = journal.persist_pending().unwrap();
-    assert_eq!(confirmation.range, range);
-    assert_eq!(confirmation.persistence, PersistenceState::NotApplicable);
-    assert_eq!(
-        journal.positions(),
-        SavePositions {
-            accepted: 4,
-            persisted: None
-        }
-    );
-    assert_eq!(candidate.project(&raw(&entries)).unwrap().len(), 2);
-    assert!(!session.canonical_path().exists());
-}
-
-#[test]
 fn pure_helper_and_journal_agree_at_every_actual_exchange_cut() {
     for complete in [false, true] {
         let f = Fixture::new();
@@ -554,8 +525,9 @@ fn pure_helper_and_journal_agree_at_every_actual_exchange_cut() {
         let position = entries.len() as u64;
         let native = raw(&entries);
         for cut in 0..=native.len() as u64 + 1 {
-            let mut journal = SessionJournal::memory(SessionId::new().unwrap());
-            journal.accept(entries.clone()).unwrap();
+            let fixture = Fixture::new();
+            let mut journal = fixture.session.open_journal().unwrap();
+            append(&mut journal, entries.clone());
             let candidate = projection(position, cut, "fixture summary");
             let valid = candidate.validate(&native, position, 0).is_ok();
             assert_eq!(

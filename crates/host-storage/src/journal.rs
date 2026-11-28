@@ -24,7 +24,7 @@ use std::{
 pub struct SavePositions {
     /// Exclusive end of records this writer has accepted, including failed saves.
     pub accepted: u64,
-    /// None for memory. Never advanced by readable bytes or an unconfirmed write.
+    /// Last confirmed disk position. Never advanced by an unconfirmed write.
     pub persisted: Option<u64>,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -60,47 +60,21 @@ impl Persistent {
         Ok(stamp)
     }
 }
-enum Backend {
-    Memory,
-    Persistent(Box<Persistent>),
-}
-
-/// One Session's single-owner incremental writer, not a business owner.
+/// One persistent Session's single-owner incremental writer, not a business owner.
 /// The caller keeps accepted work alive and invokes its synchronous methods in a
 /// blocking worker, outside Host/Agent/Session state locks.
 pub struct SessionJournal {
     session_id: SessionId,
-    backend: Backend,
+    backend: Persistent,
     positions: SavePositions,
     validation: Validation,
     loaded: LoadedHistory,
-    last_memory_range: SaveRange,
     pending: Option<Pending>,
     failed: bool,
     #[cfg(any(test, feature = "test-support"))]
     failure: Option<TestFailure>,
 }
 impl SessionJournal {
-    pub fn memory(session_id: SessionId) -> Self {
-        Self {
-            session_id,
-            backend: Backend::Memory,
-            positions: SavePositions {
-                accepted: 0,
-                persisted: None,
-            },
-            validation: Validation::default(),
-            loaded: LoadedHistory {
-                records: Vec::new(),
-                next_position: 0,
-            },
-            last_memory_range: SaveRange::default(),
-            pending: None,
-            failed: false,
-            #[cfg(any(test, feature = "test-support"))]
-            failure: None,
-        }
-    }
     pub(crate) fn persistent(owner: SessionStore, dir: Directory) -> Result<Self, StorageError> {
         let file = dir.open_history(true)?;
         let mut file = lock_history(file, &dir.path)?;
@@ -129,21 +103,20 @@ impl SessionJournal {
         let session_id = owner.id().clone();
         Ok(Self {
             session_id,
-            backend: Backend::Persistent(Box::new(Persistent {
+            backend: Persistent {
                 _owner: owner,
                 dir,
                 file,
                 stamp: before,
                 prefix_hash: hash,
                 ends_with_newline: bytes.last() == Some(&b'\n'),
-            })),
+            },
             positions: SavePositions {
                 accepted: loaded.next_position,
                 persisted: Some(loaded.next_position),
             },
             validation,
             loaded,
-            last_memory_range: SaveRange::default(),
             pending: None,
             failed: false,
             #[cfg(any(test, feature = "test-support"))]
@@ -158,9 +131,6 @@ impl SessionJournal {
         &mut self,
         failure: crate::testing::AppendFailure,
     ) -> Result<SaveConfirmation, StorageError> {
-        if !matches!(self.backend, Backend::Persistent(_)) {
-            return Err(StorageError::InvalidStorageMode);
-        }
         if self.failed {
             return Err(StorageError::ReconciliationRequired);
         }
@@ -178,11 +148,7 @@ impl SessionJournal {
     }
     #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn overwrite_owned_history_for_test(&mut self, bytes: &[u8]) -> std::io::Result<()> {
-        let Backend::Persistent(backend) = &mut self.backend else {
-            return Err(std::io::Error::other(
-                "corruption fixture requires a persistent owner",
-            ));
-        };
+        let backend = &mut self.backend;
         let position = backend.file.stream_position()?;
         let result = (|| {
             backend.file.seek(SeekFrom::Start(0))?;
@@ -242,11 +208,7 @@ impl SessionJournal {
         let mut next = start;
         let mut validation = Validator::new(&self.validation);
         let mut bytes = Vec::new();
-        if let Backend::Persistent(backend) = &self.backend
-            && backend.stamp.len != 0
-            && !backend.ends_with_newline
-            && !records.is_empty()
-        {
+        if self.backend.stamp.len != 0 && !self.backend.ends_with_newline && !records.is_empty() {
             bytes.push(b'\n');
         }
         for record in &records {
@@ -276,8 +238,7 @@ impl SessionJournal {
         let range = SaveRange { start, end: next };
         self.validation.merge(validation.finish());
         self.positions.accepted = next;
-        self.last_memory_range = range;
-        if matches!(self.backend, Backend::Persistent(_)) && !range.is_empty() {
+        if !range.is_empty() {
             self.pending = Some(Pending { range, bytes });
         }
         Ok(range)
@@ -290,12 +251,6 @@ impl SessionJournal {
     }
     fn persist_original(&mut self) -> Result<SaveConfirmation, StorageError> {
         let current = self.positions.accepted;
-        if matches!(self.backend, Backend::Memory) {
-            return Ok(SaveConfirmation {
-                range: self.last_memory_range,
-                persistence: PersistenceState::NotApplicable,
-            });
-        }
         let Some(pending) = self.pending.as_ref() else {
             return Ok(SaveConfirmation {
                 range: SaveRange {
@@ -305,9 +260,7 @@ impl SessionJournal {
                 persistence: PersistenceState::Persisted,
             });
         };
-        let Backend::Persistent(backend) = &mut self.backend else {
-            unreachable!("only persistent journals hold pending bytes")
-        };
+        let backend = &mut self.backend;
         let result = (|| {
             backend
                 .dir
@@ -397,9 +350,7 @@ impl SessionJournal {
         let Some(pending) = self.pending.as_ref() else {
             return self.persist_pending();
         };
-        let Backend::Persistent(backend) = &mut self.backend else {
-            unreachable!()
-        };
+        let backend = &mut self.backend;
         let checked = (|| {
             backend
                 .dir
@@ -510,9 +461,7 @@ impl SessionJournal {
             .pending
             .take()
             .expect("confirmation has a pending original range");
-        let Backend::Persistent(backend) = &mut self.backend else {
-            unreachable!()
-        };
+        let backend = &mut self.backend;
         backend.prefix_hash.update(&pending.bytes);
         backend.stamp = stamp;
         backend.ends_with_newline = true;

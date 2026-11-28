@@ -160,8 +160,9 @@ automatic retry or repair is introduced. Append-only history does not use these
 metadata gates and retains all its existing identity/link checks. A valid
 snapshot is readable data, not a durability confirmation for a failed save.
 
-Memory Agent/Session saves return not_applicable before filesystem work. A memory
-Session journal performs no directory lookup, object creation or JSONL write.
+Memory Agent/Session metadata saves return not_applicable before filesystem work.
+`SessionStore::open_journal` accepts persistent Sessions only. The Core Session
+retains memory history; Storage does not create a second in-memory journal.
 Memory Agent plus persistent Session is rejected; modes never silently change.
 
 ## JSONL schema

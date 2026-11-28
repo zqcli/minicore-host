@@ -65,9 +65,7 @@ fn entry(text: &str) -> HistoryEntry {
 // file. Inspect the actual owned file without releasing the lease or disturbing
 // its cursor; accepted/persisted assertions still observe real stored bytes.
 fn read_owned(journal: &SessionJournal) -> Vec<u8> {
-    let Backend::Persistent(backend) = &journal.backend else {
-        panic!("persistent fixture")
-    };
+    let backend = &journal.backend;
     let mut file = &*backend.file;
     let position = file.stream_position().unwrap();
     file.seek(SeekFrom::Start(0)).unwrap();

@@ -95,9 +95,7 @@ fn windows_history_leases_exclude_write_handles_and_writable_file_mappings() {
 fn writer_releases_only_after_actual_owner_finishes_with_inherited_descriptor() {
     let (_temp, session) = fixture();
     let mut journal = session.open_journal().unwrap();
-    let Backend::Persistent(backend) = &journal.backend else {
-        unreachable!()
-    };
+    let backend = &journal.backend;
     let mut child = InheritedDescriptor::new(&backend.file);
     let range = journal.accept(vec![entry("owned range")]).unwrap();
     held(&session);
