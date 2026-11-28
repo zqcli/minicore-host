@@ -13,7 +13,7 @@ pub fn agent_tool_spec() -> ToolSpec {
             "Only a root Session can set allow_delegation:true on a new create with text or send with delegate:true. Tell the recipient about this grant in the task text. It shares max_children active direct slots across create and send (default 2); pending starts count until released. Grants are not inherited or retained for later delegations. ",
             "Same-Agent children inherit your model, reasoning, approval policy and workspace. Overrides belong in settings (model, reasoning, instructions, role, tools, workspace, execution); choose model IDs from available_models in session context. ",
             "For ordinary communication, send to the exact agent_id/session_id with kind:session and omit delegate (false). Use kind:agent_default only to address an Agent's default Session. Set delegate:true to enroll an existing exact Session into delegated work. A delegated child without a grant can still communicate and append to active relations in its scope, but cannot start new delegated work. Do not supply grant fields on an append. ",
-            "All sends use steer: next step when busy, new Turn when idle. Creation with text and delegated sends return acceptance, not completion. Final results automatically go only to the direct delegator. Ordinary messages need an explicit send reply; do not duplicate the automatic final handoff. ",
+            "send defaults to mode:steer: next step when busy, new Turn when idle. Explicit mode:follow_up queues for the next Turn, including delegated sends; it cannot answer a wait in the current Turn, so use steer for active coordination. Creation with text and delegated sends return acceptance, not completion. Final results automatically go only to the direct delegator. Ordinary messages need an explicit send reply; do not duplicate the automatic final handoff. ",
             "inspect without target shows your current Session; config and output default to false. Explicit targets remain available. Session include_output:true returns a bounded latest history tail unless history_page is set. ",
             "wait waits for consumable input in your Session, not a specific task, without consuming it. It returns immediately on input_available and defaults to 60000ms; prefer the default over short polling."
         ),
@@ -134,7 +134,7 @@ fn schema() -> Value {
         delegation_fields(
             branch(
                 "send",
-                json!({"target":message_target,"text":text,"mode":{"enum":["steer"],"default":"steer"},"delegate":boolean,"in_reply_to":id}),
+                json!({"target":message_target,"text":text,"mode":{"enum":["steer","follow_up"],"default":"steer"},"delegate":boolean,"in_reply_to":id}),
                 &["target", "text"],
             ),
             delegate_true.clone(),

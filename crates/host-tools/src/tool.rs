@@ -54,12 +54,9 @@ impl AgentTool {
                 .await
                 .map_err(Into::into),
             AgentAction::Send(request) => {
-                // All inter-agent sends use steer so messages to an active
-                // Session are never trapped in next_turn behind a long Turn.
-                let _ = request.mode;
                 let input = MessageInput {
                     message_id: MessageId::new().map_err(id_fault)?,
-                    mode: MessageMode::Steer,
+                    mode: request.mode,
                     text: request.text,
                     in_reply_to: request.in_reply_to,
                 };

@@ -1178,7 +1178,7 @@ Host 运行环境的装配代码登记可用工具模块，复用同一声明供
 | action | 工具层语义 | 使用的基础能力 |
 | --- | --- | --- |
 | create | 省略 resource 时以首条 text 启动子 Session，默认当前 Agent、memory；显式指定 Agent／Session 时保留配置、来源和空对象创建；带任务时先核对委派权限再准备受理 | agent.create／session.create，标准文本投递、运行期关联及通用结果交接 |
-| send | 以 steer 投递；已有委派追加消息时保持原关联，首次委派已有明确 Session 时使用 delegate:true；返回接收事实，不等待任务完成 | message.send；首次委派先核对委派权限并完成范围登记和接收准备，不改变基础投递接口 |
+| send | 默认以 steer 投递，显式 follow_up 留给下一 Turn；已有委派追加消息时保持原关联，首次委派已有明确 Session 时使用 delegate:true；返回接收事实，不等待任务完成 | message.send；首次委派先核对委派权限并完成范围登记和接收准备，不改变基础投递接口 |
 | inspect | 默认读取当前 Session，也可指定目标读取身份、状态、配置、消息或回执；按需读取实际仍有的正文 | 既有查询与读取，不从旧启动回执虚构最终结果 |
 | wait | 等待当前会话有可消费的 next-step 输入或明确等待结束；暂停仅排队，不消费消息、不代表指定子任务成功 | 标准工具等待、输入可用通知与取消；不轮询模型或生成伪结果 |
 | control | 取消明确 Turn／Session、关闭 Session，或结束调用方实际持有的根协作范围 | 既有对象控制与工具范围收尾，交实际所有者执行 |
@@ -1197,7 +1197,7 @@ Host 运行环境的装配代码登记可用工具模块，复用同一声明供
 | create，省略 resource | 非空 text | 等同 resource=session 的带任务创建；target 省略时为调用方 Agent，mode 默认 memory；可显式提供 target、mode、name、settings，沿用 Session 分支的校验与继承 |
 | create，resource=agent | name、mode | target:{host_id} 省略时为本 Host；from_agent_id 省略时以调用方 Agent 为配置来源；settings、text；name 与 mode 属于新 Agent，默认 Session 随同创建并沿用其默认配置与模式 |
 | create，resource=session | 无 | target:AgentRef 省略时为调用方 Agent；name、mode、settings、text；带 text 时 mode 默认 memory，不带 text 时取所属 Agent；未覆盖设置见下文委派继承；不接受 from_agent_id |
-| send | target:MessageTarget、text | mode 可省略，工具统一按 steer 投递；delegate 默认 false；in_reply_to 可引用实际消息 |
+| send | target:MessageTarget、text | mode 默认 steer，可显式选择 follow_up；两种目标和委派投递均保留该模式。follow_up 不进入活动 Turn，实时协作或回复本轮 wait 应使用 steer；delegate 默认 false；in_reply_to 可引用实际消息 |
 | inspect | 无 | target 省略时为调用方当前 Session，显式提供时按下表定位；include_output 默认 false；include_config 默认 false，仅用于 Agent／Session；正文读取范围和分页复用既有基本结构 |
 | wait | 无额外必填业务参数 | timeout_ms；不接受子 Session target |
 | control | operation，以及该分支要求的目标 | keep_inbox 仅用于取消分支，默认 false |

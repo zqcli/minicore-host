@@ -351,6 +351,9 @@ fn actual_runtime_spec_has_only_six_actions_and_strict_objects() {
     for branch in schema["oneOf"].as_array().unwrap() {
         assert_eq!(branch["additionalProperties"], false);
     }
+    let send_mode = &schema["oneOf"][2]["properties"]["mode"];
+    assert_eq!(send_mode["enum"], json!(["steer", "follow_up"]));
+    assert_eq!(send_mode["default"], "steer");
     let session_create = &schema["oneOf"][1];
     assert_eq!(session_create["required"], json!(["action"]));
     assert_eq!(

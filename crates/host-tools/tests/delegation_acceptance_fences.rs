@@ -470,7 +470,7 @@ async fn shared_range_with_real_tools(end: End) {
     let root = f.next(&parent).await;
     let unrelated = f.send(&child, "older ordinary task");
     let old = f.next(&child).await;
-    root.tool("delegate-first", json!({"action":"send", "target":target(&child), "text":"first follow-up", "mode":"follow_up", "delegate":true}));
+    root.tool("delegate-first", json!({"action":"send", "target":target(&child), "text":"first delegated task", "delegate":true}));
     let after_first = f.next(&parent).await;
     let first_receipt = after_first.last_tool_result();
     assert_eq!(first_receipt["result"]["delivery"], "accepted");
@@ -523,8 +523,7 @@ async fn shared_range_with_real_tools(end: End) {
             .unwrap();
     }
 
-    // All agent(send) calls deliver via steer (next_step), so the busy child
-    // consumes accepted delegated messages at the very next step in T0.
+    // Default and explicit steer messages share the next step of the busy Turn.
     old.tool(
         "inspect-shared-child",
         json!({"action":"inspect", "target":target(&child)}),
@@ -782,6 +781,7 @@ async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
         }
         root.tool("start", enrollment);
         let accepted = f.next(&parent).await;
+        assert_eq!(accepted.last_tool_result()["result"]["queue"], "next-turn");
         let origin = ToolCallRef {
             turn_id: root.source.turn.turn_id.clone(),
             tool_call_id: ToolCallId("start".into()),
@@ -799,7 +799,7 @@ async fn reused_child_has_new_anchor_and_cannot_extend_old_delegation() {
         f.finished(&root.source).await;
         unrelated.complete("unrelated finished");
         let mut delegated = f.next(&child).await;
-        assert_eq!(delegated.source.turn, unrelated.source.turn);
+        assert_ne!(delegated.source.turn, unrelated.source.turn);
         if number == 1 {
             delegated.tool(
                 "no-prior-grant",
@@ -905,7 +905,7 @@ async fn rejected_agent_send_is_failed_tool_without_failing_parent_turn() {
 }
 
 #[tokio::test]
-async fn child_send_to_running_parent_always_steers_and_wakes_wait() {
+async fn child_send_defaults_to_steer_while_explicit_follow_up_waits_for_next_turn() {
     async fn next_pair(
         f: &mut Fixture,
         first_session: &SessionRef,
@@ -974,15 +974,15 @@ async fn child_send_to_running_parent_always_steers_and_wakes_wait() {
         "steered child message must be bound into the running parent Turn immediately"
     );
 
-    // Even an explicit legacy `mode: "follow_up"` on agent(send) routes through `steer`.
+    // An explicit follow-up to the Agent's default Session stays out of this Turn.
     child_after_first.tool(
-        "report-legacy-mode",
-        json!({"action":"send", "target":target(&parent), "mode":"follow_up", "text":"second coordination note"}),
+        "report-follow-up",
+        json!({"action":"send", "target":{"kind":"agent_default","host_id":root.source.host_id,"agent_id":parent.agent_id}, "mode":"follow_up", "text":"next-turn note"}),
     );
     let child_after_second = f.next(&child).await;
     assert_eq!(
         child_after_second.last_tool_result()["result"]["queue"],
-        "next-step"
+        "next-turn"
     );
     child_after_second.complete("child done");
     f.finished(&child_turn.source).await;
@@ -992,29 +992,45 @@ async fn child_send_to_running_parent_always_steers_and_wakes_wait() {
         .session_states(&f.connection.caller(), &parent)
         .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
-        while parent_states.snapshot().unwrap().data.next_step.len() < 2 {
+        while parent_states.snapshot().unwrap().data.next_step.is_empty() {
             parent_states.changed().await.unwrap();
         }
     })
     .await
-    .expect("both legacy-mode send and completion notification must arrive in next_step");
+    .expect("completion notification must arrive in next_step");
+    assert_eq!(parent_states.snapshot().unwrap().data.next_turn.len(), 1);
 
-    // Parent's response absorbs both steered messages in the same Turn.
+    // Completion can continue the current Turn, but follow-up must remain queued.
     parent_woke.complete("parent initial answer");
-    let parent_followup = f.next(&parent).await;
-    assert_eq!(parent_followup.source.turn, root.source.turn);
-    assert!(parent_followup.request.messages().iter().any(
-        |msg| matches!(msg, ModelMessage::User(text) if text.contains("second coordination note"))
-    ));
+    let parent_continued = f.next(&parent).await;
+    assert_eq!(parent_continued.source.turn, root.source.turn);
     assert!(
-        parent_followup
+        !parent_continued
+            .request
+            .messages()
+            .iter()
+            .any(|msg| matches!(msg, ModelMessage::User(text) if text.contains("next-turn note")))
+    );
+    assert!(
+        parent_continued
             .request
             .messages()
             .iter()
             .any(|msg| matches!(msg, ModelMessage::User(text) if text.contains("child done")))
     );
-    parent_followup.complete("parent final answer");
+    parent_continued.complete("parent final answer");
     f.finished(&root.source).await;
+    let parent_followup = f.next(&parent).await;
+    assert_ne!(parent_followup.source.turn, root.source.turn);
+    assert!(
+        parent_followup
+            .request
+            .messages()
+            .iter()
+            .any(|msg| matches!(msg, ModelMessage::User(text) if text.contains("next-turn note")))
+    );
+    parent_followup.complete("follow-up handled in its own Turn");
+    f.finished(&parent_followup.source).await;
     assert!(
         f.host
             .session_state(&f.connection.caller(), &parent)
@@ -1022,6 +1038,6 @@ async fn child_send_to_running_parent_always_steers_and_wakes_wait() {
             .data
             .next_turn
             .is_empty(),
-        "no stale child send may remain stranded in next_turn after parent Turn finishes"
+        "the explicitly queued follow-up must be consumed by the new Turn"
     );
 }

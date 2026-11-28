@@ -46,6 +46,28 @@ async fn create_without_text_only_creates_and_never_registers_delegation() {
     assert_eq!(*port.state.events.lock().unwrap(), vec!["create_agent"]);
 }
 #[tokio::test]
+async fn send_preserves_requested_queue_for_plain_delegated_and_appended_messages() {
+    for (mode, queue) in [
+        (None, "next-step"),
+        (Some("steer"), "next-step"),
+        (Some("follow_up"), "next-turn"),
+    ] {
+        let port = FixtureTurn::new();
+        let tool = AgentTool::new(port.port(), ScopeManager::new());
+        let child = session();
+        let mut args = json!({"action":"send","target":{"kind":"session","agent_id":child.agent_id,"session_id":child.session_id},"text":"work"});
+        if let Some(mode) = mode {
+            args["mode"] = json!(mode);
+        }
+        // First ordinary, then enrolled, then an append to the existing relation.
+        for delegate in [false, true, false] {
+            args["delegate"] = json!(delegate);
+            let receipt = invoke(&tool, args.clone()).await;
+            assert_eq!(receipt["result"]["queue"], queue);
+        }
+    }
+}
+#[tokio::test]
 async fn sessions_default_to_the_callers_agent_and_inherit_its_session_settings() {
     let port = FixtureTurn::new();
     let tool = AgentTool::new(port.port(), ScopeManager::new());

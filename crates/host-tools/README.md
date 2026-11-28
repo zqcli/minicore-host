@@ -22,6 +22,11 @@ not a copied client `CallerContext`. Delegation permits and result sinks have
 independent lifetimes, matching the registered scope and direct parent. The
 adapter must receive necessary actual results before a memory child releases.
 
+`send.mode` defaults to `steer`; explicit `follow_up` queues for the next Turn,
+including delegated sends. Use `steer` for active coordination or replying to a
+waiting peer: `follow_up` does not join or wake the current Turn's `wait`.
+Creation with text keeps its existing initial-message scheduling.
+
 ## Owner integration
 
 `CoreTurnPort::prepared` consumes the core-minted `PreparedTurnBinding` during
