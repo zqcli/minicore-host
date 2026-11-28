@@ -2274,7 +2274,7 @@ async fn awaited_creation_retires_its_owner_before_immediate_root_reopen() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn awaited_metadata_retires_workers_before_immediate_root_reopen() {
+async fn committed_metadata_survives_restart_after_owner_retirement() {
     for _ in 0..24 {
         let directory = tempfile::tempdir().unwrap();
         let (host_id, agent_id, ids) = seed(directory.path());
@@ -2315,6 +2315,8 @@ async fn awaited_metadata_retires_workers_before_immediate_root_reopen() {
         assert_eq!(session_result.unwrap().config_revision, 5);
         drop(connection);
         drop(host);
+        // Public metadata state reports the committed record, not task retirement.
+        wait_for_root_release(directory.path()).await;
         let reopened = Host::open_persistent(directory.path(), settings("second"), resources)
             .await
             .unwrap();
@@ -3146,6 +3148,8 @@ async fn concurrent_parent_child_metadata_updates_keep_confirmed_records() {
         assert_eq!(session_result.unwrap().config_revision, 5);
         drop(connection);
         drop(host);
+        // Public metadata state reports the committed record, not task retirement.
+        wait_for_root_release(directory.path()).await;
         let reopened = Host::open_persistent(directory.path(), settings("second"), resources)
             .await
             .unwrap();
