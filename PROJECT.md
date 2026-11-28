@@ -1,6 +1,15 @@
 # MiniCore Host
 
-## Current checkpoint: Host 0.12.18
+## Current checkpoint: Host 0.13.0
+
+The first simplification batch is recorded in
+[Task 127](tasks/127-host-simplification/TASK.md). The code checkpoint is
+`12486d63048e5fa3266fd0ff5337fdb0df5b569e`, compared with
+`44355a312d52e2acd1ae5feffb663a6f2c2b1800`. The public wire, storage format,
+and SPEC v4.11.13 are unchanged. Assistant representation, Agent send
+parameters and public API narrowing remain outside this batch.
+
+## Previous checkpoint: Host 0.12.18
 
 The Host 0.12.18 code checkpoint on `dev` is [`3edc6aad5f07d7ed6a37c95b72cf39b2aaf30ead`](https://github.com/zqcli/minicore-host/commit/3edc6aad5f07d7ed6a37c95b72cf39b2aaf30ead).
 [Host CI #97](https://github.com/zqcli/minicore-host/actions/runs/46010344345)
