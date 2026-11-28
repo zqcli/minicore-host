@@ -162,7 +162,19 @@ pub(super) fn encode(
                 call_id: tool_call_id.as_str(),
                 output: output.content().as_str(),
             })),
-            ModelMessage::Assistant(parts) => {
+            ModelMessage::Assistant {
+                parts,
+                provider_replay,
+            } => {
+                if let Some(provider_replay) = provider_replay {
+                    if provider_replay.format() != replay::FORMAT {
+                        return Err(invalid());
+                    }
+                    let replay =
+                        Replay::deserialize(provider_replay.payload()).map_err(|_| invalid())?;
+                    input.extend(project(model, parts, replay)?);
+                    continue;
+                }
                 for part in parts {
                     match part {
                         AssistantPart::Text(text) => input.push(Input::Message(Message {
@@ -184,17 +196,6 @@ pub(super) fn encode(
                         AssistantPart::Reasoning(_) => return Err(invalid()),
                     }
                 }
-            }
-            ModelMessage::AssistantWithReplay {
-                parts,
-                provider_replay,
-            } => {
-                if provider_replay.format() != replay::FORMAT {
-                    return Err(invalid());
-                }
-                let replay =
-                    Replay::deserialize(provider_replay.payload()).map_err(|_| invalid())?;
-                input.extend(project(model, parts, replay)?);
             }
         }
     }

@@ -583,7 +583,10 @@ async fn prompt_provider_receives_the_full_history_view() {
     assert!(
         matches!(&prepared.messages[2], ModelMessage::System(text) if text.starts_with("summary:"))
     );
-    assert!(matches!(&prepared.messages[3], ModelMessage::Assistant(_)));
+    assert!(matches!(
+        &prepared.messages[3],
+        ModelMessage::Assistant { .. }
+    ));
 }
 
 #[tokio::test]

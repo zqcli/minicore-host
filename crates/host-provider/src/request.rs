@@ -149,23 +149,23 @@ fn message(message: &ModelMessage) -> Result<Message<'_>, ModelError> {
             tool_call_id: tool_call_id.as_str(),
             content: output.content().as_str(),
         }),
-        ModelMessage::Assistant(parts) => assistant(parts),
-        ModelMessage::AssistantWithReplay {
+        ModelMessage::Assistant {
             parts,
             provider_replay,
         } => {
             // We can replay our own finish metadata via canonical parts. Do not
             // silently drop another provider's encrypted/opaque history.
-            if provider_replay.format() != REPLAY_FORMAT
-                || provider_replay.payload().as_object().is_none_or(|object| {
-                    object
-                        .keys()
-                        .any(|key| key != "finish_reason" && key != "usage")
-                        || object
-                            .get("finish_reason")
-                            .is_none_or(|reason| !reason.is_string())
-                        || object.get("usage").is_some_and(|usage| !usage.is_object())
-                })
+            if let Some(provider_replay) = provider_replay
+                && (provider_replay.format() != REPLAY_FORMAT
+                    || provider_replay.payload().as_object().is_none_or(|object| {
+                        object
+                            .keys()
+                            .any(|key| key != "finish_reason" && key != "usage")
+                            || object
+                                .get("finish_reason")
+                                .is_none_or(|reason| !reason.is_string())
+                            || object.get("usage").is_some_and(|usage| !usage.is_object())
+                    }))
             {
                 return Err(error::local(ModelErrorKind::InvalidRequest));
             }

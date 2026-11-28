@@ -114,7 +114,7 @@ fn result(loop_id: LoopId, id: &str) -> HistoryItem {
 }
 fn parts(message: &ModelMessage) -> &[AssistantPart] {
     match message {
-        ModelMessage::Assistant(parts) | ModelMessage::AssistantWithReplay { parts, .. } => parts,
+        ModelMessage::Assistant { parts, .. } => parts,
         _ => panic!("expected assistant"),
     }
 }
@@ -235,7 +235,7 @@ async fn mixed_response_keeps_content_ids_results_and_only_reindexes_retained_ca
         assert_eq!(actual.call_index(), new_index);
     }
     assert!(
-        matches!(&projected.messages[1], ModelMessage::AssistantWithReplay { provider_replay, .. } if Some(provider_replay) == original.provider_replay.as_ref())
+        matches!(&projected.messages[1], ModelMessage::Assistant { provider_replay, .. } if provider_replay == &original.provider_replay)
     );
     let default = DefaultPromptProvider::new(None)
         .prepare(prompt_request(&history, &[], &model))
@@ -829,7 +829,7 @@ async fn unsupported_replay_and_signed_reasoning_are_rejected_before_http_not_fl
             unreachable!()
         };
         assert!(
-            matches!(&projected.messages[1], ModelMessage::AssistantWithReplay { provider_replay, .. } if Some(provider_replay) == original.provider_replay.as_ref())
+            matches!(&projected.messages[1], ModelMessage::Assistant { provider_replay, .. } if provider_replay == &original.provider_replay)
         );
         let display: String = parts(&projected.messages[1])
             .iter()

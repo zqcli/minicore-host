@@ -15,6 +15,11 @@ and panic isolation. Its returned report contains actual attempt count, retry
 wait, response or failure, usage, and partial output; observations do not supply
 these facts.
 
+Assistant history uses one `ModelMessage::Assistant` representation with optional
+provider replay. Canonical parts and opaque replay remain separate; provider
+adapters still validate and project their own replay formats. The established
+serialized assistant formats are unchanged.
+
 `ModelError` keeps its adapter-sanitized readable cause in `diagnostic.message`.
 Optional `ModelUpstreamDetails` retains actual HTTP status, provider type/code and
 request ID without a raw response or recursive exception object. The driver

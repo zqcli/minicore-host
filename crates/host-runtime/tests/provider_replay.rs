@@ -41,14 +41,35 @@ fn envelope_bounds_depth_nodes_and_serde_validation() {
 }
 
 #[test]
-fn old_constructors_wire_and_debug_remain_compatible() {
+fn assistant_messages_share_a_representation_and_preserve_wire_formats() {
     let parts = vec![AssistantPart::Text("answer".into())];
     let old = ModelMessage::assistant(parts.clone()).unwrap();
-    assert!(matches!(&old, ModelMessage::Assistant(_)));
+    assert!(matches!(
+        &old,
+        ModelMessage::Assistant {
+            provider_replay: None,
+            ..
+        }
+    ));
     assert!(format!("{old:?}").starts_with("ModelMessage::Assistant {"));
     let wire = serde_json::to_value(&old).unwrap();
-    assert!(wire["content"].is_array());
+    assert_eq!(wire, json!({"role": "assistant", "content": parts}));
     assert_eq!(serde_json::from_value::<ModelMessage>(wire).unwrap(), old);
+    assert_eq!(
+        serde_json::from_value::<ModelMessage>(json!({
+            "role": "assistant", "content": {"parts": parts}
+        }))
+        .unwrap(),
+        old
+    );
+    for content in [json!([]), json!({"parts": [], "provider_replay": null})] {
+        assert!(
+            serde_json::from_value::<ModelMessage>(json!({
+                "role": "assistant", "content": content
+            }))
+            .is_err()
+        );
+    }
     let old_response = ModelResponse::new(parts.clone(), ModelFinishReason::Stop, None).unwrap();
     assert!(
         serde_json::to_value(&old_response)
@@ -62,7 +83,20 @@ fn old_constructors_wire_and_debug_remain_compatible() {
     for parts in [parts, vec![]] {
         let message =
             ModelMessage::assistant_with_provider_replay(parts.clone(), Some(replay())).unwrap();
-        assert!(format!("{message:?}").starts_with("ModelMessage::AssistantWithReplay {"));
+        assert!(matches!(
+            &message,
+            ModelMessage::Assistant {
+                provider_replay: Some(_),
+                ..
+            }
+        ));
+        assert!(format!("{message:?}").starts_with("ModelMessage::Assistant {"));
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            json!({"role": "assistant", "content": {
+                "parts": parts, "provider_replay": replay()
+            }})
+        );
         let response = ModelResponse::new_with_provider_replay(
             parts,
             ModelFinishReason::Stop,

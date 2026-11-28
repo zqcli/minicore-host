@@ -208,7 +208,7 @@ fn validate_tool_exchange(messages: &[ModelMessage]) -> Result<(), ModelValueErr
     let mut completed = BTreeSet::new();
     for message in messages {
         match message {
-            ModelMessage::Assistant(parts) | ModelMessage::AssistantWithReplay { parts, .. } => {
+            ModelMessage::Assistant { parts, .. } => {
                 if !pending.is_empty() {
                     return Err(ModelValueError::IncompleteToolExchange);
                 }

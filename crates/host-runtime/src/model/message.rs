@@ -268,11 +268,10 @@ impl<'de> Deserialize<'de> for ToolCall {
 pub enum ModelMessage {
     System(Arc<str>),
     User(Arc<str>),
-    Assistant(Vec<AssistantPart>),
     /// Canonical assistant parts plus non-display provider-owned metadata.
-    AssistantWithReplay {
+    Assistant {
         parts: Vec<AssistantPart>,
-        provider_replay: ProviderReplay,
+        provider_replay: Option<ProviderReplay>,
     },
     Tool {
         tool_call_id: ToolCallId,
@@ -336,13 +335,15 @@ impl Serialize for ModelMessage {
         let wire = match self {
             Self::System(text) => Wire::System(text),
             Self::User(text) => Wire::User(text),
-            Self::Assistant(parts) => Wire::Assistant(Content::Legacy(parts)),
-            Self::AssistantWithReplay {
+            Self::Assistant {
                 parts,
-                provider_replay: replay,
-            } => Wire::Assistant(Content::Replay {
-                parts,
-                provider_replay: replay,
+                provider_replay,
+            } => Wire::Assistant(match provider_replay {
+                Some(provider_replay) => Content::Replay {
+                    parts,
+                    provider_replay,
+                },
+                None => Content::Legacy(parts),
             }),
             Self::Tool {
                 tool_call_id,
@@ -369,16 +370,11 @@ impl fmt::Debug for ModelMessage {
                 .debug_struct("ModelMessage::User")
                 .field("text_bytes", &text.len())
                 .finish(),
-            Self::Assistant(parts) => formatter
-                .debug_struct("ModelMessage::Assistant")
-                .field("part_count", &parts.len())
-                .field("parts", parts)
-                .finish(),
-            Self::AssistantWithReplay {
+            Self::Assistant {
                 parts,
                 provider_replay,
             } => formatter
-                .debug_struct("ModelMessage::AssistantWithReplay")
+                .debug_struct("ModelMessage::Assistant")
                 .field("provider_replay", provider_replay)
                 .field("part_count", &parts.len())
                 .field("parts", parts)
@@ -423,13 +419,9 @@ impl ModelMessage {
         parts: Vec<AssistantPart>,
         provider_replay: Option<ProviderReplay>,
     ) -> Result<Self, ModelValueError> {
-        let parts = normalize_parts(parts);
-        let message = match provider_replay {
-            Some(provider_replay) => Self::AssistantWithReplay {
-                parts,
-                provider_replay,
-            },
-            None => Self::Assistant(parts),
+        let message = Self::Assistant {
+            parts: normalize_parts(parts),
+            provider_replay,
         };
         message.validate()?;
         Ok(message)
@@ -456,13 +448,15 @@ impl ModelMessage {
                     Err(ModelValueError::InvalidText)
                 }
             }
-            Self::Assistant(parts) => {
-                if parts.is_empty() {
+            Self::Assistant {
+                parts,
+                provider_replay,
+            } => {
+                if parts.is_empty() && provider_replay.is_none() {
                     return Err(ModelValueError::EmptyAssistantParts);
                 }
                 validate_tool_call_order(parts)
             }
-            Self::AssistantWithReplay { parts, .. } => validate_tool_call_order(parts),
             Self::Tool { .. } => Ok(()),
         }
     }
@@ -477,11 +471,14 @@ impl<'de> Deserialize<'de> for ModelMessage {
             ModelMessageWire::System(text) => Self::System(text),
             ModelMessageWire::User(text) => Self::User(text),
             ModelMessageWire::Assistant(content) => match content {
-                AssistantMessageWire::Legacy(parts) => Self::Assistant(parts),
-                AssistantMessageWire::Replay(content) => {
-                    Self::assistant_with_provider_replay(content.parts, content.provider_replay)
-                        .map_err(serde::de::Error::custom)?
-                }
+                AssistantMessageWire::Legacy(parts) => Self::Assistant {
+                    parts,
+                    provider_replay: None,
+                },
+                AssistantMessageWire::Replay(content) => Self::Assistant {
+                    parts: normalize_parts(content.parts),
+                    provider_replay: content.provider_replay,
+                },
             },
             ModelMessageWire::Tool {
                 tool_call_id,

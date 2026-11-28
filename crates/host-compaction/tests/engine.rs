@@ -381,7 +381,7 @@ async fn protected_boundary_inside_tool_exchange_rounds_back_and_keeps_pair_exac
     assert_eq!(candidate.history()[1..], source.items[1..]);
     assert!(matches!(
         candidate.request.messages()[2],
-        ModelMessage::Assistant(_)
+        ModelMessage::Assistant { .. }
     ));
     assert!(matches!(
         candidate.request.messages()[3],
