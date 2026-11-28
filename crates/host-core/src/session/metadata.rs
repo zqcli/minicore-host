@@ -449,21 +449,47 @@ impl SessionController {
         self.wake();
         Ok((result, receiver))
     }
+    fn activity_save_running(&self) -> bool {
+        self.state
+            .lock()
+            .expect("Session mutex poisoned")
+            .record_work
+            .as_ref()
+            .is_some_and(|work| work.running && work.activity_only())
+    }
     async fn wait_activity_save(&self) {
         let mut changes = self.snapshots.subscribe();
-        loop {
-            let waiting = {
-                let state = self.state.lock().expect("Session mutex poisoned");
-                state
-                    .record_work
-                    .as_ref()
-                    .is_some_and(|work| work.running && work.activity_only())
-            };
-            if !waiting {
-                return;
-            }
+        while self.activity_save_running() {
             if changes.changed().await.is_err() {
                 return;
+            }
+        }
+    }
+    /// Wait only for activity checkpoints before admission. Callers still choose
+    /// whether to return an acceptance receipt or await the actual save.
+    async fn accept_prepared_update_candidate_async<T>(
+        self: &Arc<Self>,
+        caller: &CallerContext,
+        expected: u64,
+        config: SessionConfig,
+        title: Option<String>,
+        operation: Option<OperationId>,
+        accepted: impl Fn(&mut SessionState) -> T,
+    ) -> Result<(T, oneshot::Receiver<Result<SessionInfo, Fault>>), Fault> {
+        loop {
+            self.wait_activity_save().await;
+            match self.accept_prepared_update_candidate(
+                caller,
+                expected,
+                config.clone(),
+                title.clone(),
+                operation.clone(),
+                &accepted,
+            ) {
+                Err(fault)
+                    if fault.kind() == Some(FaultKind::SessionBusy)
+                        && self.activity_save_running() => {}
+                result => return result,
             }
         }
     }
@@ -475,33 +501,9 @@ impl SessionController {
         title: Option<String>,
     ) -> Result<SessionInfo, Fault> {
         self.resources_owned()?.validate(&config)?;
-        let receiver = loop {
-            self.wait_activity_save().await;
-            match self.accept_prepared_update_candidate(
-                caller,
-                expected,
-                config.clone(),
-                title.clone(),
-                None,
-                |_| (),
-            ) {
-                Ok((_, receiver)) => break receiver,
-                Err(fault) if fault.kind() == Some(FaultKind::SessionBusy) => {
-                    let activity_running = self
-                        .state
-                        .lock()
-                        .expect("Session mutex poisoned")
-                        .record_work
-                        .as_ref()
-                        .is_some_and(|work| work.running && work.activity_only());
-                    if activity_running {
-                        continue;
-                    }
-                    return Err(fault);
-                }
-                Err(fault) => return Err(fault),
-            }
-        };
+        let (_, receiver) = self
+            .accept_prepared_update_candidate_async(caller, expected, config, title, None, |_| ())
+            .await?;
         receiver.await.map_err(|_| {
             Fault::new(
                 FaultKind::SessionInternalUnexpected,
@@ -547,13 +549,12 @@ impl SessionController {
                     "configuration validation task ended unexpectedly",
                 )
             })??;
-        let receipt = loop {
-            self.wait_activity_save().await;
-            match self.accept_prepared_update_candidate(
+        let (receipt, _) = self
+            .accept_prepared_update_candidate_async(
                 caller,
                 request.expected_config_revision,
-                config.clone(),
-                title.clone(),
+                config,
+                title,
                 Some(request.operation_id.clone()),
                 |state| {
                     let result = if state.record_work.is_some() {
@@ -577,24 +578,8 @@ impl SessionController {
                     Self::retain_control(state, Receipt::SessionUpdate(receipt.clone()));
                     receipt
                 },
-            ) {
-                Ok((receipt, _)) => break receipt,
-                Err(fault) if fault.kind() == Some(FaultKind::SessionBusy) => {
-                    let activity_running = self
-                        .state
-                        .lock()
-                        .expect("Session mutex poisoned")
-                        .record_work
-                        .as_ref()
-                        .is_some_and(|work| work.running && work.activity_only());
-                    if activity_running {
-                        continue;
-                    }
-                    return Err(fault);
-                }
-                Err(fault) => return Err(fault),
-            }
-        };
+            )
+            .await?;
         Ok(receipt)
     }
 }
