@@ -1,6 +1,6 @@
 # minicore-host
 
-Multi-agent, multi-session Host backend. The 0.12.18 workspace follows
+Multi-agent, multi-session Host backend. The 0.13.0 workspace follows
 [SPEC.md](SPEC.md), design v4.11.13.
 
 The implementation contains strict contracts, native durable storage, Session-owned
@@ -10,7 +10,7 @@ See [current project status](PROJECT.md) for the release version, exact source,
 validation, publication and remaining acceptance work. Historical reports below
 describe their fixed checkpoints, not the current open-work list.
 
-## Upgrade to 0.12.18
+## Upgrade from versions before 0.12.18
 
 Update `host.json` using the [provider/model migration guide](docs/configuration.md#providers-and-models).
 Keep your existing model aliases. Responses uses upstream SSE by default; set
