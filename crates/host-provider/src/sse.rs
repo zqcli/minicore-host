@@ -7,6 +7,8 @@ use std::pin::Pin;
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use minicore_host_runtime::model::ModelErrorKind;
+use tokio::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
@@ -27,8 +29,18 @@ impl Frames {
         }
     }
 
-    pub(crate) async fn frame(&mut self) -> Result<Bytes, ModelErrorKind> {
+    pub(crate) async fn frame(
+        &mut self,
+        cancellation: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<Bytes, ModelErrorKind> {
         loop {
+            if cancellation.is_cancelled() {
+                return Err(ModelErrorKind::Cancelled);
+            }
+            if Instant::now() >= deadline {
+                return Err(ModelErrorKind::Timeout);
+            }
             while self.offset < self.chunk.len() {
                 let byte = self.chunk[self.offset];
                 self.offset += 1;
@@ -117,16 +129,40 @@ mod tests {
     #[tokio::test]
     async fn fragmented_frames_keep_order_and_drop_unterminated_tail() {
         let bytes = b"\xef\xbb\xbf: hello\r\ndata: {\r\ndata: \"a\":1}\r\n\r\ndata: [DONE]\n\ndata: unfinished";
+        let cancellation = CancellationToken::new();
+        let deadline = Instant::now() + std::time::Duration::from_secs(60);
         for split in 0..=bytes.len() {
             let chunks =
                 [&bytes[..split], &bytes[split..]].map(|chunk| Ok(Bytes::copy_from_slice(chunk)));
             let mut frames = Frames::new(Box::pin(futures_util::stream::iter(chunks)));
-            assert_eq!(frames.frame().await.unwrap(), "{\n\"a\":1}");
-            assert_eq!(frames.frame().await.unwrap(), "[DONE]");
             assert_eq!(
-                frames.frame().await.unwrap_err(),
+                frames.frame(&cancellation, deadline).await.unwrap(),
+                "{\n\"a\":1}"
+            );
+            assert_eq!(
+                frames.frame(&cancellation, deadline).await.unwrap(),
+                "[DONE]"
+            );
+            assert_eq!(
+                frames.frame(&cancellation, deadline).await.unwrap_err(),
                 ModelErrorKind::IncompleteResponse
             );
         }
+    }
+
+    #[tokio::test]
+    async fn ready_chunk_cannot_bypass_cancellation() {
+        let cancellation = CancellationToken::new();
+        let cancel_on_read = cancellation.clone();
+        let bytes = futures_util::stream::once(async move {
+            cancel_on_read.cancel();
+            Ok(Bytes::from_static(b"data: not observed\n\n"))
+        });
+        let mut frames = Frames::new(Box::pin(bytes));
+        let deadline = Instant::now() + std::time::Duration::from_secs(60);
+        assert_eq!(
+            frames.frame(&cancellation, deadline).await.unwrap_err(),
+            ModelErrorKind::Cancelled
+        );
     }
 }

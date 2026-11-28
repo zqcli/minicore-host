@@ -32,9 +32,13 @@ impl Source {
         Self::WebSocket(Box::new(socket))
     }
 
-    async fn frame(&mut self) -> Result<Bytes, ModelErrorKind> {
+    async fn frame(
+        &mut self,
+        cancellation: &CancellationToken,
+        deadline: Instant,
+    ) -> Result<Bytes, ModelErrorKind> {
         match self {
-            Self::Sse(frames) => frames.frame().await,
+            Self::Sse(frames) => frames.frame(cancellation, deadline).await,
             Self::WebSocket(socket) => super::websocket::frame(socket).await,
         }
     }
@@ -1066,7 +1070,7 @@ pub(super) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
             biased;
             _ = state.cancellation.cancelled() => Err(ModelErrorKind::Cancelled),
             _ = tokio::time::sleep_until(state.deadline) => Err(ModelErrorKind::Timeout),
-            frame = state.source.frame() => frame,
+            frame = state.source.frame(&state.cancellation, state.deadline) => frame,
         };
         let result = match frame {
             Ok(frame) => state.handle(&frame),

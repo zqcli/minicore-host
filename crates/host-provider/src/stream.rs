@@ -355,22 +355,11 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
         if state.done {
             return None;
         }
-        let failure = if state.cancellation.is_cancelled() {
-            Some(error::stream(ModelErrorKind::Cancelled, state.seen))
-        } else if Instant::now() >= state.deadline {
-            Some(error::stream(ModelErrorKind::Timeout, state.seen))
-        } else {
-            None
-        };
-        if let Some(error) = failure {
-            let result = state.fail(error);
-            return Some((result, state));
-        }
         let frame = tokio::select! {
             biased;
             _ = state.cancellation.cancelled() => Err(ModelErrorKind::Cancelled),
             _ = tokio::time::sleep_until(state.deadline) => Err(ModelErrorKind::Timeout),
-            frame = state.frames.frame() => frame,
+            frame = state.frames.frame(&state.cancellation, state.deadline) => frame,
         };
         let result = match frame {
             Ok(frame) => state.handle(&frame),
