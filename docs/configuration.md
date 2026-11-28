@@ -1,6 +1,6 @@
 # JSON configuration directories
 
-Host 0.13.0 uses one explicit configuration directory. Files are UTF-8 standard
+Host 0.13.2 uses one explicit configuration directory. Files are UTF-8 standard
 JSON: no TOML, comments, legacy-file fallback or automatic migration. Runtime
 persistence stays in the separate data root.
 

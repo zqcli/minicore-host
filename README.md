@@ -1,6 +1,6 @@
 # minicore-host
 
-Multi-agent, multi-session Host backend. The 0.13.0 workspace follows
+Multi-agent, multi-session Host backend. The 0.13.2 workspace follows
 [SPEC.md](SPEC.md), design v4.11.13.
 
 The implementation contains strict contracts, native durable storage, Session-owned
