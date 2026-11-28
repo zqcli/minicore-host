@@ -2,8 +2,53 @@
 //! handling (see PROVENANCE.md). No spawned reader or unbounded frame queue:
 //! the consumer advances through a single network chunk and frame at a time.
 
+use std::pin::Pin;
+
+use bytes::Bytes;
+use futures_util::{Stream, StreamExt};
+use minicore_host_runtime::model::ModelErrorKind;
+
+type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+
+pub(crate) struct Frames {
+    bytes: ByteStream,
+    chunk: Bytes,
+    offset: usize,
+    parser: Parser,
+}
+
+impl Frames {
+    pub(crate) fn new(bytes: ByteStream) -> Self {
+        Self {
+            bytes,
+            chunk: Bytes::new(),
+            offset: 0,
+            parser: Parser::new(),
+        }
+    }
+
+    pub(crate) async fn frame(&mut self) -> Result<Bytes, ModelErrorKind> {
+        loop {
+            while self.offset < self.chunk.len() {
+                let byte = self.chunk[self.offset];
+                self.offset += 1;
+                if let Some(frame) = self.parser.push(byte) {
+                    return Ok(Bytes::from(frame));
+                }
+            }
+            self.chunk = match self.bytes.next().await {
+                Some(Ok(chunk)) => chunk,
+                Some(Err(error)) if error.is_timeout() => return Err(ModelErrorKind::Timeout),
+                Some(Err(_)) => return Err(ModelErrorKind::StreamInterrupted),
+                None => return Err(ModelErrorKind::IncompleteResponse),
+            };
+            self.offset = 0;
+        }
+    }
+}
+
 #[derive(Default)]
-pub(crate) struct Parser {
+struct Parser {
     line: Vec<u8>,
     data: Vec<u8>,
     has_data: bool,
@@ -12,14 +57,14 @@ pub(crate) struct Parser {
 }
 
 impl Parser {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             first_line: true,
             ..Self::default()
         }
     }
 
-    pub(crate) fn push(&mut self, byte: u8) -> Option<Vec<u8>> {
+    fn push(&mut self, byte: u8) -> Option<Vec<u8>> {
         if std::mem::take(&mut self.skip_lf) && byte == b'\n' {
             return None;
         }
@@ -69,29 +114,19 @@ impl Parser {
 mod tests {
     use super::*;
 
-    #[test]
-    fn framing_handles_bom_comments_crlf_multiline_and_fragmentation() {
-        let bytes = b"\xef\xbb\xbf: hello\r\ndata: {\r\ndata: \"a\":1}\r\n\r\ndata: [DONE]\n\n";
+    #[tokio::test]
+    async fn fragmented_frames_keep_order_and_drop_unterminated_tail() {
+        let bytes = b"\xef\xbb\xbf: hello\r\ndata: {\r\ndata: \"a\":1}\r\n\r\ndata: [DONE]\n\ndata: unfinished";
         for split in 0..=bytes.len() {
-            let mut parser = Parser::new();
-            let frames: Vec<_> = bytes[..split]
-                .iter()
-                .chain(&bytes[split..])
-                .filter_map(|byte| parser.push(*byte))
-                .collect();
-            assert_eq!(frames, [b"{\n\"a\":1}".to_vec(), b"[DONE]".to_vec()]);
+            let chunks =
+                [&bytes[..split], &bytes[split..]].map(|chunk| Ok(Bytes::copy_from_slice(chunk)));
+            let mut frames = Frames::new(Box::pin(futures_util::stream::iter(chunks)));
+            assert_eq!(frames.frame().await.unwrap(), "{\n\"a\":1}");
+            assert_eq!(frames.frame().await.unwrap(), "[DONE]");
+            assert_eq!(
+                frames.frame().await.unwrap_err(),
+                ModelErrorKind::IncompleteResponse
+            );
         }
-    }
-
-    #[test]
-    fn an_unterminated_frame_is_never_dispatched() {
-        let mut parser = Parser::new();
-        assert!(
-            b"data: {\"choices\":[]}"
-                .iter()
-                .filter_map(|byte| parser.push(*byte))
-                .next()
-                .is_none()
-        );
     }
 }

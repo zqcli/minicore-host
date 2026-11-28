@@ -1,7 +1,6 @@
-use std::{collections::VecDeque, pin::Pin};
+use std::collections::VecDeque;
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
 use minicore_host_runtime::{
     ToolCallId,
     model::{ModelError, ModelErrorKind, ModelEvent, ModelFinishReason, ProviderReplay, Usage},
@@ -17,28 +16,16 @@ use super::{
     },
     wire::{self, Annotation, Content, Event, Item, ProviderUsage, Response},
 };
-use crate::{error, sse::Parser};
-
-type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
+use crate::{error, sse::Frames};
 
 pub(super) enum Source {
-    Sse {
-        bytes: ByteStream,
-        chunk: Bytes,
-        offset: usize,
-        parser: Parser,
-    },
+    Sse(Frames),
     WebSocket(Box<super::websocket::Socket>),
 }
 
 impl Source {
     pub(super) fn sse(response: reqwest::Response) -> Self {
-        Self::Sse {
-            bytes: Box::pin(response.bytes_stream()),
-            chunk: Bytes::new(),
-            offset: 0,
-            parser: Parser::new(),
-        }
+        Self::Sse(Frames::new(Box::pin(response.bytes_stream())))
     }
 
     pub(super) fn websocket(socket: super::websocket::Socket) -> Self {
@@ -47,27 +34,7 @@ impl Source {
 
     async fn frame(&mut self) -> Result<Bytes, ModelErrorKind> {
         match self {
-            Self::Sse {
-                bytes,
-                chunk,
-                offset,
-                parser,
-            } => loop {
-                while *offset < chunk.len() {
-                    let byte = chunk[*offset];
-                    *offset += 1;
-                    if let Some(frame) = parser.push(byte) {
-                        return Ok(Bytes::from(frame));
-                    }
-                }
-                *chunk = match bytes.next().await {
-                    Some(Ok(chunk)) => chunk,
-                    Some(Err(error)) if error.is_timeout() => return Err(ModelErrorKind::Timeout),
-                    Some(Err(_)) => return Err(ModelErrorKind::StreamInterrupted),
-                    None => return Err(ModelErrorKind::IncompleteResponse),
-                };
-                *offset = 0;
-            },
+            Self::Sse(frames) => frames.frame().await,
             Self::WebSocket(socket) => super::websocket::frame(socket).await,
         }
     }

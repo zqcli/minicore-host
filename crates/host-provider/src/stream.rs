@@ -1,7 +1,5 @@
-use std::{collections::VecDeque, pin::Pin};
+use std::collections::VecDeque;
 
-use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
 use minicore_host_runtime::{
     ToolCallId,
     model::{ModelError, ModelErrorKind, ModelEvent, ModelFinishReason, ProviderReplay, Usage},
@@ -12,18 +10,14 @@ use serde_json::{Value, json};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-use crate::{error, sse::Parser};
+use crate::{error, sse::Frames};
 
 pub(crate) const REPLAY_FORMAT: &str = "minicore-host.openai-chat.v1";
 const PARTIAL_REPLAY_FORMAT: &str = "minicore-host.openai-chat.partial.v1";
-type ByteStream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
 
 pub(crate) struct State {
-    bytes: ByteStream,
+    frames: Frames,
     error_context: error::ResponseContext,
-    chunk: Bytes,
-    offset: usize,
-    parser: Parser,
     pending: VecDeque<ModelEvent>,
     pending_error: Option<ModelError>,
     cancellation: CancellationToken,
@@ -59,11 +53,8 @@ impl State {
         // as an HTTP error. Runtime alone decides whether/how long to retry.
         let error_context = error::ResponseContext::new(&response, authorization);
         Self {
-            bytes: Box::pin(response.bytes_stream()),
+            frames: Frames::new(Box::pin(response.bytes_stream())),
             error_context,
-            chunk: Bytes::new(),
-            offset: 0,
-            parser: Parser::new(),
             pending: VecDeque::new(),
             pending_error: None,
             cancellation,
@@ -375,46 +366,21 @@ pub(crate) async fn next(mut state: State) -> Option<(Result<ModelEvent, ModelEr
             let result = state.fail(error);
             return Some((result, state));
         }
-        if state.offset < state.chunk.len() {
-            let mut frame = None;
-            while state.offset < state.chunk.len() {
-                let byte = state.chunk[state.offset];
-                state.offset += 1;
-                if let Some(value) = state.parser.push(byte) {
-                    frame = Some(value);
-                    break;
-                }
-            }
-            if let Some(frame) = frame
-                && let Err(error) = state.handle(&frame)
-            {
-                // Never emit a fabricated Finish or partial tool end when a
-                // frame is invalid. Earlier valid frames remain observed.
-                let result = state.fail(error);
-                return Some((result, state));
-            }
-            continue;
-        }
-        let next = tokio::select! {
+        let frame = tokio::select! {
             biased;
-            _ = state.cancellation.cancelled() => Err(error::stream(ModelErrorKind::Cancelled, state.seen)),
-            _ = tokio::time::sleep_until(state.deadline) => Err(error::stream(ModelErrorKind::Timeout, state.seen)),
-            chunk = state.bytes.next() => match chunk {
-                Some(Ok(chunk)) => Ok(chunk),
-                Some(Err(failure)) if failure.is_timeout() => Err(error::stream(ModelErrorKind::Timeout, state.seen)),
-                Some(Err(_)) => Err(error::stream(ModelErrorKind::StreamInterrupted, state.seen)),
-                None => Err(error::stream(ModelErrorKind::IncompleteResponse, state.seen)),
-            }
+            _ = state.cancellation.cancelled() => Err(ModelErrorKind::Cancelled),
+            _ = tokio::time::sleep_until(state.deadline) => Err(ModelErrorKind::Timeout),
+            frame = state.frames.frame() => frame,
         };
-        match next {
-            Ok(chunk) => {
-                state.chunk = chunk;
-                state.offset = 0;
-            }
-            Err(error) => {
-                let result = state.fail(error);
-                return Some((result, state));
-            }
+        let result = match frame {
+            Ok(frame) => state.handle(&frame),
+            Err(kind) => Err(error::stream(kind, state.seen)),
+        };
+        if let Err(error) = result {
+            // Never fabricate Finish or partial tool end for an invalid frame.
+            // Earlier valid frames remain observed.
+            let result = state.fail(error);
+            return Some((result, state));
         }
     }
 }
@@ -544,31 +510,60 @@ mod tests {
     use super::*;
     use minicore_host_runtime::model::{DeliveryState, RetryHint};
 
+    fn state(chunk: &'static [u8]) -> State {
+        State {
+            frames: Frames::new(Box::pin(futures_util::stream::iter([Ok(
+                bytes::Bytes::from_static(chunk),
+            )]))),
+            error_context: error::ResponseContext::fixture(200),
+            pending: VecDeque::new(),
+            pending_error: None,
+            cancellation: CancellationToken::new(),
+            deadline: Instant::now() + std::time::Duration::from_secs(60),
+            done: false,
+            seen: false,
+            has_output: false,
+            tools: Vec::new(),
+            finish: None,
+            usage: None,
+            raw_usage: None,
+            response_id: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn interruption_drains_parsed_frame_but_preempts_buffered_terminal_frame() {
+        for kind in [ModelErrorKind::Cancelled, ModelErrorKind::Timeout] {
+            let state = state(b"data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"think\",\"content\":\"text\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n");
+            let (event, mut state) = next(state).await.unwrap();
+            assert!(matches!(event.unwrap(), ModelEvent::ReasoningDelta { .. }));
+            if kind == ModelErrorKind::Cancelled {
+                state.cancellation.cancel();
+            } else {
+                state.deadline = Instant::now();
+            }
+            let (event, state) = next(state).await.unwrap();
+            assert!(matches!(event.unwrap(), ModelEvent::TextDelta { .. }));
+            let (event, state) = next(state).await.unwrap();
+            assert!(
+                matches!(event.unwrap(), ModelEvent::ProviderReplay { replay }
+                if replay.format() == PARTIAL_REPLAY_FORMAT)
+            );
+            let (event, state) = next(state).await.unwrap();
+            let error = event.unwrap_err();
+            assert_eq!(error.kind(), kind);
+            assert_eq!(error.delivery(), DeliveryState::Started);
+            assert!(next(state).await.is_none());
+        }
+    }
+
     #[test]
     fn ignored_extensions_cannot_hide_invalid_utf8() {
         for frame in [
             b"{\"choices\":[{\"index\":0,\"delta\":{\"content\":\"text\"}}],\"extension\":\"\xff\"}".as_slice(),
             b"{\"choices\":false,\"error\":{\"code\":\"rate_limit_exceeded\"},\"extension\":\"\xff\"}".as_slice(),
         ] {
-            let mut state = State {
-                bytes: Box::pin(futures_util::stream::empty()),
-                error_context: error::ResponseContext::fixture(200),
-                chunk: Bytes::new(),
-                offset: 0,
-                parser: Parser::new(),
-                pending: VecDeque::new(),
-                pending_error: None,
-                cancellation: CancellationToken::new(),
-                deadline: Instant::now(),
-                done: false,
-                seen: false,
-                has_output: false,
-                tools: Vec::new(),
-                finish: None,
-                usage: None,
-                raw_usage: None,
-                response_id: None,
-            };
+            let mut state = state(b"");
             let error = state.handle(frame).unwrap_err();
             assert_eq!(error.kind(), ModelErrorKind::InvalidProviderResponse);
             assert_eq!(error.delivery(), DeliveryState::Unknown);
