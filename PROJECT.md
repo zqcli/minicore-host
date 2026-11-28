@@ -1,6 +1,13 @@
 # MiniCore Host
 
-## Current checkpoint: Host 0.13.0
+## Current checkpoint: Host 0.13.2
+
+[Task 129](tasks/129-host-tui-api-cleanup/TASK.md) records the API cleanup and
+paired TUI verification. Compare the Host code checkpoint
+`62038d5c34507d0bea42d26ccdb318fbace5731a` to
+`fdc07b97618504b81a4fb536caf36dcbd4bf456a`.
+
+## Previous checkpoint: Host 0.13.0
 
 The first simplification batch is recorded in
 [Task 127](tasks/127-host-simplification/TASK.md). The code checkpoint is
