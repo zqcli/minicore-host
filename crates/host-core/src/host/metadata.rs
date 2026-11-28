@@ -11,6 +11,9 @@ impl Host {
             .update_control(caller, request)
             .await
     }
+    /// Update Session title/configuration through the public control contract.
+    /// A `Saving` receipt is acceptance, not persistence completion; observe
+    /// Session state for the committed revision or metadata fault.
     pub async fn session_update(
         &self,
         caller: &CallerContext,
@@ -41,17 +44,6 @@ impl Host {
             },
         )
         .map(|_| ())
-    }
-    pub async fn update_session_async(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        expected_revision: u64,
-        patch: &SessionConfigPatch,
-    ) -> Result<SessionInfo, Fault> {
-        self.session(caller, target)?
-            .update_async(caller, expected_revision, patch)
-            .await
     }
     pub async fn update_agent_async(
         &self,

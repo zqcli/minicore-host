@@ -537,19 +537,26 @@ async fn configuration_stays_bound_across_internal_loops() {
         system(&next_request(&mut seen).await),
         "framework\nold role"
     );
-    host.update_session(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            role: Some(Role {
-                name: "new".into(),
-                description: String::new(),
-                instructions: "new role".into(),
-            }),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    role: Some(Role {
+                        name: "new".into(),
+                        description: String::new(),
+                        instructions: "new role".into(),
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
+    .await
     .unwrap();
     send(&host, &caller, &target, MessageMode::Steer, "same turn");
     send(&host, &caller, &target, MessageMode::FollowUp, "new turn");
@@ -813,15 +820,23 @@ async fn review_session_update_must_reject_missing_resource_before_commit() {
     let (host, connection, target, _seen) = setup(Vec::new()).await;
     let caller = connection.caller();
     let old = host.session_info(&caller, &target).unwrap();
-    let result = host.update_session(
-        &caller,
-        &target,
-        0,
-        &SessionConfigPatch {
-            model: Some("missing/model".parse().unwrap()),
-            ..Default::default()
-        },
-    );
+    let result = host
+        .session_update(
+            &caller,
+            &target,
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        model: Some("missing/model".parse().unwrap()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            },
+        )
+        .await;
     assert!(
         result.is_err(),
         "invalid resource reference was committed: {:?}",

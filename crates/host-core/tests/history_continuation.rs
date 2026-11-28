@@ -1,5 +1,7 @@
 //! Independent acceptance checks: production Host/Journal/Runtime with a
 //! deterministic in-process model fixture; no live provider or TUI coverage.
+#[path = "../../../tests/support/session_update.rs"]
+mod session_update;
 use futures_util::{StreamExt, stream};
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -14,6 +16,7 @@ use minicore_host_runtime::{
 };
 use minicore_host_storage::testing::{read_history_bytes, read_history_text};
 use minicore_host_storage::{HistoryEntry, HistoryRecord};
+use session_update::commit_session_config;
 use std::{
     collections::BTreeSet,
     sync::{
@@ -354,7 +357,8 @@ async fn resume_reconciles_only_this_sessions_original_metadata_candidate() {
         instructions: "saved exact candidate".into(),
     };
     assert!(
-        host.update_session_async(
+        commit_session_config(
+            &host,
             &caller,
             &target,
             original.config_revision,
@@ -480,7 +484,8 @@ async fn resume_settles_history_and_metadata_originals_without_cross_confirmatio
         instructions: "new config only after confirmation".into(),
     };
     assert_eq!(
-        host.update_session_async(
+        commit_session_config(
+            &host,
             &caller,
             &target,
             original.config_revision,

@@ -326,19 +326,25 @@ async fn old_turn_resources_after_reload(network_operator: bool) {
     assert!(host.info(&old_network.caller()).is_err());
     assert!(host.info(&local_reader.caller()).is_ok());
     assert!(host.info(&caller).is_ok());
-    host.update_session_async(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            role: Some(Role {
-                name: "Changed".into(),
-                description: String::new(),
-                instructions: "ROLE B".into(),
-            }),
-            instructions: Some("AGENT B".into()),
-            tools: Some(vec![]),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    role: Some(Role {
+                        name: "Changed".into(),
+                        description: String::new(),
+                        instructions: "ROLE B".into(),
+                    }),
+                    instructions: Some("AGENT B".into()),
+                    tools: Some(vec![]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await
@@ -496,13 +502,19 @@ async fn removed_referenced_model_keeps_original_input_queued_and_can_be_restore
         .await
         .unwrap();
     // Explicitly commit the repaired selection; no accepted input is resent.
-    host.update_session_async(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            model: Some("custom/provider/chat".parse().unwrap()),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    model: Some("custom/provider/chat".parse().unwrap()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await
@@ -758,13 +770,19 @@ async fn model_references_and_tool_queries_use_real_available_and_owner_selected
         host.tool_list_for_agent(&caller, &agent).unwrap(),
         vec![all[0].clone()]
     );
-    host.update_session_async(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            tools: Some(vec![]),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    tools: Some(vec![]),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await

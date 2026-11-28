@@ -107,20 +107,28 @@ fn query_timeout_disconnect_and_context_cancellation_leave_real_turn_running() {
                 QueryContext::default(),
             ));
             assert!(futures_util::poll!(captured.as_mut()).is_pending());
-            // This synchronous owner write completes while binding is blocked: no
-            // Host/Agent/Session/authority lock is held across the query's I/O.
-            host.update_session(
+            let mut update = Box::pin(host.session_update(
                 &caller,
                 &target,
-                0,
-                &SessionConfigPatch {
-                    workspace: NullablePatch::Set(WorkspaceRef {
-                        path: new.path().to_string_lossy().into_owned(),
-                    }),
-                    ..Default::default()
+                SessionUpdateRequest {
+                    operation_id: OperationId::new().unwrap(),
+                    expected_config_revision: 0,
+                    changes: SessionUpdateChanges {
+                        config: SessionConfigPatch {
+                            workspace: NullablePatch::Set(WorkspaceRef {
+                                path: new.path().to_string_lossy().into_owned(),
+                            }),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
                 },
-            )
-            .unwrap();
+            ));
+            assert!(futures_util::poll!(update.as_mut()).is_pending());
+            // Pure owner controls can still finish while query I/O and update
+            // validation wait: neither operation holds a Session/authority lock.
+            host.pause(&caller, &target).unwrap();
+            host.resume(&caller, &target).unwrap();
             for client in &peers.clients {
                 let error = client
                     .session(target.clone())
@@ -154,6 +162,7 @@ fn query_timeout_disconnect_and_context_cancellation_leave_real_turn_running() {
             }
             drop(release);
             blocking.await.unwrap();
+            update.await.unwrap();
             let actual = captured.await.unwrap();
             assert_eq!(actual.config_revision, Some(0));
             assert_eq!(actual.data.text, "original query source");
@@ -186,17 +195,24 @@ async fn missing_binding_and_invalid_edit_continuations_are_faults_not_empty_pag
     let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     let missing_root = root.path().join("removed");
     fs::create_dir(&missing_root).unwrap();
-    host.update_session(
+    host.session_update(
         &operator.caller(),
         &target,
-        0,
-        &SessionConfigPatch {
-            workspace: NullablePatch::Set(WorkspaceRef {
-                path: missing_root.to_string_lossy().into_owned(),
-            }),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    workspace: NullablePatch::Set(WorkspaceRef {
+                        path: missing_root.to_string_lossy().into_owned(),
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
+    .await
     .unwrap();
     fs::remove_dir(&missing_root).unwrap();
     for client in &peers.clients {

@@ -420,19 +420,26 @@ async fn gated_active_and_continuation_bindings_remain_frozen_across_config_and_
     assert_eq!(original.model.context_window, 4096);
     let mut execution = config(false).session_defaults.execution;
     execution.compaction.target_percent = 30;
-    host.update_session(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            role: Some(Role {
-                instructions: "Do not duplicate this long Role in context".repeat(100),
-                ..config(false).role
-            }),
-            execution: Some(execution.clone()),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    role: Some(Role {
+                        instructions: "Do not duplicate this long Role in context".repeat(100),
+                        ..config(false).role
+                    }),
+                    execution: Some(execution.clone()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
+    .await
     .unwrap();
     let new_model = ScriptedModel::new(8192, vec![Script::gated(next.clone())], None);
     let new_resources = Resources::new(new_model.clone());
@@ -1070,15 +1077,22 @@ async fn automatic_compaction_on_continuation_uses_public_response_index_everywh
     );
     let (host, connection, target) = memory(Resources::new(model.clone())).await;
     let caller = connection.caller();
-    host.update_session(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            execution: Some(config(true).session_defaults.execution),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    execution: Some(config(true).session_defaults.execution),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
+    .await
     .unwrap();
     // The first request has no accepted prefix to compact. Its complete handoff
     // becomes eligible at the next model request in this same public Turn.

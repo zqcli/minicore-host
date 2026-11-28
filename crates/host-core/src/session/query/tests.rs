@@ -282,19 +282,15 @@ async fn original_config_and_actual_indexes_survive_tool_only_empty_response_and
         .data
         .remove(0)
         .turn_id;
+    let mut config = original.clone();
+    config.role = Role {
+        name: "next Turn binding".into(),
+        ..Role::default()
+    };
     fixture
         .session
-        .update(
-            &caller,
-            0,
-            &SessionConfigPatch {
-                role: Some(Role {
-                    name: "next Turn binding".into(),
-                    ..Role::default()
-                }),
-                ..Default::default()
-            },
-        )
+        .update_candidate_async(&caller, 0, config, None)
+        .await
         .unwrap();
     let detail = fixture.session.turn_details(&caller, &first).unwrap();
     assert_eq!(detail.data.config, original);

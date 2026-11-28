@@ -442,19 +442,25 @@ async fn current_local_tool_workspace_and_selection_stay_frozen_across_reload_an
             agents: Vec::new()
         }
     );
-    host.update_session_async(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            tools: Some(selection(&["read"])),
-            workspace: NullablePatch::Set(workspace(b.path()).unwrap()),
-            role: Some(Role {
-                name: "changed".into(),
-                description: String::new(),
-                instructions: "ROLE B".into(),
-            }),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    tools: Some(selection(&["read"])),
+                    workspace: NullablePatch::Set(workspace(b.path()).unwrap()),
+                    role: Some(Role {
+                        name: "changed".into(),
+                        description: String::new(),
+                        instructions: "ROLE B".into(),
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await

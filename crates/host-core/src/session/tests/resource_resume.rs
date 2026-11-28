@@ -189,7 +189,7 @@ impl RecoveryFixture {
 }
 
 #[test]
-fn synchronous_memory_metadata_does_not_need_a_current_or_retained_executor() {
+fn memory_metadata_does_not_need_a_current_or_retained_executor() {
     assert!(tokio::runtime::Handle::try_current().is_err());
     let fixture = RecoveryFixture::new(StorageMode::Memory, FaultKind::SessionResourceMissing);
     let caller = fixture.connection.caller();
@@ -201,7 +201,16 @@ fn synchronous_memory_metadata_does_not_need_a_current_or_retained_executor() {
         }),
         ..Default::default()
     };
-    let updated = fixture.session.update(&caller, 0, &patch).unwrap();
+    let original = fixture.session.info(&caller).unwrap();
+    let config = original.config.apply_patch(&patch).unwrap();
+    let updated = futures_util::FutureExt::now_or_never(fixture.session.update_candidate_async(
+        &caller,
+        0,
+        config,
+        original.title,
+    ))
+    .expect("memory commit must not wait for an executor")
+    .unwrap();
     assert_eq!(updated.config_revision, 1);
     assert_eq!(updated.config.role, patch.role.unwrap());
     assert!(fixture.session.executor().is_none());
@@ -227,38 +236,70 @@ fn synchronous_memory_metadata_does_not_need_a_current_or_retained_executor() {
     assert!(agent.info(&caller).unwrap().default_session_id.is_none());
 }
 
-#[test]
-fn synchronous_persistent_update_keeps_authority_and_lifecycle_refusals() {
+#[tokio::test]
+async fn session_update_keeps_authority_revision_and_lifecycle_refusals() {
     let fixture = RecoveryFixture::new(StorageMode::Persistent, FaultKind::SessionResourceMissing);
     let observer = fixture.session.access.connect().unwrap();
-    let patch = SessionConfigPatch::default();
+    let request = || SessionUpdateRequest {
+        operation_id: OperationId::new().unwrap(),
+        expected_config_revision: 0,
+        changes: SessionUpdateChanges::default(),
+    };
     assert_eq!(
         fixture
             .session
-            .update(&observer.caller(), 0, &patch)
+            .update_control(&observer.caller(), request())
+            .await
             .unwrap_err()
             .kind(),
         Some(FaultKind::HostAccessReadOnly),
     );
     let caller = fixture.connection.caller();
+    let mut stale = request();
+    stale.expected_config_revision = 1;
     assert_eq!(
         fixture
             .session
-            .update(&caller, 0, &patch)
+            .update_control(&caller, stale)
+            .await
             .unwrap_err()
             .kind(),
-        Some(FaultKind::HostMethodUnavailable),
+        Some(FaultKind::SessionConfigConflict),
     );
     fixture.session.state.lock().unwrap().lifecycle = SessionLifecycle::Closed;
     assert_eq!(
         fixture
             .session
-            .update(&caller, 0, &patch)
+            .update_control(&caller, request())
+            .await
             .unwrap_err()
             .kind(),
         Some(FaultKind::SessionLifecycleClosed),
     );
-    assert!(fixture.session.executor().is_none());
+}
+
+async fn commit_control(
+    fixture: &RecoveryFixture,
+    expected: u64,
+    config: SessionConfigPatch,
+) -> Result<SessionInfo, Fault> {
+    let caller = fixture.connection.caller();
+    fixture
+        .session
+        .update_control(
+            &caller,
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: expected,
+                changes: SessionUpdateChanges {
+                    config,
+                    ..Default::default()
+                },
+            },
+        )
+        .await?;
+    fixture.settled().await;
+    fixture.session.info(&caller)
 }
 
 async fn resume_reprepares(mode: StorageMode) {
@@ -316,9 +357,7 @@ async fn update_releases_only_resource_block(mode: StorageMode, candidate: bool)
         let original = fixture.session.info(&caller).unwrap();
         // A rejected stale update never clears the startup fault.
         assert_eq!(
-            fixture
-                .session
-                .update_async(&caller, 9, &SessionConfigPatch::default())
+            commit_control(&fixture, 9, SessionConfigPatch::default())
                 .await
                 .unwrap_err()
                 .kind(),
@@ -345,18 +384,16 @@ async fn update_releases_only_resource_block(mode: StorageMode, candidate: bool)
                 .await
                 .unwrap()
         } else {
-            fixture
-                .session
-                .update_async(
-                    &caller,
-                    0,
-                    &SessionConfigPatch {
-                        role: Some(config.role.clone()),
-                        ..Default::default()
-                    },
-                )
-                .await
-                .unwrap()
+            commit_control(
+                &fixture,
+                0,
+                SessionConfigPatch {
+                    role: Some(config.role.clone()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
         };
         assert_eq!(updated.config_revision, 1);
         assert_eq!(updated.config, config);
@@ -403,9 +440,7 @@ async fn updates_keep_history_blocks(mode: StorageMode) {
                     .await
                     .unwrap();
             } else {
-                fixture
-                    .session
-                    .update_async(&caller, 0, &SessionConfigPatch::default())
+                commit_control(&fixture, 0, SessionConfigPatch::default())
                     .await
                     .unwrap();
             }
@@ -562,9 +597,17 @@ async fn real_host_revision_conflict_clears_after_session_update() {
     .await
     .unwrap();
     assert_eq!(model.calls.load(Ordering::SeqCst), 0);
-    host.update_session_async(&caller, &target, 0, &SessionConfigPatch::default())
-        .await
-        .unwrap();
+    host.session_update(
+        &caller,
+        &target,
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges::default(),
+        },
+    )
+    .await
+    .unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
             if let Some(turn) = host.turns(&caller, &target).unwrap().first() {

@@ -22,9 +22,21 @@ use std::{
 };
 use tokio::sync::Semaphore;
 
-struct UnusedResources;
+type ValidationHold = (
+    tokio::sync::oneshot::Sender<()>,
+    std::sync::mpsc::Receiver<()>,
+);
+#[derive(Default)]
+struct UnusedResources {
+    validation: Mutex<Option<ValidationHold>>,
+}
 impl ResourceResolver for UnusedResources {
     fn validate(&self, config: &SessionConfig) -> Result<(), Fault> {
+        let gate = self.validation.lock().unwrap().take();
+        if let Some((entered, release)) = gate {
+            entered.send(()).unwrap();
+            release.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
         config
             .validate()
             .map_err(|e| Fault::new(FaultKind::SessionConfigInvalid, e.to_string()))
@@ -94,7 +106,7 @@ fn check_no_config(value: &impl serde::Serialize) {
 
 #[tokio::test]
 async fn actual_host_facilities_and_query_values_do_not_retain_resources() {
-    let resources = Arc::new(UnusedResources);
+    let resources = Arc::new(UnusedResources::default());
     let weak = Arc::downgrade(&resources);
     let spec = ToolSpec::new(
         "fixture".parse().unwrap(),
@@ -168,7 +180,7 @@ async fn actual_host_facilities_and_query_values_do_not_retain_resources() {
 
 #[tokio::test]
 async fn agent_pages_are_exclusive_lexical_and_none_returns_all() {
-    let host = Host::memory(Arc::new(UnusedResources)).unwrap();
+    let host = Host::memory(Arc::new(UnusedResources::default())).unwrap();
     let connection = host.connect().unwrap();
     let caller = connection.caller();
     for _ in 0..5 {
@@ -250,7 +262,7 @@ async fn session_filters_precede_pagination_and_close_reason_survives_reopen() {
         HostSettings {
             name: "persistent discovery".into(),
         },
-        Arc::new(UnusedResources),
+        Arc::new(UnusedResources::default()),
     )
     .await
     .unwrap();
@@ -372,7 +384,7 @@ async fn session_filters_precede_pagination_and_close_reason_survives_reopen() {
         HostSettings {
             name: "ignored".into(),
         },
-        Arc::new(UnusedResources),
+        Arc::new(UnusedResources::default()),
     )
     .await
     .unwrap();
@@ -637,12 +649,13 @@ fn accepted_metadata_save_and_agent_own_deletion_remain_visible_while_disk_waits
         .unwrap();
     runtime.block_on(async {
         let dir = tempfile::tempdir().unwrap();
+        let resources = Arc::new(UnusedResources::default());
         let host = Host::open_persistent(
             dir.path(),
             HostSettings {
                 name: "metadata discovery".into(),
             },
-            Arc::new(UnusedResources),
+            resources.clone(),
         )
         .await
         .unwrap();
@@ -653,34 +666,51 @@ fn accepted_metadata_save_and_agent_own_deletion_remain_visible_while_disk_waits
             host_id: host.info(&caller).unwrap().host_id,
             agent_id: target.agent_id.clone(),
         };
+        let (validated, validating) = tokio::sync::oneshot::channel();
+        let (release_validation, hold_validation) = std::sync::mpsc::channel();
+        *resources.validation.lock().unwrap() = Some((validated, hold_validation));
+        let update = {
+            let host = host.clone();
+            let caller = caller.clone();
+            let target = target.clone();
+            tokio::spawn(async move {
+                host.session_update(
+                    &caller,
+                    &target,
+                    SessionUpdateRequest {
+                        operation_id: OperationId::new().unwrap(),
+                        expected_config_revision: 0,
+                        changes: SessionUpdateChanges {
+                            config: SessionConfigPatch {
+                                role: Some(Role {
+                                    name: "updated".into(),
+                                    description: String::new(),
+                                    instructions: "metadata save is real".into(),
+                                }),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        },
+                    },
+                )
+                .await
+            })
+        };
+        validating.await.unwrap();
         let (entered, receiver) = tokio::sync::oneshot::channel();
         let (release, wait) = std::sync::mpsc::channel();
         let blocker = tokio::task::spawn_blocking(move || {
             entered.send(()).unwrap();
             wait.recv_timeout(Duration::from_secs(5)).unwrap();
         });
+        release_validation.send(()).unwrap();
         receiver.await.unwrap();
-        let update = {
-            let host = host.clone();
-            let caller = caller.clone();
-            let target = target.clone();
-            tokio::spawn(async move {
-                host.update_session_async(
-                    &caller,
-                    &target,
-                    0,
-                    &SessionConfigPatch {
-                        role: Some(Role {
-                            name: "updated".into(),
-                            description: String::new(),
-                            instructions: "metadata save is real".into(),
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .await
-            })
-        };
+        let accepted = update.await.unwrap().unwrap();
+        assert_eq!(
+            accepted.result,
+            MetadataUpdateResult::Saving { config_revision: 0 }
+        );
+
         until(|| {
             host.session_state(&caller, &target)
                 .unwrap()
@@ -697,7 +727,6 @@ fn accepted_metadata_save_and_agent_own_deletion_remain_visible_while_disk_waits
             page.items[0].config_revision, 0,
             "unconfirmed candidate is not committed configuration"
         );
-        assert!(!update.is_finished());
         host.agent_delete(
             &caller,
             &agent,
@@ -716,7 +745,6 @@ fn accepted_metadata_save_and_agent_own_deletion_remain_visible_while_disk_waits
         assert_eq!(deletion, serde_json::json!({"status":"pending"}));
         release.send(()).unwrap();
         blocker.await.unwrap();
-        assert_eq!(update.await.unwrap().unwrap().config_revision, 1);
         until(|| host.agents(&caller).is_ok_and(|agents| agents.is_empty())).await;
         shutdown(&host, &caller).await;
     });

@@ -298,18 +298,25 @@ async fn active_turn_inspect_is_lightweight_while_public_get_keeps_bound_configu
     f.send(&session, "inspect the active Turn");
     let first = f.next(&session).await;
     f.host
-        .update_session(
+        .session_update(
             &f.connection.caller(),
             &session,
-            0,
-            &SessionConfigPatch {
-                role: Some(Role {
-                    instructions: "next Turn instructions".into(),
-                    ..Role::default()
-                }),
-                ..Default::default()
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        role: Some(Role {
+                            instructions: "next Turn instructions".into(),
+                            ..Role::default()
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
             },
         )
+        .await
         .unwrap();
     first.tool("inspect-active", inspect(&first.source, false));
     let next = f.next(&session).await;

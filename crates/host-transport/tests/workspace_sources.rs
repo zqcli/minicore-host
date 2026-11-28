@@ -74,17 +74,24 @@ async fn workspace_change_refs_reject_other_or_reconfigured_roots_but_accept_sam
         );
         references.push(reference);
     }
-    host.update_session(
+    host.session_update(
         &operator.caller(),
         &target_a,
-        0,
-        &SessionConfigPatch {
-            workspace: NullablePatch::Set(WorkspaceRef {
-                path: b.path().to_string_lossy().into_owned(),
-            }),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    workspace: NullablePatch::Set(WorkspaceRef {
+                        path: b.path().to_string_lossy().into_owned(),
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
+    .await
     .unwrap();
     for (client, reference) in peers.clients.iter().zip(&references) {
         let session = client.session(target_a.clone());

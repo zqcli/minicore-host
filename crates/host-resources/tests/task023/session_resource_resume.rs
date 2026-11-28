@@ -128,15 +128,21 @@ async fn corrected_workspace_continues(mode: StorageMode) {
     })
     .await
     .expect("accepted input activity metadata save completed");
-    host.update_session_async(
+    host.session_update(
         &caller,
         &target,
-        0,
-        &SessionConfigPatch {
-            workspace: NullablePatch::Set(WorkspaceRef {
-                path: directory.path().to_str().unwrap().into(),
-            }),
-            ..Default::default()
+        SessionUpdateRequest {
+            operation_id: OperationId::new().unwrap(),
+            expected_config_revision: 0,
+            changes: SessionUpdateChanges {
+                config: SessionConfigPatch {
+                    workspace: NullablePatch::Set(WorkspaceRef {
+                        path: directory.path().to_str().unwrap().into(),
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         },
     )
     .await

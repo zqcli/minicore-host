@@ -249,16 +249,6 @@ impl Host {
         )
         .map(|_| ())
     }
-    pub fn update_session(
-        &self,
-        caller: &CallerContext,
-        target: &SessionRef,
-        expected_revision: u64,
-        patch: &SessionConfigPatch,
-    ) -> Result<SessionInfo, Fault> {
-        self.session(caller, target)?
-            .update(caller, expected_revision, patch)
-    }
     pub fn update_agent(
         &self,
         caller: &CallerContext,

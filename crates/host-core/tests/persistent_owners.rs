@@ -1,5 +1,7 @@
 //! Real temporary files, production owners and real Runtime. The model is an
 //! explicitly scripted in-process fixture, not a live provider or TUI test.
+#[path = "../../../tests/support/session_update.rs"]
+mod session_update;
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -14,6 +16,7 @@ use minicore_host_runtime::{
 };
 use minicore_host_storage::testing::read_history_text;
 use minicore_host_storage::*;
+use session_update::commit_session_config;
 use std::{
     collections::BTreeSet,
     path::Path,
@@ -906,18 +909,18 @@ async fn durable_config_versions_defaults_and_reload_preserve_real_history() {
     let info = host.session_info(&caller, &new_target).unwrap();
     assert_eq!(info.config.role, role);
     assert_eq!(info.agent_config_revision, 8);
-    let updated = host
-        .update_session_async(
-            &caller,
-            &target,
-            4,
-            &SessionConfigPatch {
-                role: Some(role.clone()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    let updated = commit_session_config(
+        &host,
+        &caller,
+        &target,
+        4,
+        &SessionConfigPatch {
+            role: Some(role.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(updated.config_revision, 5);
     assert_eq!(
         read_session(&session_path(directory.path(), &target))
@@ -1023,7 +1026,8 @@ async fn metadata_write_failure_retains_old_config_and_reconciles_only_original_
         instructions: "new role".into(),
     };
     assert!(
-        host.update_session_async(
+        commit_session_config(
+            &host,
             &caller,
             &target,
             4,
@@ -1047,7 +1051,8 @@ async fn metadata_write_failure_retains_old_config_and_reconciles_only_original_
             .is_some()
     );
     assert!(
-        host.update_session_async(
+        commit_session_config(
+            &host,
             &caller,
             &target,
             4,
@@ -1591,7 +1596,13 @@ fn accepted_metadata_saves_outlive_both_waiters_and_connection() {
         let directory = tempfile::tempdir().unwrap();
         let (host_id, agent_id, ids) = seed(directory.path());
         let (resources, _) = resources();
-        let host = Host::open_persistent(directory.path(), settings("test"), resources)
+        let validation = Arc::new(GatedValidationFixture {
+            inner: resources,
+            count: std::sync::atomic::AtomicUsize::new(2),
+            entered: tokio::sync::Notify::new(),
+            released: (Mutex::new(false), std::sync::Condvar::new()),
+        });
+        let host = Host::open_persistent(directory.path(), settings("test"), validation.clone())
             .await
             .unwrap();
         let connection = host.connect().unwrap();
@@ -1604,34 +1615,40 @@ fn accepted_metadata_saves_outlive_both_waiters_and_connection() {
             agent_id: agent_id.clone(),
             session_id: ids[0].clone(),
         };
-        // A scheduling fixture occupies the blocking pool. The actual metadata
-        // work still uses production storage against real temporary files.
+        // Queue the disk blocker after canonical request validation. The accepted
+        // owner save still writes production storage against real temporary files.
+        validation
+            .count
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = target.clone();
+        let session_waiter = tokio::spawn(async move {
+            commit_session_config(
+                &owner,
+                &task_caller,
+                &task_target,
+                4,
+                &SessionConfigPatch {
+                    role: Some(Role {
+                        name: "accepted Session config".into(),
+                        ..Role::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+        });
+        validation.entered.notified().await;
         let (release, held) = std::sync::mpsc::channel::<()>();
         let (entered, entering) = tokio::sync::oneshot::channel();
         let blocker = tokio::task::spawn_blocking(move || {
             let _ = entered.send(());
             let _ = held.recv();
         });
+        validation.release();
         entering.await.unwrap();
-        let owner = Arc::clone(&host);
-        let task_caller = caller.clone();
-        let task_target = target.clone();
-        let session_waiter = tokio::spawn(async move {
-            owner
-                .update_session_async(
-                    &task_caller,
-                    &task_target,
-                    4,
-                    &SessionConfigPatch {
-                        role: Some(Role {
-                            name: "accepted Session config".into(),
-                            ..Role::default()
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .await
-        });
+
         let owner = Arc::clone(&host);
         let task_caller = caller.clone();
         let task_target = agent.clone();
@@ -2292,9 +2309,8 @@ async fn awaited_metadata_retires_workers_before_immediate_root_reopen() {
         let agent_result = host
             .update_agent_async(&caller, &agent, 7, &patch_agent)
             .await;
-        let session_result = host
-            .update_session_async(&caller, &target, 4, &patch_session)
-            .await;
+        let session_result =
+            commit_session_config(&host, &caller, &target, 4, &patch_session).await;
         assert_eq!(agent_result.unwrap().config_revision, 8);
         assert_eq!(session_result.unwrap().config_revision, 5);
         drop(connection);
@@ -2362,11 +2378,42 @@ fn review_meta_stop_wakes_after_late_child_metadata_save() {
         };
         let agent = AgentRef { host_id, agent_id };
         let (resources, _) = resources();
-        let host = Host::open_persistent(directory.path(), settings("stop wake"), resources)
-            .await
-            .unwrap();
+        let validation = Arc::new(GatedValidationFixture {
+            inner: resources,
+            count: std::sync::atomic::AtomicUsize::new(2),
+            entered: tokio::sync::Notify::new(),
+            released: (Mutex::new(false), std::sync::Condvar::new()),
+        });
+        let host =
+            Host::open_persistent(directory.path(), settings("stop wake"), validation.clone())
+                .await
+                .unwrap();
         let connection = host.connect().unwrap();
         let caller = connection.caller();
+
+        validation
+            .count
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+        let task_host = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = first.clone();
+        let save = tokio::spawn(async move {
+            commit_session_config(
+                &task_host,
+                &task_caller,
+                &task_target,
+                4,
+                &SessionConfigPatch {
+                    role: Some(Role {
+                        name: "late accepted metadata".into(),
+                        ..Role::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+        });
+        validation.entered.notified().await;
 
         let (release_first, held_first) = std::sync::mpsc::channel::<()>();
         let (entered_first, entering_first) = tokio::sync::oneshot::channel();
@@ -2374,7 +2421,6 @@ fn review_meta_stop_wakes_after_late_child_metadata_save() {
             let _ = entered_first.send(());
             let _ = held_first.recv();
         });
-        entering_first.await.unwrap();
         host.load_session(&caller, &last).unwrap();
         wait_state(&host, &caller, &last, |state| state.preparing).await;
         // Let the production load task enqueue its blocking read behind blocker1.
@@ -2392,25 +2438,9 @@ fn review_meta_stop_wakes_after_late_child_metadata_save() {
         );
         // Stop has walked the earlier, quiescent child and waits on the last child.
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        let task_host = Arc::clone(&host);
-        let task_caller = caller.clone();
-        let task_target = first.clone();
-        let save = tokio::spawn(async move {
-            task_host
-                .update_session_async(
-                    &task_caller,
-                    &task_target,
-                    4,
-                    &SessionConfigPatch {
-                        role: Some(Role {
-                            name: "late accepted metadata".into(),
-                            ..Role::default()
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .await
-        });
+
+        validation.release();
+        entering_first.await.unwrap();
         wait_state(&host, &caller, &first, |state| state.metadata_saving).await;
         release_first.send(()).unwrap();
         first_blocker.await.unwrap();
@@ -2528,37 +2558,53 @@ fn review_meta_check_close_and_stop_wait_for_owned_saves() {
         };
         let agent = AgentRef { host_id, agent_id };
         let (resources, seen) = resources();
-        let host = Host::open_persistent(directory.path(), settings("save close stop"), resources)
-            .await
-            .unwrap();
+        let validation = Arc::new(GatedValidationFixture {
+            inner: resources,
+            count: std::sync::atomic::AtomicUsize::new(2),
+            entered: tokio::sync::Notify::new(),
+            released: (Mutex::new(false), std::sync::Condvar::new()),
+        });
+        let host = Host::open_persistent(
+            directory.path(),
+            settings("save close stop"),
+            validation.clone(),
+        )
+        .await
+        .unwrap();
         let connection = host.connect().unwrap();
         let caller = connection.caller();
+        validation
+            .count
+            .store(1, std::sync::atomic::Ordering::SeqCst);
+        let owner = Arc::clone(&host);
+        let task_caller = caller.clone();
+        let task_target = target.clone();
+        let session_save = tokio::spawn(async move {
+            commit_session_config(
+                &owner,
+                &task_caller,
+                &task_target,
+                4,
+                &SessionConfigPatch {
+                    role: Some(Role {
+                        name: "confirmed Session value".into(),
+                        ..Role::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .await
+        });
+        validation.entered.notified().await;
         let (release, held) = std::sync::mpsc::channel::<()>();
         let (entered, entering) = tokio::sync::oneshot::channel();
         let blocker = tokio::task::spawn_blocking(move || {
             let _ = entered.send(());
             let _ = held.recv();
         });
+        validation.release();
         entering.await.unwrap();
-        let owner = Arc::clone(&host);
-        let task_caller = caller.clone();
-        let task_target = target.clone();
-        let session_save = tokio::spawn(async move {
-            owner
-                .update_session_async(
-                    &task_caller,
-                    &task_target,
-                    4,
-                    &SessionConfigPatch {
-                        role: Some(Role {
-                            name: "confirmed Session value".into(),
-                            ..Role::default()
-                        }),
-                        ..Default::default()
-                    },
-                )
-                .await
-        });
+
         let owner = Arc::clone(&host);
         let task_caller = caller.clone();
         let task_agent = agent.clone();
@@ -2752,21 +2798,21 @@ async fn review_meta_check_confirmed_update_does_not_rebind_active_turn() {
         .clone();
     assert_eq!(first.config_revision, 4);
     wait_state(&host, &caller, &target, |state| !state.metadata_saving).await;
-    let updated = host
-        .update_session_async(
-            &caller,
-            &target,
-            4,
-            &SessionConfigPatch {
-                role: Some(Role {
-                    name: "next turn config".into(),
-                    ..Role::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+    let updated = commit_session_config(
+        &host,
+        &caller,
+        &target,
+        4,
+        &SessionConfigPatch {
+            role: Some(Role {
+                name: "next turn config".into(),
+                ..Role::default()
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(updated.config_revision, 5);
     assert_eq!(
         host.turns(&caller, &target)
@@ -3094,7 +3140,7 @@ async fn concurrent_parent_child_metadata_updates_keep_confirmed_records() {
         };
         let (agent_result, session_result) = tokio::join!(
             host.update_agent_async(&caller, &agent, 7, &patch_agent),
-            host.update_session_async(&caller, &target, 4, &patch_session)
+            commit_session_config(&host, &caller, &target, 4, &patch_session)
         );
         assert_eq!(agent_result.unwrap().config_revision, 8);
         assert_eq!(session_result.unwrap().config_revision, 5);

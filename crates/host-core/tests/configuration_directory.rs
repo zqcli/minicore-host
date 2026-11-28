@@ -1,5 +1,7 @@
 //! Actual directory files, native owners and persistence. The model is an
 //! explicitly scripted fixture; no provider, UI or external service is exercised.
+#[path = "../../../tests/support/session_update.rs"]
+mod session_update;
 use futures_util::stream;
 use minicore_host_core::*;
 use minicore_host_protocol::*;
@@ -13,6 +15,7 @@ use minicore_host_runtime::{
     tools::ToolSet,
 };
 use serde_json::json;
+use session_update::commit_session_config;
 use std::{
     collections::BTreeSet,
     path::PathBuf,
@@ -436,7 +439,8 @@ async fn file_sources_are_required_and_explicit_deletion_preserves_dynamic_agent
         .kind(),
         Some(FaultKind::AgentDeleteInvalid)
     );
-    host.update_session_async(
+    commit_session_config(
+        &host,
         &caller,
         &session,
         0,

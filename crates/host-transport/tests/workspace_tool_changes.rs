@@ -79,20 +79,29 @@ async fn actual_edits_remain_bound_to_original_tool_while_workspace_config_chang
     );
     fs::write(original.path().join("unrelated"), "external edit\n").unwrap();
     let updated = host
-        .update_session_async(
+        .session_update(
             &operator.caller(),
             &target,
-            0,
-            &SessionConfigPatch {
-                workspace: NullablePatch::Set(WorkspaceRef {
-                    path: current.path().to_string_lossy().into_owned(),
-                }),
-                ..Default::default()
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        workspace: NullablePatch::Set(WorkspaceRef {
+                            path: current.path().to_string_lossy().into_owned(),
+                        }),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
             },
         )
         .await
         .unwrap();
-    assert_eq!(updated.config_revision, 1);
+    assert_eq!(
+        updated.result,
+        MetadataUpdateResult::Committed { config_revision: 1 }
+    );
     let peers = Clients::new(host.clone(), compaction_common::KEY, options()).await;
     for client in &peers.clients {
         let session = client.session(target.clone());

@@ -626,17 +626,24 @@ async fn real_file_tool_fast_child_hands_off_before_startup_tool_result_without_
     );
     let parent = agent(&f).await;
     f.host
-        .update_session(
+        .session_update(
             &f.connection.caller(),
             &parent,
-            0,
-            &SessionConfigPatch {
-                tools: Some(vec![ToolBinding {
-                    name: "delegate_fixture".into(),
-                }]),
-                ..Default::default()
+            SessionUpdateRequest {
+                operation_id: OperationId::new().unwrap(),
+                expected_config_revision: 0,
+                changes: SessionUpdateChanges {
+                    config: SessionConfigPatch {
+                        tools: Some(vec![ToolBinding {
+                            name: "delegate_fixture".into(),
+                        }]),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
             },
         )
+        .await
         .unwrap();
     send(&f, &parent);
     let parent_binding = recv(&mut f.bindings).await;
